@@ -5,9 +5,9 @@
  */
 #include "common/xanadu/vlace/run_vm.hpp"
 
+#include <algorithm>
 #include <exception>
 #include <functional>
-#include <limits>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
@@ -20,16 +20,31 @@ struct RunState {
   std::optional<std::size_t> maxCycles;
 };
 
+/// Every run is capped, even when the arena has its own work fuel: the arena
+/// is a second governor, not a replacement for the cycle cap.
 std::size_t cycleBudget(LowerContext &ctx) {
-  if (const auto &limit =
-          ctx.state().cardState<RunState>(Card::Scalars).maxCycles)
-    return *limit;
-  // The arena's work fuel is the governor when one is set; the cycle cap then
-  // only has to stay out of its way.
-  return ctx.arena().executionLimited()
-             ? std::numeric_limits<std::size_t>::max()
-             : defaultMaxCycles;
+  const auto limit = ctx.state().cardState<RunState>(Card::Scalars).maxCycles;
+  return std::min(limit.value_or(defaultMaxCycles), defaultMaxCycles);
 }
+
+/// Releases a run's cursor on every exit, failure included, as the VQL request
+/// scope does: its choice points are dropped and its opcode is cleared, so a
+/// failed evaluation leaves nothing live for the next one.
+class CursorRelease {
+public:
+  CursorRelease(zigzag::vortex::VortexVM &vm, zigzag::CellRef cursor) noexcept
+      : vm_(vm), cursor_(cursor) {}
+  CursorRelease(const CursorRelease &)            = delete;
+  CursorRelease &operator=(const CursorRelease &) = delete;
+  ~CursorRelease() {
+    vm_.abortScopedChoices(cursor_);
+    vm_.setCursorOpcode(cursor_, std::nullopt);
+  }
+
+private:
+  zigzag::vortex::VortexVM &vm_;
+  zigzag::CellRef cursor_;
+};
 
 /// A thrown arena fuel or lowering failure as an EvalError.
 EvalError exceptionToEval(const std::exception &error) {
@@ -96,6 +111,7 @@ Lowered<Operand> runBlock(LowerContext &ctx, Block block, Operand result) {
   limits.maxDepth = evaluationNestingBudget;
   vm.setFrameLimits(limits);
   const auto cursor = vm.spawnCursor(*block.entry, "vlace_eval");
+  const CursorRelease release(vm, cursor);
   zigzag::vortex::ExecutionResult run;
   try {
     run = vm.run(cursor, cycleBudget(ctx));

@@ -244,4 +244,106 @@ TEST(VlaceLowerScalarsTest, ConstructsOwnedByLaterCardsStillRefuse) {
             std::string::npos);
 }
 
+// `/` and `%` by a zero divisor fail at run time, for both kinds, instead of
+// the VM's silent 0.
+TEST(VlaceLowerScalarsTest, DivisionByZeroFailsForIntAndFloat) {
+  Rig rig;
+  for (const std::string_view src :
+       {"7 / 0", "7 % 0", "7.0 / 0.0", "7 / 0.0", "7.5 / (1.0 - 1.0)"}) {
+    auto v = rig.eval(src);
+    ASSERT_FALSE(v.has_value()) << src;
+    EXPECT_NE(v.error().detail.find("division by zero"), std::string::npos)
+        << src;
+  }
+  EXPECT_EQ(rig.show("7 / 1"), "7");
+  EXPECT_EQ(rig.show("7.0 / 2.0"), "3.5");
+}
+
+TEST(VlaceLowerScalarsTest, DivisionByZeroIsUnreachableOnTheDeadBranch) {
+  Rig rig;
+  EXPECT_EQ(rig.show("if False then 7 / 0 else 1"), "1");
+  EXPECT_EQ(rig.show("if True then 1 else 7 % 0"), "1");
+}
+
+// Mixed numeric kinds: the type checker refuses them (spec §4.6), so a typed
+// run never reaches the VM's comparison. With checking off, the VM's Eq
+// compares variants, so 3 == 3.0 is False rather than a numeric equality.
+TEST(VlaceLowerScalarsTest, MixedIntFloatComparisonIsATypeErrorWhenChecked) {
+  Driver driver;
+  auto checked = driver.run("3 == 3.0");
+  ASSERT_FALSE(checked.has_value());
+  EXPECT_EQ(checked.error().code, CompileError::TypeMismatch);
+  driver.withTypeChecking(false);
+  auto unchecked = driver.run("3 == 3.0");
+  ASSERT_TRUE(unchecked.has_value());
+  EXPECT_EQ(unchecked->value, "False");
+}
+
+TEST(VlaceLowerScalarsTest, FloatModulusIsATypeErrorWhenChecked) {
+  Driver driver;
+  auto checked = driver.run("7.5 % 2");
+  ASSERT_FALSE(checked.has_value());
+  EXPECT_EQ(checked.error().code, CompileError::TypeMismatch);
+  EXPECT_EQ(driver.run("7 % 2")->value, "1");
+}
+
+// `++` concatenates Strings and `+` adds numbers; both lower to Add, so a
+// literal operand of the wrong kind is refused even with checking off.
+TEST(VlaceLowerScalarsTest, ConcatAndAddRefuseLiteralsOfTheWrongKind) {
+  Rig rig;
+  for (const std::string_view src :
+       {"\"a\" ++ 1", "1 ++ \"b\"", "1 + \"x\"", "\"x\" + 2", "'c' ++ \"d\""}) {
+    auto v = rig.eval(src);
+    ASSERT_FALSE(v.has_value()) << src;
+    EXPECT_EQ(v.error().code, CompileError::TypeMismatch) << src;
+  }
+  EXPECT_EQ(rig.show("\"a\" ++ \"b\""), "ab");
+  EXPECT_EQ(rig.show("1 + 2"), "3");
+}
+
+void expectNoRunnableCursor(Rig &rig) {
+  for (const auto cursor : rig.vm.activeCursors())
+    EXPECT_FALSE(rig.vm.getCursorOpcode(cursor).has_value());
+}
+
+// A failed run must leave the Compiler usable: its cursors are released (no
+// opcode left to run) and the next evaluation gives its own answer.
+TEST(VlaceLowerScalarsTest, FailedEvaluationLeavesTheCompilerUsable) {
+  Rig rig;
+  const auto failed = rig.eval("9223372036854775807 + 1");
+  ASSERT_FALSE(failed.has_value());
+  expectNoRunnableCursor(rig);
+  EXPECT_EQ(rig.show("1 + 2"), "3");
+  lower::setCycleLimit(rig.compiler, 1);
+  ASSERT_FALSE(rig.eval("1 + 2 * 3 + 4").has_value());
+  expectNoRunnableCursor(rig);
+  lower::setCycleLimit(rig.compiler, std::nullopt);
+  EXPECT_EQ(rig.show("1 + 2 * 3 + 4"), "11");
+  expectNoRunnableCursor(rig);
+}
+
+// The cycle cap applies even when the arena has its own work fuel.
+TEST(VlaceLowerScalarsTest, CycleLimitAppliesUnderAnArenaWorkBudget) {
+  Rig rig;
+  rig.arena.setExecutionLimits(1'000'000'000, 0, 0);
+  lower::setCycleLimit(rig.compiler, 1);
+  auto v = rig.eval("1 + 2 * 3 + 4");
+  ASSERT_FALSE(v.has_value());
+  EXPECT_EQ(v.error().code, CompileError::BudgetExhausted);
+}
+
+// A run that goes through the VM: the lone "42" and 7 are constants and take
+// the no-ops path, so these wrap them in an `if` that copies the result.
+TEST(VlaceLowerScalarsTest, ConstantsThroughTheVmKeepTheirKind) {
+  Rig rig;
+  auto text = rig.eval("if True then \"42\" else \"0\"");
+  ASSERT_TRUE(text.has_value());
+  EXPECT_EQ((*text)->kind, Value::Kind::Str);
+  EXPECT_EQ((*text)->s, "42");
+  auto number = rig.eval("if True then 7 else 0");
+  ASSERT_TRUE(number.has_value());
+  EXPECT_EQ((*number)->kind, Value::Kind::Int);
+  EXPECT_EQ((*number)->i, 7);
+}
+
 } // namespace

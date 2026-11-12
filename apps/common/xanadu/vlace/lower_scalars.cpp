@@ -46,6 +46,30 @@ std::optional<OpcodeKind> opcodeFor(std::string_view op) {
   return std::nullopt;
 }
 
+/// `++` (string concatenation) and `+` (numeric addition) both lower to Add,
+/// which the VM dispatches on its operands' variants. Type checking is the only
+/// other guard, so with it off a literal operand of the wrong kind is refused
+/// here. A non-literal operand would need a type-test opcode, which the VM does
+/// not have; that case stays with the type checker.
+std::optional<std::string> addOperandRefusal(std::string_view op,
+                                             const EBinOp &e) {
+  const auto literalKind =
+      [](const Expr &operand) -> std::optional<LiteralKind> {
+    if (const auto *lit = std::get_if<ELiteral>(&operand->node))
+      return lit->lit.kind;
+    return std::nullopt;
+  };
+  const std::array operands{literalKind(e.lhs), literalKind(e.rhs)};
+  for (const auto kind : operands) {
+    if (!kind) continue;
+    if (op == "++" && *kind != LiteralKind::String)
+      return "operator '++' concatenates Strings, not this literal";
+    if (op == "+" && *kind == LiteralKind::String)
+      return "operator '+' adds numbers, not a String literal";
+  }
+  return std::nullopt;
+}
+
 /// A value in weak head normal form: forced unless lowering already knows it.
 Lowered<Operand> toWhnf(LowerContext &ctx, Operand operand,
                         SourceLocation loc) {
@@ -67,6 +91,23 @@ Operand emitBinary(LowerContext &ctx, OpcodeKind kind, Operand lhs,
   ctx.emitInput(op, rhs.cell);
   ctx.emitOutput(op, out.cell);
   return Operand(out.cell, Evaluation::Whnf);
+}
+
+/// `/` and `%` by zero are a run-time failure, never a silent 0 (spec §6.6, an
+/// arithmetic fault). The divisor's kind is not known while lowering, and the
+/// VM's Eq compares variants (3 == 3.0 is false), so both zero constants are
+/// tested; a zero that matches either fails through an Assert in the graph.
+void emitDivisorGuard(LowerContext &ctx, Operand divisor, SourceLocation loc) {
+  const std::array zeros{CellValue{std::int64_t{0}}, CellValue{0.0}};
+  for (const auto &zero : zeros) {
+    const auto isZero =
+        emitBinary(ctx, OpcodeKind::Eq, divisor, ctx.emitConstant(zero));
+    const auto nonZero = ctx.mintLabel("#vlace_nonzero");
+    ctx.branchIfFalse(isZero, nonZero);
+    ctx.emitRuntimeFailure(CompileError::UnexpectedToken, loc,
+                           "division by zero");
+    ctx.placeLabel(nonZero);
+  }
 }
 
 /// `lhs && rhs` and `lhs || rhs`: the right operand is lowered after a branch
@@ -133,10 +174,15 @@ Lowered<Operand> lowerBinOp(LowerContext &ctx, const EBinOp &e,
     return fail(CompileError::UnexpectedToken,
                 "unknown operator '" + e.op + "'", loc);
   }
+  if (const auto refusal = addOperandRefusal(e.op, e)) {
+    return fail(CompileError::TypeMismatch, *refusal, loc);
+  }
   auto lhs = lowerForced(ctx, *e.lhs);
   if (!lhs) return lhs;
   auto rhs = lowerForced(ctx, *e.rhs);
   if (!rhs) return rhs;
+  if (*kind == OpcodeKind::Div || *kind == OpcodeKind::Mod)
+    emitDivisorGuard(ctx, *rhs, loc);
   return emitBinary(ctx, *kind, *lhs, *rhs);
 }
 

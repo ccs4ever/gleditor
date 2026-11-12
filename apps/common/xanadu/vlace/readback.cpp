@@ -45,6 +45,11 @@ std::expected<ValuePtr, EvalError> readbackCell(Compiler &compiler,
 std::optional<Lowered<ValuePtr>> readbackScalar(Compiler &compiler,
                                                 zigzag::CellRef cell) {
   auto &core = compiler.core();
+  // A register that references another cell holds that cell's handle, not a
+  // scalar of its own; reading its value here would return the handle. L3 owns
+  // referenced cells.
+  if (const auto ref = compiler.vm().cellReferenceOf(cell); ref && *ref != cell)
+    return std::nullopt;
   // A term root keeps its fields on +d.grab; a scalar never has any, so a cell
   // with one belongs to the data hook.
   if (core.arena().linked(cell, core.dims().grab, zigzag::Posward))
