@@ -307,5 +307,64 @@ TEST(VortexLogicChainingProbe, MakeTermSubTermAlreadyAnArgumentIsNotStolen) {
   EXPECT_EQ(innerArgs[0], leaf);
 }
 
+// Backtracking and memoization ------------------------------------------
+
+TEST(VortexLogicChainingProbe, MakeVarUnderChoiceIsUndoneByFail) {
+  Probe p;
+  const auto choice = p.vm.mintOpcode(OpcodeKind::Choice);
+  const auto alt    = p.vm.mintOpcode(OpcodeKind::Halt);
+  p.core.bindInput(choice,
+                   p.arena.makeScalarCell(static_cast<std::int64_t>(alt)));
+  const auto var = p.slot("var slot");
+  p.chain.push_back(choice);
+  p.emit(OpcodeKind::MakeVar, {}, {var});
+  p.emit(OpcodeKind::Fail, {}, {});
+  const auto cursor   = p.vm.spawnCursor(choice, "undo");
+  const auto cells    = p.arena.cellCount();
+  const auto executed = p.vm.run(cursor, 20);
+  ASSERT_TRUE(executed.success) << executed.errorMessage;
+  EXPECT_EQ(p.arena.cellCount(), cells);
+}
+
+TEST(VortexLogicChainingProbe, MemoizedMakeVarAfterFailYieldsALiveCell) {
+  Probe p;
+  const auto choice = p.vm.mintOpcode(OpcodeKind::Choice);
+  const auto first  = p.vm.mintOpcode(OpcodeKind::MakeVar);
+  const auto fail   = p.vm.mintOpcode(OpcodeKind::Fail);
+  const auto second = p.vm.mintOpcode(OpcodeKind::MakeVar);
+  const auto halt   = p.vm.mintOpcode(OpcodeKind::Halt);
+  const auto slotA  = p.slot("first slot");
+  const auto slotB  = p.slot("second slot");
+  p.core.bindInput(choice,
+                   p.arena.makeScalarCell(static_cast<std::int64_t>(second)));
+  p.core.bindOutput(first, slotA);
+  p.core.bindOutput(second, slotB);
+  p.vm.enableMemoization(first, "var");
+  p.vm.enableMemoization(second, "var");
+  ASSERT_TRUE(p.arena.link(choice, p.core.dims().spin, DimVector::POS, first));
+  ASSERT_TRUE(p.arena.link(first, p.core.dims().spin, DimVector::POS, fail));
+  ASSERT_TRUE(p.arena.link(second, p.core.dims().spin, DimVector::POS, halt));
+  const auto executed = p.vm.run(p.vm.spawnCursor(choice, "memo"), 20);
+  ASSERT_TRUE(executed.success) << executed.errorMessage;
+  const auto cell = p.boxed(slotB);
+  ASSERT_TRUE(cell);
+  EXPECT_TRUE(p.arena.contains(*cell));
+  EXPECT_TRUE(p.stdlib.isVar(*cell));
+}
+
+TEST(VortexLogicChainingProbe, DerefPublishesVariableOrValueItself) {
+  Probe p;
+  const auto unbound = p.stdlib.makeVar();
+  const auto atom    = p.arena.makeCell("cat");
+  const auto slotVar = p.slot("deref of variable");
+  const auto slotAtm = p.slot("deref of atom");
+  p.emit(OpcodeKind::Deref, {unbound}, {slotVar});
+  p.emit(OpcodeKind::Deref, {atom}, {slotAtm});
+  const auto executed = p.run();
+  ASSERT_TRUE(executed.success) << executed.errorMessage;
+  EXPECT_EQ(p.boxed(slotVar), std::optional<CellRef>{unbound});
+  EXPECT_TRUE(p.stdlib.isVar(unbound));
+  EXPECT_EQ(p.boxed(slotAtm), std::optional<CellRef>{atom});
+}
 } // namespace
 } // namespace zigzag::vortex

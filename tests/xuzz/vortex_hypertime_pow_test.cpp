@@ -82,15 +82,28 @@ TEST(VortexHypertimeTest, ReadsTheArenaCellCountAndGrowsWithMinting) {
   EXPECT_GE(*secondValue, *firstValue + 16);
 }
 
-TEST(VortexHypertimeTest, StoreBackedArenaReportsTheBaseOperationCount) {
+TEST(VortexHypertimeTest, StoreBackedArenaReportsTheFoldedOperationIndex) {
   xanadu::Store store;
-  const auto genesis = store.sliceGenesis(xanadu::MicroversionId{});
-  const auto base    = store.rebuildManifold(genesis);
+  auto at           = store.sliceGenesis(xanadu::MicroversionId{});
+  const auto minted = store.makeDimension(at, "d.step");
+  at                = minted.version;
+  at                = store.makeCell(at, "first");
+  const auto first  = store.cellRefOf(at).value();
+  at                = store.makeCell(at, "second");
+  const auto second = store.cellRefOf(at).value();
+  // SetLink mints no cell, so operations and cells now differ.
+  at = store.setLink(at, first, minted.dim, DimVector::POS, second);
+  const auto base = store.rebuildManifold(at);
+  ASSERT_NE(store.opCount(), base.cellCount());
+  ASSERT_EQ(base.foldedThrough(), store.opCount());
+
   zigzag::ArenaManifold arena(&base, &store);
   Harness h(arena);
   const auto before = h.hypertime();
   ASSERT_TRUE(before.result.success) << before.result.errorMessage;
   EXPECT_EQ(before.value,
+            CellValue{static_cast<std::int64_t>(store.opCount())});
+  EXPECT_NE(before.value,
             CellValue{static_cast<std::int64_t>(base.cellCount())});
   // Ephemeral cells are not operations: minting them leaves the mark alone.
   for (int i = 0; i < 16; ++i) (void)arena.makeCell();
@@ -195,6 +208,34 @@ TEST(VortexPowTest, RefusesNonNumericAndMissingOperands) {
   const auto missing = h.vm.step(h.vm.spawnCursor(op));
   EXPECT_FALSE(missing.success);
   EXPECT_NE(missing.errorMessage.find("Pow expects"), std::string::npos);
+}
+
+TEST(VortexPowTest, NegativeBaseReachesInt64MinExactly) {
+  ArenaHarness h;
+  const auto outcome = h.pow(h.integer(-2), h.integer(63));
+  ASSERT_TRUE(outcome.result.success) << outcome.result.errorMessage;
+  EXPECT_EQ(outcome.value, CellValue{std::numeric_limits<std::int64_t>::min()});
+  EXPECT_FALSE(h.pow(h.integer(2), h.integer(63)).result.success);
+}
+
+TEST(VortexPowTest, ZeroToTheZeroIsOneForIntegersAndReals) {
+  ArenaHarness h;
+  EXPECT_EQ(h.pow(h.integer(0), h.integer(0)).value,
+            CellValue{std::int64_t{1}});
+  EXPECT_EQ(h.pow(h.real(0.0), h.real(0.0)).value, CellValue{1.0});
+  EXPECT_EQ(h.pow(h.real(0.0), h.integer(0)).value, CellValue{1.0});
+}
+
+TEST(VortexPowTest, ANaNOperandFailsExplicitly) {
+  ArenaHarness h;
+  const auto nan = std::numeric_limits<double>::quiet_NaN();
+  for (const auto &[base, exponent] : {std::pair{h.real(nan), h.integer(2)},
+                                       std::pair{h.real(nan), h.integer(0)},
+                                       std::pair{h.integer(2), h.real(nan)}}) {
+    const auto outcome = h.pow(base, exponent);
+    EXPECT_FALSE(outcome.result.success);
+    EXPECT_NE(outcome.result.errorMessage.find("NaN"), std::string::npos);
+  }
 }
 
 } // namespace

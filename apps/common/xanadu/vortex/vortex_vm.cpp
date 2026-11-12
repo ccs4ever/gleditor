@@ -848,10 +848,13 @@ ExecutionResult VortexVM::executeRelationNext(const CellRef opcode) {
     const auto *const limitValue    = std::get_if<std::int64_t>(&limit);
     if (positionValue == nullptr || limitValue == nullptr)
       return fail("RelationNext position and limit must be Int64 values");
-    const auto provider = relationProviders_.find(*relationName);
-    if (provider == relationProviders_.end())
+    const auto registered = relationProviders_.find(*relationName);
+    if (registered == relationProviders_.end())
       return fail("RelationNext: no relation provider is registered for '" +
                   *relationName + "'");
+    // A copy: the provider may legitimately replace itself, which would
+    // destroy the function this call is running inside.
+    const RelationProvider provider = registered->second;
 
     std::vector<CellRef> arguments;
     arguments.reserve(arity);
@@ -866,12 +869,20 @@ ExecutionResult VortexVM::executeRelationNext(const CellRef opcode) {
 
     core_.arena().consumeWork();
     zigzag::ArenaSavepoint savepoint(core_.arena());
-    const auto result =
-        provider->second(RelationQuery{.relation  = *relationName,
-                                       .position  = *positionValue,
-                                       .limit     = *limitValue,
-                                       .arguments = arguments,
-                                       .arena     = core_.arena()});
+    struct ProviderScope {
+      bool &flag;
+      explicit ProviderScope(bool &active) : flag(active) { flag = true; }
+      ~ProviderScope() { flag = false; }
+    };
+    std::expected<std::optional<RelationAnswer>, std::string> result;
+    {
+      ProviderScope scope(relationProviderActive_);
+      result = provider(RelationQuery{.relation  = *relationName,
+                                      .position  = *positionValue,
+                                      .limit     = *limitValue,
+                                      .arguments = arguments,
+                                      .arena     = core_.arena()});
+    }
     if (!result) return fail("RelationNext: " + result.error());
     if (*result && (*result)->answers.size() != arity)
       return fail("RelationNext provider for '" + *relationName +
@@ -882,6 +893,30 @@ ExecutionResult VortexVM::executeRelationNext(const CellRef opcode) {
         if (!core_.arena().contains(answer))
           return fail("RelationNext provider for '" + *relationName +
                       "' returned a cell the arena does not hold");
+
+    // Publishing is all-or-nothing: the savepoint undoes the value writes on
+    // any failure below, and this restores the reference entries it erases.
+    struct SavedReference {
+      CellRef slot;
+      bool had;
+      std::optional<CellRef> target;
+    };
+    std::vector<SavedReference> saved;
+    saved.reserve(slots.size());
+    for (const CellRef slot : slots) {
+      const auto found = cellReferences_.find(slot);
+      saved.push_back(
+          {slot, found != cellReferences_.end(),
+           found != cellReferences_.end() ? found->second : std::nullopt});
+    }
+    const auto restoreReferences = [&] {
+      for (const auto &entry : saved) {
+        if (entry.had)
+          cellReferences_[entry.slot] = entry.target;
+        else
+          cellReferences_.erase(entry.slot);
+      }
+    };
 
     const bool found = result->has_value();
     const std::int64_t nextPosition =
@@ -896,9 +931,11 @@ ExecutionResult VortexVM::executeRelationNext(const CellRef opcode) {
     };
     if (!writeScalar(slots[0], CellValue{found}) ||
         !writeScalar(slots[1], CellValue{nextPosition}) ||
-        !writeScalar(slots[2], CellValue{nextLimit}))
+        !writeScalar(slots[2], CellValue{nextLimit})) {
+      restoreReferences();
       return fail("P15: write to a registered opcode cell refused (kind "
                   "immutability)");
+    }
     // Exhaustion publishes absent references, so a graph that reads an answer
     // slot after a failed lookup sees no cell instead of a stale one.
     std::vector<CellValue> answers;
@@ -906,7 +943,12 @@ ExecutionResult VortexVM::executeRelationNext(const CellRef opcode) {
     for (std::size_t i = 0; i < arity; ++i)
       answers.emplace_back(
           static_cast<std::int64_t>(found ? (*result)->answers[i] : noCell));
-    writeCellReferences(std::span(slots).subspan(fixedOutputs), answers);
+    try {
+      writeCellReferences(std::span(slots).subspan(fixedOutputs), answers);
+    } catch (...) {
+      restoreReferences();
+      throw;
+    }
     savepoint.commit();
     return {};
   } catch (const std::exception &error) {
@@ -2600,6 +2642,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     }
     const double base     = toDouble(inputs[0]);
     const double exponent = toDouble(inputs[1]);
+    if (std::isnan(base) || std::isnan(exponent))
+      return fail("Pow: operand is NaN");
     if (base == 0.0 && exponent < 0.0)
       return fail("Pow: zero raised to a negative power");
     if (base < 0.0 && std::trunc(exponent) != exponent)
@@ -2616,12 +2660,13 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
               .errorMessage  = "Hypertime expects no inputs"};
     auto &arena = core_.arena();
     arena.consumeWork();
-    // A store-backed arena's operations are the base manifold's cells; its
-    // own cells are ephemeral and mint none. Without a base every cell is an
-    // operation, as the VPL oracle counted.
+    // Store-backed: the highest operation index the base manifold has folded
+    // (cells and operations differ: SetLink/SetValue mint no cell). The
+    // arena's own cells are ephemeral and are not operations. Without a base
+    // every cell is an operation, as the VPL oracle counted.
     const auto *const base = arena.base();
     outputs.emplace_back(static_cast<std::int64_t>(
-        base != nullptr ? base->cellCount() : arena.cellCount()));
+        base != nullptr ? base->foldedThrough() : arena.cellCount()));
     break;
   }
   case OpcodeKind::DimByName: {
@@ -2644,8 +2689,11 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
       return fail("DimByName mint flag must be a Bool or an Int64");
     auto &arena = core_.arena();
     arena.consumeWork();
+    // One name is one dimension whichever side minted it: the core files its
+    // dimensions as cells on d.dims, which the arena's own table never sees.
     auto dimension = arena.dimensionNamed(*name);
-    if (!dimension && mint) dimension = arena.ensureDimension(*name);
+    if (!dimension) dimension = core_.findDimension(*name);
+    if (!dimension && mint) dimension = core_.mintDimension(*name);
     // Absent reads as the noCell Int64, as Deref and ProbeLink report it.
     outputs.emplace_back(static_cast<std::int64_t>(dimension.value_or(noCell)));
     break;
@@ -3735,6 +3783,10 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
 }
 
 ExecutionResult VortexVM::step(CellRef cursor) {
+  if (relationProviderActive_)
+    return {.success = false,
+            .errorMessage =
+                "a relation provider cannot re-enter the VM (step or run)"};
   if (const auto groups = mutationGroups_.find(cursor);
       groups != mutationGroups_.end() && groups->second &&
       !groups->second->empty() && guardLimits_.maxMutationGroupCycles == 0) {
@@ -4437,7 +4489,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind != OpcodeKind::ScopedChoice && kind != OpcodeKind::ResumeInit &&
       kind != OpcodeKind::ResumeSet && kind != OpcodeKind::ProbeLink &&
       kind != OpcodeKind::VqlMaskLinks && kind != OpcodeKind::VqlFieldProbe &&
-      !readsHostState(kind) && !stateful;
+      !readsHostState(kind) && !publishesLogicReference(kind) && !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
@@ -4447,8 +4499,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
         newOutputs = *cached;
         if (kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
             kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
-            kind == OpcodeKind::ClearCellRefs ||
-            publishesLogicReference(kind)) {
+            kind == OpcodeKind::ClearCellRefs) {
           writeCellReferences(outCells, newOutputs);
         } else {
           for (std::size_t i = 0;

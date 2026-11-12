@@ -218,6 +218,10 @@ struct RelationAnswer {
   std::vector<CellRef> answers;
 };
 
+/// A provider must not re-enter the VM (`step`/`run` fail explicitly while one
+/// runs) and may mint arena cells only for its answers; the VM undoes them if
+/// the step fails. It may replace or remove providers, itself included.
+///
 /// An empty optional means the relation is exhausted at that position; the
 /// string is an explicit failure (unknown arity, ill-formed argument) that
 /// fails the step.
@@ -659,7 +663,8 @@ public:
   /// Registers the provider RelationNext asks for `relation`; an empty
   /// function removes it. Providers are per relation name so the stdlib
   /// registry, a store and an arena can each register theirs without knowing
-  /// of the others; the arity is the provider's to check. Host registration,
+  /// of the others; the arity is the provider's to check. See RelationProvider
+  /// for what a provider may not do. Host registration,
   /// not VM state: it is not trailed by backtracking.
   VortexVM *setRelationProvider(std::string relation,
                                 RelationProvider provider);
@@ -856,6 +861,7 @@ private:
   std::uint64_t nextMutationGroupId_{1};
   std::uint64_t nextChoiceId_{1};
   FrameLimits frameLimits_;
+  bool relationProviderActive_{false};
   std::unordered_map<std::string, RelationProvider> relationProviders_;
   LogicalClosureLimits closureLimits_;
   std::size_t closureValuesCreated_{};

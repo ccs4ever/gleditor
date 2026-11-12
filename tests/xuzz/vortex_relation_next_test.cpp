@@ -304,5 +304,128 @@ TEST(VortexRelationNextTest, CannotRunAsACondition) {
             std::string::npos);
 }
 
+TEST(VortexRelationNextTest, ExhaustionClearsAReferenceFromAnEarlierHit) {
+  Harness h;
+  h.registerEdge();
+  const auto first =
+      h.emit("edge", h.integer(0), h.integer(0), {h.wildcard(), h.wildcard()});
+  // A second lookup past the end, writing the same output slots.
+  const auto second = h.vm.mintOpcode(OpcodeKind::RelationNext);
+  h.core.bindInput(second, h.arena.makeCell("edge"));
+  h.core.bindInput(second, h.integer(3));
+  h.core.bindInput(second, h.integer(3));
+  h.core.bindInput(second, h.wildcard());
+  h.core.bindInput(second, h.wildcard());
+  for (const auto slot : {first.found, first.position, first.limit})
+    h.core.bindOutput(second, slot);
+  for (const auto slot : first.answers) h.core.bindOutput(second, slot);
+  ASSERT_TRUE(
+      h.arena.link(first.op, h.core.dims().spin, DimVector::POS, second));
+  h.chain.push_back(second);
+  // Deref of a slot that denotes no cell reports absence.
+  const auto derefed = h.arena.makeCell("deref");
+  const auto deref   = h.vm.mintOpcode(OpcodeKind::Deref);
+  h.core.bindInput(deref, first.answers[0]);
+  h.core.bindOutput(deref, derefed);
+  ASSERT_TRUE(h.arena.link(second, h.core.dims().spin, DimVector::POS, deref));
+  h.chain.push_back(deref);
+  const auto executed = h.run();
+  ASSERT_TRUE(executed.success) << executed.errorMessage;
+  EXPECT_EQ(h.core.render(first.found), CellValue{false});
+  EXPECT_EQ(h.answerText(first.answers[0]), "<absent>");
+  EXPECT_EQ(h.core.render(derefed),
+            CellValue{static_cast<std::int64_t>(noCell)});
+}
+
+TEST(VortexRelationNextTest, AHitUnderAChoiceIsUndoneByFail) {
+  Harness h;
+  h.registerEdge();
+  const auto choice = h.vm.mintOpcode(OpcodeKind::Choice);
+  const auto alt    = h.vm.mintOpcode(OpcodeKind::Halt);
+  h.core.bindInput(choice,
+                   h.arena.makeScalarCell(static_cast<std::int64_t>(alt)));
+  h.chain.push_back(choice);
+  const auto call =
+      h.emit("edge", h.integer(0), h.integer(0), {h.wildcard(), h.wildcard()});
+  const auto fail = h.vm.mintOpcode(OpcodeKind::Fail);
+  ASSERT_TRUE(h.arena.link(call.op, h.core.dims().spin, DimVector::POS, fail));
+  const auto cursor   = h.vm.spawnCursor(choice);
+  const auto cells    = h.arena.cellCount();
+  const auto executed = h.vm.run(cursor, 20);
+  ASSERT_TRUE(executed.success) << executed.errorMessage;
+  EXPECT_EQ(h.arena.cellCount(), cells);
+  // The answer slot is back to a plain cell: Deref names the slot itself, not
+  // a cell the rolled-back provider minted.
+  const auto derefed = h.arena.makeCell("deref");
+  const auto deref   = h.vm.mintOpcode(OpcodeKind::Deref);
+  h.core.bindInput(deref, call.answers[0]);
+  h.core.bindOutput(deref, derefed);
+  ASSERT_TRUE(h.vm.step(h.vm.spawnCursor(deref, "after")).success);
+  EXPECT_EQ(h.core.render(derefed),
+            CellValue{static_cast<std::int64_t>(call.answers[0])});
+}
+
+TEST(VortexRelationNextTest, AFailedPublishKeepsTheEarlierReferences) {
+  Harness h;
+  h.registerEdge();
+  const auto first =
+      h.emit("edge", h.integer(0), h.integer(0), {h.wildcard(), h.wildcard()});
+  // The found output is a registered opcode cell, so the first write is
+  // refused after the provider has already answered.
+  const auto victim = h.vm.mintOpcode(OpcodeKind::Nop);
+  const auto second = h.vm.mintOpcode(OpcodeKind::RelationNext);
+  h.core.bindInput(second, h.arena.makeCell("edge"));
+  h.core.bindInput(second, h.integer(1));
+  h.core.bindInput(second, h.integer(3));
+  h.core.bindInput(second, h.wildcard());
+  h.core.bindInput(second, h.wildcard());
+  h.core.bindOutput(second, victim);
+  h.core.bindOutput(second, h.arena.makeCell("position"));
+  h.core.bindOutput(second, h.arena.makeCell("limit"));
+  for (const auto slot : first.answers) h.core.bindOutput(second, slot);
+  ASSERT_TRUE(
+      h.arena.link(first.op, h.core.dims().spin, DimVector::POS, second));
+  h.chain.push_back(second);
+  const auto executed = h.run();
+  EXPECT_FALSE(executed.success);
+  EXPECT_NE(executed.errorMessage.find("P15"), std::string::npos);
+  EXPECT_EQ(h.answerText(first.answers[0]), "a");
+  EXPECT_EQ(h.answerText(first.answers[1]), "b");
+}
+
+TEST(VortexRelationNextTest, AProviderMayReplaceItselfWhileRunning) {
+  Harness h;
+  h.vm.setRelationProvider(
+      "edge", [&h](const RelationQuery &query) -> RelationResult {
+        h.vm.setRelationProvider("edge", {});
+        h.vm.setRelationProvider("other", [](const RelationQuery &) {
+          return RelationResult{std::optional<RelationAnswer>{}};
+        });
+        return std::optional<RelationAnswer>{
+            RelationAnswer{.answers = {query.arena.makeCell("x")}}};
+      });
+  const auto call = h.emit("edge", h.integer(0), h.integer(0), {h.wildcard()});
+  const auto executed = h.run();
+  ASSERT_TRUE(executed.success) << executed.errorMessage;
+  EXPECT_EQ(h.core.render(call.found), CellValue{true});
+  EXPECT_EQ(h.answerText(call.answers[0]), "x");
+}
+
+TEST(VortexRelationNextTest, AProviderCannotReEnterTheVm) {
+  Harness h;
+  std::string reentry;
+  CellRef probeCursor = noCell;
+  h.vm.setRelationProvider(
+      "edge", [&](const RelationQuery &query) -> RelationResult {
+        reentry = h.vm.step(probeCursor).errorMessage;
+        return std::optional<RelationAnswer>{
+            RelationAnswer{.answers = {query.arena.makeCell("x")}}};
+      });
+  probeCursor = h.vm.spawnCursor(h.vm.mintOpcode(OpcodeKind::Nop), "probe");
+  h.emit("edge", h.integer(0), h.integer(0), {h.wildcard()});
+  const auto executed = h.run();
+  ASSERT_TRUE(executed.success) << executed.errorMessage;
+  EXPECT_NE(reentry.find("cannot re-enter"), std::string::npos);
+}
 } // namespace
 } // namespace zigzag::vortex

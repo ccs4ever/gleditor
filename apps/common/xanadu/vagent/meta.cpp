@@ -320,7 +320,7 @@ bool MetaRuntime::isOpCell(CellRef cell) const {
   const auto ceiling =
       arena()
           .asInt64(binds_.validate.linkedCeiling)
-          .value_or(static_cast<std::int64_t>(OpcodeKind::Linked));
+          .value_or(static_cast<std::int64_t>(OpcodeKind::Pow));
   return *ordinal >= 0 && *ordinal <= ceiling;
 }
 
@@ -504,7 +504,7 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
 
   const auto ceiling =
       arena.asInt64(binds_.validate.linkedCeiling)
-          .value_or(static_cast<std::int64_t>(OpcodeKind::Linked));
+          .value_or(static_cast<std::int64_t>(OpcodeKind::Pow));
   if (!isOpCell(root)) return {false, "validate: root is not an op cell"};
 
   // Decode the bound arity table: `(op, in, out)` triples on `+d.step`.
