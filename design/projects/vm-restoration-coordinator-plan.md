@@ -425,6 +425,31 @@ All four opcodes are appended by one serial card, O1, which owns `vortex/vortex_
 it lands, so that no two cards append to the enum. The workers' common instructions are in
 `/data/git/gleditor-restore/.logs/card-brief.md`.
 
+Ruled by the owner on 2026-11-11, after the first W1 batch. The full list of what that batch found,
+including the shared-file hooks for a second integrator card, is in
+`/data/git/gleditor-restore/.logs/w1/pending-owner-and-hooks.md`.
+
+- **Cell-identity comparison:** approved. One read-only, pure opcode: two cell inputs, one Bool
+  output. Needed by multi-subject `apply_shape`, `same_cell` and watch-since.
+- **Detached topology copy for `project`:** approved after a read-only spike specifies it and
+  confirms that nothing existing does it.
+- **`PinHistorical`:** approved. A cell stream and a constant naming the (store, version) fold in;
+  the matching historical proxies out; a cell absent from the fold yields nothing.
+- **`ArenaManifold` undo of a space attach:** approved. `Mark` records the space count and
+  `release()` truncates back to it, so a failed compile leaves no pinned history behind.
+- **`find`:** no new opcode. It is lowered with `RelationNext` and a host-registered prose-hits
+  provider (reviewer's verdict, adopted).
+
+These go through a second serial opcode card, O2, after O1 lands.
+
+Gate A (2026-11-11, shared branch at `98ecab03`, cards P0, V1.0, L0, Q1, Q3, Q4 and S1 merged):
+`xuzz_test` 206 failures of 3892, nothing newly failing against the 225 baseline, 19 turned green;
+`gleditor_test` and `zigzag_test` unchanged. The current failing list is
+`/data/git/gleditor-restore/.logs/w1/gate-a-xuzz-failed.txt`.
+
+**Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
+usage limit twice. Hold concurrent mid-tier agents (workers plus reviewers) to about four.
+
 ## 5a. Original decision table (before W0)
 
 | Id  | Before | Decision                                                                                                                   | Recommendation                                                                                                                                                          |
