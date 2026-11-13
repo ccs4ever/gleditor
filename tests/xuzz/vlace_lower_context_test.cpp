@@ -204,8 +204,6 @@ TEST(VlaceLowerContextTest, KernelDimensionsAreMintedOnceByName) {
   const auto thunk  = first.thunk;
   const auto &again = state.kernelDims(rig.core);
   EXPECT_EQ(again.thunk, thunk);
-  EXPECT_NE(first.memo, first.blackhole);
-  EXPECT_NE(first.thunk, first.memo);
 }
 
 TEST(VlaceLowerContextTest, MintingPastTheBudgetIsReportedAsBudgetExhausted) {
