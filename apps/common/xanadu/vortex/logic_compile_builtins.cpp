@@ -10,13 +10,10 @@
  * clause predicate, which walks the term and calls back into `is`.
  */
 #include <array>
-#include <cctype>
-#include <charconv>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 
 #include "common/xanadu/vortex/logic_compile.hpp"
 
@@ -43,6 +40,8 @@ constexpr std::string_view kEvalName        = "$eval";
 constexpr std::string_view kVarTest         = "var";
 constexpr std::string_view kNonvarTest      = "nonvar";
 constexpr std::string_view kInternalVarTest = "$var";
+constexpr std::string_view kRaise           = "$raise";
+constexpr std::string_view kInstantiation   = "instantiation";
 
 constexpr std::size_t kNoArguments = 0;
 constexpr std::size_t kUnary       = 1;
@@ -80,34 +79,24 @@ void emitFailNow(CompileContext &ctx, FrameScope &scope, Chain &chain) {
   appendOp(ctx, chain, OpcodeKind::Jump, inputs);
 }
 
-// The old evaluator's text leaf: digits (optionally negative) with a decimal
-// point meaning float, otherwise integer; anything else is not a number.
-[[nodiscard]] std::optional<ScalarConstant> numericText(std::string_view text) {
-  if (text.empty()) return std::nullopt;
-  const auto digit = [](char c) {
-    return std::isdigit(static_cast<unsigned char>(c)) != 0;
-  };
-  if (!digit(text[0]) && !(text.size() > 1 && text[0] == '-' && digit(text[1])))
-    return std::nullopt;
-  const char *const first = text.data();
-  const char *const last  = text.data() + text.size();
-  if (text.contains('.')) {
-    double value{};
-    const auto parsed = std::from_chars(first, last, value);
-    if (parsed.ec != std::errc{}) return std::nullopt;
-    return ScalarConstant{value};
-  }
-  std::int64_t value{};
-  const auto parsed = std::from_chars(first, last, value);
-  if (parsed.ec != std::errc{}) return std::nullopt;
-  return ScalarConstant{value};
+// A failure to evaluate is an error, not a quiet backtrack: the query aborts
+// with this text (the driver rethrows an Assert's message as a
+// std::runtime_error, the way integer overflow already aborts).
+void emitRaise(CompileContext &ctx, Chain &chain, std::string message) {
+  const std::array<CellRef, 2> inputs{emitConstant(ctx, chain, false),
+                                      emitConstant(ctx, chain, message)};
+  appendOp(ctx, chain, OpcodeKind::Assert, inputs);
+}
+
+[[nodiscard]] std::string render(CompileContext &ctx, CellRef term) {
+  return ctx.stdlib.renderTerm(term).value_or("?");
 }
 
 // Evaluates @p term into a slot that holds a number at run time, emitting the
-// ops. Nullopt means the term can never evaluate (an atom, an unknown
-// functor): the caller emits a failure, which is what the old solver did.
-[[nodiscard]] std::optional<CellRef>
-emitEval(CompileContext &ctx, FrameScope &scope, Chain &chain, CellRef term);
+// ops. @p site is the rendered goal, named by every error raised for it.
+[[nodiscard]] CellRef emitEval(CompileContext &ctx, FrameScope &scope,
+                               Chain &chain, CellRef term,
+                               const std::string &site);
 
 // A Bool: `bound` is an Int64 or a Double. `x + 0` equals `x` as a variant only
 // then: a string, Bool or unbound variable converts to a different
@@ -121,12 +110,13 @@ emitEval(CompileContext &ctx, FrameScope &scope, Chain &chain, CellRef term);
 }
 
 // A variable leaf holds a number at run time or is evaluated: a number takes
-// the fast path, anything else goes to '$eval'(Var, Result), which backtracks
-// for an unbound variable, an atom or an unknown functor and otherwise binds
-// Result to the number. The returned slot is the same local on both paths, so
-// the join needs no copy.
+// the fast path; an unbound variable raises the instantiation error naming the
+// goal; anything else goes to '$eval'(Var, Result), which raises for a
+// non-number and otherwise binds Result to the value. The returned slot is the
+// same local on every path, so the join needs no copy.
 [[nodiscard]] CellRef emitVariableLeaf(CompileContext &ctx, FrameScope &scope,
-                                       Chain &chain, CellRef variable) {
+                                       Chain &chain, CellRef variable,
+                                       const std::string &site) {
   const CellRef slot    = variableSlot(ctx, scope, chain, variable);
   const CellRef bound   = op1(ctx, scope, chain, OpcodeKind::Deref, slot);
   const CellRef numeric = emitNumericTest(ctx, scope, chain, bound);
@@ -140,14 +130,21 @@ emitEval(CompileContext &ctx, FrameScope &scope, Chain &chain, CellRef term);
   const CellRef resultSlot = variableSlot(ctx, scope, chain, result);
   const CellRef goal       = ctx.stdlib.makeTerm(kEvalName, {argument, result});
 
-  const Label evaluated = newLabel(ctx);
-  emitBranchIf(ctx, chain, numeric, evaluated);
+  const Label done     = newLabel(ctx);
+  const Label evaluate = newLabel(ctx);
+  emitBranchIf(ctx, chain, numeric, done);
+  const CellRef unbound = op1(ctx, scope, chain, OpcodeKind::IsVar, bound);
+  emitBranchUnless(ctx, chain, unbound, evaluate);
+  emitRaise(ctx, chain,
+            "instantiation error: " + render(ctx, variable) +
+                " is unbound in " + site);
+  placeLabel(ctx, chain, evaluate);
   emitUserCall(ctx, scope, chain, PredicateKey{std::string(kEvalName), kBinary},
                goal);
   const std::array<CellRef, 1> inputs{resultSlot};
   const std::array<CellRef, 1> outputs{bound};
   appendOp(ctx, chain, OpcodeKind::Deref, inputs, outputs);
-  placeLabel(ctx, chain, evaluated);
+  placeLabel(ctx, chain, done);
   scope.variableSlots.erase(argument);
   scope.variableSlots.erase(result);
   return bound;
@@ -160,10 +157,11 @@ emitEval(CompileContext &ctx, FrameScope &scope, Chain &chain, CellRef term);
              emitConstant(ctx, chain, 0.0));
 }
 
-// Truncates @p value to an Int64 and fails on zero: the divisor rule of `//`
-// and `mod`. DivMod by one is the VM's only truncating cast.
+// Truncates @p value to an Int64 and raises on zero: the divisor rule of `//`,
+// `mod` and `rem`. DivMod by one is the VM's only truncating cast.
 [[nodiscard]] CellRef emitNonZeroDivisor(CompileContext &ctx, FrameScope &scope,
-                                         Chain &chain, CellRef value) {
+                                         Chain &chain, CellRef value,
+                                         const std::string &site) {
   const CellRef truncated = newLocal(ctx, scope);
   const CellRef remainder = newLocal(ctx, scope);
   const std::array<CellRef, 2> inputs{
@@ -172,65 +170,94 @@ emitEval(CompileContext &ctx, FrameScope &scope, Chain &chain, CellRef term);
   appendOp(ctx, chain, OpcodeKind::DivMod, inputs, outputs);
   const CellRef nonZero = op2(ctx, scope, chain, OpcodeKind::Neq, truncated,
                               emitConstant(ctx, chain, std::int64_t{0}));
-  emitFailUnless(ctx, scope, chain, nonZero);
+  const Label proceed   = newLabel(ctx);
+  emitBranchIf(ctx, chain, nonZero, proceed);
+  emitRaise(ctx, chain, "evaluation error: zero divisor in " + site);
+  placeLabel(ctx, chain, proceed);
   return truncated;
 }
 
-[[nodiscard]] std::optional<CellRef> emitCompound(CompileContext &ctx,
-                                                  FrameScope &scope,
-                                                  Chain &chain, CellRef term,
-                                                  std::string_view functor) {
+// The VM's Mod keeps the dividend's sign (rem); `mod` takes the divisor's, so
+// a non-zero remainder whose sign differs from the divisor's is shifted by it.
+[[nodiscard]] CellRef emitFlooredMod(CompileContext &ctx, FrameScope &scope,
+                                     Chain &chain, CellRef left,
+                                     CellRef divisor) {
+  const CellRef zero = emitConstant(ctx, chain, std::int64_t{0});
+  const CellRef remainder =
+      op2(ctx, scope, chain, OpcodeKind::Mod, left, divisor);
+  const CellRef nonZero =
+      op2(ctx, scope, chain, OpcodeKind::Neq, remainder, zero);
+  const CellRef remNeg =
+      op2(ctx, scope, chain, OpcodeKind::Lt, remainder, zero);
+  const CellRef divNeg = op2(ctx, scope, chain, OpcodeKind::Lt, divisor, zero);
+  const CellRef differ =
+      op2(ctx, scope, chain, OpcodeKind::Neq, remNeg, divNeg);
+  const CellRef shift =
+      op2(ctx, scope, chain, OpcodeKind::And, nonZero, differ);
+  const Label keep = newLabel(ctx);
+  emitBranchUnless(ctx, chain, shift, keep);
+  const std::array<CellRef, 2> inputs{remainder, divisor};
+  const std::array<CellRef, 1> outputs{remainder};
+  appendOp(ctx, chain, OpcodeKind::Add, inputs, outputs);
+  placeLabel(ctx, chain, keep);
+  return remainder;
+}
+
+[[nodiscard]] std::optional<CellRef>
+emitCompound(CompileContext &ctx, FrameScope &scope, Chain &chain, CellRef term,
+             std::string_view functor, const std::string &site) {
   const auto args = ctx.stdlib.argumentsOf(term);
   if (args.size() == kUnary && (functor == "-" || functor == "+")) {
-    const auto operand = emitEval(ctx, scope, chain, args[0]);
-    if (!operand) return std::nullopt;
+    const CellRef operand = emitEval(ctx, scope, chain, args[0], site);
     if (functor == "+") return operand;
-    return op1(ctx, scope, chain, OpcodeKind::Neg, *operand);
+    return op1(ctx, scope, chain, OpcodeKind::Neg, operand);
   }
   if (args.size() != kBinary) return std::nullopt;
   const bool known = functor == "+" || functor == "-" || functor == "*" ||
-                     functor == "/" || functor == "//" || functor == "mod";
+                     functor == "/" || functor == "//" || functor == "mod" ||
+                     functor == "rem";
   if (!known) return std::nullopt;
 
-  const auto left = emitEval(ctx, scope, chain, args[0]);
-  if (!left) return std::nullopt;
-  const auto right = emitEval(ctx, scope, chain, args[1]);
-  if (!right) return std::nullopt;
+  const CellRef left  = emitEval(ctx, scope, chain, args[0], site);
+  const CellRef right = emitEval(ctx, scope, chain, args[1], site);
 
   if (functor == "+")
-    return op2(ctx, scope, chain, OpcodeKind::Add, *left, *right);
+    return op2(ctx, scope, chain, OpcodeKind::Add, left, right);
   if (functor == "-")
-    return op2(ctx, scope, chain, OpcodeKind::Sub, *left, *right);
+    return op2(ctx, scope, chain, OpcodeKind::Sub, left, right);
   if (functor == "*")
-    return op2(ctx, scope, chain, OpcodeKind::Mul, *left, *right);
+    return op2(ctx, scope, chain, OpcodeKind::Mul, left, right);
   if (functor == "/") {
     // The VM's Div is integer division on two integers and answers 0 for a
-    // zero divisor; the old `/` was always a float quotient that failed on
-    // zero.
-    const CellRef dividend = asDouble(ctx, scope, chain, *left);
-    const CellRef divisor  = asDouble(ctx, scope, chain, *right);
+    // zero divisor; `/` is always a float quotient.
+    const CellRef dividend = asDouble(ctx, scope, chain, left);
+    const CellRef divisor  = asDouble(ctx, scope, chain, right);
     const CellRef nonZero  = op2(ctx, scope, chain, OpcodeKind::Neq, divisor,
                                  emitConstant(ctx, chain, 0.0));
-    emitFailUnless(ctx, scope, chain, nonZero);
+    const Label proceed    = newLabel(ctx);
+    emitBranchIf(ctx, chain, nonZero, proceed);
+    emitRaise(ctx, chain, "evaluation error: zero divisor in " + site);
+    placeLabel(ctx, chain, proceed);
     return op2(ctx, scope, chain, OpcodeKind::Div, dividend, divisor);
   }
-  const CellRef divisor = emitNonZeroDivisor(ctx, scope, chain, *right);
-  if (functor == "mod")
-    return op2(ctx, scope, chain, OpcodeKind::Mod, *left, divisor);
+  const CellRef divisor = emitNonZeroDivisor(ctx, scope, chain, right, site);
+  if (functor == "mod") return emitFlooredMod(ctx, scope, chain, left, divisor);
+  if (functor == "rem")
+    return op2(ctx, scope, chain, OpcodeKind::Mod, left, divisor);
   const CellRef quotient  = newLocal(ctx, scope);
   const CellRef remainder = newLocal(ctx, scope);
-  const std::array<CellRef, 2> inputs{*left, divisor};
+  const std::array<CellRef, 2> inputs{left, divisor};
   const std::array<CellRef, 2> outputs{quotient, remainder};
   appendOp(ctx, chain, OpcodeKind::DivMod, inputs, outputs);
   return quotient;
 }
 
-std::optional<CellRef> emitEval(CompileContext &ctx, FrameScope &scope,
-                                Chain &chain, CellRef term) {
+CellRef emitEval(CompileContext &ctx, FrameScope &scope, Chain &chain,
+                 CellRef term, const std::string &site) {
   const auto actual = ctx.stdlib.deref(term);
   if (!actual) throw LogicRefusal("arithmetic operand is not a cell");
   if (ctx.stdlib.isVar(*actual))
-    return emitVariableLeaf(ctx, scope, chain, *actual);
+    return emitVariableLeaf(ctx, scope, chain, *actual, site);
 
   auto &arena = ctx.core.arena();
   switch (arena.valueKindOf(*actual)) {
@@ -247,58 +274,51 @@ std::optional<CellRef> emitEval(CompileContext &ctx, FrameScope &scope,
   }
 
   if (const auto functor = ctx.stdlib.functorOf(*actual);
-      functor && !ctx.stdlib.argumentsOf(*actual).empty())
-    return emitCompound(ctx, scope, chain, *actual, *functor);
-  if (const auto number = numericText(arena.textOf(*actual)))
-    return emitConstant(ctx, chain, *number);
-  return std::nullopt;
+      functor && !ctx.stdlib.argumentsOf(*actual).empty()) {
+    if (const auto value =
+            emitCompound(ctx, scope, chain, *actual, *functor, site))
+      return *value;
+  }
+  // An atom (quoted digits included), a Bool or an unknown functor. The raise
+  // always aborts; the constant only keeps the surrounding ops well formed.
+  emitRaise(ctx, chain,
+            "type error: " + render(ctx, *actual) + " is not a number in " +
+                site);
+  return emitConstant(ctx, chain, std::int64_t{0});
 }
 
 void emitIs(CompileContext &ctx, FrameScope &scope, Chain &chain,
             CellRef goal) {
-  const auto args  = ctx.stdlib.argumentsOf(goal);
-  const auto value = emitEval(ctx, scope, chain, args[1]);
-  if (!value) {
-    emitFailNow(ctx, scope, chain);
-    return;
-  }
+  const auto args     = ctx.stdlib.argumentsOf(goal);
+  const CellRef value = emitEval(ctx, scope, chain, args[1], render(ctx, goal));
   const CellRef target = emitTerm(ctx, scope, chain, args[0]);
-  emitUnifyOrFail(ctx, scope, chain, target, *value);
+  emitUnifyOrFail(ctx, scope, chain, target, value);
 }
 
 void emitComparison(CompileContext &ctx, FrameScope &scope, Chain &chain,
                     const PredicateKey &key, CellRef goal) {
-  const auto args = ctx.stdlib.argumentsOf(goal);
-  const auto left = emitEval(ctx, scope, chain, args[0]);
-  if (!left) {
-    emitFailNow(ctx, scope, chain);
-    return;
-  }
-  const auto right = emitEval(ctx, scope, chain, args[1]);
-  if (!right) {
-    emitFailNow(ctx, scope, chain);
-    return;
-  }
+  const auto args        = ctx.stdlib.argumentsOf(goal);
+  const std::string site = render(ctx, goal);
+  const CellRef left     = emitEval(ctx, scope, chain, args[0], site);
+  const CellRef right    = emitEval(ctx, scope, chain, args[1], site);
   CellRef holds{};
   if (key.name == kLess) {
-    holds = op2(ctx, scope, chain, OpcodeKind::Lt, *left, *right);
+    holds = op2(ctx, scope, chain, OpcodeKind::Lt, left, right);
   } else if (key.name == kGreater) {
-    holds = op2(ctx, scope, chain, OpcodeKind::Gt, *left, *right);
+    holds = op2(ctx, scope, chain, OpcodeKind::Gt, left, right);
   } else if (key.name == kLessEqual) {
-    holds = op2(ctx, scope, chain, OpcodeKind::Lte, *left, *right);
+    holds = op2(ctx, scope, chain, OpcodeKind::Lte, left, right);
   } else if (key.name == kGreaterEqual) {
-    holds = op2(ctx, scope, chain, OpcodeKind::Gte, *left, *right);
+    holds = op2(ctx, scope, chain, OpcodeKind::Gte, left, right);
   } else if (key.name == kNumericEqual) {
     // Eq compares variants, so 1 =:= 1.0 would be false; Lte and Gte compare
     // numerically and stay exact on two integers.
-    const CellRef below =
-        op2(ctx, scope, chain, OpcodeKind::Lte, *left, *right);
-    const CellRef above =
-        op2(ctx, scope, chain, OpcodeKind::Gte, *left, *right);
-    holds = op2(ctx, scope, chain, OpcodeKind::And, below, above);
+    const CellRef below = op2(ctx, scope, chain, OpcodeKind::Lte, left, right);
+    const CellRef above = op2(ctx, scope, chain, OpcodeKind::Gte, left, right);
+    holds               = op2(ctx, scope, chain, OpcodeKind::And, below, above);
   } else {
-    const CellRef below = op2(ctx, scope, chain, OpcodeKind::Lt, *left, *right);
-    const CellRef above = op2(ctx, scope, chain, OpcodeKind::Gt, *left, *right);
+    const CellRef below = op2(ctx, scope, chain, OpcodeKind::Lt, left, right);
+    const CellRef above = op2(ctx, scope, chain, OpcodeKind::Gt, left, right);
     holds               = op2(ctx, scope, chain, OpcodeKind::Or, below, above);
   }
   emitFailUnless(ctx, scope, chain, holds);
@@ -307,6 +327,16 @@ void emitComparison(CompileContext &ctx, FrameScope &scope, Chain &chain,
 // '$number', '$var', var and nonvar: one VM test on the dereferenced argument.
 void emitTypeTest(CompileContext &ctx, FrameScope &scope, Chain &chain,
                   const PredicateKey &key, CellRef argument) {
+  if (key.name == kRaise) {
+    // The inner operands of a runtime-bound expression, where the goal text is
+    // no longer known; the top-level goal is named by the static checks.
+    emitRaise(ctx, chain,
+              ctx.stdlib.functorOf(argument) == kInstantiation
+                  ? "instantiation error: unbound variable in an arithmetic "
+                    "expression"
+                  : "type error: a non-number in an arithmetic expression");
+    return;
+  }
   const CellRef term = emitTerm(ctx, scope, chain, argument);
   if (key.name == kNumberTest) {
     const CellRef bound = op1(ctx, scope, chain, OpcodeKind::Deref, term);
@@ -345,8 +375,8 @@ bool isControlBuiltin(const PredicateKey &key) {
     return key.name == kTrue || key.name == kFail || key.name == kCut;
   if (key.arity == kUnary)
     return key.name == kNegation || key.name == kNumberTest ||
-           key.name == kInternalVarTest || key.name == kVarTest ||
-           key.name == kNonvarTest;
+           key.name == kInternalVarTest || key.name == kRaise ||
+           key.name == kVarTest || key.name == kNonvarTest;
   if (key.arity == kBinary)
     return key.name == kIs || key.name == kNotUnifiable ||
            key.name == kConjunction || isComparison(key.name);

@@ -1704,8 +1704,9 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
 
     CellRef unbound             = makeVar();
     CellRef ignored             = makeVar();
-    const CellRef unboundBody[] = {makeTerm("$var", {unbound}), cut(),
-                                   core_.arena().makeCell("fail")};
+    const CellRef unboundBody[] = {
+        makeTerm("$var", {unbound}), cut(),
+        makeTerm("$raise", {core_.arena().makeCell("instantiation")})};
     addClause(predEval_, makeTerm("$eval", {unbound, ignored}), unboundBody);
 
     CellRef number             = makeVar();
@@ -1714,12 +1715,12 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
                                   makeTerm("=", {numberOut, number})};
     addClause(predEval_, makeTerm("$eval", {number, numberOut}), numberBody);
 
-    for (const std::string_view op : {"+", "-", "*", "/", "//", "mod"}) {
+    for (const std::string_view op : {"+", "-", "*", "/", "//", "mod", "rem"}) {
       CellRef a            = makeVar();
       CellRef b            = makeVar();
-      CellRef out          = makeVar();
-      CellRef left         = makeVar();
-      CellRef right        = makeVar();
+      CellRef out          = makeVar("Result");
+      CellRef left         = makeVar("Left");
+      CellRef right        = makeVar("Right");
       const CellRef body[] = {
           cut(), makeTerm("$eval", {a, left}), makeTerm("$eval", {b, right}),
           makeTerm("is", {out, makeTerm(op, {left, right})})};
@@ -1728,12 +1729,16 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     }
     for (const std::string_view op : {"-", "+"}) {
       CellRef a            = makeVar();
-      CellRef out          = makeVar();
-      CellRef x            = makeVar();
+      CellRef out          = makeVar("Result");
+      CellRef x            = makeVar("Operand");
       const CellRef body[] = {cut(), makeTerm("$eval", {a, x}),
                               makeTerm("is", {out, makeTerm(op, {x})})};
       addClause(predEval_, makeTerm("$eval", {makeTerm(op, {a}), out}), body);
     }
+    // Nothing above matched: an atom, a Bool or an unknown functor.
+    const CellRef rest[] = {
+        makeTerm("$raise", {core_.arena().makeCell("type")})};
+    addClause(predEval_, makeTerm("$eval", {makeVar(), makeVar()}), rest);
   }
 
   // Predicate: vortex_function/2 and vortex_module/1 introspection

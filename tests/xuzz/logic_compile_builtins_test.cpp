@@ -41,6 +41,19 @@ struct Prolog {
     }
     return out;
   }
+  // The query aborts with a std::runtime_error whose text contains every
+  // fragment; nothing else (not a quiet failure) is acceptable.
+  void raises(const std::string &query,
+              const std::vector<std::string> &fragments) {
+    try {
+      (void)compiler.solve(compiler.compileQuery(query), 1);
+      ADD_FAILURE() << query << " did not abort";
+    } catch (const std::runtime_error &err) {
+      for (const auto &fragment : fragments)
+        EXPECT_NE(std::string(err.what()).find(fragment), std::string::npos)
+            << query << ": " << err.what();
+    }
+  }
   bool holds(const std::string &query) {
     return !compiler.solve(compiler.compileQuery(query), 1).empty();
   }
@@ -74,18 +87,22 @@ TEST(LogicCompileBuiltinsTest, IsOnIntegersFloatsAndMixed) {
 
 TEST(LogicCompileBuiltinsTest, DivisionRules) {
   Prolog p;
-  // `/` is a float quotient even on two integers, as the old solver had it.
+  // `/` is a float quotient even on two integers.
   EXPECT_EQ(p.all("X is 7 / 2.", "X"), (Strings{"3.5"}));
   EXPECT_EQ(p.all("X is 6 / 3.", "X"), (Strings{"2"}));
   EXPECT_EQ(p.all("X is 7 // 2.", "X"), (Strings{"3"}));
   EXPECT_EQ(p.all("X is 7 mod 3.", "X"), (Strings{"1"}));
-  // A zero divisor fails; it is neither 0 nor an error.
-  EXPECT_TRUE(p.all("X is 1 / 0.", "X").empty());
-  EXPECT_TRUE(p.all("X is 1 // 0.", "X").empty());
-  EXPECT_TRUE(p.all("X is 1 mod 0.", "X").empty());
-  EXPECT_TRUE(p.all("X is 1 / 0.0.", "X").empty());
-  // The integer divisor is the truncated operand.
-  EXPECT_TRUE(p.all("X is 5 // 0.5.", "X").empty());
+  EXPECT_EQ(p.all("X is 7 rem 3.", "X"), (Strings{"1"}));
+  // A zero divisor aborts the query naming the goal and the fault.
+  p.raises("X is 1 / 0.",
+           {"evaluation error", "zero divisor", "is(X, /(1, 0))"});
+  p.raises("X is 1 // 0.", {"zero divisor", "is(X, //(1, 0))"});
+  p.raises("X is 1 mod 0.", {"zero divisor", "is(X, mod(1, 0))"});
+  p.raises("X is 1 rem 0.", {"zero divisor"});
+  p.raises("X is 1 / 0.0.", {"zero divisor"});
+  p.raises("1 < 5 // 0.", {"zero divisor", "<(1, //(5, 0))"});
+  // The integer divisor is the truncated operand, so 0.5 is a zero divisor.
+  p.raises("X is 5 // 0.5.", {"zero divisor"});
 }
 
 TEST(LogicCompileBuiltinsTest, IsChecksAnAlreadyBoundLeftSide) {
@@ -123,25 +140,25 @@ TEST(LogicCompileBuiltinsTest, ComparisonsMixIntegersAndFloats) {
   EXPECT_TRUE(p.holds("2 * 3 > 5.5."));
 }
 
-TEST(LogicCompileBuiltinsTest, UnboundAndNonNumericOperandsFailQuietly) {
+TEST(LogicCompileBuiltinsTest, UnboundAndNonNumericOperandsAbortTheQuery) {
   Prolog p;
-  // The old solver failed on a non-evaluable operand and so do we; what we
-  // never do is coerce an atom or an unbound variable to 0.
-  EXPECT_TRUE(p.all("X is Y + 1.", "X").empty());
-  EXPECT_TRUE(p.all("X is foo + 1.", "X").empty());
-  EXPECT_TRUE(p.all("X is foo.", "X").empty());
-  EXPECT_TRUE(p.all("X is f(1).", "X").empty());
-  EXPECT_FALSE(p.holds("Y < 3."));
-  EXPECT_FALSE(p.holds("foo < 3."));
-  EXPECT_FALSE(p.holds("Y =:= 0."));
-  EXPECT_FALSE(p.holds("foo =:= 0."));
-  EXPECT_FALSE(p.holds("foo =\\= 1."));
-  EXPECT_FALSE(p.holds("X = foo, X >= 0."));
-  EXPECT_FALSE(p.holds("X = foo, Y is X * 2."));
-  // The failure is local: a later alternative still runs.
+  p.raises("X is Y + 1.", {"instantiation error", "Y", "is(X, +(Y, 1))"});
+  p.raises("Y < 3.", {"instantiation error", "<(Y, 3)"});
+  p.raises("Y =:= 0.", {"instantiation error"});
+  p.raises("X is foo + 1.",
+           {"type error", "foo", "not a number", "is(X, +(foo, 1))"});
+  p.raises("X is foo.", {"type error", "foo"});
+  p.raises("X is f(1).", {"type error", "f(1)"});
+  p.raises("foo < 3.", {"type error", "foo"});
+  p.raises("foo =\\= 1.", {"type error"});
+  // A variable bound at run time is reported without the goal text.
+  p.raises("X = foo, X >= 0.", {"type error", "non-number"});
+  p.raises("X = foo, Y is X * 2.", {"type error"});
+  p.raises("X is '5' + 1.", {"type error", "5", "not a number"});
+  // An error is not a failure: no later alternative or negation absorbs it.
   p.consult("pick(a).\npick(1).\npick(2).\n");
-  EXPECT_EQ(p.all("pick(N), N > 0.", "N"), (Strings{"1", "2"}));
-  EXPECT_EQ(p.all("pick(N), M is N + 1.", "M"), (Strings{"2", "3"}));
+  p.raises("pick(N), N > 0.", {"type error", "a"});
+  p.raises("\\+ X is Y.", {"instantiation error"});
 }
 
 TEST(LogicCompileBuiltinsTest, NegationAsFailureLeavesNoBindings) {
@@ -322,24 +339,21 @@ TEST(LogicCompileBuiltinsTest, RuntimeBoundExpressionsAreEvaluated) {
   EXPECT_TRUE(p.holds("pair(1+1, 2*3)."));
 }
 
-TEST(LogicCompileBuiltinsTest,
-     RuntimeEvaluationRefusesNonNumbersWithoutBinding) {
+TEST(LogicCompileBuiltinsTest, RuntimeEvaluationAbortsOnNonNumbers) {
   Prolog p;
-  // An unbound operand fails and binds nothing, even inside an expression.
-  EXPECT_TRUE(p.all("E = 1+Y, X is E.", "X").empty());
-  EXPECT_EQ(p.all("E = 1+Y, \\+ X is E, X = ok.", "X"), (Strings{"ok"}));
-  EXPECT_EQ(p.all("\\+ X is Y, X = free.", "X"), (Strings{"free"}));
-  EXPECT_EQ(p.all("\\+ Y < 3, Y = bound.", "Y"), (Strings{"bound"}));
-  // An atom or an unknown functor anywhere in the term fails.
-  EXPECT_TRUE(p.all("E = foo, X is E.", "X").empty());
-  EXPECT_TRUE(p.all("E = 1+foo, X is E.", "X").empty());
-  EXPECT_TRUE(p.all("E = f(1), X is E.", "X").empty());
-  EXPECT_TRUE(p.all("E = 1+f(2), X is E.", "X").empty());
-  EXPECT_FALSE(p.holds("E = foo, E > 1."));
-  EXPECT_FALSE(p.holds("E = 1+Y, E > 1."));
-  // A division by zero inside the term still fails.
-  EXPECT_TRUE(p.all("E = 1/0, X is E.", "X").empty());
-  EXPECT_TRUE(p.all("E = 1 mod 0, X is E.", "X").empty());
+  p.raises("E = 1+Y, X is E.", {"instantiation error"});
+  p.raises("E = foo, X is E.", {"type error"});
+  p.raises("E = 1+foo, X is E.", {"type error"});
+  p.raises("E = f(1), X is E.", {"type error"});
+  p.raises("E = 1+f(2), X is E.", {"type error"});
+  p.raises("E = foo, E > 1.", {"type error"});
+  p.raises("E = 1+Y, E > 1.", {"instantiation error"});
+  p.raises("A = '5', X is A + 1.", {"type error"});
+  p.raises("E = 1/0, X is E.", {"zero divisor"});
+  p.raises("E = 1 mod 0, X is E.", {"zero divisor"});
+  p.raises("E = 3+true, X is E.", {"type error"});
+  // The engine is usable after an abort.
+  EXPECT_EQ(p.all("X is 1 + 1.", "X"), (Strings{"2"}));
 }
 
 TEST(LogicCompileBuiltinsTest, DeepRuntimeExpressionRespectsTheCycleBudget) {
@@ -380,64 +394,47 @@ TEST(LogicCompileBuiltinsTest, TypeTestsAndInternalGuards) {
   EXPECT_EQ(p.all("var(X), X = 4.", "X"), (Strings{"4"}));
 }
 
-// The next four tests pin what the lowering does today, which is what the
-// old solver did. They are oracle-compatible behaviour pending an owner ruling
-// against ISO; do not "fix" them without that ruling.
-TEST(LogicCompileBuiltinsTest, PinsDivisionByZeroFailing) {
+TEST(LogicCompileBuiltinsTest, ModTakesTheDivisorsSignAndRemTheDividends) {
   Prolog p;
-  EXPECT_TRUE(p.all("X is 5 / 0.", "X").empty());
-  EXPECT_TRUE(p.all("X is 5 // 0.", "X").empty());
-  EXPECT_TRUE(p.all("X is 5 mod 0.", "X").empty());
-  EXPECT_FALSE(p.holds("5 / 0 > 1."));
-}
-
-TEST(LogicCompileBuiltinsTest, PinsModSignAndIntegerDivisionTruncation) {
-  Prolog p;
-  EXPECT_EQ(p.all("X is -7 mod 2.", "X"), (Strings{"-1"}));
-  EXPECT_EQ(p.all("X is 7 mod -2.", "X"), (Strings{"1"}));
+  EXPECT_EQ(p.all("X is -7 mod 2.", "X"), (Strings{"1"}));
+  EXPECT_EQ(p.all("X is 7 mod -2.", "X"), (Strings{"-1"}));
+  EXPECT_EQ(p.all("X is -7 mod -2.", "X"), (Strings{"-1"}));
+  EXPECT_EQ(p.all("X is 7 mod 2.", "X"), (Strings{"1"}));
+  EXPECT_EQ(p.all("X is -6 mod 2.", "X"), (Strings{"0"}));
+  EXPECT_EQ(p.all("X is -7 rem 2.", "X"), (Strings{"-1"}));
+  EXPECT_EQ(p.all("X is 7 rem -2.", "X"), (Strings{"1"}));
+  EXPECT_EQ(p.all("E = -7 mod 2, X is E.", "X"), (Strings{"1"}));
+  EXPECT_EQ(p.all("A = -7, B = 2, X is A mod B.", "X"), (Strings{"1"}));
+  // // truncates toward zero.
   EXPECT_EQ(p.all("X is -7 // 2.", "X"), (Strings{"-3"}));
   EXPECT_EQ(p.all("X is 7 // -2.", "X"), (Strings{"-3"}));
 }
 
-TEST(LogicCompileBuiltinsTest, PinsIntegerOverflowAbortingTheQuery) {
+TEST(LogicCompileBuiltinsTest, IntegerOverflowAbortsTheQuery) {
   Prolog p;
-  const auto query = p.compiler.compileQuery("X is 9223372036854775807 + 1.");
-  try {
-    (void)p.compiler.solveOnce(query);
-    FAIL() << "overflow did not abort the query";
-  } catch (const std::exception &err) {
-    EXPECT_NE(std::string(err.what()).find("overflow"), std::string::npos)
-        << err.what();
-  }
+  p.raises("X is 9223372036854775807 + 1.", {"overflow"});
   // The engine is usable afterwards.
   EXPECT_EQ(p.all("X is 2 + 2.", "X"), (Strings{"4"}));
 }
 
-TEST(LogicCompileBuiltinsTest, PinsQuotedNumberTextEvaluatesOnlyStatically) {
-  Prolog p;
-  EXPECT_EQ(p.all("X is '5' + 1.", "X"), (Strings{"6"}));
-  EXPECT_TRUE(p.all("A = '5', X is A + 1.", "X").empty());
-}
-
 TEST(LogicCompileBuiltinsTest, BoolOperandIsNotANumber) {
   Prolog p;
-  // A Bool cell reaches the lowering from a fact asserted with a Bool value;
-  // the numeric test must not accept it as 1.
+  // A Bool cell must not pass the numeric test as 1.
+  auto &lib          = p.compiler.stdlib();
   const CellRef flag = p.arena.makeScalarCell(true);
-  const CellRef var  = p.compiler.stdlib().makeVar();
-  const CellRef eq   = p.compiler.stdlib().makeTerm("=", {var, flag});
-  const CellRef sum  = p.compiler.stdlib().makeTerm(
-      "+", {var, p.arena.makeScalarCell(std::int64_t{1})});
-  const CellRef isGoal =
-      p.compiler.stdlib().makeTerm("is", {p.compiler.stdlib().makeVar(), sum});
+  const CellRef var  = lib.makeVar();
+  const CellRef eq   = lib.makeTerm("=", {var, flag});
+  const CellRef sum =
+      lib.makeTerm("+", {var, p.arena.makeScalarCell(std::int64_t{1})});
+  const CellRef isGoal  = lib.makeTerm("is", {lib.makeVar(), sum});
   const CellRef goals[] = {eq, isGoal};
-  EXPECT_FALSE(
-      p.compiler.stdlib().solveOnce(goals, p.compiler.customPredicates()));
-  const CellRef cmp = p.compiler.stdlib().makeTerm(
-      ">", {var, p.arena.makeScalarCell(std::int64_t{0})});
+  EXPECT_THROW((void)lib.solveOnce(goals, p.compiler.customPredicates()),
+               std::runtime_error);
+  const CellRef cmp =
+      lib.makeTerm(">", {var, p.arena.makeScalarCell(std::int64_t{0})});
   const CellRef cmpGoals[] = {eq, cmp};
-  EXPECT_FALSE(
-      p.compiler.stdlib().solveOnce(cmpGoals, p.compiler.customPredicates()));
+  EXPECT_THROW((void)lib.solveOnce(cmpGoals, p.compiler.customPredicates()),
+               std::runtime_error);
 }
 
 TEST(LogicCompileBuiltinsTest, CutInsideConjunctionUnderNegationIsLocal) {
