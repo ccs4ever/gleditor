@@ -1,0 +1,66 @@
+/**
+ * @file lower_support.hpp
+ * @brief Small emission helpers shared by the verb-lowering files.
+ *
+ * These sit above graph_emit.hpp (they are built from it and LowerContext, and
+ * add nothing to its frozen interface). They are here so that the same
+ * run-time check, with the same message shape, is not copied into each card's
+ * file.
+ */
+#ifndef COMMON_XANADU_VPL_LOWER_SUPPORT_HPP
+#define COMMON_XANADU_VPL_LOWER_SUPPORT_HPP
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
+
+#include "common/xanadu/vpl/lower_decls.hpp"
+
+namespace xanadu::vpl::lower {
+
+/// The value of a literal number as written: `3`, `2.5`, `¯3`, or `-3` (a
+/// Minus over a literal). Nothing else is folded, so a computed operand is
+/// std::nullopt.
+[[nodiscard]] inline std::optional<double> literalNumber(const AstNode *node) {
+  if (const auto *scalar = dynamic_cast<const ScalarExpr *>(node)) {
+    if (scalar->isString()) return std::nullopt;
+    return scalar->floatValue();
+  }
+  if (const auto *monadic = dynamic_cast<const MonadicExpr *>(node)) {
+    if (monadic->customVerb() || monadic->verb() != TokenKind::Minus) {
+      return std::nullopt;
+    }
+    if (const auto value = literalNumber(monadic->right().get())) {
+      return -*value;
+    }
+  }
+  return std::nullopt;
+}
+
+/// Emits an Assert on the cell `condition` with `message`: the VM stops with a
+/// run-time failure carrying that text when the condition is false.
+inline void assertCell(LowerContext &ctx, CellRef condition,
+                       std::string_view label, std::string_view message) {
+  const auto assertion = ctx.emitOp(zigzag::vortex::OpcodeKind::Assert, label);
+  ctx.emitInput(assertion, condition);
+  ctx.emitInputConstant(assertion, std::string{message});
+}
+
+/// Emits Assert(0 <= count) with `message`.
+inline void assertNotNegative(LowerContext &ctx, CellRef count,
+                              std::string_view label,
+                              std::string_view message) {
+  // Zero is the least count APL accepts; a smaller one is a DOMAIN ERROR.
+  constexpr std::int64_t kLeastCount = 0;
+  const auto valid                   = ctx.core().arena().makeCell();
+  const auto test = ctx.emitOp(zigzag::vortex::OpcodeKind::Lte, label);
+  ctx.emitInputConstant(test, kLeastCount);
+  ctx.emitInput(test, count);
+  ctx.emitOutput(test, valid);
+  assertCell(ctx, valid, label, message);
+}
+
+} // namespace xanadu::vpl::lower
+
+#endif // COMMON_XANADU_VPL_LOWER_SUPPORT_HPP

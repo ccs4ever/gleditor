@@ -22,6 +22,7 @@
 
 #include "common/xanadu/vpl/graph_emit.hpp"
 #include "common/xanadu/vpl/lower_decls.hpp"
+#include "common/xanadu/vpl/lower_support.hpp"
 
 namespace xanadu::vpl::lower {
 namespace {
@@ -77,26 +78,13 @@ CellRef readNext(LowerContext &ctx, CellRef from, DimRef dimension) {
   return out;
 }
 
-// A computed count is checked by the VM: Assert(0 <= count) with the DOMAIN
-// ERROR text. A non-integer computed count is not checked yet (open item).
-void assertNotNegative(LowerContext &ctx, CellRef count) {
-  auto &arena      = ctx.core().arena();
-  const auto valid = arena.makeCell();
-  const auto test  = ctx.emitOp(OpcodeKind::Lte, "#IOTA_NONNEGATIVE");
-  ctx.emitInputConstant(test, kIotaMinimumCount);
-  ctx.emitInput(test, count);
-  ctx.emitOutput(test, valid);
-  const auto assertion = ctx.emitOp(OpcodeKind::Assert, "#IOTA_COUNT_CHECK");
-  ctx.emitInput(assertion, valid);
-  ctx.emitInputConstant(assertion, std::string{kIotaNegativeRuntime});
-}
-
 // Appends `count` cells valued 1..count after the tail of the rank that
 // starts at `anchor` on `dimension`; returns a register for the first one.
 CellRef mintIota(LowerContext &ctx, CellRef count, CellRef anchor,
                  DimRef dimension) {
   auto &arena = ctx.core().arena();
-  assertNotNegative(ctx, count);
+  // A non-integer computed count is not checked yet (open item).
+  assertNotNegative(ctx, count, "#IOTA_NONNEGATIVE", kIotaNegativeRuntime);
   // The destination rank is open at its tail by design: no stop.
   const auto tail =
       emit::extreme(ctx, anchor, dimension, DimVector::POS, std::nullopt);
@@ -125,27 +113,9 @@ CellRef finishIota(LowerContext &ctx, CellRef first, DimRef dimension,
   return first;
 }
 
-// The value of a literal count as written: `3`, `2.5`, `¯3`, or `-3` (a
-// Minus over a literal). Nothing else is folded, so a computed count is None.
-std::optional<double> literalCount(const AstNode *node) {
-  if (const auto *scalar = dynamic_cast<const ScalarExpr *>(node)) {
-    if (scalar->isString()) return std::nullopt;
-    return scalar->floatValue();
-  }
-  if (const auto *monadic = dynamic_cast<const MonadicExpr *>(node)) {
-    if (monadic->customVerb() || monadic->verb() != TokenKind::Minus) {
-      return std::nullopt;
-    }
-    if (const auto value = literalCount(monadic->right().get())) {
-      return -*value;
-    }
-  }
-  return std::nullopt;
-}
-
 // Refuses a literal count APL rejects, at compile time, by name.
 void refuseBadLiteral(const AstNode *node) {
-  const auto value = literalCount(node);
+  const auto value = literalNumber(node);
   if (!value) return;
   if (std::trunc(*value) != *value) refuse(kIotaNonIntegerLiteral);
   if (*value < static_cast<double>(kIotaMinimumCount)) {
