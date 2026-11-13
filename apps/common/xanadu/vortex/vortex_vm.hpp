@@ -187,6 +187,10 @@ enum class OpcodeKind : std::uint8_t {
   // Numeric power for any exponent. Appended last: the enum's tail, which the
   // decode bounds and the vagent ceiling track.
   Pow,
+
+  // Cell identity: two cell inputs, one Bool output, true iff both resolve to
+  // the same cell. Appended last for the persisted-kind reason.
+  SameCell,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.

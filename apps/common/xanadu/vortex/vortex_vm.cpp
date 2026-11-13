@@ -285,12 +285,12 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // asInt64 ≤ Find sweep of the band would register dimConstant
     // operand cells and every other small-int data cell too.
     const auto kind = core_.arena().asInt64(opCell);
-    // The bound is the enum's last ordinal — Pow while the append-last tail
-    // is RelationNext..Pow; a new kind landing past it must move this
+    // The bound is the enum's last ordinal — SameCell while the append-last
+    // tail is RelationNext..SameCell; a new kind landing past it must move this
     // ceiling the way linkedCeiling's does (meta.cpp).
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::Pow)) {
+            static_cast<std::uint64_t>(OpcodeKind::SameCell)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -545,7 +545,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::Pow)) {
+          static_cast<std::uint64_t>(OpcodeKind::SameCell)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -2653,6 +2653,33 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     outputs.emplace_back(result);
     break;
   }
+  case OpcodeKind::SameCell: {
+    const auto inCells = inputsOf(opcode);
+    if (inCells.size() != 2)
+      return {.success       = false,
+              .failingClause = opcode,
+              .errorMessage  = "SameCell expects exactly two cell inputs"};
+    auto &arena = core_.arena();
+    arena.consumeWork();
+    const auto left  = resolveCell(inCells, inputs, cellReferences_, 0, arena);
+    const auto right = resolveCell(inCells, inputs, cellReferences_, 1, arena);
+    // Two absent inputs are not the same cell: there is no cell to be.
+    if (!left || !right) {
+      outputs.emplace_back(false);
+      break;
+    }
+    // A proxy names its foreign cell and a base cell is its own source, so a
+    // cell is one identity however many attached folds proxy it; the cell's
+    // identity is its operation, not the fold it is read through. Anything
+    // with no source (an ephemeral cell) is itself and equals nothing else.
+    const auto leftSource  = arena.resolveSourceCell(*left);
+    const auto rightSource = arena.resolveSourceCell(*right);
+    if (leftSource && rightSource)
+      outputs.emplace_back(*leftSource == *rightSource);
+    else
+      outputs.emplace_back(!leftSource && !rightSource && *left == *right);
+    break;
+  }
   case OpcodeKind::Hypertime: {
     if (!inputs.empty())
       return {.success       = false,
@@ -4097,6 +4124,12 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       (*stagedParticipants)[cursor] = std::move(groups);
     }
   }
+  // Checked here, not in the body: a pipeline stage or condition runs the body
+  // with the parameter cell standing for the output.
+  if (kind == OpcodeKind::SameCell && outCells.size() != 1)
+    return {.success       = false,
+            .failingClause = *op,
+            .errorMessage  = "SameCell expects exactly one output"};
   if (kind == OpcodeKind::ScopedChoice) {
     const auto failScoped = [op](const std::string_view message) {
       return ExecutionResult{.success       = false,
@@ -4486,10 +4519,12 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind != OpcodeKind::VqlString && kind != OpcodeKind::VqlAdd &&
       kind != OpcodeKind::VqlBoxScalar &&
       kind != OpcodeKind::CurrentTimestamp &&
-      kind != OpcodeKind::ScopedChoice && kind != OpcodeKind::ResumeInit &&
-      kind != OpcodeKind::ResumeSet && kind != OpcodeKind::ProbeLink &&
-      kind != OpcodeKind::VqlMaskLinks && kind != OpcodeKind::VqlFieldProbe &&
-      !readsHostState(kind) && !publishesLogicReference(kind) && !stateful;
+      // Identity, not content: equal content must not share a memo entry.
+      kind != OpcodeKind::SameCell && kind != OpcodeKind::ScopedChoice &&
+      kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
+      kind != OpcodeKind::ProbeLink && kind != OpcodeKind::VqlMaskLinks &&
+      kind != OpcodeKind::VqlFieldProbe && !readsHostState(kind) &&
+      !publishesLogicReference(kind) && !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
