@@ -456,6 +456,10 @@ outside the baseline failed under load from two concurrent worker builds
 and the drag test passed three of four runs alone, so they are timing-sensitive and not regressions.
 L-PARSE (`893eec8d`) was merged after the gate, on its own VLace run.
 
+Gate D (2026-11-12, shared branch at `687bacf7`, adding L-PARSE and P1): `xuzz_test` 176 failures of
+4081, nothing newly failing, 30 turned green against the baseline; `gleditor_test` and `zigzag_test`
+unchanged. The current failing list is `/data/git/gleditor-restore/.logs/w1/gate-d-xuzz-failed.txt`.
+
 **Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
 usage limit twice, and four exhausted it again. By the owner's instruction (2026-11-12), run at most
 two agents at a time, workers and reviewers counted together.
@@ -464,32 +468,53 @@ Ruled by the owner on 2026-11-12, after the second batch (W1.1, V3, L1 and P1 re
 
 - **`<=` and `>=` on versions:** ancestor-or-equal, so `@a <= @a` is true; unrelated branches are
   false for all four ordering operators. The spec's hypertime operator table gains the two rows.
+
 - **Program cells after a VQL run:** fix in O2 with the approved arena undo. Mark before compile,
   release after the run, and copy out result cells the program itself minted before the release. The
   same mechanism is Q3's failed-compile cleanup.
+
 - **`Mount` and `SessionMount`:** unify; the engine's type becomes an alias of the compiler's. Rides
   on Q2.
+
 - **VLace reference copies (L1 D2):** no new opcode. `emitCopy` stays a value copy; L2 adds
   `emitCopyReference` over `CopyCellRefs` for operands the lowering knows are references. A
   value-preserving copy opcode is reconsidered only if L2 meets an operand whose kind is unknown
   while lowering.
+
 - **`CompileError::ArithFault`:** approved and added (division by zero). No type-test opcode for
   `++`/`+`: the type checker owns it, and lowering refuses untyped input by name.
+
 - **`FrameScope` in the frozen `logic_compile.hpp`:** one amendment approved, two fields
   (`scratchOk`, `freeTemps`), so `variableSlots` holds no sentinel keys. It lands with P1, before P2
   and P3 start.
+
 - **`⍴ ⊂ …`:** the `kRhoEnclosed` guard stays; V10 makes it reachable and adds the source-level
   test.
+
 - **VLace parser defect** (`1 > 2 || 3 < 4` drops the tail, `parser.cpp:624-627`): fix in this work,
   as its own small card (L-PARSE) ahead of L2.
+
 - **Prolog cycle budget:** the default is read from `system://settings`, with a 10,000,000 fallback
   in place of 100,000. Rides on P2.
+
+- **Reversed views are bounded (V4, ruled 2026-11-12).** A view had no extent, so `⌽A` of `5⍳d.1`
+  walked on past A's head into the home cell and `⍴⌽A` was 6 where the spec says 5. A reversed axis
+  now carries a bound and every walker ends there; views stay free of copies. The bound is a stop
+  cell (the operand's old origin), which needs O2's cell-identity opcode, so card V4b waits for O2.
+  It amends the frozen `graph_emit.hpp` and the executor's view type once. V4 stays unmerged and
+  V5–V13 stay parked until V4b lands, since they share the walkers.
+
+- **Prolog arithmetic follows ISO (P2, ruled 2026-11-12).** Division by zero and an unbound or
+  non-numeric operand abort the query with a named error, as integer overflow already does; they do
+  not fail quietly. `mod` takes the divisor's sign and `rem` is added for the truncating remainder.
+  A quoted atom such as `'5'` is not a number, statically or at run time.
 
 New cards from these rulings:
 
 | Card    | What                                                                                    | After |
 | :------ | :-------------------------------------------------------------------------------------- | :---- |
 | L-PARSE | Fix the VLace comparison-chain parse defect, with tests                                 | L1    |
+| V4b     | Bounded views: a stop cell on reversed axes, honoured by every walker and by read-back  | O2    |
 | O2      | Cell-identity compare, `PinHistorical`, arena space undo, program-cell release, project | O1    |
 
 ## 5a. Original decision table (before W0)

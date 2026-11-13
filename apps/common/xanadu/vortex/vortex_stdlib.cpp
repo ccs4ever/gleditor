@@ -1667,12 +1667,27 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
 
   // Predicate: length/2
   // length([], 0).
+  // length([_ | T], N) :- length(T, M), N is M + 1.
   {
     predLength_       = createPredicate("length");
     CellRef emptyList = core_.arena().makeCell("[]");
     CellRef zero  = core_.arena().makeScalarCell(static_cast<std::int64_t>(0));
     CellRef head1 = makeTerm("length", {emptyList, zero});
     addClause(predLength_, head1);
+
+    // length([_ | T], N) :- length(T, M), N is M + 1.
+    // Replaces the old host fast path: a proper list counts, an unbound list
+    // enumerates (the one behaviour change from the pre-lowering solver).
+    CellRef wild   = makeVar();
+    CellRef tail   = makeVar();
+    CellRef count  = makeVar();
+    CellRef parent = makeVar();
+    CellRef one    = core_.arena().makeScalarCell(static_cast<std::int64_t>(1));
+    CellRef head2  = makeTerm("length", {makeCons(wild, tail), parent});
+    const CellRef body2[] = {
+        makeTerm("length", {tail, count}),
+        makeTerm("is", {parent, makeTerm("+", {count, one})})};
+    addClause(predLength_, head2, body2);
 
     exportSymbol(mod, "length", predLength_);
   }

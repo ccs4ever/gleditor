@@ -58,11 +58,11 @@ public:
   /// Returns all custom predicate cells defined in this compiler session.
   [[nodiscard]] std::vector<zigzag::CellRef> customPredicates() const;
 
-  /// Throws std::logic_error until resolution is lowered to VM instructions.
+  /// Runs @p query on the VM; every solution, up to @p maxSolutions.
   std::vector<zigzag::vortex::LogicSolution>
   solve(const CompiledQuery &query, std::size_t maxSolutions = 100);
 
-  /// Throws std::logic_error until resolution is lowered to VM instructions.
+  /// True when @p query has a solution.
   bool solveOnce(const CompiledQuery &query);
 
   [[nodiscard]] zigzag::vortex::VortexCore &core() noexcept { return core_; }
