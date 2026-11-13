@@ -529,6 +529,12 @@ Ruled by the owner on 2026-11-13:
 - **VLace spec §8.1:** `d.thunk` stays, as an arena-only dimension; the unused `d.memo` and
   `d.blackhole` are removed; §8.1 now says "no persistent dimension". The code removal rides on L3's
   fix round.
+- **Reversed views stay live (V4b, replaces the stop-cell form of 2026-11-12).** The first V4b made
+  `⌽A` a snapshot: its far end was found when the reverse ran, so it did not grow with `A`. The
+  owner refused that. A view now keeps the operand's origin and each axis carries a reversed flag; a
+  reversed axis is read from the rank's far end back to the origin, which is its own stop cell
+  (`SameCell`). `⌽⌽A` is `A`, the first row of a matrix does not change under reverse, and the
+  "already reversed along another axis" refusal goes away. A reversed read walks the rank twice.
 - **Out-of-order mark release:** refused by name. Releasing a mark while a later mark is still
   outstanding regrows cells in `ArenaManifold` today; `release()` returns a typed refusal that names
   both marks instead. Rides on O2b.

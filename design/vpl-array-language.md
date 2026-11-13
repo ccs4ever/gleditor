@@ -147,16 +147,14 @@ Three things are worth reading off that table, because they are the parts a glyp
 `(origin, axes)` — not cells. That is why §4.2 can call the visualizer's viewport a `⍉`: rebinding
 which dimension is "across" costs nothing because nothing about the manifold changed.
 
-**A reversed axis is bounded where it was reversed.** A view has no extent: `A` is "from this cell,
-posward, to the end of the rank", so a later `3⍳d.1` on the same rank grows it (§4.1). Walked
-negward from A's last cell, the same rule would run on past A's first cell into whatever precedes it
-on the rank (the home cell, for a fresh `5⍳d.1`), and `⍴⌽A` would be 6. So `⌽` and `⊖` record a
-*stop cell* on the axis they flip, the operand's origin, and every walk and read-back ends there.
-The price is that `⌽A` is fixed at the moment it runs: its far end is found then, so it mints
-nothing and copies nothing, but it does not grow when the rank does, while `A` still does. Reversing
-it again walks no rank and gives back the operand's axis. On a matrix a stop names one row's end, so
-a reverse there checks that it preserved the shape and refuses a ragged array by name (ruled
-2026-11-12; cards V4 and V4b).
+**A reversed axis ends at the view's origin.** A view has no extent: `A` is "from this cell,
+posward, to the end of the rank", so a later `3⍳d.1` on the same rank grows it (§4.1). `⌽` and `⊖`
+do not move the origin; they set the flipped axis's sign. A reversed axis is read by finding the
+rank's far end from the origin and walking back, ending on the origin itself, so `⍴⌽A` is always
+`⍴A` and `⌽A` stays live: it grows when `A` does, and `⌽⌽A` is `A`. (Moving the origin to the far
+end instead would lose the bound: walked negward from A's last cell, the view would run on past A's
+first cell into the home cell, and `⍴⌽A` would be 6.) Nothing is minted or copied; the price is that
+a reversed read walks the rank twice (ruled 2026-11-13; cards V4 and V4b).
 
 **`\` and `⌸` write.** A scan mints a cell per intermediate and `⌸` links every group member onto a
 clone rank, so both appear in hypertime. APL trains the instinct that these are cheap traversals;
