@@ -169,17 +169,18 @@ void sameCell(LowerContext &ctx, CellRef left, CellRef right, CellRef out,
   ctx.emitOutput(op, out);
 }
 
-// The loop of iteratorLoop with a bound: the walk ends after the item that is
-// the stop cell. `anchor` is the cell the walk started from and is not among
-// the iterator's items; when it is itself the stop, the walk has already
-// ended and the body runs zero times. The test sits at the loop head, so a
-// body that does not return normally cannot skip it, and the body sees only
-// cells up to and including the stop.
-void boundedIteratorLoop(
-    LowerContext &ctx, CellRef iterator, CellRef anchor, CellRef stop,
-    gleditor::cpp26::function_ref<void(CellRef item)> body) {
-  const auto closed = freshRegister(ctx);
-  sameCell(ctx, anchor, stop, closed, "#STOP_AT_ANCHOR");
+// iteratorLoop, with an optional bound: the walk ends after the item that is
+// the stop. `anchor` is the cell the walk started from and is not among the
+// iterator's items; when it is itself the stop, the walk has already ended and
+// the body runs zero times. The test sits at the loop head, outside the body.
+void loopOver(LowerContext &ctx, CellRef iterator,
+              std::optional<CellRef> anchor, std::optional<CellRef> stop,
+              gleditor::cpp26::function_ref<void(CellRef item)> body) {
+  std::optional<CellRef> closed;
+  if (stop && anchor) {
+    closed = freshRegister(ctx);
+    sameCell(ctx, *anchor, *stop, *closed, "#STOP_AT_ANCHOR");
+  }
   const auto next = ctx.emitOp(OpcodeKind::IteratorNext, "#ITERATOR_NEXT");
   ctx.emitInput(next, iterator);
   const auto item    = freshRegister(ctx);
@@ -188,17 +189,20 @@ void boundedIteratorLoop(
   ctx.emitOutput(next, present);
   const auto end = mintLabel(ctx, "#ITERATOR_END");
   branchIfFalse(ctx, present, end, "#ITERATOR_EXHAUSTED");
-  const auto open = freshRegister(ctx);
-  const auto flip = ctx.emitOp(OpcodeKind::Not, "#STOP_OPEN");
-  ctx.emitInput(flip, closed);
-  ctx.emitOutput(flip, open);
-  branchIfFalse(ctx, open, end, "#STOP_REACHED");
+  if (closed) {
+    const auto open = freshRegister(ctx);
+    const auto flip = ctx.emitOp(OpcodeKind::Not, "#STOP_OPEN");
+    ctx.emitInput(flip, *closed);
+    ctx.emitOutput(flip, open);
+    branchIfFalse(ctx, open, end, "#STOP_REACHED");
+  }
   {
     const BodyScope scope(ctx);
     body(item);
     scope.verify();
   }
-  sameCell(ctx, item, stop, closed, "#STOP_TEST");
+  if (closed) sameCell(ctx, item, *stop, *closed, "#STOP_TEST");
+  // The back-edge targets the IteratorNext op itself, which is in the chain.
   const auto repeat =
       ctx.emitOp(OpcodeKind::BranchFalseCell, "#ITERATOR_REPEAT");
   ctx.emitInputConstant(repeat, false);
@@ -211,11 +215,7 @@ void loopAfter(LowerContext &ctx, CellRef anchor, DimRef dimension,
                DimVector direction, std::optional<CellRef> stop,
                gleditor::cpp26::function_ref<void(CellRef item)> body) {
   const auto iterator = beginRankIterator(ctx, anchor, dimension, direction);
-  if (stop) {
-    boundedIteratorLoop(ctx, iterator, anchor, *stop, body);
-  } else {
-    iteratorLoop(ctx, iterator, body);
-  }
+  loopOver(ctx, iterator, anchor, stop, body);
 }
 
 // Anchor first, then the rank. The rank is snapshotted into a stream before
@@ -277,25 +277,7 @@ void branchAlways(LowerContext &ctx, CellRef target, std::string_view label) {
 
 void iteratorLoop(LowerContext &ctx, CellRef iterator,
                   gleditor::cpp26::function_ref<void(CellRef item)> body) {
-  const auto next = ctx.emitOp(OpcodeKind::IteratorNext, "#ITERATOR_NEXT");
-  ctx.emitInput(next, iterator);
-  const auto item    = freshRegister(ctx);
-  const auto present = freshRegister(ctx);
-  ctx.emitOutput(next, item);
-  ctx.emitOutput(next, present);
-  const auto end = mintLabel(ctx, "#ITERATOR_END");
-  branchIfFalse(ctx, present, end, "#ITERATOR_EXHAUSTED");
-  {
-    const BodyScope scope(ctx);
-    body(item);
-    scope.verify();
-  }
-  // The back-edge targets the IteratorNext op itself, which is in the chain.
-  const auto repeat =
-      ctx.emitOp(OpcodeKind::BranchFalseCell, "#ITERATOR_REPEAT");
-  ctx.emitInputConstant(repeat, false);
-  ctx.emitInput(repeat, next);
-  placeLabel(ctx, end);
+  loopOver(ctx, iterator, std::nullopt, std::nullopt, body);
 }
 
 void walkRank(LowerContext &ctx, CellRef anchor, DimRef dimension,
@@ -353,6 +335,17 @@ void walkRanksLockstep(
   ctx.emitInputConstant(repeat, false);
   ctx.emitInput(repeat, nextA);
   placeLabel(ctx, end);
+}
+
+void walkAxis(LowerContext &ctx, CellRef origin, DimRef dimension,
+              DimVector direction, bool reversed,
+              gleditor::cpp26::function_ref<void(CellRef item)> body) {
+  if (!reversed) {
+    walkRank(ctx, origin, dimension, direction, body, std::nullopt);
+    return;
+  }
+  const auto far = extreme(ctx, origin, dimension, direction, std::nullopt);
+  walkRank(ctx, far, dimension, -direction, body, origin);
 }
 
 CellRef extreme(LowerContext &ctx, CellRef anchor, DimRef dimension,

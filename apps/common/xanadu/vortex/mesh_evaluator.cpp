@@ -825,31 +825,43 @@ std::optional<CellRef> vplCell(ResultBuilder &builder, const vpl::VplView &view,
     if (value) builder.link(nested, builder.value, *value);
     return box;
   }
-  if (!view.axes().empty()) {
+  // The wire carries an origin, directions and extents and no reversed flag,
+  // so a reversed view is exported as the unreversed walk that reads the same
+  // cells in the same order (origin at the far end, axis flipped). A ragged
+  // array may have none; that is refused by name rather than exported wrong.
+  std::optional<vpl::VplView> walked;
+  if (!view.reversed().empty()) {
+    walked = view.walkable(arena);
+    if (!walked)
+      throw std::runtime_error(
+          "VPL mesh export of a reversed ragged array is unsupported");
+  }
+  const vpl::VplView &shown = walked ? *walked : view;
+  if (!shown.axes().empty()) {
     auto axes        = arena.makeCell("d.mesh.axes");
     auto dimension   = arena.makeCell("d.mesh.axis");
     auto extent      = arena.makeCell("d.mesh.extent");
     auto direction   = arena.makeCell("d.mesh.direction");
     CellRef axisTail = metadata;
-    for (std::size_t i = 0; i < view.axes().size(); ++i) {
+    for (std::size_t i = 0; i < shown.axes().size(); ++i) {
       auto axis = arena.makeCell();
       builder.link(axisTail, axes, axis);
-      builder.link(axis, dimension, view.axes()[i].dim);
+      builder.link(axis, dimension, shown.axes()[i].dim);
       builder.link(axis, direction,
-                   arena.makeScalarCell(view.axes()[i].dir == DimVector::POS));
-      if (i < view.extents().size())
-        builder.link(
-            axis, extent,
-            arena.makeScalarCell(static_cast<std::int64_t>(view.extents()[i])));
+                   arena.makeScalarCell(shown.axes()[i].dir == DimVector::POS));
+      if (i < shown.extents().size())
+        builder.link(axis, extent,
+                     arena.makeScalarCell(
+                         static_cast<std::int64_t>(shown.extents()[i])));
       axisTail = axis;
     }
   }
-  if (view.isScalar()) {
-    if (view.isString()) return arena.makeCell(view.scalarString());
-    if (view.isFloat()) return arena.makeScalarCell(view.scalarFloat());
-    return arena.makeScalarCell(view.scalarInt());
+  if (shown.isScalar()) {
+    if (shown.isString()) return arena.makeCell(shown.scalarString());
+    if (shown.isFloat()) return arena.makeScalarCell(shown.scalarFloat());
+    return arena.makeScalarCell(shown.scalarInt());
   }
-  return view.origin();
+  return shown.origin();
 }
 
 // Resolution rolls the arena back after each solution, so retaining a CellRef

@@ -28,11 +28,11 @@ private:
 // `scalarInt()` while the result is still a rank of one cell.
 VplView makeRankView(std::optional<zigzag::CellRef> origin,
                      const std::vector<zigzag::DirectedDim> &axes,
-                     const AxisStops &stops, zigzag::ArenaManifold &arena) {
+                     const AxisReversed &reversed,
+                     zigzag::ArenaManifold &arena) {
   VplView view{origin, axes};
   if (!origin) return view;
-  // Before the extents: shape() walks, and must end where the view does.
-  view.setStops(stops);
+  view.setReversed(reversed);
   if (const auto value = arena.asInt64(*origin)) {
     view.setScalarPayload(*value);
   } else if (const auto value = arena.asDouble(*origin)) {
@@ -44,7 +44,7 @@ VplView makeRankView(std::optional<zigzag::CellRef> origin,
 
 struct ViewFacts {
   std::vector<zigzag::DirectedDim> axes;
-  AxisStops stops; // run-time stop cells, already resolved from registers
+  AxisReversed reversed;
   bool enclosed{false};
   const std::optional<std::vector<zigzag::DirectedDim>> *dimensionValues{
       nullptr};
@@ -58,7 +58,11 @@ VplView makeView(std::optional<zigzag::CellRef> cell, const ViewFacts &facts,
     return VplView{std::nullopt, **facts.dimensionValues};
   }
   // An empty array has axes and no origin: its register was cleared.
-  if (!cell) return VplView{std::nullopt, facts.axes};
+  if (!cell) {
+    VplView empty{std::nullopt, facts.axes};
+    empty.setReversed(facts.reversed);
+    return empty;
+  }
 
   if (facts.enclosed) {
     const auto dimension = core.findOrMintDimension(enclosureDimensionName);
@@ -69,7 +73,7 @@ VplView makeView(std::optional<zigzag::CellRef> cell, const ViewFacts &facts,
     return box;
   }
   if (!facts.axes.empty()) {
-    return makeRankView(cell, facts.axes, facts.stops, arena);
+    return makeRankView(cell, facts.axes, facts.reversed, arena);
   }
 
   if (const auto value = arena.asInt64(*cell)) {
@@ -83,26 +87,6 @@ VplView makeView(std::optional<zigzag::CellRef> cell, const ViewFacts &facts,
                                std::optional{*cell});
   }
   return VplView::makeScalar(arena.textOf(*cell), *cell);
-}
-
-// Turns the registers a program left its stops in into the cells they hold. A
-// stop that is missing while the view has an origin is a view that would
-// silently run past its array, so it is a failure, not an unbounded view.
-AxisStops resolveStops(const zigzag::vortex::VortexVM &vm,
-                       const AxisStops &registers,
-                       std::optional<zigzag::CellRef> origin) {
-  AxisStops cells;
-  cells.reserve(registers.size());
-  for (const auto &reg : registers) {
-    std::optional<zigzag::CellRef> cell;
-    if (reg) cell = vm.resultCell(*reg);
-    if (reg && origin && !cell) {
-      throw std::runtime_error(
-          "VPL bounded view lost its stop cell at run time");
-    }
-    cells.push_back(cell);
-  }
-  return cells;
 }
 
 void addDependency(std::vector<zigzag::CellRef> &dependencies,
@@ -205,13 +189,12 @@ Executor::run(CompilationResult compiled, std::size_t maxCycles) {
     auto resultDependencies  = compiled.resultDependencies;
     const bool foreignResult = resultCell && arena.resolveForeign(*resultCell);
     if (foreignResult) addDependency(resultDependencies, *resultCell);
-    auto view =
-        makeView(resultCell,
-                 {.axes  = compiled.resultAxes,
-                  .stops = resolveStops(vm_, compiled.resultStops, resultCell),
-                  .enclosed        = compiled.resultEnclosed,
-                  .dimensionValues = &compiled.resultDimensionValues},
-                 core_);
+    auto view = makeView(resultCell,
+                         {.axes            = compiled.resultAxes,
+                          .reversed        = compiled.resultReversed,
+                          .enclosed        = compiled.resultEnclosed,
+                          .dimensionValues = &compiled.resultDimensionValues},
+                         core_);
     view.setDependencies(resultDependencies);
 
     auto updatedBindings     = bindings_;
@@ -248,13 +231,12 @@ Executor::run(CompilationResult compiled, std::size_t maxCycles) {
         addDependency(bindingDependencies, *cell);
         addDependency(updatedDependencies[*cell], *cell);
       }
-      VplView assigned =
-          makeView(cell,
-                   {.axes            = binding.axes,
-                    .stops           = resolveStops(vm_, binding.stops, cell),
-                    .enclosed        = binding.enclosed,
-                    .dimensionValues = &binding.dimensionValues},
-                   core_);
+      VplView assigned = makeView(cell,
+                                  {.axes            = binding.axes,
+                                   .reversed        = binding.reversed,
+                                   .enclosed        = binding.enclosed,
+                                   .dimensionValues = &binding.dimensionValues},
+                                  core_);
       recordUnion(assigned, bindingDependencies);
       assigned.setDependencies(std::move(bindingDependencies));
       updatedBindings.insert_or_assign(name, std::move(assigned));

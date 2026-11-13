@@ -660,13 +660,13 @@ std::optional<CellRef> VPLCompiler::compileProgram(const Program &prog) {
     lastResultCells_.clear();
     lastResultCells_.push_back(*lastRes);
     lastResultAxes_.clear();
-    lastResultStops_.clear();
+    lastResultReversed_.clear();
     if (const auto axes = rankAxes_.find(*lastRes); axes != rankAxes_.end()) {
       lastResultAxes_ = axes->second;
     }
-    if (const auto stops = rankStops_.find(*lastRes);
-        stops != rankStops_.end()) {
-      lastResultStops_ = stops->second;
+    if (const auto flags = rankReversed_.find(*lastRes);
+        flags != rankReversed_.end()) {
+      lastResultReversed_ = flags->second;
     }
     lastResultDependencies_ = rankDependenciesOf(*lastRes);
     recordResultFacts(*lastRes);
@@ -743,9 +743,13 @@ VPLCompiler::compileIdentifier(const IdentifierExpr &expr) {
           axes != varAxes_.end() && !axes->second.empty()) {
         rankAxes_[*it->second] = axes->second;
       }
-      if (const auto stops = varStops_.find(expr.name());
-          stops != varStops_.end()) {
-        rankStops_[*it->second] = stops->second;
+      // Two variables can name one origin cell across programs (a reversed
+      // view and the array it views), so the flags are set on every use.
+      if (const auto flags = varReversed_.find(expr.name());
+          flags != varReversed_.end()) {
+        rankReversed_[*it->second] = flags->second;
+      } else {
+        rankReversed_.erase(*it->second);
       }
       if (varEnclosed_.contains(expr.name())) {
         enclosedCells_.insert(*it->second);
@@ -754,6 +758,14 @@ VPLCompiler::compileIdentifier(const IdentifierExpr &expr) {
           dims != varDimensionValues_.end()) {
         dimensionValues_[*it->second] = dims->second;
       }
+    } else if (const auto axes = varAxes_.find(expr.name());
+               axes != varAxes_.end() && !axes->second.empty()) {
+      // A binding with axes and no cell is an empty array or a dimension
+      // value from an earlier program; the two look alike once stored.
+      throw std::invalid_argument(
+          "VPL variable '" + expr.name() +
+          "' holds an empty array or a dimension value from an earlier "
+          "program, which the VM cannot reuse across programs");
     }
     return it->second;
   }
@@ -779,19 +791,20 @@ std::optional<CellRef> VPLCompiler::compileAssign(const AssignExpr &expr) {
   const std::vector<zigzag::DirectedDim> bindingAxes =
       axes == rankAxes_.end() ? std::vector<zigzag::DirectedDim>{}
                               : axes->second;
-  AxisStops bindingStops;
-  if (const auto stops = rankStops_.find(*valCell); stops != rankStops_.end()) {
-    bindingStops = stops->second;
+  AxisReversed bindingReversed;
+  if (const auto flags = rankReversed_.find(*valCell);
+      flags != rankReversed_.end()) {
+    bindingReversed = flags->second;
   }
   if (bindingAxes.empty()) {
     varAxes_.erase(expr.target());
   } else {
     varAxes_[expr.target()] = bindingAxes;
   }
-  if (bindingStops.empty()) {
-    varStops_.erase(expr.target());
+  if (bindingReversed.empty()) {
+    varReversed_.erase(expr.target());
   } else {
-    varStops_[expr.target()] = bindingStops;
+    varReversed_[expr.target()] = bindingReversed;
   }
   const bool enclosed = enclosedCells_.contains(*valCell);
   if (enclosed) {
@@ -810,7 +823,7 @@ std::optional<CellRef> VPLCompiler::compileAssign(const AssignExpr &expr) {
   assignedBindings_[expr.target()] = {
       .cell            = *valCell,
       .axes            = bindingAxes,
-      .stops           = std::move(bindingStops),
+      .reversed        = std::move(bindingReversed),
       .dependencies    = rankDependenciesOf(*valCell),
       .enclosed        = enclosed,
       .dimensionValues = std::move(dimensionValues),
@@ -1161,9 +1174,9 @@ CompilationResult VPLCompiler::compile(const Program &program,
   allOps_.clear();
   varBindings_.clear();
   varAxes_.clear();
-  varStops_.clear();
+  varReversed_.clear();
   rankAxes_.clear();
-  rankStops_.clear();
+  rankReversed_.clear();
   rankDependencies_.clear();
   cellDependencies_.clear();
   assignedBindings_.clear();
@@ -1176,7 +1189,7 @@ CompilationResult VPLCompiler::compile(const Program &program,
   lastResultDimensionValues_.reset();
   lastResultCells_.clear();
   lastResultAxes_.clear();
-  lastResultStops_.clear();
+  lastResultReversed_.clear();
   lastResultDependencies_.clear();
   optimize_ = options.optimize;
 
@@ -1218,11 +1231,9 @@ CompilationResult VPLCompiler::compile(const Program &program,
     }
     if (cell && !binding.axes().empty()) {
       rankAxes_[*cell] = binding.axes();
-      // A stop cell is its own register: an input that no reference was
-      // published for reads as the cell itself.
-      if (!binding.stops().empty()) {
-        rankStops_[*cell] = binding.stops();
-        varStops_[name]   = binding.stops();
+      if (!binding.reversed().empty()) {
+        rankReversed_[*cell] = binding.reversed();
+        varReversed_[name]   = binding.reversed();
       }
     }
     if (cell && binding.isEnclosed()) {
@@ -1239,9 +1250,9 @@ CompilationResult VPLCompiler::compile(const Program &program,
           axes != rankAxes_.end()) {
         lastResultAxes_ = axes->second;
       }
-      if (const auto stops = rankStops_.find(*resultCell);
-          stops != rankStops_.end()) {
-        lastResultStops_ = stops->second;
+      if (const auto flags = rankReversed_.find(*resultCell);
+          flags != rankReversed_.end()) {
+        lastResultReversed_ = flags->second;
       }
       lastResultDependencies_ = rankDependenciesOf(*resultCell);
       recordResultFacts(*resultCell);
@@ -1276,7 +1287,7 @@ CompilationResult VPLCompiler::compile(const Program &program,
         .cursor                = cursor,
         .resultSlots           = lastResultCells_,
         .resultAxes            = lastResultAxes_,
-        .resultStops           = lastResultStops_,
+        .resultReversed        = lastResultReversed_,
         .resultDependencies    = lastResultDependencies_,
         .cellDependencies      = cellDependencies_,
         .assignedBindings      = assignedBindings_,
@@ -1292,7 +1303,7 @@ CompilationResult VPLCompiler::compile(const Program &program,
     allOps_.clear();
     lastResultCells_.clear();
     lastResultAxes_.clear();
-    lastResultStops_.clear();
+    lastResultReversed_.clear();
     lastResultDependencies_.clear();
     cellDependencies_.clear();
     rankDependencies_.clear();

@@ -81,15 +81,17 @@ TEST_F(VplViewsTest, ReverseRankOneWalksTheSameCellsNegward) {
   for (const auto *source : {"⌽A", "|. A", "⊖A", "|.. A"}) {
     const auto r = run(source);
     ASSERT_EQ(r.view.axes().size(), 1U) << source;
-    EXPECT_EQ(r.view.axes()[0].dir, DimVector::NEG) << source;
-    EXPECT_EQ(r.view.origin(), original.back()) << source;
+    // The axis keeps its natural direction and the origin stays put: reverse
+    // is a flag (card V4b), read by walking to the far end and back.
+    EXPECT_EQ(r.view.axes()[0].dir, DimVector::POS) << source;
+    EXPECT_TRUE(r.view.isReversed(0)) << source;
+    EXPECT_EQ(r.view.origin(), original.front()) << source;
     // The same cells in the opposite order: nothing was copied, and the
     // reverse ends at A's head instead of running on into the cell that
     // precedes it (card V4b; V4 alone walked that predecessor too).
     auto cells = r.view.collectCells(arena);
     ASSERT_EQ(cells.size(), original.size()) << source;
     EXPECT_EQ(r.view.shape(arena), std::vector<std::size_t>{5}) << source;
-    EXPECT_EQ(r.view.stopAt(0), original.front()) << source;
     std::ranges::reverse(cells);
     EXPECT_EQ(cells, original) << source;
   }
@@ -130,15 +132,15 @@ TEST_F(VplViewsTest, ReverseFirstAndLastFlipDifferentAxesOfAMatrix) {
       "M", VplView{grid[0][0], {{d1, DimVector::POS}, {d2, DimVector::POS}}});
 
   const auto first = run("⌽M");
-  EXPECT_EQ(first.view.axes()[0].dir, DimVector::NEG);
-  EXPECT_EQ(first.view.axes()[1].dir, DimVector::POS);
-  EXPECT_EQ(first.view.origin(), grid[1][0]);
+  EXPECT_TRUE(first.view.isReversed(0));
+  EXPECT_FALSE(first.view.isReversed(1));
+  EXPECT_EQ(first.view.origin(), grid[0][0]);
   EXPECT_EQ(first.view.shape(arena), (std::vector<std::size_t>{2, 3}));
 
   const auto last = run("⊖M");
-  EXPECT_EQ(last.view.axes()[0].dir, DimVector::POS);
-  EXPECT_EQ(last.view.axes()[1].dir, DimVector::NEG);
-  EXPECT_EQ(last.view.origin(), grid[0][2]);
+  EXPECT_FALSE(last.view.isReversed(0));
+  EXPECT_TRUE(last.view.isReversed(1));
+  EXPECT_EQ(last.view.origin(), grid[0][0]);
   EXPECT_EQ(last.view.shape(arena), (std::vector<std::size_t>{2, 3}));
 
   const auto transposed = run("⍉M");
@@ -155,7 +157,7 @@ TEST_F(VplViewsTest, ReverseFirstAndLastFlipDifferentAxesOfAMatrix) {
   const auto back = run("⌽⌽M");
   EXPECT_EQ(run("⊖⊖M").view.origin(), grid[0][0]);
   EXPECT_EQ(back.view.origin(), grid[0][0]);
-  EXPECT_EQ(back.view.axes()[0].dir, DimVector::POS);
+  EXPECT_FALSE(back.view.isReversed(0));
 }
 
 TEST_F(VplViewsTest, DimensionViewHasOneAxisPerDimensionAndNoCellsOfItsOwn) {
@@ -238,7 +240,7 @@ TEST_F(VplViewsTest, ViewsOfEmptyArraysStayEmptyAndKeepTheirAxes) {
     EXPECT_EQ(r.view.axes()[0].dim, dim("d.2")) << source;
     EXPECT_EQ(r.view.shape(arena), std::vector<std::size_t>{0}) << source;
   }
-  EXPECT_EQ(run("E ← 0⍳d.2; ⌽E").view.axes()[0].dir, DimVector::NEG);
+  EXPECT_TRUE(run("E ← 0⍳d.2; ⌽E").view.isReversed(0));
 }
 
 TEST_F(VplViewsTest, ScalarOperandsAreTheirOwnViews) {
@@ -265,9 +267,9 @@ TEST_F(VplViewsTest, RefusalsNameTheForm) {
                 "the VM");
 }
 
-TEST_F(VplViewsTest, ACycleBudgetStopsAReverseThatWalksToTheTail) {
+TEST_F(VplViewsTest, ACycleBudgetStopsAShapeThatWalksToTheTail) {
   run("A ← 50⍳d.1");
-  const auto result = executor->execute("⌽A", kTinyBudget);
+  const auto result = executor->execute("⍴⌽A", kTinyBudget);
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().stage, ExecutionError::Stage::Budget);
 }

@@ -290,7 +290,8 @@ TEST_F(GraphEmitTest, CounterEqualToLiveCellIdsStaysAnInteger) {
   const auto count = constant(live + 10);
   const auto hits  = counter();
   const auto head  = arena_.makeScalarCell(std::int64_t{-1});
-  const auto tail  = emit::extreme(ctx_, head, dim_, DimVector::POS);
+  const auto tail =
+      emit::extreme(ctx_, head, dim_, DimVector::POS, std::nullopt);
   const auto index = emit::countedLoop(ctx_, count, [&](CellRef i) {
     bump(hits);
     const auto fresh = emit::mintAfter(ctx_, tail, dim_, DimVector::POS);
@@ -333,15 +334,18 @@ TEST_F(GraphEmitTest, WalkRankVisitsTheAnchorAndEverySuccessorInOrder) {
     const auto hits = counter();
     const auto sum  = counter();
     const auto out  = arena_.makeScalarCell(std::int64_t{-1});
-    const auto tail = emit::extreme(ctx_, out, other_, DimVector::POS);
-    emit::walkRank(ctx_, cells.front(), dim_, DimVector::POS,
-                   [&](CellRef item) {
-                     bump(hits);
-                     add(sum, item);
-                     const auto fresh =
-                         emit::mintAfter(ctx_, tail, other_, DimVector::POS);
-                     emit::copyValue(ctx_, item, fresh);
-                   });
+    const auto tail =
+        emit::extreme(ctx_, out, other_, DimVector::POS, std::nullopt);
+    emit::walkRank(
+        ctx_, cells.front(), dim_, DimVector::POS,
+        [&](CellRef item) {
+          bump(hits);
+          add(sum, item);
+          const auto fresh =
+              emit::mintAfter(ctx_, tail, other_, DimVector::POS);
+          emit::copyValue(ctx_, item, fresh);
+        },
+        std::nullopt);
     walked_.push_back({values, hits, sum, out});
   }
   run();
@@ -359,10 +363,12 @@ TEST_F(GraphEmitTest, WalkRankVisitsTheAnchorAndEverySuccessorInOrder) {
 TEST_F(GraphEmitTest, WalkRankOverAnAbsentAnchorRunsTheBodyZeroTimes) {
   const auto hits = counter();
   const auto gone = absent();
-  emit::walkRank(ctx_, gone, dim_, DimVector::POS,
-                 [&](CellRef) { bump(hits); });
-  emit::walkRankAfter(ctx_, gone, dim_, DimVector::POS,
-                      [&](CellRef) { bump(hits); });
+  emit::walkRank(
+      ctx_, gone, dim_, DimVector::POS, [&](CellRef) { bump(hits); },
+      std::nullopt);
+  emit::walkRankAfter(
+      ctx_, gone, dim_, DimVector::POS, [&](CellRef) { bump(hits); },
+      std::nullopt);
   run();
   EXPECT_EQ(valueOf(hits), 0);
 }
@@ -371,15 +377,18 @@ TEST_F(GraphEmitTest, WalkRankAfterSkipsTheAnchor) {
   const auto cells = makeRank({1, 2, 3, 4}, dim_);
   const auto sum   = counter();
   const auto hits  = counter();
-  emit::walkRankAfter(ctx_, cells.front(), dim_, DimVector::POS,
-                      [&](CellRef item) {
-                        bump(hits);
-                        add(sum, item);
-                      });
+  emit::walkRankAfter(
+      ctx_, cells.front(), dim_, DimVector::POS,
+      [&](CellRef item) {
+        bump(hits);
+        add(sum, item);
+      },
+      std::nullopt);
   const auto lone     = makeRank({9}, dim_);
   const auto loneHits = counter();
-  emit::walkRankAfter(ctx_, lone.front(), dim_, DimVector::POS,
-                      [&](CellRef) { bump(loneHits); });
+  emit::walkRankAfter(
+      ctx_, lone.front(), dim_, DimVector::POS,
+      [&](CellRef) { bump(loneHits); }, std::nullopt);
   run();
   EXPECT_EQ(valueOf(hits), 3);
   EXPECT_EQ(valueOf(sum), 2 + 3 + 4);
@@ -389,8 +398,9 @@ TEST_F(GraphEmitTest, WalkRankAfterSkipsTheAnchor) {
 TEST_F(GraphEmitTest, WalkRankNegwardFollowsTheOtherDirection) {
   const auto cells = makeRank({1, 2, 3}, dim_);
   const auto sum   = counter();
-  emit::walkRank(ctx_, cells.back(), dim_, DimVector::NEG,
-                 [&](CellRef item) { add(sum, item); });
+  emit::walkRank(
+      ctx_, cells.back(), dim_, DimVector::NEG,
+      [&](CellRef item) { add(sum, item); }, std::nullopt);
   run();
   EXPECT_EQ(valueOf(sum), 6);
 }
@@ -400,13 +410,19 @@ TEST_F(GraphEmitTest, NestedWalksVisitEveryPair) {
   const auto b    = makeRank({10, 20, 30, 40}, other_);
   const auto hits = counter();
   const auto sum  = counter();
-  emit::walkRank(ctx_, a.front(), dim_, DimVector::POS, [&](CellRef x) {
-    emit::walkRank(ctx_, b.front(), other_, DimVector::POS, [&](CellRef y) {
-      bump(hits);
-      add(sum, x);
-      add(sum, y);
-    });
-  });
+  emit::walkRank(
+      ctx_, a.front(), dim_, DimVector::POS,
+      [&](CellRef x) {
+        emit::walkRank(
+            ctx_, b.front(), other_, DimVector::POS,
+            [&](CellRef y) {
+              bump(hits);
+              add(sum, x);
+              add(sum, y);
+            },
+            std::nullopt);
+      },
+      std::nullopt);
   run();
   EXPECT_EQ(valueOf(hits), 12);
   EXPECT_EQ(valueOf(sum), (1 + 2 + 3) * 4 + (10 + 20 + 30 + 40) * 3);
@@ -445,24 +461,27 @@ TEST_F(GraphEmitTest, LockstepStopsAtTheShorterRank) {
     const auto b    = makeRank(vb, other_);
     const auto hits = counter();
     const auto sum  = counter();
-    emit::walkRanksLockstep(ctx_, a.front(), dim_, DimVector::POS, b.front(),
-                            other_, DimVector::POS, [&](CellRef x, CellRef y) {
-                              bump(hits);
-                              add(sum, x);
-                              add(sum, y);
-                            });
+    emit::walkRanksLockstep(
+        ctx_, a.front(), dim_, DimVector::POS, b.front(), other_,
+        DimVector::POS,
+        [&](CellRef x, CellRef y) {
+          bump(hits);
+          add(sum, x);
+          add(sum, y);
+        },
+        std::nullopt, std::nullopt);
     watches.push_back({shape, hits, sum});
   }
   const auto gone   = absent();
   const auto full   = makeRank({1, 2}, dim_);
   const auto emptyA = counter();
   const auto emptyB = counter();
-  emit::walkRanksLockstep(ctx_, gone, dim_, DimVector::POS, full.front(), dim_,
-                          DimVector::POS,
-                          [&](CellRef, CellRef) { bump(emptyA); });
-  emit::walkRanksLockstep(ctx_, full.front(), dim_, DimVector::POS, gone, dim_,
-                          DimVector::POS,
-                          [&](CellRef, CellRef) { bump(emptyB); });
+  emit::walkRanksLockstep(
+      ctx_, gone, dim_, DimVector::POS, full.front(), dim_, DimVector::POS,
+      [&](CellRef, CellRef) { bump(emptyA); }, std::nullopt, std::nullopt);
+  emit::walkRanksLockstep(
+      ctx_, full.front(), dim_, DimVector::POS, gone, dim_, DimVector::POS,
+      [&](CellRef, CellRef) { bump(emptyB); }, std::nullopt, std::nullopt);
   run();
   for (const auto &w : watches) {
     const auto n = static_cast<std::int64_t>(std::min(w.shape.a, w.shape.b));
@@ -481,10 +500,14 @@ TEST_F(GraphEmitTest,
   const auto cells = makeRank({1, 2, 3}, dim_);
   const auto lone  = makeRank({9}, dim_);
   const auto gone  = absent();
-  const auto last  = emit::extreme(ctx_, cells.front(), dim_, DimVector::POS);
-  const auto first = emit::extreme(ctx_, cells.back(), dim_, DimVector::NEG);
-  const auto same  = emit::extreme(ctx_, lone.front(), dim_, DimVector::POS);
-  const auto none  = emit::extreme(ctx_, gone, dim_, DimVector::POS);
+  const auto last =
+      emit::extreme(ctx_, cells.front(), dim_, DimVector::POS, std::nullopt);
+  const auto first =
+      emit::extreme(ctx_, cells.back(), dim_, DimVector::NEG, std::nullopt);
+  const auto same =
+      emit::extreme(ctx_, lone.front(), dim_, DimVector::POS, std::nullopt);
+  const auto none =
+      emit::extreme(ctx_, gone, dim_, DimVector::POS, std::nullopt);
   run();
   EXPECT_EQ(vm_.resultCell(last), cells.back());
   EXPECT_EQ(vm_.resultCell(first), cells.front());
@@ -496,11 +519,16 @@ TEST_F(GraphEmitTest, ExtentCountsTheAnchorAndIsZeroForAnAbsentAnchor) {
   const auto cells = makeRank({1, 2, 3, 4}, dim_);
   const auto lone  = makeRank({9}, dim_);
   const auto gone  = absent();
-  const auto four  = emit::extentOf(ctx_, cells.front(), dim_, DimVector::POS);
-  const auto three = emit::extentOf(ctx_, cells[1], dim_, DimVector::POS);
-  const auto back  = emit::extentOf(ctx_, cells.back(), dim_, DimVector::NEG);
-  const auto one   = emit::extentOf(ctx_, lone.front(), dim_, DimVector::POS);
-  const auto zero  = emit::extentOf(ctx_, gone, dim_, DimVector::POS);
+  const auto four =
+      emit::extentOf(ctx_, cells.front(), dim_, DimVector::POS, std::nullopt);
+  const auto three =
+      emit::extentOf(ctx_, cells[1], dim_, DimVector::POS, std::nullopt);
+  const auto back =
+      emit::extentOf(ctx_, cells.back(), dim_, DimVector::NEG, std::nullopt);
+  const auto one =
+      emit::extentOf(ctx_, lone.front(), dim_, DimVector::POS, std::nullopt);
+  const auto zero =
+      emit::extentOf(ctx_, gone, dim_, DimVector::POS, std::nullopt);
   run();
   EXPECT_EQ(valueOf(four), 4);
   EXPECT_EQ(valueOf(three), 3);
@@ -514,16 +542,19 @@ TEST_F(GraphEmitTest, ExtentCountsTheAnchorAndIsZeroForAnAbsentAnchor) {
 
 TEST_F(GraphEmitTest, MintAfterBuildsARankWhoseLinksAreReciprocal) {
   const auto head = arena_.makeScalarCell(std::int64_t{-1});
-  const auto tail = emit::extreme(ctx_, head, dim_, DimVector::POS);
-  const auto n    = constant(5);
+  const auto tail =
+      emit::extreme(ctx_, head, dim_, DimVector::POS, std::nullopt);
+  const auto n = constant(5);
   emit::countedLoop(ctx_, n, [&](CellRef index) {
     const auto fresh = emit::mintAfter(ctx_, tail, dim_, DimVector::POS);
     emit::copyValue(ctx_, index, fresh);
   });
-  const auto length   = emit::extentOf(ctx_, head, dim_, DimVector::POS);
-  const auto none     = arena_.makeScalarCell(std::int64_t{-1});
-  const auto zeroN    = constant(0);
-  const auto noneTail = emit::extreme(ctx_, none, dim_, DimVector::POS);
+  const auto length =
+      emit::extentOf(ctx_, head, dim_, DimVector::POS, std::nullopt);
+  const auto none  = arena_.makeScalarCell(std::int64_t{-1});
+  const auto zeroN = constant(0);
+  const auto noneTail =
+      emit::extreme(ctx_, none, dim_, DimVector::POS, std::nullopt);
   emit::countedLoop(ctx_, zeroN, [&](CellRef) {
     (void)emit::mintAfter(ctx_, noneTail, dim_, DimVector::POS);
   });
@@ -566,8 +597,9 @@ TEST_F(GraphEmitTest, CopyValueKeepsIntegerDoubleAndTextTypes) {
   const auto real   = arena_.makeScalarCell(3.5);
   const auto head   = arena_.makeScalarCell(std::int64_t{0});
   (void)source;
-  const auto tail = emit::extreme(ctx_, head, dim_, DimVector::POS);
-  const auto a    = emit::mintAfter(ctx_, tail, dim_, DimVector::POS);
+  const auto tail =
+      emit::extreme(ctx_, head, dim_, DimVector::POS, std::nullopt);
+  const auto a = emit::mintAfter(ctx_, tail, dim_, DimVector::POS);
   emit::copyValue(ctx_, number, a);
   const auto b = emit::mintAfter(ctx_, tail, dim_, DimVector::POS);
   emit::copyValue(ctx_, real, b);
