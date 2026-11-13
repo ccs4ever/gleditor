@@ -247,6 +247,8 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::RunResume:
   // Pow is a function of its operands alone.
   case OpcodeKind::Pow:
+  // SameCell reads the VM's cell references but writes only its output.
+  case OpcodeKind::SameCell:
     return true;
   case OpcodeKind::StreamClear:
   case OpcodeKind::StreamAppend:
@@ -540,7 +542,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::Pow))
+    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::SameCell))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

@@ -91,7 +91,7 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
     return arena.makeScalarCell(value);
   };
   binds.validate.linkedCeiling =
-      mintInt(static_cast<std::int64_t>(OpcodeKind::Pow));
+      mintInt(static_cast<std::int64_t>(OpcodeKind::SameCell));
   binds.validate.arityTable  = arena.makeCell();
   binds.validate.impureKinds = arena.makeCell();
 
@@ -150,7 +150,7 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       {static_cast<std::int64_t>(OpcodeKind::Nop), 0, 0},
       // Main's appended traversal/run kinds (Linked above, then these
       // four) sit after the VQL opcodes in the enum, at 81-85. The
-      // ceiling scalar above is Pow, the enum's last ordinal; the four
+      // ceiling scalar above is SameCell, the enum's last ordinal; the four
       // kinds appended after RunResume (RelationNext, DimByName,
       // Hypertime, Pow) are deliberately not in this table: they are
       // host-state readers and a numeric leaf the meta palette does not
@@ -320,7 +320,7 @@ bool MetaRuntime::isOpCell(CellRef cell) const {
   const auto ceiling =
       arena()
           .asInt64(binds_.validate.linkedCeiling)
-          .value_or(static_cast<std::int64_t>(OpcodeKind::Pow));
+          .value_or(static_cast<std::int64_t>(OpcodeKind::SameCell));
   return *ordinal >= 0 && *ordinal <= ceiling;
 }
 
@@ -504,7 +504,7 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
 
   const auto ceiling =
       arena.asInt64(binds_.validate.linkedCeiling)
-          .value_or(static_cast<std::int64_t>(OpcodeKind::Pow));
+          .value_or(static_cast<std::int64_t>(OpcodeKind::SameCell));
   if (!isOpCell(root)) return {false, "validate: root is not an op cell"};
 
   // Decode the bound arity table: `(op, in, out)` triples on `+d.step`.
@@ -558,7 +558,7 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
 
     const auto ordinal = arena.asInt64(op);
     if (!ordinal || *ordinal < 0 || *ordinal > ceiling)
-      return {false, "validate: op int64 outside [0, Pow]"};
+      return {false, "validate: op int64 outside [0, SameCell]"};
     const auto shape = arity.find(*ordinal);
     if (shape == arity.end())
       return {false, "validate: op kind absent from the arity table"};

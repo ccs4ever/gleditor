@@ -172,6 +172,59 @@ TEST(QuotedStructureTest, aQuotedKeymapIsOneQuotation) {
   EXPECT_TRUE(qSucc);
 }
 
+// A quotation resolved inside a mark attaches a foreign space whose view cells
+// live above that mark. Releasing the mark must take the space with them: the
+// space is the quotation's scaffolding, and a space left behind would name a
+// fold no cell of the arena refers to any more.
+TEST(QuotedStructureTest, releasingTheMarkDetachesTheQuotationsSpace) {
+  TestStore alice("btpk:aaaa:alice");
+  const auto homeAlice = alice.store->homeCell().value();
+  auto atAlice         = alice.head;
+  const auto dimA      = alice.makeDimAt(atAlice, "d.vars");
+  atAlice              = alice.store->makeCell(atAlice, "setting");
+  const auto s1        = alice.store->cellRefOf(atAlice).value();
+  atAlice              = alice.store->setLink(atAlice, homeAlice, dimA,
+                                              zigzag::DimVector::POS, s1);
+  alice.head           = atAlice;
+
+  TestStore bob("btpk:bbbb:bob");
+  bob.head = bob.store->registerScroll(bob.head, alice.scrollKey);
+  const auto aliceScrollId =
+      *bob.store->scrollRegistry().scrollIdForKey(alice.scrollKey);
+  const GlobalDocumentState pinnedState{.scroll  = alice.scrollKey,
+                                        .version = alice.head};
+  SelectorSpec spec{
+      .kind = Selector::Kind::Closure,
+      .rootRef =
+          ExternOpRef{.scroll = aliceScrollId,
+                      .produces =
+                          alice.store->segmentedOps().idOf(homeAlice).value()},
+      .carryRefs = {ExternOpRef{
+          .scroll   = aliceScrollId,
+          .produces = alice.store->segmentedOps().idOf(dimA).value()}},
+  };
+  const auto dimB = bob.makeDim("d.vars");
+  bob.head        = bob.store
+                 ->quote(bob.head, bob.store->homeCell().value(), dimB,
+                         "quoted", pinnedState, spec)
+                 .version;
+  const auto bobFold = bob.store->rebuildManifold(bob.head);
+  InMemoryForeignSource source;
+  source.registerDocument(pinnedState, alice.store.get(), nullptr);
+
+  zigzag::ArenaManifold arena(&bobFold, bob.store.get());
+  const auto spaces = arena.spaceCount();
+  const auto cells  = arena.cellCount();
+  const auto mark   = arena.mark();
+  resolveQuotations(arena, bobFold, *bob.store, source, QuotationBudget{});
+  ASSERT_GT(arena.spaceCount(), spaces);
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.spaceCount(), spaces);
+  EXPECT_EQ(arena.cellCount(), cells);
+}
+
 // 2. aForeignShapeFoldsWithoutDocumentContent
 TEST(QuotedStructureTest, aForeignShapeFoldsWithoutDocumentContent) {
   TestStore alice("btpk:aaaa:alice");

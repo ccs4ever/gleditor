@@ -1510,4 +1510,225 @@ TEST(ArenaManifoldTest, promotingAnOverlayDoesNotDoubleEmitARepoint) {
   EXPECT_EQ(after.refusedOps(), 0U);
 }
 
+// -- space attaches under a mark ---------------------------------------------
+
+TEST(ArenaManifoldTest, releaseDetachesSpacesAttachedAfterTheMark) {
+  ArenaManifold arena;
+  const auto mark  = arena.mark();
+  const auto space = arena.attach(Space{.label = "pinned"});
+  const auto proxy = arena.proxyFor(space, 42);
+  ASSERT_EQ(arena.spaceCount(), 1U);
+  ASSERT_TRUE(arena.foreignOf(proxy));
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.spaceCount(), 0U);
+  EXPECT_FALSE(arena.spaceAt(space));
+  EXPECT_FALSE(arena.findExistingProxy(space, 42));
+  EXPECT_FALSE(arena.foreignOf(proxy));
+  EXPECT_FALSE(arena.contains(proxy));
+  EXPECT_FALSE(arena.storeRefsDimension(space));
+  // The id is free again and the arena attaches as if nothing had happened.
+  EXPECT_EQ(arena.attach(Space{.label = "again"}), space);
+  EXPECT_EQ(arena.spaceCount(), 1U);
+}
+
+TEST(ArenaManifoldTest, releaseKeepsSpacesAttachedBeforeTheMark) {
+  ArenaManifold arena;
+  const auto kept      = arena.attach(Space{.label = "kept"});
+  const auto keptProxy = arena.proxyFor(kept, 7);
+  const auto mark      = arena.mark();
+  const auto dropped   = arena.attach(Space{.label = "dropped"});
+  (void)arena.proxyFor(dropped, 9);
+  (void)arena.proxyFor(kept, 8);
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.spaceCount(), 1U);
+  EXPECT_TRUE(arena.spaceAt(kept));
+  EXPECT_EQ(arena.findExistingProxy(kept, 7), keptProxy);
+  EXPECT_FALSE(arena.findExistingProxy(kept, 8));
+  EXPECT_TRUE(arena.storeRefsDimension(kept));
+}
+
+TEST(ArenaManifoldTest, nestedMarksEachTruncateToTheirOwnSpaceCount) {
+  ArenaManifold arena;
+  (void)arena.attach(Space{.label = "a"});
+  const auto outer = arena.mark();
+  (void)arena.attach(Space{.label = "b"});
+  const auto inner = arena.mark();
+  (void)arena.attach(Space{.label = "c"});
+  ASSERT_EQ(arena.spaceCount(), 3U);
+
+  arena.release(inner);
+  EXPECT_EQ(arena.spaceCount(), 2U);
+  arena.release(outer);
+  EXPECT_EQ(arena.spaceCount(), 1U);
+  EXPECT_EQ(arena.spaceAt(1)->label, "a");
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+}
+
+TEST(ArenaManifoldTest, discardKeepsTheAttachesLikeItKeepsTheCells) {
+  ArenaManifold arena;
+  const auto mark  = arena.mark();
+  const auto space = arena.attach(Space{.label = "cut"});
+  const auto proxy = arena.proxyFor(space, 5);
+
+  arena.discard(mark);
+
+  EXPECT_EQ(arena.spaceCount(), 1U);
+  EXPECT_EQ(arena.findExistingProxy(space, 5), proxy);
+  EXPECT_TRUE(arena.contains(proxy));
+}
+
+TEST(ArenaManifoldTest, aDiscardedInnerMarkLeavesItsAttachesToTheOuterRelease) {
+  ArenaManifold arena;
+  const auto outer = arena.mark();
+  const auto inner = arena.mark();
+  (void)arena.attach(Space{.label = "inner"});
+  arena.discard(inner);
+  ASSERT_EQ(arena.spaceCount(), 1U);
+  arena.release(outer);
+  EXPECT_EQ(arena.spaceCount(), 0U);
+}
+
+TEST(ArenaManifoldTest, compactIsStillRefusedWhileAMarkIsOutstanding) {
+  ArenaManifold arena;
+  const auto mark = arena.mark();
+  (void)arena.attach(Space{.label = "pinned"});
+  const auto refused = arena.compact();
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::MarksOutstanding);
+  arena.release(mark);
+  EXPECT_TRUE(arena.compact());
+}
+
+TEST(ArenaManifoldTest, releaseUnbindsDimensionsOfADetachedSpace) {
+  ArenaManifold arena;
+  const auto kept     = arena.attach(Space{.label = "kept"});
+  const auto sharedAs = arena.ensureDimension("d.shared");
+  arena.bindDimension(sharedAs, kept, 11);
+  const auto mark    = arena.mark();
+  const auto dropped = arena.attach(Space{.label = "dropped"});
+  arena.bindDimension(sharedAs, dropped, 12);
+  const auto only = arena.ensureDimension("d.only-dropped");
+  arena.bindDimension(only, dropped, 13);
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.arenaDimFor(kept, 11), std::optional<DimRef>{sharedAs});
+  EXPECT_FALSE(arena.arenaDimFor(std::nullopt, 12));
+  EXPECT_FALSE(arena.arenaDimFor(std::nullopt, 13));
+}
+
+TEST(ArenaManifoldTest, releaseHandsBackTheBaseAndStoreAnAttachAdopted) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena;
+  ASSERT_EQ(arena.base(), nullptr);
+  const auto mark = arena.mark();
+  (void)arena.attach(Space{.manifold = &base, .store = &doc.store});
+  ASSERT_EQ(arena.base(), &base);
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.base(), nullptr);
+  EXPECT_EQ(arena.store(), nullptr);
+}
+
+TEST(ArenaManifoldTest, releaseKeepsABaseTheArenaWasBuiltOver) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base, &doc.store};
+  const auto mark = arena.mark();
+  (void)arena.attach(Space{.manifold = &base, .store = &doc.store});
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.spaceCount(), 0U);
+  EXPECT_EQ(arena.base(), &base);
+  EXPECT_EQ(arena.store(), &doc.store);
+}
+
+TEST(ArenaManifoldTest, releaseLeavesNothingDanglingToADetachedSpacesProxy) {
+  ArenaManifold arena;
+  const auto dim    = arena.ensureDimension("d.link");
+  const auto anchor = arena.makeCell("older than the mark");
+  const auto cells  = arena.cellCount();
+  const auto mark   = arena.mark();
+  const auto space  = arena.attach(Space{.label = "pinned"});
+  const auto proxy  = arena.proxyFor(space, 11);
+  const auto young  = arena.makeCell("younger");
+  zigzag::expectWritten(arena.link(young, dim, DimVector::POS, proxy));
+  zigzag::expectWritten(arena.link(anchor, dim, DimVector::POS, proxy));
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.cellCount(), cells);
+  EXPECT_FALSE(arena.contains(young));
+  EXPECT_FALSE(arena.contains(proxy));
+  EXPECT_FALSE(arena.linked(anchor, dim, DimVector::POS));
+  EXPECT_EQ(arena.spaceCount(), 0U);
+  // The arena is whole: the same work done again lands on the same ids.
+  const auto again = arena.attach(Space{.label = "pinned"});
+  EXPECT_EQ(again, space);
+  EXPECT_EQ(arena.proxyFor(again, 11), proxy);
+}
+
+TEST(ArenaManifoldTest, marksReleasedOutOfOrderNeverRegrowTheSpaces) {
+  ArenaManifold arena;
+  const auto outer = arena.mark();
+  (void)arena.attach(Space{.label = "a"});
+  const auto inner = arena.mark();
+  (void)arena.attach(Space{.label = "b"});
+  arena.release(outer);
+  ASSERT_EQ(arena.spaceCount(), 0U);
+  // The inner mark now names a state that is gone; its space count is above
+  // the arena's, and releasing it must not conjure spaces back.
+  arena.release(inner);
+  EXPECT_EQ(arena.spaceCount(), 0U);
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+}
+
+TEST(ArenaManifoldTest, aPrefixRefusesAMarkNamingMoreSpacesThanAreAttached) {
+  ArenaManifold arena;
+  auto stale         = arena.mark();
+  stale.spaceCount   = 3;
+  const auto refused = arena.exportPrefix(stale);
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::MalformedPrefix);
+}
+
+TEST(ArenaManifoldTest, aHydratedPrefixRefusesAMarkNamingSpaces) {
+  ArenaManifold source;
+  auto snapshot = source.exportPrefix(source.mark());
+  ASSERT_TRUE(snapshot);
+  snapshot->mark.spaceCount = 1;
+  ArenaManifold target;
+  const auto refused = target.hydratePrefix(*snapshot);
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::UnsupportedPrefixState);
+}
+
+TEST(ArenaManifoldTest, promoteStillWorksAfterAReleaseDetachedASpace) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  const auto mark  = arena.mark();
+  const auto space = arena.attach(Space{.label = "pinned"});
+  (void)arena.proxyFor(space, 3);
+  arena.release(mark);
+  ASSERT_EQ(arena.spaceCount(), 0U);
+
+  const auto fresh = arena.makeCell("fresh");
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, fresh));
+  zigzag::PromotionBudget budget{};
+  budget.commitShadowed = zigzag::commitStateSide(0);
+  const auto promoted =
+      zigzag::promote(doc.store, doc.at, arena, doc.first, budget);
+  ASSERT_TRUE(promoted.has_value());
+  const auto after = doc.store.rebuildManifold(promoted->version);
+  EXPECT_EQ(after.textOf(promoted->cells.front(), doc.store), "fresh");
+}
+
 } // namespace

@@ -290,11 +290,14 @@ std::uint32_t ArenaManifold::attach(Space space) {
   if (space.manifold == nullptr && space.ownedManifold != nullptr) {
     space.manifold = space.ownedManifold.get();
   }
+  SpaceAdoption adoption;
   if (base_ == nullptr && space.manifold != nullptr) {
-    base_ = space.manifold;
+    base_         = space.manifold;
+    adoption.base = true;
   }
   if (store_ == nullptr && space.store != nullptr) {
-    store_ = space.store;
+    store_         = space.store;
+    adoption.store = true;
   }
   if (space.reader == nullptr && space.store != nullptr) {
     space.reader = space.store;
@@ -341,6 +344,7 @@ std::uint32_t ArenaManifold::attach(Space space) {
   spaceStoreRefsTail_.push_back(*space.storeCell);
   spaceStoreRefsDimensions_.push_back(dimStoreRefs);
   spaceProxies_.emplace_back();
+  spaceAdoptions_.push_back(adoption);
   spaces_.push_back(space);
   return id;
 }
@@ -2428,6 +2432,7 @@ Mark ArenaManifold::mark() {
           static_cast<std::uint32_t>(proxyShadowedEdgeOrder_.size()),
       .quoteSpaceCount = static_cast<std::uint32_t>(quoteSpaceOrder_.size()),
       .dimensionCount  = static_cast<std::uint32_t>(dimensionOrder_.size()),
+      .spaceCount      = static_cast<std::uint32_t>(spaces_.size()),
   };
   floors_.push_back(Floors{.cells   = taken.cellCount,
                            .links   = taken.linkSize,
@@ -2502,6 +2507,43 @@ ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
     }
   }
   proxyOrder_.resize(m.proxyCount);
+
+  // Detach the spaces attached under the mark, newest first, now that their
+  // proxies are gone. Their store cells and rank links are cell and link
+  // writes, undone below with everything else; what is left to hand back is
+  // the base and store an attach may have adopted and the stores-rank tail.
+  for (std::size_t i = spaces_.size(); i > m.spaceCount; i--) {
+    const auto &adoption = spaceAdoptions_[i - 1];
+    if (adoption.base) base_ = nullptr;
+    if (adoption.store) store_ = nullptr;
+  }
+  if (spaces_.size() > m.spaceCount) {
+    const auto keep = static_cast<std::ptrdiff_t>(m.spaceCount);
+    spaces_.erase(spaces_.begin() + keep, spaces_.end());
+    spaceAdoptions_.erase(spaceAdoptions_.begin() + keep,
+                          spaceAdoptions_.end());
+    spaceProxies_.erase(spaceProxies_.begin() + keep, spaceProxies_.end());
+    spaceStoreRefsTail_.erase(spaceStoreRefsTail_.begin() + keep,
+                              spaceStoreRefsTail_.end());
+    spaceStoreRefsDimensions_.erase(spaceStoreRefsDimensions_.begin() + keep,
+                                    spaceStoreRefsDimensions_.end());
+    // Dimension bindings that named a detached space would dangle.
+    for (auto it = boundDimensions_.begin(); it != boundDimensions_.end();) {
+      auto &members     = it->second.members;
+      const bool before = !members.empty();
+      std::erase_if(members, [&](const BoundDimensionMember &b) {
+        return b.space > m.spaceCount;
+      });
+      // Only a set this sweep emptied goes; one that was empty before is not
+      // this mark's to undo.
+      it = before && members.empty() ? boundDimensions_.erase(it)
+                                     : std::next(it);
+    }
+    if (spaces_.empty())
+      storesRankTail_.reset();
+    else
+      storesRankTail_ = spaces_.back().storeCell;
+  }
 
   // Reverse, so that a cell written more than once under this mark ends up
   // holding the value it had when the mark was taken rather than the one it
@@ -3184,7 +3226,8 @@ ArenaManifold::exportPrefix(const Mark &m) const {
       m.quoteOccurrenceCount > quoteOccurrenceOrder_.size() ||
       m.proxyShadowedEdgeCount > proxyShadowedEdgeOrder_.size() ||
       m.quoteSpaceCount > quoteSpaceOrder_.size() ||
-      m.dimensionCount > dimensionOrder_.size() || m.cellCount > ephemeralBit ||
+      m.dimensionCount > dimensionOrder_.size() ||
+      m.spaceCount > spaces_.size() || m.cellCount > ephemeralBit ||
       m.liveLinks > m.linkSize || m.liveContent > m.contentSize) {
     return std::unexpected{ArenaRefusal::MalformedPrefix};
   }
@@ -3238,6 +3281,8 @@ ArenaManifold::exportPrefix(const Mark &m) const {
   // the state at the mark, and therefore form a fresh rollback baseline.
   out.mark.trailSize      = 0;
   out.mark.dimensionCount = 0;
+  // A prefix carries no spaces (hasUnsupportedUntrackedPrefixIdentity).
+  out.mark.spaceCount = 0;
 
   const auto cellCount = static_cast<std::size_t>(m.cellCount);
   out.slots.assign(slots_.begin(),
@@ -3292,7 +3337,8 @@ ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
   }
   const auto &m = snapshot.mark;
   if (m.proxyCount != 0 || m.quoteOccurrenceCount != 0 ||
-      m.proxyShadowedEdgeCount != 0 || m.quoteSpaceCount != 0) {
+      m.proxyShadowedEdgeCount != 0 || m.quoteSpaceCount != 0 ||
+      m.spaceCount != 0) {
     return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
   }
   if (!prefixHasRepresentableSizes(snapshot) ||
@@ -3335,6 +3381,7 @@ ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
   trail_.clear();
   dimensionOrder_.clear();
   spaces_.clear();
+  spaceAdoptions_.clear();
   spaceProxies_.clear();
   spaceStoreRefsTail_.clear();
   spaceStoreRefsDimensions_.clear();
