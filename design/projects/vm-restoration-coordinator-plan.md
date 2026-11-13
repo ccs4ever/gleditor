@@ -499,18 +499,23 @@ Ruled by the owner on 2026-11-12, after the second batch (W1.1, V3, L1 and P1 re
 
 - **Reversed views are bounded (V4, ruled 2026-11-12).** A view had no extent, so `⌽A` of `5⍳d.1`
   walked on past A's head into the home cell and `⍴⌽A` was 6 where the spec says 5. A reversed axis
-  now carries a bound and every walker ends there; views stay free of copies. The bound is an extent
-  count taken when the view is made (arithmetic only), not a stop cell, because a stop cell needs
-  the cell-identity opcode that O2 has not built. This is a one-time amendment to the frozen
-  `graph_emit.hpp` and to the executor's view type, made in card V4b before V5–V13 use the walkers.
+  now carries a bound and every walker ends there; views stay free of copies. The bound is a stop
+  cell (the operand's old origin), which needs O2's cell-identity opcode, so card V4b waits for O2.
+  It amends the frozen `graph_emit.hpp` and the executor's view type once. V4 stays unmerged and
+  V5–V13 stay parked until V4b lands, since they share the walkers.
+
+- **Prolog arithmetic follows ISO (P2, ruled 2026-11-12).** Division by zero and an unbound or
+  non-numeric operand abort the query with a named error, as integer overflow already does; they do
+  not fail quietly. `mod` takes the divisor's sign and `rem` is added for the truncating remainder.
+  A quoted atom such as `'5'` is not a number, statically or at run time.
 
 New cards from these rulings:
 
-| Card    | What                                                                                       | After |
-| :------ | :----------------------------------------------------------------------------------------- | :---- |
-| L-PARSE | Fix the VLace comparison-chain parse defect, with tests                                    | L1    |
-| V4b     | Bounded views: per-axis extent on reversed axes, honoured by every walker and by read-back | V4    |
-| O2      | Cell-identity compare, `PinHistorical`, arena space undo, program-cell release, project    | O1    |
+| Card    | What                                                                                    | After |
+| :------ | :-------------------------------------------------------------------------------------- | :---- |
+| L-PARSE | Fix the VLace comparison-chain parse defect, with tests                                 | L1    |
+| V4b     | Bounded views: a stop cell on reversed axes, honoured by every walker and by read-back  | O2    |
+| O2      | Cell-identity compare, `PinHistorical`, arena space undo, program-cell release, project | O1    |
 
 ## 5a. Original decision table (before W0)
 
