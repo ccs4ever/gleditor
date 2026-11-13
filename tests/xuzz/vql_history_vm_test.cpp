@@ -160,6 +160,24 @@ TEST(VQLHistoryVmTest, RefusalBeforeAnyFoldLeavesNoSpaceBehind) {
   EXPECT_EQ(fixture.coordinator.arena().spaceCount(), attached);
 }
 
+TEST(VQLHistoryVmTest, FailedCompileAfterAPinLeavesNoSpaceBehind) {
+  PinnedStore fixture;
+  const auto attached = fixture.coordinator.arena().spaceCount();
+  // The first pin folds and attaches its space; the step pin after it is then
+  // refused, so the compile fails with that space already attached.
+  EXPECT_THROW(fixture.engine.execute("let $early := ##@(" +
+                                      fixture.cellVersion.str() +
+                                      ") return ##/d.pin-test@(" +
+                                      fixture.linkedVersion.str() + ")"),
+               std::runtime_error);
+  EXPECT_EQ(fixture.coordinator.arena().spaceCount(), attached);
+  // The same fold pins again afterwards, from a clean arena.
+  EXPECT_EQ(fixture.engine
+                .execute("##@(" + fixture.linkedVersion.str() + ")/d.pin-test")
+                .size(),
+            1U);
+}
+
 TEST(VQLHistoryVmTest, TwoPinsInOneQueryEachKeepTheirOwnAnchor) {
   PinnedStore fixture;
   const auto results = fixture.engine.execute(

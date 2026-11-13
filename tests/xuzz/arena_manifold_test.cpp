@@ -1510,4 +1510,144 @@ TEST(ArenaManifoldTest, promotingAnOverlayDoesNotDoubleEmitARepoint) {
   EXPECT_EQ(after.refusedOps(), 0U);
 }
 
+// -- space attaches under a mark ---------------------------------------------
+
+TEST(ArenaManifoldTest, releaseDetachesSpacesAttachedAfterTheMark) {
+  ArenaManifold arena;
+  const auto mark  = arena.mark();
+  const auto space = arena.attach(Space{.label = "pinned"});
+  const auto proxy = arena.proxyFor(space, 42);
+  ASSERT_EQ(arena.spaceCount(), 1U);
+  ASSERT_TRUE(arena.foreignOf(proxy));
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.spaceCount(), 0U);
+  EXPECT_FALSE(arena.spaceAt(space));
+  EXPECT_FALSE(arena.findExistingProxy(space, 42));
+  EXPECT_FALSE(arena.foreignOf(proxy));
+  EXPECT_FALSE(arena.contains(proxy));
+  EXPECT_FALSE(arena.storeRefsDimension(space));
+  // The id is free again and the arena attaches as if nothing had happened.
+  EXPECT_EQ(arena.attach(Space{.label = "again"}), space);
+  EXPECT_EQ(arena.spaceCount(), 1U);
+}
+
+TEST(ArenaManifoldTest, releaseKeepsSpacesAttachedBeforeTheMark) {
+  ArenaManifold arena;
+  const auto kept      = arena.attach(Space{.label = "kept"});
+  const auto keptProxy = arena.proxyFor(kept, 7);
+  const auto mark      = arena.mark();
+  const auto dropped   = arena.attach(Space{.label = "dropped"});
+  (void)arena.proxyFor(dropped, 9);
+  (void)arena.proxyFor(kept, 8);
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.spaceCount(), 1U);
+  EXPECT_TRUE(arena.spaceAt(kept));
+  EXPECT_EQ(arena.findExistingProxy(kept, 7), keptProxy);
+  EXPECT_FALSE(arena.findExistingProxy(kept, 8));
+  EXPECT_TRUE(arena.storeRefsDimension(kept));
+}
+
+TEST(ArenaManifoldTest, nestedMarksEachTruncateToTheirOwnSpaceCount) {
+  ArenaManifold arena;
+  (void)arena.attach(Space{.label = "a"});
+  const auto outer = arena.mark();
+  (void)arena.attach(Space{.label = "b"});
+  const auto inner = arena.mark();
+  (void)arena.attach(Space{.label = "c"});
+  ASSERT_EQ(arena.spaceCount(), 3U);
+
+  arena.release(inner);
+  EXPECT_EQ(arena.spaceCount(), 2U);
+  arena.release(outer);
+  EXPECT_EQ(arena.spaceCount(), 1U);
+  EXPECT_EQ(arena.spaceAt(1)->label, "a");
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+}
+
+TEST(ArenaManifoldTest, discardKeepsTheAttachesLikeItKeepsTheCells) {
+  ArenaManifold arena;
+  const auto mark  = arena.mark();
+  const auto space = arena.attach(Space{.label = "cut"});
+  const auto proxy = arena.proxyFor(space, 5);
+
+  arena.discard(mark);
+
+  EXPECT_EQ(arena.spaceCount(), 1U);
+  EXPECT_EQ(arena.findExistingProxy(space, 5), proxy);
+  EXPECT_TRUE(arena.contains(proxy));
+}
+
+TEST(ArenaManifoldTest, aDiscardedInnerMarkLeavesItsAttachesToTheOuterRelease) {
+  ArenaManifold arena;
+  const auto outer = arena.mark();
+  const auto inner = arena.mark();
+  (void)arena.attach(Space{.label = "inner"});
+  arena.discard(inner);
+  ASSERT_EQ(arena.spaceCount(), 1U);
+  arena.release(outer);
+  EXPECT_EQ(arena.spaceCount(), 0U);
+}
+
+TEST(ArenaManifoldTest, compactIsStillRefusedWhileAMarkIsOutstanding) {
+  ArenaManifold arena;
+  const auto mark = arena.mark();
+  (void)arena.attach(Space{.label = "pinned"});
+  const auto refused = arena.compact();
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::MarksOutstanding);
+  arena.release(mark);
+  EXPECT_TRUE(arena.compact());
+}
+
+TEST(ArenaManifoldTest, releaseUnbindsDimensionsOfADetachedSpace) {
+  ArenaManifold arena;
+  const auto kept     = arena.attach(Space{.label = "kept"});
+  const auto sharedAs = arena.ensureDimension("d.shared");
+  arena.bindDimension(sharedAs, kept, 11);
+  const auto mark    = arena.mark();
+  const auto dropped = arena.attach(Space{.label = "dropped"});
+  arena.bindDimension(sharedAs, dropped, 12);
+  const auto only = arena.ensureDimension("d.only-dropped");
+  arena.bindDimension(only, dropped, 13);
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.arenaDimFor(kept, 11), std::optional<DimRef>{sharedAs});
+  EXPECT_FALSE(arena.arenaDimFor(std::nullopt, 12));
+  EXPECT_FALSE(arena.arenaDimFor(std::nullopt, 13));
+}
+
+TEST(ArenaManifoldTest, releaseHandsBackTheBaseAndStoreAnAttachAdopted) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena;
+  ASSERT_EQ(arena.base(), nullptr);
+  const auto mark = arena.mark();
+  (void)arena.attach(Space{.manifold = &base, .store = &doc.store});
+  ASSERT_EQ(arena.base(), &base);
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.base(), nullptr);
+  EXPECT_EQ(arena.store(), nullptr);
+}
+
+TEST(ArenaManifoldTest, releaseKeepsABaseTheArenaWasBuiltOver) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base, &doc.store};
+  const auto mark = arena.mark();
+  (void)arena.attach(Space{.manifold = &base, .store = &doc.store});
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.spaceCount(), 0U);
+  EXPECT_EQ(arena.base(), &base);
+  EXPECT_EQ(arena.store(), &doc.store);
+}
+
 } // namespace
