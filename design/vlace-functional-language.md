@@ -148,8 +148,8 @@ The right-hand column is the argument. Everything a pure functional language nee
 structural sharing, call-by-need, an environment model, and an effect boundary — is already a
 mechanism in the manifold, built for reasons that had nothing to do with functional programming.
 What is new is a `std:fun` package of thunk/force/let combinators written in Vortex, and a front end
-that parses ML-shaped text and emits the VM's existing opcodes. **No new opcode, no new dimension
-outside `std:fun`'s own naming, no change to the arena.**
+that parses ML-shaped text and emits the VM's existing opcodes. **No new opcode, no persistent
+dimension, no change to the arena.**
 
 ______________________________________________________________________
 
@@ -925,10 +925,15 @@ new opcode. No new `ArenaManifold` method. No change to the trail, the mark, or 
 arena's `mark`/`release` that §5.4 needs for failed matches is the one Vlog and vicon already use;
 vlace is its third consumer.
 
-vlace mints no new system dimension at all — unlike vicon's `d.scan` or Vlog's `d.clause`, its
-values live on the dimensions the manifold already has (`d.grab`/`d.step` for structure, `d.vars`/
-`d.values` for scope, `d.spin` for bodies, `d.clone` for sharing, `d.cache` for memo). This is the
-quietest of the four front ends against the core: it is pure composition of mechanisms that exist.
+vlace mints no persistent dimension — unlike vicon's `d.scan` or Vlog's `d.clause`, nothing it names
+reaches a store. Its values live on the dimensions the manifold already has (`d.grab`/`d.step` for
+structure, `d.vars`/ `d.values` for scope, `d.spin` for bodies, `d.clone` for sharing). The one
+exception is `d.thunk`, minted in the evaluation arena only: a thunk cell's `d.thunk` edge names the
+closure to run and, once forced, the box that holds the value. Identity-keyed call-by-need (§5.3)
+needs an edge that belongs to *this* thunk, which the content-keyed `d.cache` memo cannot give, and
+an arena dimension is never promoted, so R12 is untouched. The lowering first minted `d.memo` and
+`d.blackhole` as well; neither was read (the thunk's state is a value on the cell and the forced
+value hangs on `d.thunk`), and both were removed (ruled 2026-11-13).
 
 ### 8.2 A front end: lexer, parser, type checker, compiler, driver
 
@@ -1285,8 +1290,8 @@ ______________________________________________________________________
   Zero-copy substrings are ephemeral quoting cells refused as persistent link targets (§4.5).
   Promotion is parent-relative and non-confluent, so the "byte-identical" RT claim is scoped to the
   pure fragment and `render()`, not to a `save` (§6.5).
-- **R12 (a dimension is a cell on `d.dims`).** vlace mints no new dimension; it composes the
-  existing ones (§8.1).
+- **R12 (a dimension is a cell on `d.dims`).** vlace mints no persistent dimension; it composes the
+  existing ones, plus `d.thunk` in the evaluation arena (§8.1).
 - **U1 (random access into a rank).** vlace is a fourth independent consumer, from the list-indexing
   side (§11); it does not resolve U1 and does not need to for correctness, only for the speed of
   indexed access.

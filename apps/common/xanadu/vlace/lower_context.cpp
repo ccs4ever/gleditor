@@ -91,10 +91,7 @@ std::optional<std::size_t> CtorTable::fieldIndex(std::string_view ctor,
 const LowerState::KernelDims &
 LowerState::kernelDims(zigzag::vortex::VortexCore &core) {
   if (!kernelDims_) {
-    kernelDims_ =
-        KernelDims{.thunk     = core.findOrMintDimension("d.thunk"),
-                   .memo      = core.findOrMintDimension("d.memo"),
-                   .blackhole = core.findOrMintDimension("d.blackhole")};
+    kernelDims_ = KernelDims{.thunk = core.findOrMintDimension("d.thunk")};
   }
   return *kernelDims_;
 }

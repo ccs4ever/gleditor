@@ -351,9 +351,9 @@ TEST(VlaceLowerKernelTest, ForceValueRunsAnUnforcedThunkOnTheVm) {
 TEST(VlaceLowerKernelTest, FormsOwnedByLaterCardsRefuseByName) {
   Rig rig;
   const std::string refusal = "VM lowering is not implemented for VLace";
-  for (const std::string_view src :
-       {"[1, 2]", "(1, 2)", "case 1 of x => x", "Some 1", "1 : []",
-        "fn (a, b) => a", "putStrLn \"x\""}) {
+  // Lists, tuples, constructors, `case` and constructor-pattern parameters
+  // became L3's; only the IO builder is still a later card's.
+  for (const std::string_view src : {"putStrLn \"x\""}) {
     auto v = rig.eval(src);
     ASSERT_FALSE(v.has_value()) << src;
     EXPECT_NE(v.error().detail.find(refusal), std::string::npos)

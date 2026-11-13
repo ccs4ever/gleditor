@@ -9,6 +9,7 @@
 #include <variant>
 
 #include "common/xanadu/vlace/lower_cards.hpp"
+#include "common/xanadu/vlace/render_error.hpp"
 
 namespace xanadu::vlace::lower {
 
@@ -89,7 +90,7 @@ std::string renderValue(Compiler &compiler, const ValuePtr &v,
   ValuePtr forced = v;
   if (v->kind == Value::Kind::Thunk) {
     auto result = compiler.forceValue(v); // L2: runs the force frame on the VM
-    if (!result) return "<error>";
+    if (!result) throw RenderFailure(result.error());
     forced = *result;
     if (!forced) return "<null>";
   }
