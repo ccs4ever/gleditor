@@ -464,6 +464,12 @@ Gate E (2026-11-12, shared branch at `0152df7f`, adding P2): `xuzz_test` 171 fai
 nothing newly failing, 35 turned green against the baseline; `gleditor_test` and `zigzag_test`
 unchanged. The current failing list is `/data/git/gleditor-restore/.logs/w1/gate-e-xuzz-failed.txt`.
 
+Gate F (2026-11-13, shared branch at `ab6993dd`, adding L2 and O2a): `xuzz_test` 154 failures of
+4149, 53 turned green against the baseline (18 since gate E: the VLace kernel and the mesh tests
+that run every frontend); `gleditor_test` and `zigzag_test` unchanged. The one name outside the
+baseline is `ArrayfiladeBenchmarkTest.Subscripting10000Cells`, the timing-sensitive benchmark of
+gate C. The current failing list is `/data/git/gleditor-restore/.logs/w1/gate-f-xuzz-failed.txt`.
+
 **Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
 usage limit twice, and four exhausted it again. By the owner's instruction (2026-11-12), run at most
 two agents at a time, workers and reviewers counted together.
@@ -512,6 +518,19 @@ Ruled by the owner on 2026-11-12, after the second batch (W1.1, V3, L1 and P1 re
   non-numeric operand abort the query with a named error, as integer overflow already does; they do
   not fail quietly. `mod` takes the divisor's sign and `rem` is added for the truncating remainder.
   A quoted atom such as `'5'` is not a number, statically or at run time.
+
+Ruled by the owner on 2026-11-13:
+
+- **VLace spec §8.1:** `d.thunk` stays, as an arena-only dimension; the unused `d.memo` and
+  `d.blackhole` are removed; §8.1 now says "no persistent dimension". The code removal rides on L3's
+  fix round.
+- **Out-of-order mark release:** refused by name. Releasing a mark while a later mark is still
+  outstanding regrows cells in `ArenaManifold` today; `release()` returns a typed refusal that names
+  both marks instead. Rides on O2b.
+
+O2 was split: O2a (cell-identity compare `SameCell`, arena space undo) is merged; O2b carries
+`PinHistorical`, program-cell release with copy-out, the `project` spike and the out-of-order
+release refusal.
 
 New cards from these rulings:
 
