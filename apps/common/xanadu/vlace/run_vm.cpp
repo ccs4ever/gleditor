@@ -4,6 +4,7 @@
  *        the VM, read the result back; and the Driver's evaluation half.
  */
 #include "common/xanadu/vlace/run_vm.hpp"
+#include "common/xanadu/vlace/kernel.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -44,6 +45,43 @@ public:
 private:
   zigzag::vortex::VortexVM &vm_;
   zigzag::CellRef cursor_;
+};
+
+/// The VM's own safety limits are sized for small programs: its frame depth
+/// (128) is below what lazy recursion needs, and it refuses to create more than
+/// 65,536 closure values (a lazy program makes two per thunk). Raise them for
+/// one run and restore the caller's on every exit, failure included, so a
+/// VLace run leaves no trace in a VM shared with other languages. The cycle
+/// and frame-depth budgets are what bound a VLace run; the closure ceilings
+/// only keep the VM's limits from firing first.
+inline constexpr std::size_t closureValueCeiling       = 1U << 24;
+inline constexpr std::size_t closureEnvironmentCeiling = 1U << 28;
+
+class RunLimits {
+public:
+  explicit RunLimits(zigzag::vortex::VortexVM &vm)
+      : vm_(vm), frame_(vm.frameLimits()), closure_(vm.closureLimits()) {
+    auto frame     = frame_;
+    frame.maxDepth = evaluationNestingBudget;
+    vm_.setFrameLimits(frame);
+    auto closure = closure_;
+    closure.maxValuesCreated =
+        std::max(closure.maxValuesCreated, closureValueCeiling);
+    closure.maxEnvironmentCellsCreated =
+        std::max(closure.maxEnvironmentCellsCreated, closureEnvironmentCeiling);
+    vm_.setClosureLimits(closure);
+  }
+  RunLimits(const RunLimits &)            = delete;
+  RunLimits &operator=(const RunLimits &) = delete;
+  ~RunLimits() {
+    vm_.setFrameLimits(frame_);
+    vm_.setClosureLimits(closure_);
+  }
+
+private:
+  zigzag::vortex::VortexVM &vm_;
+  zigzag::vortex::FrameLimits frame_;
+  zigzag::vortex::LogicalClosureLimits closure_;
 };
 
 /// A thrown arena fuel or lowering failure as an EvalError.
@@ -106,10 +144,8 @@ Compiler *setCycleLimit(Compiler &compiler, std::optional<std::size_t> cycles) {
 Lowered<Operand> runBlock(LowerContext &ctx, Block block, Operand result) {
   if (!block.entry) return result; // nothing to execute: constants only
   auto &vm = ctx.vm();
-  // The VM's default depth (128) is below what lazy recursion needs.
-  auto limits     = vm.frameLimits();
-  limits.maxDepth = evaluationNestingBudget;
-  vm.setFrameLimits(limits);
+  const RunLimits limits(vm);
+  beginEvaluation(ctx);
   const auto cursor = vm.spawnCursor(*block.entry, "vlace_eval");
   const CursorRelease release(vm, cursor);
   zigzag::vortex::ExecutionResult run;
@@ -165,12 +201,6 @@ std::expected<DriverResult, DriverError> driverEvaluate(const Program &prog,
     return driverFailure(exceptionToEval(error), "eval");
   }
   return partial;
-}
-
-void emitCopy(LowerContext &ctx, Operand src, Operand dst) {
-  const auto op = ctx.emitOp(zigzag::vortex::OpcodeKind::Add, "#vlace_copy");
-  ctx.emitInput(op, src.cell);
-  ctx.emitOutput(op, dst.cell);
 }
 
 } // namespace xanadu::vlace::lower
