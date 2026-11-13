@@ -357,7 +357,7 @@ TEST(LogicCompileCoreTest, UnloweredBuiltinsRefuseByNameButUnknownNamesFail) {
   // A user clause named like a builtin does not replace it: the old solver
   // tried its builtin arms before any clause. Until the owning card lowers
   // them these refuse by name.
-  h.consult("true.\nknown(1).\n");
+  h.consult("known(1).\n");
   // Every entry of the owned table, at its arity, quoted so the parser reads
   // symbolic names as atoms. An entry deleted when its card lands drops out of
   // this sweep by itself.

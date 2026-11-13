@@ -5,10 +5,9 @@
  *
  * Arithmetic is emitted over dereferenced terms: a constant leaf is a static
  * cell, a variable leaf is `Deref` plus a numeric type test, and each operator
- * is one VM arithmetic op. Nothing here walks a term at run time, so a
- * variable that is bound to a compound expression (`E = 1+2, X is E`) is not
- * evaluated: it fails like any other non-number (a divergence from the old
- * solver, which re-read the term; see the card report).
+ * is one VM arithmetic op. A variable bound at run time to a compound
+ * (`E = 1+2, X is E`) takes the slow path through the internal `'$eval'/2`
+ * clause predicate, which walks the term and calls back into `is`.
  */
 #include <array>
 #include <cctype>
@@ -38,6 +37,12 @@ constexpr std::string_view kLessEqual      = "=<";
 constexpr std::string_view kGreaterEqual   = ">=";
 constexpr std::string_view kNumericEqual   = "=:=";
 constexpr std::string_view kNumericUnequal = "=\\=";
+// Internal names: the guards the stdlib's `'$eval'/2` clauses are written with.
+constexpr std::string_view kNumberTest      = "$number";
+constexpr std::string_view kEvalName        = "$eval";
+constexpr std::string_view kVarTest         = "var";
+constexpr std::string_view kNonvarTest      = "nonvar";
+constexpr std::string_view kInternalVarTest = "$var";
 
 constexpr std::size_t kNoArguments = 0;
 constexpr std::size_t kUnary       = 1;
@@ -104,19 +109,47 @@ void emitFailNow(CompileContext &ctx, FrameScope &scope, Chain &chain) {
 [[nodiscard]] std::optional<CellRef>
 emitEval(CompileContext &ctx, FrameScope &scope, Chain &chain, CellRef term);
 
-[[nodiscard]] CellRef emitVariableLeaf(CompileContext &ctx, FrameScope &scope,
-                                       Chain &chain, CellRef variable) {
-  const CellRef slot  = variableSlot(ctx, scope, chain, variable);
-  const CellRef bound = op1(ctx, scope, chain, OpcodeKind::Deref, slot);
-  // `x + 0` equals `x` as a variant only when x is an Int64 or a Double: a
-  // string, Bool or unbound variable converts to a different alternative. That
-  // is the one numeric type test the instruction set offers, and it stops the
-  // arithmetic ops from coercing an atom to 0.
+// A Bool: `bound` is an Int64 or a Double. `x + 0` equals `x` as a variant only
+// then: a string, Bool or unbound variable converts to a different
+// alternative. That is the one numeric type test the instruction set offers,
+// and it stops the arithmetic ops from coercing an atom to 0.
+[[nodiscard]] CellRef emitNumericTest(CompileContext &ctx, FrameScope &scope,
+                                      Chain &chain, CellRef bound) {
   const CellRef zero    = emitConstant(ctx, chain, std::int64_t{0});
   const CellRef shifted = op2(ctx, scope, chain, OpcodeKind::Add, bound, zero);
-  const CellRef numeric =
-      op2(ctx, scope, chain, OpcodeKind::Eq, bound, shifted);
-  emitFailUnless(ctx, scope, chain, numeric);
+  return op2(ctx, scope, chain, OpcodeKind::Eq, bound, shifted);
+}
+
+// A variable leaf holds a number at run time or is evaluated: a number takes
+// the fast path, anything else goes to '$eval'(Var, Result), which backtracks
+// for an unbound variable, an atom or an unknown functor and otherwise binds
+// Result to the number. The returned slot is the same local on both paths, so
+// the join needs no copy.
+[[nodiscard]] CellRef emitVariableLeaf(CompileContext &ctx, FrameScope &scope,
+                                       Chain &chain, CellRef variable) {
+  const CellRef slot    = variableSlot(ctx, scope, chain, variable);
+  const CellRef bound   = op1(ctx, scope, chain, OpcodeKind::Deref, slot);
+  const CellRef numeric = emitNumericTest(ctx, scope, chain, bound);
+
+  // The call goal is built over two fresh placeholder variables that are then
+  // mapped to the existing slots: makeTerm would otherwise link the clause's
+  // own variable cell into a term rank.
+  const CellRef argument = ctx.stdlib.makeVar();
+  const CellRef result   = ctx.stdlib.makeVar();
+  scope.variableSlots.emplace(argument, slot);
+  const CellRef resultSlot = variableSlot(ctx, scope, chain, result);
+  const CellRef goal       = ctx.stdlib.makeTerm(kEvalName, {argument, result});
+
+  const Label evaluated = newLabel(ctx);
+  emitBranchIf(ctx, chain, numeric, evaluated);
+  emitUserCall(ctx, scope, chain, PredicateKey{std::string(kEvalName), kBinary},
+               goal);
+  const std::array<CellRef, 1> inputs{resultSlot};
+  const std::array<CellRef, 1> outputs{bound};
+  appendOp(ctx, chain, OpcodeKind::Deref, inputs, outputs);
+  placeLabel(ctx, chain, evaluated);
+  scope.variableSlots.erase(argument);
+  scope.variableSlots.erase(result);
   return bound;
 }
 
@@ -271,6 +304,23 @@ void emitComparison(CompileContext &ctx, FrameScope &scope, Chain &chain,
   emitFailUnless(ctx, scope, chain, holds);
 }
 
+// '$number', '$var', var and nonvar: one VM test on the dereferenced argument.
+void emitTypeTest(CompileContext &ctx, FrameScope &scope, Chain &chain,
+                  const PredicateKey &key, CellRef argument) {
+  const CellRef term = emitTerm(ctx, scope, chain, argument);
+  if (key.name == kNumberTest) {
+    const CellRef bound = op1(ctx, scope, chain, OpcodeKind::Deref, term);
+    emitFailUnless(ctx, scope, chain,
+                   emitNumericTest(ctx, scope, chain, bound));
+    return;
+  }
+  const CellRef unbound = op1(ctx, scope, chain, OpcodeKind::IsVar, term);
+  emitFailUnless(ctx, scope, chain,
+                 key.name == kNonvarTest
+                     ? op1(ctx, scope, chain, OpcodeKind::Not, unbound)
+                     : unbound);
+}
+
 // `\+ G` and `\=` share the shape: push a CONT choice, run a test that FAILS
 // when the goal does not hold (backtracking into CONT, which rolls the test's
 // bindings back and continues), and when the test succeeds cut CONT away and
@@ -293,7 +343,10 @@ void emitNegated(CompileContext &ctx, FrameScope &scope, Chain &chain,
 bool isControlBuiltin(const PredicateKey &key) {
   if (key.arity == kNoArguments)
     return key.name == kTrue || key.name == kFail || key.name == kCut;
-  if (key.arity == kUnary) return key.name == kNegation;
+  if (key.arity == kUnary)
+    return key.name == kNegation || key.name == kNumberTest ||
+           key.name == kInternalVarTest || key.name == kVarTest ||
+           key.name == kNonvarTest;
   if (key.arity == kBinary)
     return key.name == kIs || key.name == kNotUnifiable ||
            key.name == kConjunction || isComparison(key.name);
@@ -313,6 +366,10 @@ void emitControlBuiltin(CompileContext &ctx, FrameScope &scope, Chain &chain,
     return;
   }
   const auto args = ctx.stdlib.argumentsOf(goal);
+  if (key.arity == kUnary && key.name != kNegation) {
+    emitTypeTest(ctx, scope, chain, key, args[0]);
+    return;
+  }
   if (key.name == kIs) {
     emitIs(ctx, scope, chain, goal);
   } else if (key.name == kConjunction) {

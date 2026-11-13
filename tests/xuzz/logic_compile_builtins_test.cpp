@@ -276,12 +276,190 @@ TEST(LogicCompileBuiltinsTest, DefaultBudgetIsTenMillionCycles) {
   EXPECT_EQ(p.compiler.stdlib().logicCycleBudget(), 10'000'000u);
 }
 
-TEST(LogicCompileBuiltinsTest, UserClauseNamedLikeABuiltinDoesNotShadowIt) {
+TEST(LogicCompileBuiltinsTest, ClauseForABuiltinIsRefusedAtConsult) {
   Prolog p;
-  // The old solver tried its builtin arms before any clause.
-  p.consult("fail.\ntrue :- fail.\n");
-  EXPECT_FALSE(p.holds("fail."));
+  const auto refused = [&](const std::string &source, const std::string &name) {
+    try {
+      p.consult(source);
+      ADD_FAILURE() << source << " was accepted";
+    } catch (const logic::LogicRefusal &err) {
+      EXPECT_NE(std::string(err.what()).find("cannot redefine builtin " + name),
+                std::string::npos)
+          << err.what();
+    }
+  };
+  refused("X is Y.\n", "is/2");
+  refused("\\+ a.\n", "\\+/1");
+  refused("','(a, b).\n", ",/2");
+  refused("true.\n", "true/0");
+  refused("fail :- true.\n", "fail/0");
+  refused("1 < 2.\n", "</2");
+  refused("'$eval'(a, b).\n", "$eval/2");
+  // The refused clauses left nothing behind.
   EXPECT_TRUE(p.holds("true."));
+  EXPECT_FALSE(p.holds("fail."));
+  EXPECT_FALSE(p.holds("\\+ true."));
+}
+
+// Arithmetic on a variable bound at run time to a compound is evaluated.
+TEST(LogicCompileBuiltinsTest, RuntimeBoundExpressionsAreEvaluated) {
+  Prolog p;
+  EXPECT_EQ(p.all("E = 1+2, X is E.", "X"), (Strings{"3"}));
+  EXPECT_EQ(p.all("E = (1+2)*F, F = 4.0, X is E.", "X"), (Strings{"12"}));
+  EXPECT_EQ(p.all("E = 7 mod 3, X is E + 1.", "X"), (Strings{"2"}));
+  EXPECT_EQ(p.all("E = -(4), X is E * 2.", "X"), (Strings{"-8"}));
+  EXPECT_EQ(p.all("A = 2, B = A*3, C = B+A, X is C.", "X"), (Strings{"8"}));
+  EXPECT_EQ(p.all("E = 7 / 2, X is E.", "X"), (Strings{"3.5"}));
+  EXPECT_TRUE(p.holds("E = 2*3, E > 5."));
+  EXPECT_FALSE(p.holds("E = 2*3, E > 6."));
+  EXPECT_TRUE(p.holds("E = 2*3, F = 3+3, E =:= F."));
+  EXPECT_TRUE(p.holds("E = 2*3, 5 < E."));
+  EXPECT_TRUE(p.holds("E = 1+1, E =\\= 3."));
+  EXPECT_TRUE(p.holds("E = 1+1, 2 is E."));
+  p.consult("val(X, V) :- V is X.\n"
+            "pair(E, F) :- E < F.\n");
+  EXPECT_EQ(p.all("val(3*4, V).", "V"), (Strings{"12"}));
+  EXPECT_TRUE(p.holds("pair(1+1, 2*3)."));
+}
+
+TEST(LogicCompileBuiltinsTest,
+     RuntimeEvaluationRefusesNonNumbersWithoutBinding) {
+  Prolog p;
+  // An unbound operand fails and binds nothing, even inside an expression.
+  EXPECT_TRUE(p.all("E = 1+Y, X is E.", "X").empty());
+  EXPECT_EQ(p.all("E = 1+Y, \\+ X is E, X = ok.", "X"), (Strings{"ok"}));
+  EXPECT_EQ(p.all("\\+ X is Y, X = free.", "X"), (Strings{"free"}));
+  EXPECT_EQ(p.all("\\+ Y < 3, Y = bound.", "Y"), (Strings{"bound"}));
+  // An atom or an unknown functor anywhere in the term fails.
+  EXPECT_TRUE(p.all("E = foo, X is E.", "X").empty());
+  EXPECT_TRUE(p.all("E = 1+foo, X is E.", "X").empty());
+  EXPECT_TRUE(p.all("E = f(1), X is E.", "X").empty());
+  EXPECT_TRUE(p.all("E = 1+f(2), X is E.", "X").empty());
+  EXPECT_FALSE(p.holds("E = foo, E > 1."));
+  EXPECT_FALSE(p.holds("E = 1+Y, E > 1."));
+  // A division by zero inside the term still fails.
+  EXPECT_TRUE(p.all("E = 1/0, X is E.", "X").empty());
+  EXPECT_TRUE(p.all("E = 1 mod 0, X is E.", "X").empty());
+}
+
+TEST(LogicCompileBuiltinsTest, DeepRuntimeExpressionRespectsTheCycleBudget) {
+  Prolog p;
+  p.consult("sumto(0, 0) :- !.\n"
+            "sumto(N, E+N) :- N1 is N - 1, sumto(N1, E).\n");
+  EXPECT_EQ(p.all("sumto(30, E), X is E.", "X"), (Strings{"465"}));
+  p.compiler.stdlib().setLogicCycleBudget(1500);
+  const auto query = p.compiler.compileQuery("sumto(200, E), X is E.");
+  try {
+    (void)p.compiler.solveOnce(query);
+    FAIL() << "the budget was not reported";
+  } catch (const std::runtime_error &err) {
+    EXPECT_NE(std::string(err.what()).find("exceeded its cycle budget"),
+              std::string::npos)
+        << err.what();
+  }
+  p.compiler.stdlib().setLogicCycleBudget(kDefaultLogicCycleBudget);
+  EXPECT_EQ(p.all("X is 2 + 2.", "X"), (Strings{"4"}));
+}
+
+TEST(LogicCompileBuiltinsTest, TypeTestsAndInternalGuards) {
+  Prolog p;
+  EXPECT_TRUE(p.holds("var(X)."));
+  EXPECT_FALSE(p.holds("var(a)."));
+  EXPECT_FALSE(p.holds("X = 1, var(X)."));
+  EXPECT_TRUE(p.holds("X = f(Y), nonvar(X)."));
+  EXPECT_FALSE(p.holds("nonvar(X)."));
+  EXPECT_TRUE(p.holds("nonvar(3)."));
+  EXPECT_TRUE(p.holds("'$var'(X)."));
+  EXPECT_FALSE(p.holds("'$var'(1)."));
+  EXPECT_TRUE(p.holds("'$number'(1)."));
+  EXPECT_TRUE(p.holds("X = 2.5, '$number'(X)."));
+  EXPECT_FALSE(p.holds("'$number'(a)."));
+  EXPECT_FALSE(p.holds("'$number'(X)."));
+  EXPECT_FALSE(p.holds("'$number'(1+2)."));
+  // var/1 on an unbound argument does not bind it.
+  EXPECT_EQ(p.all("var(X), X = 4.", "X"), (Strings{"4"}));
+}
+
+// The next four tests pin what the lowering does today, which is what the
+// old solver did. They are oracle-compatible behaviour pending an owner ruling
+// against ISO; do not "fix" them without that ruling.
+TEST(LogicCompileBuiltinsTest, PinsDivisionByZeroFailing) {
+  Prolog p;
+  EXPECT_TRUE(p.all("X is 5 / 0.", "X").empty());
+  EXPECT_TRUE(p.all("X is 5 // 0.", "X").empty());
+  EXPECT_TRUE(p.all("X is 5 mod 0.", "X").empty());
+  EXPECT_FALSE(p.holds("5 / 0 > 1."));
+}
+
+TEST(LogicCompileBuiltinsTest, PinsModSignAndIntegerDivisionTruncation) {
+  Prolog p;
+  EXPECT_EQ(p.all("X is -7 mod 2.", "X"), (Strings{"-1"}));
+  EXPECT_EQ(p.all("X is 7 mod -2.", "X"), (Strings{"1"}));
+  EXPECT_EQ(p.all("X is -7 // 2.", "X"), (Strings{"-3"}));
+  EXPECT_EQ(p.all("X is 7 // -2.", "X"), (Strings{"-3"}));
+}
+
+TEST(LogicCompileBuiltinsTest, PinsIntegerOverflowAbortingTheQuery) {
+  Prolog p;
+  const auto query = p.compiler.compileQuery("X is 9223372036854775807 + 1.");
+  try {
+    (void)p.compiler.solveOnce(query);
+    FAIL() << "overflow did not abort the query";
+  } catch (const std::exception &err) {
+    EXPECT_NE(std::string(err.what()).find("overflow"), std::string::npos)
+        << err.what();
+  }
+  // The engine is usable afterwards.
+  EXPECT_EQ(p.all("X is 2 + 2.", "X"), (Strings{"4"}));
+}
+
+TEST(LogicCompileBuiltinsTest, PinsQuotedNumberTextEvaluatesOnlyStatically) {
+  Prolog p;
+  EXPECT_EQ(p.all("X is '5' + 1.", "X"), (Strings{"6"}));
+  EXPECT_TRUE(p.all("A = '5', X is A + 1.", "X").empty());
+}
+
+TEST(LogicCompileBuiltinsTest, BoolOperandIsNotANumber) {
+  Prolog p;
+  // A Bool cell reaches the lowering from a fact asserted with a Bool value;
+  // the numeric test must not accept it as 1.
+  const CellRef flag = p.arena.makeScalarCell(true);
+  const CellRef var  = p.compiler.stdlib().makeVar();
+  const CellRef eq   = p.compiler.stdlib().makeTerm("=", {var, flag});
+  const CellRef sum  = p.compiler.stdlib().makeTerm(
+      "+", {var, p.arena.makeScalarCell(std::int64_t{1})});
+  const CellRef isGoal =
+      p.compiler.stdlib().makeTerm("is", {p.compiler.stdlib().makeVar(), sum});
+  const CellRef goals[] = {eq, isGoal};
+  EXPECT_FALSE(
+      p.compiler.stdlib().solveOnce(goals, p.compiler.customPredicates()));
+  const CellRef cmp = p.compiler.stdlib().makeTerm(
+      ">", {var, p.arena.makeScalarCell(std::int64_t{0})});
+  const CellRef cmpGoals[] = {eq, cmp};
+  EXPECT_FALSE(
+      p.compiler.stdlib().solveOnce(cmpGoals, p.compiler.customPredicates()));
+}
+
+TEST(LogicCompileBuiltinsTest, CutInsideConjunctionUnderNegationIsLocal) {
+  Prolog p;
+  p.consult("p(1).\np(2).\n"
+            "t(X) :- p(X), \\+ (X = 1, !, fail).\n"
+            "u(X) :- p(X), \\+ (!, X = 1).\n");
+  // The cut inside ','/2 under \+ is local to the negation: p's second
+  // alternative survives it. t(1) is refused (the negated goal fails after
+  // the cut, so \+ holds), t(2) holds.
+  EXPECT_EQ(p.all("t(X).", "X"), (Strings{"1", "2"}));
+  EXPECT_EQ(p.all("u(X).", "X"), (Strings{"2"}));
+  EXPECT_EQ(p.all("p(X), \\+ (p(Y), !, Y > 1).", "X"), (Strings{"1", "2"}));
+}
+
+TEST(LogicCompileBuiltinsTest, DoubleNegationLeavesNoBindings) {
+  Prolog p;
+  p.consult("p(1).\np(2).\n");
+  EXPECT_EQ(p.all("\\+ \\+ p(X), Z = free.", "Z"), (Strings{"free"}));
+  EXPECT_EQ(p.all("\\+ \\+ (X = f(Y), Y = 2), Y = 3.", "Y"), (Strings{"3"}));
+  EXPECT_EQ(p.all("\\+ \\+ X = 1, var(X), X = 9.", "X"), (Strings{"9"}));
+  EXPECT_EQ(p.all("p(X), \\+ \\+ p(X).", "X"), (Strings{"1", "2"}));
 }
 
 } // namespace

@@ -561,6 +561,7 @@ private:
   CellRef predMember_{noCell};
   CellRef predAppend_{noCell};
   CellRef predLength_{noCell};
+  CellRef predEval_{noCell}; ///< '$eval'/2, internal; never exported
   CellRef predVortexFunction_{noCell};
   CellRef predVortexModule_{noCell};
   CellRef predVortexInstruction_{noCell};

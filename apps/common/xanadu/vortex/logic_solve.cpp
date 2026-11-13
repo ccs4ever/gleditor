@@ -14,16 +14,14 @@
 namespace zigzag::vortex {
 
 std::vector<CellRef> VortexStdLib::stdlibPredicates() const {
-  const CellRef seeded[] = {predEqual_,          predUnify_,
-                            predMember_,         predAppend_,
-                            predLength_,         predVortexFunction_,
-                            predVortexModule_,   predVortexInstruction_,
-                            predVortexContract_, predVortexParam_,
-                            predSetting_,        predSettingShape_,
-                            predSettingDefault_, predCellValue_,
-                            predCellLink_,       predTransclude_,
-                            predXanalink_,       predCellSpan_,
-                            predBridgeEdge_};
+  const CellRef seeded[] = {
+      predEqual_,          predUnify_,          predMember_,
+      predAppend_,         predLength_,         predEval_,
+      predVortexFunction_, predVortexModule_,   predVortexInstruction_,
+      predVortexContract_, predVortexParam_,    predSetting_,
+      predSettingShape_,   predSettingDefault_, predCellValue_,
+      predCellLink_,       predTransclude_,     predXanalink_,
+      predCellSpan_,       predBridgeEdge_};
   std::vector<CellRef> cells;
   for (const CellRef cell : seeded) {
     if (core_.arena().contains(cell)) cells.push_back(cell);

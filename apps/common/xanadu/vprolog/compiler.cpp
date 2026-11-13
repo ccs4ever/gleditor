@@ -9,6 +9,7 @@
 #include <functional>
 #include <stdexcept>
 
+#include "common/xanadu/vortex/logic_compile.hpp"
 #include "common/xanadu/vprolog/parser.hpp"
 
 namespace xanadu::vprolog {
@@ -104,6 +105,16 @@ std::optional<zigzag::CellRef> Compiler::compileClause(const Clause &clause) {
     arity   = 0;
   } else {
     return std::nullopt;
+  }
+
+  // A clause for a lowered builtin would never be consulted (the builtin is
+  // emitted first), so accepting it silently is a lie; '$'-prefixed names are
+  // the compiler's own internal predicates.
+  const zigzag::vortex::logic::PredicateKey key{functor, arity};
+  if (zigzag::vortex::logic::isControlBuiltin(key) ||
+      functor.starts_with('$')) {
+    throw zigzag::vortex::logic::LogicRefusal("cannot redefine builtin " +
+                                              key.display());
   }
 
   zigzag::CellRef predCell = getOrCreatePredicate(functor, arity);
