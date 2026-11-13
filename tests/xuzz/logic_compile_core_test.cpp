@@ -357,7 +357,7 @@ TEST(LogicCompileCoreTest, UnloweredBuiltinsRefuseByNameButUnknownNamesFail) {
   // A user clause named like a builtin does not replace it: the old solver
   // tried its builtin arms before any clause. Until the owning card lowers
   // them these refuse by name.
-  h.consult("true.\nknown(1).\n");
+  h.consult("known(1).\n");
   // Every entry of the owned table, at its arity, quoted so the parser reads
   // symbolic names as atoms. An entry deleted when its card lands drops out of
   // this sweep by itself.
@@ -390,8 +390,8 @@ TEST(LogicCompileCoreTest, UnloweredBuiltinsRefuseByNameButUnknownNamesFail) {
     }
   }
   try {
-    (void)h.all("known(X), \\+ known(2).", "X");
-    ADD_FAILURE() << "a conjunction through \\+ did not refuse";
+    (void)h.all("known(X), vortex_module(2).", "X");
+    ADD_FAILURE() << "a conjunction through a P3 goal did not refuse";
   } catch (const logic::LogicRefusal &refusal) {
     EXPECT_NE(std::string(refusal.what()).find("awaits P2/P3/P4"),
               std::string::npos);
