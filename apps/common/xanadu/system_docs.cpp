@@ -831,9 +831,16 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                   "contexts (independent goals on private arenas, merged by "
                   "submission index). Default off; serial search is unchanged",
          .schemas = {{.expectedTypes = {"boolean"}, .defaultValues = {false}}}},
-        {.name  = std::string(settings::kVagentReadyPerMessage),
-         .notes = "Consecutive mailbox services before one local wake is "
-                  "forced; bounds P4 wake starvation (actor-executor §4.1)",
+        {.name  = std::string(settings::kVortexLogicMaxCycles),
+         .notes = "VM cycles one vprolog or Vlog solve may spend before it "
+                  "stops with a budget error rather than returning a partial "
+                  "answer set",
+         .schemas =
+             {{.expectedTypes = {"integer"},
+               .defaultValues = {settings::kVortexLogicMaxCyclesDefault}}}},
+        {.name    = std::string(settings::kVagentReadyPerMessage),
+         .notes   = "Consecutive mailbox services before one local wake is "
+                    "forced; bounds P4 wake starvation (actor-executor §4.1)",
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {std::int64_t{4}}}}},
         {.name    = std::string(settings::kVagentJournalSize),

@@ -299,6 +299,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "HYPERTIME";
   case OpcodeKind::Pow:
     return "POW";
+  case OpcodeKind::SameCell:
+    return "SAMECELL";
   default:
     return "UNKNOWN";
   }

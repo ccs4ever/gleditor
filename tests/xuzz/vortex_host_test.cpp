@@ -185,6 +185,35 @@ TEST(VortexHostTest, ConfigurationFromStore) {
   EXPECT_EQ(host.config().defaultBundle, "Scope");
 }
 
+TEST(VortexHostTest, LogicBudgetFromStoreTripsASolve) {
+  Store store;
+  store.setSystem(true);
+  auto head = initializeSystemStoreGenesis(store, SystemDocKind::Settings);
+  SettingSpec spec;
+  spec.name  = "vortex.logic_max_cycles";
+  spec.notes = "Logic solve cycle budget";
+  spec.schemas.push_back({{"integer"}, {std::int64_t{10}}});
+  head = ensureSetting(store, head, spec);
+  store.repointCurrentVersion(head);
+
+  EXPECT_EQ(VortexHostConfig::fromStore(store).logicMaxCycles, 10U);
+
+  const std::string query =
+      "X is 1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17+18.";
+  VortexHost roomy;
+  EXPECT_EQ(roomy.solveLogic(query, 1).size(), 1U);
+
+  VortexHost tight;
+  tight.loadConfigFromStore(store);
+  EXPECT_EQ(tight.config().logicMaxCycles, 10U);
+  // solveLogic reports a spent budget as an empty answer (and on stderr).
+  testing::internal::CaptureStderr();
+  const auto sols       = tight.solveLogic(query, 1);
+  const std::string err = testing::internal::GetCapturedStderr();
+  EXPECT_TRUE(sols.empty());
+  EXPECT_NE(err.find("cycle budget"), std::string::npos) << err;
+}
+
 TEST(VortexHostTest, VQLCompilationAndAttachmentToArena) {
   VortexHost host;
   auto &arena = host.arena();

@@ -176,10 +176,12 @@ TEST(VlaceLowerScalarsTest, RuntimeOverflowIsAnEvalFailure) {
 
 TEST(VlaceLowerScalarsTest, RunningAdvancesTheVmCycleCounter) {
   Rig rig;
-  const auto before = rig.vm.totalCycles();
+  const auto before      = rig.vm.totalCycles();
+  const auto depthBefore = rig.vm.frameLimits().maxDepth;
   EXPECT_EQ(rig.show("1 + 2"), "3");
   EXPECT_GT(rig.vm.totalCycles(), before);
-  EXPECT_EQ(rig.vm.frameLimits().maxDepth, lower::evaluationNestingBudget);
+  // A run raises the frame-depth limit for its own extent only (L2 review).
+  EXPECT_EQ(rig.vm.frameLimits().maxDepth, depthBefore);
 }
 
 TEST(VlaceLowerScalarsTest, CycleLimitFailsAsBudget) {
@@ -238,7 +240,7 @@ TEST(VlaceLowerScalarsTest, DriverNamesThePhaseThatFailed) {
 
 TEST(VlaceLowerScalarsTest, ConstructsOwnedByLaterCardsStillRefuse) {
   Rig rig;
-  auto v = rig.eval("(fn x => x) 1");
+  auto v = rig.eval("(1, 2)");
   ASSERT_FALSE(v.has_value());
   EXPECT_NE(v.error().detail.find("VM lowering is not implemented"),
             std::string::npos);

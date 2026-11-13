@@ -59,6 +59,45 @@ TEST(VlaceParserTest, LeftAssocSubtraction) {
   ASSERT_TRUE(std::holds_alternative<ELiteral>(top.rhs->node));
 }
 
+TEST(VlaceParserTest, LooserOperatorAfterAComparisonIsKept) {
+  // 1 > 2 || 3 < 4  parses as  (1 > 2) || (3 < 4); the tail was once dropped.
+  auto e = parseExpr("1 > 2 || 3 < 4");
+  ASSERT_TRUE(e);
+  ASSERT_TRUE(std::holds_alternative<EBinOp>(e->node));
+  const auto &top = std::get<EBinOp>(e->node);
+  EXPECT_EQ(top.op, "||");
+  ASSERT_TRUE(std::holds_alternative<EBinOp>(top.lhs->node));
+  EXPECT_EQ(std::get<EBinOp>(top.lhs->node).op, ">");
+  ASSERT_TRUE(std::holds_alternative<EBinOp>(top.rhs->node));
+  EXPECT_EQ(std::get<EBinOp>(top.rhs->node).op, "<");
+}
+
+TEST(VlaceParserTest, ComparisonOperandMayHoldTighterOperators) {
+  // 1 + 2 == 3 * 1 && 4 < 5  parses as  ((1 + 2) == (3 * 1)) && (4 < 5)
+  auto e = parseExpr("1 + 2 == 3 * 1 && 4 < 5");
+  ASSERT_TRUE(e);
+  const auto &top = std::get<EBinOp>(e->node);
+  EXPECT_EQ(top.op, "&&");
+  const auto &eq = std::get<EBinOp>(top.lhs->node);
+  EXPECT_EQ(eq.op, "==");
+  EXPECT_EQ(std::get<EBinOp>(eq.lhs->node).op, "+");
+  EXPECT_EQ(std::get<EBinOp>(eq.rhs->node).op, "*");
+}
+
+TEST(VlaceParserTest, ChainedNonAssociativeOperatorsAreRefused) {
+  for (const std::string_view src :
+       {"1 < 2 < 3", "1 == 2 /= 3", "1 < 2 + 0 < 3"}) {
+    Parser p(src);
+    const auto r = p.parseExpressionOnly();
+    ASSERT_FALSE(r.has_value()) << src;
+    EXPECT_EQ(r.error().code, CompileError::UnexpectedToken) << src;
+    EXPECT_NE(r.error().detail.find("non-associative"), std::string::npos)
+        << src;
+  }
+  // Parentheses choose the grouping.
+  EXPECT_TRUE(parseExpr("(1 < 2) == (2 < 3)"));
+}
+
 TEST(VlaceParserTest, RightAssocCons) {
   // 1 : 2 : [] parses as 1 : (2 : [])
   auto e = parseExpr("1 : 2 : []");

@@ -9,6 +9,7 @@
 
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 
 namespace {
@@ -158,6 +159,70 @@ TEST(VQLHistoryVmTest, RefusalBeforeAnyFoldLeavesNoSpaceBehind) {
                                       fixture.linkedVersion.str() + ")"),
                std::runtime_error);
   EXPECT_EQ(fixture.coordinator.arena().spaceCount(), attached);
+}
+
+TEST(VQLHistoryVmTest, FailedCompileAfterAPinLeavesNoSpaceBehind) {
+  PinnedStore fixture;
+  const auto attached = fixture.coordinator.arena().spaceCount();
+  // The first pin folds and attaches its space; the step pin after it is then
+  // refused, so the compile fails with that space already attached.
+  EXPECT_THROW(fixture.engine.execute("let $early := ##@(" +
+                                      fixture.cellVersion.str() +
+                                      ") return ##/d.pin-test@(" +
+                                      fixture.linkedVersion.str() + ")"),
+               std::runtime_error);
+  EXPECT_EQ(fixture.coordinator.arena().spaceCount(), attached);
+  // The same fold pins again afterwards, from a clean arena.
+  EXPECT_EQ(fixture.engine
+                .execute("##@(" + fixture.linkedVersion.str() + ")/d.pin-test")
+                .size(),
+            1U);
+}
+
+TEST(VQLHistoryVmTest,
+     ReusedSpaceIdAfterAFailedCompileDoesNotAliasAnotherFold) {
+  PinnedStore fixture;
+  const auto earlier = "##@(" + fixture.cellVersion.str() + ")/d.pin-test";
+  const auto later   = "##@(" + fixture.linkedVersion.str() + ")/d.pin-test";
+  // The failed compile attaches the early fold's space and gives it back.
+  EXPECT_THROW(fixture.engine.execute("let $early := ##@(" +
+                                      fixture.cellVersion.str() +
+                                      ") return ##/d.pin-test@(" +
+                                      fixture.linkedVersion.str() + ")"),
+               std::runtime_error);
+  // The late fold now takes the freed id; the early one must not read it.
+  EXPECT_EQ(fixture.engine.execute(later).size(), 1U);
+  EXPECT_TRUE(fixture.engine.execute(earlier).empty());
+  EXPECT_EQ(fixture.engine.execute(later).size(), 1U);
+}
+
+TEST(VQLHistoryVmTest, InterpreterPinCacheDropsAnIdAReleaseFreed) {
+  PinnedStore fixture;
+  const auto pinned = [&](const MicroversionId &version) {
+    const std::string text = "##@(" + version.str() + ")/d.pin-test";
+    xanadu::vql::Parser parser(text);
+    const auto query = parser.parseQuery();
+    const auto *path =
+        query.body.statements.empty()
+            ? std::get_if<xanadu::vql::PathExpression>(&query.expr)
+            : std::get_if<xanadu::vql::PathExpression>(
+                  &query.body.statements.front());
+    return path != nullptr ? fixture.engine.evaluatePath(*path)
+                           : std::vector<zigzag::CellRef>{};
+  };
+  auto &arena = fixture.coordinator.arena();
+  // Rolled back, as a failed compile's transaction would: the cache entry the
+  // pin made names a space that is gone.
+  const auto mark = arena.mark();
+  (void)pinned(fixture.cellVersion);
+  const auto attached = arena.spaceCount();
+  arena.release(mark);
+  ASSERT_LT(arena.spaceCount(), attached);
+  // The freed id is reused by the other fold ...
+  EXPECT_EQ(pinned(fixture.linkedVersion).size(), 1U);
+  // ... and the first fold, asked again, is folded afresh rather than
+  // answered from the reused id.
+  EXPECT_TRUE(pinned(fixture.cellVersion).empty());
 }
 
 TEST(VQLHistoryVmTest, TwoPinsInOneQueryEachKeepTheirOwnAnchor) {

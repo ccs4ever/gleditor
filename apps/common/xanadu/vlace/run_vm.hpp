@@ -28,12 +28,6 @@ inline constexpr std::size_t defaultMaxCycles = 100'000'000;
 /// Chainable.
 Compiler *setCycleLimit(Compiler &compiler, std::optional<std::size_t> cycles);
 
-/// Emit `dst := src` into the current block. Both arms of an `if` (and the
-/// operands of `&&`/`||`) write their result into one register this way. It
-/// is the VM's one-input `Add`, which hands its input through unchanged and
-/// keeps the value's kind (text stays text, a bool stays a bool).
-void emitCopy(LowerContext &ctx, Operand src, Operand dst);
-
 } // namespace xanadu::vlace::lower
 
 #endif // COMMON_XANADU_VLACE_RUN_VM_HPP

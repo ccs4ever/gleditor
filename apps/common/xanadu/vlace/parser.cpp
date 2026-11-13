@@ -5,6 +5,8 @@
 #include "common/xanadu/vlace/parser.hpp"
 
 #include <memory>
+#include <optional>
+#include <string>
 #include <utility>
 
 namespace xanadu::vlace {
@@ -605,6 +607,9 @@ std::expected<Expr, ParseError> Parser::parseOpExpr(int minLevel) {
   auto left = parseApp();
   if (!left) return std::unexpected(left.error());
 
+  // The level of the non-associative operator just folded into `left`, if any:
+  // a second one at that level (`a < b < c`) has no grouping to choose.
+  std::optional<int> closedLevel;
   for (;;) {
     if (cur_.kind != TokenKind::Operator && cur_.kind != TokenKind::Dot) {
       break;
@@ -615,18 +620,26 @@ std::expected<Expr, ParseError> Parser::parseOpExpr(int minLevel) {
       break;
     }
     const SourceLocation opLoc = cur_.loc;
+    if (closedLevel && info->level == *closedLevel) {
+      return err(CompileError::UnexpectedToken,
+                 "operator '" + op +
+                     "' is non-associative and cannot follow another "
+                     "operator of its level; add parentheses",
+                 opLoc);
+    }
     advance();
+    // Only a right-associative operator lets its own level recur on the
+    // right. A non-associative one must not, or a looser operator after its
+    // right operand (`a > b || c`) is left for nobody to consume.
     const int nextMin =
-        info->fixity == Fixity::Left ? info->level + 1 : info->level;
+        info->fixity == Fixity::Right ? info->level : info->level + 1;
     auto right = parseOpExpr(nextMin);
     if (!right) return std::unexpected(right.error());
     left = makeExpr(
         EBinOp{.op = op, .lhs = std::move(*left), .rhs = std::move(*right)},
         opLoc);
-    if (info->fixity == Fixity::None) {
-      // Non-associative: do not chain at the same level.
-      break;
-    }
+    closedLevel = info->fixity == Fixity::None ? std::optional<int>{info->level}
+                                               : std::nullopt;
   }
   return left;
 }

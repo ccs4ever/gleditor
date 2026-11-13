@@ -264,6 +264,9 @@ inline constexpr std::string_view kVortexParallelThreshold =
     "vortex.parallel_threshold";
 inline constexpr std::string_view kVortexOrParallelSearch =
     "vortex.or_parallel_search";
+inline constexpr std::string_view kVortexLogicMaxCycles =
+    "vortex.logic_max_cycles";
+inline constexpr std::int64_t kVortexLogicMaxCyclesDefault = 10'000'000;
 
 // Vagent actor-executor policy (design/vagent-actor-executor.md §4.1/§4.2)
 inline constexpr std::string_view kVagentReadyPerMessage =
@@ -284,8 +287,7 @@ inline constexpr std::string_view kVagentMaxClausesPerGoal =
 inline constexpr std::string_view kVagentReclaimDeadline =
     "vagent.reclaim_deadline";
 inline constexpr std::string_view kVagentMaxLiveCells = "vagent.max_live_cells";
-inline constexpr std::string_view kVagentCompactEvery =
-    "vagent.compact_every";
+inline constexpr std::string_view kVagentCompactEvery = "vagent.compact_every";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";

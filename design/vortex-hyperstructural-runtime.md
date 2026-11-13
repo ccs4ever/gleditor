@@ -1108,6 +1108,17 @@ VortexVM incorporates eight dedicated logic opcodes implementing the Vlog instru
 1. **`#CUT` (`OpcodeKind::Cut`)**: Prunes choice points down to the recorded barrier depth without
    undoing bindings made under them.
 
+Beside the eight logic opcodes, `#SAMECELL` (`OpcodeKind::SameCell`, appended after `Pow`) answers
+cell identity, which `#UNIFY` cannot: it takes exactly two cell inputs and one output, and writes
+`true` only when both resolve (through the VM's cell references, as `#UNIFY` does) to the same cell.
+It never compares content, so two cells holding equal values are different. An input that holds no
+cell makes the answer `false`, two absent inputs included; a wrong input count or a missing output
+fails the step by name. Identity is the cell's source: a federation proxy, its source cell and the
+proxies of that source in any other attached space (a pinned historical fold, say) are one cell,
+resolved through `ArenaManifold::resolveSourceCell`, while a cell of another store with the same
+index, or an ephemeral cell, is not. It is pure and reads no host state, so it may sit in a
+parameter pipeline, but it is never memoised: a memo key is content, and identity is not.
+
 ### 8.3 `std:logic` Standard Library Module
 
 The standard library exports the `std:logic` module off `d.stdlib`:

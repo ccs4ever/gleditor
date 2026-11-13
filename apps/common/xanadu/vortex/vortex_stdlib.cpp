@@ -1667,6 +1667,7 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
 
   // Predicate: length/2
   // length([], 0).
+  // length([_ | T], N) :- length(T, M), N is M + 1.
   {
     predLength_       = createPredicate("length");
     CellRef emptyList = core_.arena().makeCell("[]");
@@ -1674,7 +1675,70 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     CellRef head1 = makeTerm("length", {emptyList, zero});
     addClause(predLength_, head1);
 
+    // length([_ | T], N) :- length(T, M), N is M + 1.
+    // Replaces the old host fast path: a proper list counts, an unbound list
+    // enumerates (the one behaviour change from the pre-lowering solver).
+    CellRef wild   = makeVar();
+    CellRef tail   = makeVar();
+    CellRef count  = makeVar();
+    CellRef parent = makeVar();
+    CellRef one    = core_.arena().makeScalarCell(static_cast<std::int64_t>(1));
+    CellRef head2  = makeTerm("length", {makeCons(wild, tail), parent});
+    const CellRef body2[] = {
+        makeTerm("length", {tail, count}),
+        makeTerm("is", {parent, makeTerm("+", {count, one})})};
+    addClause(predLength_, head2, body2);
+
     exportSymbol(mod, "length", predLength_);
+  }
+
+  // Predicate: '$eval'/2, the run-time half of `is` and the comparisons.
+  // Arithmetic is lowered statically, so a variable bound at run time to a
+  // compound (`E = 1+2, X is E`) reaches here instead. The first clause keeps
+  // an unbound argument from being bound by a head pattern below; after each
+  // operand is evaluated it is a number, so the inner `is` takes its static
+  // fast path and cannot recurse. Not exported: it is not user-facing.
+  {
+    predEval_      = createPredicate("$eval");
+    const auto cut = [&] { return core_.arena().makeCell("!"); };
+
+    CellRef unbound             = makeVar();
+    CellRef ignored             = makeVar();
+    const CellRef unboundBody[] = {
+        makeTerm("$var", {unbound}), cut(),
+        makeTerm("$raise", {core_.arena().makeCell("instantiation")})};
+    addClause(predEval_, makeTerm("$eval", {unbound, ignored}), unboundBody);
+
+    CellRef number             = makeVar();
+    CellRef numberOut          = makeVar();
+    const CellRef numberBody[] = {makeTerm("$number", {number}), cut(),
+                                  makeTerm("=", {numberOut, number})};
+    addClause(predEval_, makeTerm("$eval", {number, numberOut}), numberBody);
+
+    for (const std::string_view op : {"+", "-", "*", "/", "//", "mod", "rem"}) {
+      CellRef a            = makeVar();
+      CellRef b            = makeVar();
+      CellRef out          = makeVar("Result");
+      CellRef left         = makeVar("Left");
+      CellRef right        = makeVar("Right");
+      const CellRef body[] = {
+          cut(), makeTerm("$eval", {a, left}), makeTerm("$eval", {b, right}),
+          makeTerm("is", {out, makeTerm(op, {left, right})})};
+      addClause(predEval_, makeTerm("$eval", {makeTerm(op, {a, b}), out}),
+                body);
+    }
+    for (const std::string_view op : {"-", "+"}) {
+      CellRef a            = makeVar();
+      CellRef out          = makeVar("Result");
+      CellRef x            = makeVar("Operand");
+      const CellRef body[] = {cut(), makeTerm("$eval", {a, x}),
+                              makeTerm("is", {out, makeTerm(op, {x})})};
+      addClause(predEval_, makeTerm("$eval", {makeTerm(op, {a}), out}), body);
+    }
+    // Nothing above matched: an atom, a Bool or an unknown functor.
+    const CellRef rest[] = {
+        makeTerm("$raise", {core_.arena().makeCell("type")})};
+    addClause(predEval_, makeTerm("$eval", {makeVar(), makeVar()}), rest);
   }
 
   // Predicate: vortex_function/2 and vortex_module/1 introspection

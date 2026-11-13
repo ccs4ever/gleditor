@@ -223,8 +223,17 @@ Term Parser::parseTerm(int maxPrecedence) {
     int rightPrec =
         (prefOp->assoc == Assoc::FY) ? prefOp->prec : prefOp->prec - 1;
     Term operand = parseTerm(rightPrec);
-    left =
-        Term(Compound{.functor = std::string(prefOp->name), .args = {operand}});
+    // `-4` is a negative number, as in ISO Prolog, not the compound -(4): the
+    // lowered arithmetic reads a variable's value as a number, and a compound
+    // bound to it (classify(-42, C), N < 0) would never compare.
+    if (const auto *const literal = operand.asNumber();
+        literal != nullptr && prefOp->name == "-") {
+      left = Term(literal->isFloat() ? Number{.value = -literal->asFloat()}
+                                     : Number{.value = -literal->asInt()});
+    } else {
+      left = Term(
+          Compound{.functor = std::string(prefOp->name), .args = {operand}});
+    }
   } else {
     left = parsePrimary();
   }

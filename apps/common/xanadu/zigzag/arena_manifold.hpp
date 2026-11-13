@@ -217,6 +217,10 @@ struct Mark {
   std::uint32_t proxyShadowedEdgeCount{0};
   std::uint32_t quoteSpaceCount{0};
   std::uint32_t dimensionCount{0};
+  /// How many spaces were attached. Release detaches the later ones, so a
+  /// failed branch that pinned a historical space leaves none behind; discard
+  /// keeps them, as it keeps the cells.
+  std::uint32_t spaceCount{0};
 };
 
 /// What promote() refuses above, so that a runaway evaluation cannot write an
@@ -963,6 +967,13 @@ private:
 
   // Federation storage (§5.7)
   std::vector<Space> spaces_;
+  /// Whether attaching each space is what first gave this arena its base or
+  /// store, so detaching it can hand them back.
+  struct SpaceAdoption {
+    bool base{false};
+    bool store{false};
+  };
+  std::vector<SpaceAdoption> spaceAdoptions_;
   std::vector<std::unordered_map<CellRef, CellRef>> spaceProxies_;
   std::vector<ProxyEntry> proxyOrder_;
   std::vector<CellRef> spaceStoreRefsTail_;

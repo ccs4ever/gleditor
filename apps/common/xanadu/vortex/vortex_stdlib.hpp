@@ -45,6 +45,13 @@ class Store;
 
 namespace zigzag::vortex {
 
+/// VM cycles one logic solve may spend when no session supplies the
+/// `vortex.logic_max_cycles` setting. system_docs seeds the setting with the
+/// same number (vortex_host.cpp asserts they agree); the 100000 the VM runs
+/// with by default is too small for a recursive search over a few thousand
+/// facts.
+inline constexpr std::size_t kDefaultLogicCycleBudget = 10'000'000;
+
 class VortexWorkerPool;
 namespace logic {
 struct CompileContext;
@@ -293,28 +300,40 @@ public:
   [[nodiscard]] logic::CompileContext
   makeLogicContext(std::span<const CellRef> customPredicates);
 
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   bool solveOnce(CellRef goal, std::span<const CellRef> customPredicates = {});
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   bool solveOnce(std::span<const CellRef> goals,
                  std::span<const CellRef> customPredicates = {});
 
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   std::vector<LogicSolution>
   solveQuery(CellRef goal, std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions = 100);
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   std::vector<LogicSolution>
   solveQuery(std::span<const CellRef> goals,
              std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions                  = 100);
 
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   bool solve(CellRef goal,
              std::function<bool(const LogicSolution &)> onSolution,
              std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions                  = 100);
-  /// Throws std::logic_error until logic resolution is lowered to VM code.
+  /// Compiles the goals to a Vortex graph and runs it on this VM; a spent cycle
+  /// budget or any VM failure throws std::runtime_error, and a builtin or
+  /// relation not yet lowered refuses by name (std::logic_error).
   bool solve(std::span<const CellRef> goals,
              std::function<bool(const LogicSolution &)> onSolution,
              std::span<const CellRef> customPredicates = {},
@@ -520,7 +539,7 @@ private:
   const xanadu::Store *boundStore_{nullptr};
   /// Matches VortexVM::run's default so behaviour is unchanged until a caller
   /// (the mesh evaluator's budget.maxCycles) sets it.
-  std::size_t logicMaxCycles_{100000};
+  std::size_t logicMaxCycles_{kDefaultLogicCycleBudget};
 
   // Stage 2 data-parallel hook: borrowed, not owned. Null => serial.
   VortexWorkerPool *workerPool_{nullptr};
@@ -542,6 +561,7 @@ private:
   CellRef predMember_{noCell};
   CellRef predAppend_{noCell};
   CellRef predLength_{noCell};
+  CellRef predEval_{noCell}; ///< '$eval'/2, internal; never exported
   CellRef predVortexFunction_{noCell};
   CellRef predVortexModule_{noCell};
   CellRef predVortexInstruction_{noCell};
