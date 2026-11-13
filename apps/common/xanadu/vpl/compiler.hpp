@@ -39,6 +39,8 @@ struct CompilationOptions {
 struct CompiledBinding {
   zigzag::CellRef cell;
   std::vector<zigzag::DirectedDim> axes;
+  /// Which axes are read in reverse (card V4b); empty when none is.
+  AxisReversed reversed;
   std::vector<zigzag::CellRef> dependencies;
   /// The bound value is an enclosed array: a box cell whose content hangs off
   /// `d.enclosure`. Valence stays `axes.size()`; enclosure is static because a
@@ -59,6 +61,8 @@ struct CompilationResult {
   std::optional<zigzag::CellRef> cursor;
   std::vector<zigzag::CellRef> resultSlots;
   std::vector<zigzag::DirectedDim> resultAxes;
+  /// The result's reversed axes (see CompiledBinding).
+  AxisReversed resultReversed;
   std::vector<zigzag::CellRef> resultDependencies;
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
       cellDependencies;
@@ -165,13 +169,17 @@ private:
   std::vector<zigzag::CellRef> allOps_;
   std::vector<zigzag::CellRef> lastResultCells_;
   std::vector<zigzag::DirectedDim> lastResultAxes_;
+  AxisReversed lastResultReversed_;
   std::vector<zigzag::CellRef> lastResultDependencies_;
 
   std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
   std::unordered_map<std::string, std::vector<zigzag::DirectedDim>> varAxes_;
+  std::unordered_map<std::string, AxisReversed> varReversed_;
   std::unordered_map<std::string, CompiledBinding> assignedBindings_;
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::DirectedDim>>
       rankAxes_;
+  /// Reversed axes of a view, keyed like rankAxes_; no entry means none is.
+  std::unordered_map<zigzag::CellRef, AxisReversed> rankReversed_;
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
       rankDependencies_;
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>

@@ -39,10 +39,36 @@
  *  - Every emitted instruction is appended to the chain in call order; a
  *    helper that returns has emitted its whole loop, ending at its own end
  *    label, so the next emit continues after the loop.
+ *
+ * Bounded walks (card V4b). A walk along an axis goes until the rank ends.
+ * That is right posward from the head of a rank a verb minted, and wrong
+ * negward from its tail, where the rank goes on into whatever precedes the
+ * head (the home cell, for an iota). The walkers that walk an axis therefore
+ * take a STOP: a register that holds, at run time, the last cell of the walk,
+ * inclusive, or std::nullopt for the unbounded walk. There is no default
+ * argument: every caller writes its choice.
+ *  - The stop is compared by identity (SameCell), never by value, so two cells
+ *    that hold equal numbers are not the stop. The walk ends after the item
+ *    that is the stop; a walk whose anchor is the stop has only the anchor
+ *    (walkRank, extentOf, extreme) or nothing (walkRankAfter).
+ *  - std::nullopt emits exactly the instructions of the unbounded walk every
+ *    earlier card was written against. A stop adds a SameCell and a Not per
+ *    item and nothing else.
+ *  - The stop ends the walk FROM THE ANCHOR. It is not a property of an axis:
+ *    on a valence-2 array it would name one row's end, so a walker started
+ *    from another row's start must not be given it.
+ *  - A stop that is never reached (it lies behind the anchor, or its register
+ *    is absent while the anchor is not) does not stop the walk.
+ *  - A view's reversed axis is read with walkAxis, which makes the origin the
+ *    stop of a walk from the far end back. A reversed read therefore walks the
+ *    rank twice. A walker over a rank the caller is about to extend (iota
+ *    appending at the tail of the destination) passes std::nullopt: the
+ *    destination is open at its tail by design.
  */
 #ifndef COMMON_XANADU_VPL_GRAPH_EMIT_HPP
 #define COMMON_XANADU_VPL_GRAPH_EMIT_HPP
 
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -98,18 +124,24 @@ void iteratorLoop(LowerContext &ctx, CellRef iterator,
  * `dimension` in `direction`, in order (StreamBegin over [anchor, RankBegin
  * stream], as compile_selector.cpp does). An absent anchor register runs the
  * body zero times. Allocates its own iterator and item registers. Nestable.
+ * With `stop`, the walk ends after the cell the stop register references (the
+ * snapshot stream ends there, so the body sees nothing past it).
  */
 void walkRank(LowerContext &ctx, CellRef anchor, DimRef dimension,
               DimVector direction,
-              gleditor::cpp26::function_ref<void(CellRef item)> body);
+              gleditor::cpp26::function_ref<void(CellRef item)> body,
+              std::optional<CellRef> stop);
 
 /**
  * Like walkRank but skips the anchor: only the cells after it (RankBegin +
- * iteratorLoop, i.e. emitRank without collecting).
+ * iteratorLoop, i.e. emitRank without collecting). With `stop`, the loop ends
+ * after the item that is the stop; if the anchor is the stop the body runs
+ * zero times.
  */
 void walkRankAfter(LowerContext &ctx, CellRef anchor, DimRef dimension,
                    DimVector direction,
-                   gleditor::cpp26::function_ref<void(CellRef item)> body);
+                   gleditor::cpp26::function_ref<void(CellRef item)> body,
+                   std::optional<CellRef> stop);
 
 /**
  * Two ranks in lockstep, for elementwise verbs. Each rank is walked as in
@@ -119,12 +151,14 @@ void walkRankAfter(LowerContext &ctx, CellRef anchor, DimRef dimension,
  * Built from two IteratorNext opcodes and an And of the two present registers;
  * allocates two iterators, two items, two presents, one And result. Nestable.
  * Scalar extension needs no helper: walkRank the rank and use the scalar cell
- * directly in the body.
+ * directly in the body. `stopA` and `stopB` bound each rank as in walkRank, so
+ * a reversed view and an unbounded one can be zipped.
  */
 void walkRanksLockstep(
     LowerContext &ctx, CellRef anchorA, DimRef dimensionA, DimVector directionA,
     CellRef anchorB, DimRef dimensionB, DimVector directionB,
-    gleditor::cpp26::function_ref<void(CellRef itemA, CellRef itemB)> body);
+    gleditor::cpp26::function_ref<void(CellRef itemA, CellRef itemB)> body,
+    std::optional<CellRef> stopA, std::optional<CellRef> stopB);
 
 /**
  * The last cell reached from `anchor` along `dimension` in `direction`, in a
@@ -134,20 +168,37 @@ void walkRanksLockstep(
  * anchor register is. Writing through the result writes the anchor's cell, but
  * rebinding the result register never touches the anchor register. Allocates
  * the result, an iterator and loop registers; the caller owns the result and
- * may pass it to mintAfter as a tail.
+ * may pass it to mintAfter as a tail. With `stop` the walk ends at the stop
+ * cell.
  */
 [[nodiscard]] CellRef extreme(LowerContext &ctx, CellRef anchor,
-                              DimRef dimension, DimVector direction);
+                              DimRef dimension, DimVector direction,
+                              std::optional<CellRef> stop);
 
 /**
  * The number of cells of the rank starting at `anchor` along `dimension` in
  * `direction`, anchor included, in a fresh register written ONLY by
  * arithmetic (so it is a plain integer, never a reference). An absent anchor
  * yields 0. Allocates the count register plus a walkRank's registers; the
- * count is valid after the call.
+ * count is valid after the call. With `stop` it counts up to and including the
+ * stop cell.
  */
 [[nodiscard]] CellRef extentOf(LowerContext &ctx, CellRef anchor,
-                               DimRef dimension, DimVector direction);
+                               DimRef dimension, DimVector direction,
+                               std::optional<CellRef> stop);
+
+/**
+ * Walks one axis of a view whose origin register is `origin`: the cells in
+ * order when `reversed` is false (walkRank, no stop), and in reverse when it
+ * is true. A reversed axis finds its far end with extreme along the axis's
+ * natural `direction`, then walks back with the opposite direction and ends
+ * after the item that is the same cell as `origin`, so the view is exactly the
+ * unreversed cells, live, with the origin as its stop. Costs two passes over
+ * the rank when reversed. Nestable.
+ */
+void walkAxis(LowerContext &ctx, CellRef origin, DimRef dimension,
+              DimVector direction, bool reversed,
+              gleditor::cpp26::function_ref<void(CellRef item)> body);
 
 /**
  * A loop the VM runs `count` times. `count` is read at each test and must not

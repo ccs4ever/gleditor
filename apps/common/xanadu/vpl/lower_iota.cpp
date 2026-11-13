@@ -97,7 +97,9 @@ CellRef mintIota(LowerContext &ctx, CellRef count, CellRef anchor,
                  DimRef dimension) {
   auto &arena = ctx.core().arena();
   assertNotNegative(ctx, count);
-  const auto tail = emit::extreme(ctx, anchor, dimension, DimVector::POS);
+  // The destination rank is open at its tail by design: no stop.
+  const auto tail =
+      emit::extreme(ctx, anchor, dimension, DimVector::POS, std::nullopt);
   // The register `tail` is advanced by every mint, so the old tail is kept
   // to find the first new cell afterwards.
   const auto before = emit::aliasRegister(ctx, tail);
@@ -198,9 +200,12 @@ Maybe lowerRhoMonadic(LowerContext &ctx, const MonadicExpr &expr) {
   cells.reserve(measured.size());
   for (const auto &axis : measured) {
     // Each extent is measured from the origin, which is how the first row's
-    // length stands for every row of a rectangular array.
-    const auto extent = emit::extentOf(ctx, operand, axis.dim, axis.dir);
-    const auto cell   = ctx.core().arena().makeCell();
+    // length stands for every row of a rectangular array. A reversed axis has
+    // the extent of the unreversed one (same origin, same cells), so the flag
+    // is deliberately not consulted: `⍴⌽A` is `⍴A` by construction.
+    const auto extent =
+        emit::extentOf(ctx, operand, axis.dim, axis.dir, std::nullopt);
+    const auto cell = ctx.core().arena().makeCell();
     // The cell needs a value before the first Value op can replace it.
     ctx.core().writeValue(cell, kWholeValueOffset, std::nullopt,
                           std::int64_t{0});

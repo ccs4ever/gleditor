@@ -24,6 +24,19 @@
 namespace xanadu::vpl {
 
 /**
+ * Which axes of a view are read in reverse (card V4b), parallel to the axis
+ * list; the vector is empty when none is. `⌽`/`⊖` toggle a flag and touch
+ * nothing else: the origin stays the operand's, and the axis keeps its
+ * natural walking direction, which is a separate fact (an axis may run
+ * negward by nature). A reversed axis is read by finding its far end from the
+ * origin and walking back to the origin, so the view stays live: cells
+ * appended to the rank later are in it, and it always holds exactly the cells
+ * the unreversed view holds. The cost is that a reversed read walks the rank
+ * twice.
+ */
+using AxisReversed = std::vector<bool>;
+
+/**
  * @brief Represents a VPL multidimensional view or scalar value.
  *
  * A VPL value is either a scalar cell (valence 0, empty axes) or a view
@@ -116,6 +129,25 @@ public:
     return this;
   }
 
+  /// The reversed flag of each axis (see AxisReversed); empty when none is.
+  [[nodiscard]] const AxisReversed &reversed() const noexcept {
+    return reversed_;
+  }
+  VplView *setReversed(AxisReversed reversed) {
+    if (!reversed.empty() && reversed.size() != axes_.size()) {
+      throw std::invalid_argument(
+          "VPL view reversed flags must be parallel to its axes");
+    }
+    reversed_ = std::move(reversed);
+    if (std::ranges::none_of(reversed_, [](const bool flag) { return flag; })) {
+      reversed_.clear();
+    }
+    return this;
+  }
+  [[nodiscard]] bool isReversed(std::size_t index) const noexcept {
+    return index < reversed_.size() && reversed_[index];
+  }
+
   /// Valence: number of dimensions indexed along (APL rank).
   [[nodiscard]] std::size_t valence() const noexcept { return axes_.size(); }
 
@@ -160,6 +192,7 @@ public:
    */
   void transpose() {
     std::ranges::reverse(axes_);
+    std::ranges::reverse(reversed_);
     if (!extents_.empty()) {
       std::ranges::reverse(extents_);
     }
@@ -176,17 +209,20 @@ public:
     std::vector<zigzag::DirectedDim> newAxes;
     newAxes.reserve(axes_.size());
     std::vector<std::size_t> newExtents;
+    AxisReversed newReversed;
     if (!extents_.empty() && extents_.size() == axes_.size()) {
       newExtents.reserve(extents_.size());
     }
     for (std::size_t p : permutation) {
       if (p >= axes_.size()) return false;
       newAxes.push_back(axes_[p]);
+      if (!reversed_.empty()) newReversed.push_back(reversed_[p]);
       if (!newExtents.empty()) {
         newExtents.push_back(extents_[p]);
       }
     }
-    axes_ = std::move(newAxes);
+    axes_     = std::move(newAxes);
+    reversed_ = std::move(newReversed);
     if (!newExtents.empty()) {
       extents_ = std::move(newExtents);
     }
@@ -194,23 +230,16 @@ public:
   }
 
   /**
-   * @brief Reverse first axis (⌽ / |.): walks first axis in opposite direction.
-   * O(1).
+   * @brief Reverse first axis (⌽ / |.): toggles its flag. O(1); the origin and
+   * the cells read are unchanged, only their order.
    */
-  void reverseFirst() {
-    if (!axes_.empty()) {
-      axes_[0].dir = -axes_[0].dir;
-    }
-  }
+  void reverseFirst() { toggleReversed(0); }
 
   /**
-   * @brief Reverse last axis (⊖ / |..): walks last axis in opposite direction.
-   * O(1).
+   * @brief Reverse last axis (⊖ / |..): toggles its flag. O(1).
    */
   void reverseLast() {
-    if (!axes_.empty()) {
-      axes_.back().dir = -axes_.back().dir;
-    }
+    if (!axes_.empty()) toggleReversed(axes_.size() - 1);
   }
 
   /**
@@ -286,21 +315,18 @@ public:
     if (!origin_) return std::nullopt;
     if (coords.empty()) return origin_;
 
-    std::optional<zigzag::CellRef> cur = origin_;
-    for (std::size_t i = 0; i < coords.size() && i < axes_.size(); ++i) {
-      std::int64_t steps    = coords[i];
-      zigzag::DimVector dir = axes_[i].dir;
-      if (steps < 0) {
-        dir   = -dir;
-        steps = -steps;
+    // A reversed axis counts its positions from the far end of the first
+    // walk, so logical position p is natural position extent - 1 - p.
+    std::vector<std::int64_t> natural(coords.begin(), coords.end());
+    if (!reversed_.empty()) {
+      const auto sh = shape(arena);
+      for (std::size_t i = 0; i < natural.size() && i < sh.size(); ++i) {
+        if (isReversed(i)) {
+          natural[i] = static_cast<std::int64_t>(sh[i]) - 1 - natural[i];
+        }
       }
-      while (steps > 0 && cur) {
-        cur = arena.linked(*cur, axes_[i].dim, dir);
-        steps--;
-      }
-      if (!cur) break;
     }
-    return cur;
+    return cellAtNatural(arena, natural);
   }
 
   /**
@@ -327,6 +353,7 @@ public:
         cells.push_back(*cur);
         cur = arena.linked(*cur, axes_[0].dim, axes_[0].dir);
       }
+      if (isReversed(0)) std::ranges::reverse(cells);
       return cells;
     }
 
@@ -337,14 +364,15 @@ public:
     std::vector<std::int64_t> coords(axes_.size(), 0);
     std::function<void(std::size_t)> traverse = [&](std::size_t dimIdx) {
       if (dimIdx == axes_.size()) {
-        const auto c = cellAt(arena, coords);
+        const auto c = cellAtNatural(arena, coords);
         if (c) {
           cells.push_back(*c);
         }
         return;
       }
       for (std::size_t step = 0; step < sh[dimIdx]; ++step) {
-        coords[dimIdx] = static_cast<std::int64_t>(step);
+        coords[dimIdx] = static_cast<std::int64_t>(
+            isReversed(dimIdx) ? sh[dimIdx] - 1 - step : step);
         traverse(dimIdx + 1);
       }
     };
@@ -352,7 +380,60 @@ public:
     return cells;
   }
 
+  /**
+   * @brief The same cells in the same order as a view nothing is reversed in
+   * (origin at the far end, axes flipped), or nullopt when no such view reads
+   * them. For the wire, which carries an origin, directions and extents and
+   * no flag. Exact for any reversed rank-1 view and for rectangular arrays;
+   * a ragged array may not survive the move of the origin, which is checked
+   * by reading both and comparing, never assumed.
+   */
+  [[nodiscard]] std::optional<VplView>
+  walkable(const zigzag::ArenaManifold &arena) const {
+    if (reversed_.empty()) return *this;
+    const auto cells = collectCells(arena);
+    VplView out{cells.empty() ? std::nullopt
+                              : std::optional<zigzag::CellRef>{cells.front()},
+                axes_};
+    for (std::size_t i = 0; i < axes_.size(); ++i) {
+      if (isReversed(i)) out.axes_[i].dir = -out.axes_[i].dir;
+    }
+    out.extents_ = shape(arena);
+    out.setDependencies(dependencies_);
+    if (out.collectCells(arena) != cells) return std::nullopt;
+    return out;
+  }
+
 private:
+  void toggleReversed(std::size_t index) {
+    if (axes_.empty() || index >= axes_.size()) return;
+    reversed_.resize(axes_.size(), false);
+    reversed_[index] = !reversed_[index];
+    if (std::ranges::none_of(reversed_, [](const bool flag) { return flag; })) {
+      reversed_.clear();
+    }
+  }
+
+  [[nodiscard]] std::optional<zigzag::CellRef>
+  cellAtNatural(const zigzag::ArenaManifold &arena,
+                std::span<const std::int64_t> coords) const {
+    std::optional<zigzag::CellRef> cur = origin_;
+    for (std::size_t i = 0; i < coords.size() && i < axes_.size(); ++i) {
+      std::int64_t steps    = coords[i];
+      zigzag::DimVector dir = axes_[i].dir;
+      if (steps < 0) {
+        dir   = -dir;
+        steps = -steps;
+      }
+      while (steps > 0 && cur) {
+        cur = arena.linked(*cur, axes_[i].dim, dir);
+        steps--;
+      }
+      if (!cur) break;
+    }
+    return cur;
+  }
+
   void requireKnownOrigin(const zigzag::ArenaManifold &arena) const {
     if (origin_ && !arena.contains(*origin_)) {
       throw std::invalid_argument(
@@ -361,6 +442,7 @@ private:
   }
   std::optional<zigzag::CellRef> origin_;
   std::vector<zigzag::DirectedDim> axes_;
+  AxisReversed reversed_;
   std::vector<std::size_t> extents_;
   std::vector<zigzag::CellRef> dependencies_;
   bool isRagged_{false};

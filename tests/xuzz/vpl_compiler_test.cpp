@@ -274,13 +274,17 @@ TEST_F(VPLCompilerTest, RejectsUnsupportedIndexing) {
             std::string::npos);
 }
 
-TEST_F(VPLCompilerTest, RejectsUnsupportedDimensionValue) {
+// A dimension is lowered: its value is compile-time structure (no cells), so
+// the compiled program carries it as a dimension value, not as an error.
+TEST_F(VPLCompilerTest, LowersDimensionValue) {
   VPLCompiler compiler(*core, *vm);
 
   const auto dimension = compiler.compile("d.1");
-  EXPECT_FALSE(dimension.success);
-  EXPECT_NE(dimension.errorMessage.find("typed-handle VM lowering"),
-            std::string::npos);
+  EXPECT_TRUE(dimension.success) << dimension.errorMessage;
+  ASSERT_TRUE(dimension.resultDimensionValues.has_value());
+  ASSERT_EQ(dimension.resultDimensionValues->size(), 1U);
+  EXPECT_EQ(dimension.resultDimensionValues->front().dim,
+            core->findOrMintDimension("d.1"));
 }
 
 // Intent (rewritten from "both entry points throw"): the facade's AST and

@@ -156,18 +156,21 @@ TEST(VPLEngineTest, ZeroLengthIotaKeepsItsArrayShapeWithoutAnOrigin) {
   EXPECT_TRUE(empty.collectCells(engine.arena()).empty());
 }
 
-TEST(VPLEngineTest, DISABLED_TransposeAndReverse) {
+TEST(VPLEngineTest, TransposeAndReverse) {
   VPLEngine engine;
 
   engine.evaluate("A ← 5⍳d.1");
 
   // Reverse: ⌽A
   auto revA = engine.evaluate("⌽A");
-  EXPECT_EQ(revA.axes()[0].dir, zigzag::DimVector::NEG);
+  // Reverse is a flag on the axis (card V4b); the walk direction is the
+  // dimension's own and stays positive.
+  EXPECT_TRUE(revA.isReversed(0));
+  EXPECT_EQ(revA.axes()[0].dir, zigzag::DimVector::POS);
 
   // Reverse ASCII: |. A
   auto revAscii = engine.evaluate("|. A");
-  EXPECT_EQ(revAscii.axes()[0].dir, zigzag::DimVector::NEG);
+  EXPECT_TRUE(revAscii.isReversed(0));
 
   // Transpose: ⍉ and |:
   engine.evaluate("V ← H ⍴ (d.1 d.2 d.3)");

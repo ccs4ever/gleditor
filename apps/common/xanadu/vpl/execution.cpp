@@ -1,6 +1,7 @@
 #include "common/xanadu/vpl/execution.hpp"
 
 #include <memory>
+#include <stdexcept>
 #include <unordered_set>
 
 #include "common/xanadu/zigzag/dim_vector.hpp"
@@ -27,9 +28,11 @@ private:
 // `scalarInt()` while the result is still a rank of one cell.
 VplView makeRankView(std::optional<zigzag::CellRef> origin,
                      const std::vector<zigzag::DirectedDim> &axes,
+                     const AxisReversed &reversed,
                      zigzag::ArenaManifold &arena) {
   VplView view{origin, axes};
   if (!origin) return view;
+  view.setReversed(reversed);
   if (const auto value = arena.asInt64(*origin)) {
     view.setScalarPayload(*value);
   } else if (const auto value = arena.asDouble(*origin)) {
@@ -41,6 +44,7 @@ VplView makeRankView(std::optional<zigzag::CellRef> origin,
 
 struct ViewFacts {
   std::vector<zigzag::DirectedDim> axes;
+  AxisReversed reversed;
   bool enclosed{false};
   const std::optional<std::vector<zigzag::DirectedDim>> *dimensionValues{
       nullptr};
@@ -54,17 +58,23 @@ VplView makeView(std::optional<zigzag::CellRef> cell, const ViewFacts &facts,
     return VplView{std::nullopt, **facts.dimensionValues};
   }
   // An empty array has axes and no origin: its register was cleared.
-  if (!cell) return VplView{std::nullopt, facts.axes};
+  if (!cell) {
+    VplView empty{std::nullopt, facts.axes};
+    empty.setReversed(facts.reversed);
+    return empty;
+  }
 
   if (facts.enclosed) {
     const auto dimension = core.findOrMintDimension(enclosureDimensionName);
     const auto content = arena.linked(*cell, dimension, zigzag::DimVector::POS);
     VplView box{cell, facts.axes};
-    box.enclose(
-        std::make_shared<VplView>(makeRankView(content, facts.axes, arena)));
+    box.enclose(std::make_shared<VplView>(
+        makeRankView(content, facts.axes, {}, arena)));
     return box;
   }
-  if (!facts.axes.empty()) return makeRankView(cell, facts.axes, arena);
+  if (!facts.axes.empty()) {
+    return makeRankView(cell, facts.axes, facts.reversed, arena);
+  }
 
   if (const auto value = arena.asInt64(*cell)) {
     return VplView::makeScalar(*value, std::optional{*cell});
@@ -181,6 +191,7 @@ Executor::run(CompilationResult compiled, std::size_t maxCycles) {
     if (foreignResult) addDependency(resultDependencies, *resultCell);
     auto view = makeView(resultCell,
                          {.axes            = compiled.resultAxes,
+                          .reversed        = compiled.resultReversed,
                           .enclosed        = compiled.resultEnclosed,
                           .dimensionValues = &compiled.resultDimensionValues},
                          core_);
@@ -222,6 +233,7 @@ Executor::run(CompilationResult compiled, std::size_t maxCycles) {
       }
       VplView assigned = makeView(cell,
                                   {.axes            = binding.axes,
+                                   .reversed        = binding.reversed,
                                    .enclosed        = binding.enclosed,
                                    .dimensionValues = &binding.dimensionValues},
                                   core_);

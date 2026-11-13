@@ -94,6 +94,16 @@ public:
     const auto found = compiler_.rankAxes_.find(cell);
     return found == compiler_.rankAxes_.end() ? nullptr : &found->second;
   }
+  /// Which axes of `cell` are read in reverse (parallel to axesOf), or nullptr
+  /// when none is.
+  [[nodiscard]] const AxisReversed *reversedOf(zigzag::CellRef cell) const {
+    const auto found = compiler_.rankReversed_.find(cell);
+    return found == compiler_.rankReversed_.end() ? nullptr : &found->second;
+  }
+  [[nodiscard]] bool isReversed(zigzag::CellRef cell, std::size_t index) const {
+    const auto *flags = reversedOf(cell);
+    return flags != nullptr && index < flags->size() && (*flags)[index];
+  }
   [[nodiscard]] std::size_t valenceOf(zigzag::CellRef cell) const {
     const auto *axes = axesOf(cell);
     return axes == nullptr ? 0U : axes->size();
@@ -121,6 +131,9 @@ public:
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::DirectedDim>> &
   rankAxes() const {
     return compiler_.rankAxes_;
+  }
+  std::unordered_map<zigzag::CellRef, AxisReversed> &rankReversed() const {
+    return compiler_.rankReversed_;
   }
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>> &
   rankDependencies() const {
