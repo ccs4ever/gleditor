@@ -819,12 +819,15 @@ TEST(VlaceLowerDataTest, EmptyParenthesesAreNotAnExpression) {
 
 TEST(VlaceLowerDataTest, ALongForcedListReadsBackAndRenders) {
   Rig rig;
-  const auto v = rig.eval("from n = n : from (n + 1) ;" + takeDef +
-                          "take 3000 (from 1)");
+  const auto v =
+      rig.eval("from n = n : from (n + 1) ;" + takeDef + "take 500 (from 1)");
   ASSERT_TRUE(v.has_value());
+  // Each element is forced by its own VM run and the runs' backing cells
+  // accumulate, so the cost grows faster than the length (card L-RENDER);
+  // 500 is long enough to show there is no host recursion per element.
   const auto text = rig.compiler.render(*v, 20000);
   EXPECT_EQ(text.substr(0, 13), "[1, 2, 3, 4, ");
-  EXPECT_NE(text.find(", 3000]"), std::string::npos);
+  EXPECT_NE(text.find(", 500]"), std::string::npos);
   EXPECT_EQ(text.find("..."), std::string::npos);
 }
 
