@@ -10,6 +10,7 @@
 #include <array>
 #include <utility>
 
+#include "common/xanadu/vlace/kernel.hpp"
 #include "common/xanadu/vlace/run_vm.hpp"
 
 namespace xanadu::vlace::lower {
@@ -118,7 +119,7 @@ Lowered<Operand> lowerShortCircuit(LowerContext &ctx, const EBinOp &e,
   if (!lhs) return lhs;
   const auto result = ctx.newRegister();
   const auto done = ctx.mintLabel(isAnd ? "#vlace_and_done" : "#vlace_or_done");
-  emitCopy(ctx, *lhs, result);
+  emitCopyReference(ctx, *lhs, result);
   if (isAnd) {
     ctx.branchIfFalse(*lhs, done);
   } else {
@@ -131,7 +132,7 @@ Lowered<Operand> lowerShortCircuit(LowerContext &ctx, const EBinOp &e,
   }
   auto rhs = lowerForced(ctx, *e.rhs);
   if (!rhs) return rhs;
-  emitCopy(ctx, *rhs, result);
+  emitCopyReference(ctx, *rhs, result);
   ctx.placeLabel(done);
   return Operand(result.cell, Evaluation::Whnf);
 }
@@ -194,12 +195,12 @@ Lowered<Operand> lowerIf(LowerContext &ctx, const EIf &e, SourceLocation) {
   ctx.branchIfFalse(*cond, elseArm);
   auto thenValue = lowerForced(ctx, *e.then);
   if (!thenValue) return thenValue;
-  emitCopy(ctx, *thenValue, result);
+  emitCopyReference(ctx, *thenValue, result);
   ctx.jumpTo(done);
   ctx.placeLabel(elseArm);
   auto elseValue = lowerForced(ctx, *e.elze);
   if (!elseValue) return elseValue;
-  emitCopy(ctx, *elseValue, result);
+  emitCopyReference(ctx, *elseValue, result);
   ctx.placeLabel(done);
   return Operand(result.cell, Evaluation::Whnf);
 }

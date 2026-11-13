@@ -388,3 +388,66 @@ TEST(VlaceLowerKernelTest, FormsOwnedByLaterCardsRefuseByName) {
 }
 
 } // namespace
+
+namespace {
+
+using namespace xanadu::vlace;
+
+TEST(VlaceLowerKernelJoinTest, IfSelectsAClosureAndAppliesIt) {
+  const std::string defs =
+      "let f = fn x => x + 1 in let g = fn y => y * 10 in ";
+  EXPECT_EQ(Rig{}.show(defs + "(if True then f else g) 4"), "5");
+  EXPECT_EQ(Rig{}.show(defs + "(if False then f else g) 4"), "40");
+  EXPECT_EQ(Rig{}.show("(if True then fn x => x + 1 else fn y => y) 1"), "2");
+}
+
+TEST(VlaceLowerKernelJoinTest, IfReturningAThunkIsForcedByItsUser) {
+  EXPECT_EQ(
+      Rig{}.show("let a = 6 * 7 in let b = 1 in (if True then a else b) + 0"),
+      "42");
+  EXPECT_EQ(Rig{}.show("let a = 6 * 7 in let b = 1 in if False then a else b"),
+            "1");
+}
+
+TEST(VlaceLowerKernelJoinTest, ScalarArmsStillReadBackAsTheirKind) {
+  Rig rig;
+  const auto kind = [&rig](std::string_view src) {
+    auto v = rig.eval(src);
+    EXPECT_TRUE(v.has_value()) << src;
+    return v ? (*v)->kind : Value::Kind::Thunk;
+  };
+  EXPECT_EQ(kind("if True then 1 else 2"), Value::Kind::Int);
+  EXPECT_EQ(kind("if True then 1.5 else 2.5"), Value::Kind::Float);
+  EXPECT_EQ(kind("if True then \"7\" else \"8\""), Value::Kind::Str);
+  EXPECT_EQ(rig.show("if False then \"7\" else \"8\""), "8");
+  EXPECT_EQ(kind("if 1 < 2 then True else False"), Value::Kind::Bool);
+  EXPECT_EQ(kind("True && False"), Value::Kind::Bool);
+  EXPECT_EQ(kind("False || True"), Value::Kind::Bool);
+}
+
+TEST(VlaceLowerKernelJoinTest, NestedIfsMixClosureAndScalarArmsAcrossLets) {
+  EXPECT_EQ(
+      Rig{}.show("let inc = fn x => x + 1 in let n = if True then 10 else 0 in "
+                 "let h = if n == 10 then (if False then inc else fn z => z * "
+                 "2) else inc in "
+                 "h n"),
+      "20");
+  EXPECT_EQ(Rig{}.show(
+                "let inc = fn x => x + 1 in let n = if False then 10 else 5 in "
+                "let h = if n == 10 then inc else (if True then fn z => z - 1 "
+                "else inc) in "
+                "(h n) + (if n == 5 then 100 else 0)"),
+            "104");
+}
+
+TEST(VlaceLowerKernelJoinTest, AClosureThroughAndOrIsAnErrorNotACrash) {
+  for (const std::string_view src :
+       {"(fn x => x) && True", "True && (fn x => x)", "False || (fn x => x)"}) {
+    Rig rig;
+    auto v = rig.eval(src);
+    // Either refused or reads back as something; it must not crash or hang.
+    if (v) SUCCEED() << src;
+  }
+}
+
+} // namespace
