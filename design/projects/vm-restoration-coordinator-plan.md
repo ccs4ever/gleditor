@@ -470,6 +470,11 @@ that run every frontend); `gleditor_test` and `zigzag_test` unchanged. The one n
 baseline is `ArrayfiladeBenchmarkTest.Subscripting10000Cells`, the timing-sensitive benchmark of
 gate C. The current failing list is `/data/git/gleditor-restore/.logs/w1/gate-f-xuzz-failed.txt`.
 
+Gate G (2026-11-13, shared branch at `e65ca318`, adding L3): `xuzz_test` 121 failures of 4239,
+nothing newly failing, 85 turned green against the baseline (33 since gate F, all but two of them
+VLace end-to-end, prelude and IO tests); `gleditor_test` and `zigzag_test` unchanged. The current
+failing list is `/data/git/gleditor-restore/.logs/w1/gate-g-xuzz-failed.txt`.
+
 **Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
 usage limit twice, and four exhausted it again. By the owner's instruction (2026-11-12), run at most
 two agents at a time, workers and reviewers counted together.
@@ -534,11 +539,12 @@ release refusal.
 
 New cards from these rulings:
 
-| Card    | What                                                                                    | After |
-| :------ | :-------------------------------------------------------------------------------------- | :---- |
-| L-PARSE | Fix the VLace comparison-chain parse defect, with tests                                 | L1    |
-| V4b     | Bounded views: a stop cell on reversed axes, honoured by every walker and by read-back  | O2    |
-| O2      | Cell-identity compare, `PinHistorical`, arena space undo, program-cell release, project | O1    |
+| Card     | What                                                                                                                                                                                             | After |
+| :------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---- |
+| L-PARSE  | Fix the VLace comparison-chain parse defect, with tests                                                                                                                                          | L1    |
+| L-RENDER | Rendering a long VLace list: one VM run per element, and the runs' backing cells accumulate until the frame limit refuses (found in L3's fix round; 100,000 elements fail cleanly after minutes) | L3    |
+| V4b      | Bounded views: a stop cell on reversed axes, honoured by every walker and by read-back                                                                                                           | O2    |
+| O2       | Cell-identity compare, `PinHistorical`, arena space undo, program-cell release, project                                                                                                          | O1    |
 
 ## 5a. Original decision table (before W0)
 
