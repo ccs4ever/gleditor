@@ -39,6 +39,9 @@ struct CompilationOptions {
 struct CompiledBinding {
   zigzag::CellRef cell;
   std::vector<zigzag::DirectedDim> axes;
+  /// Registers that hold each axis's stop cell at run time (card V4b); empty
+  /// when no axis is bounded.
+  AxisStops stops;
   std::vector<zigzag::CellRef> dependencies;
   /// The bound value is an enclosed array: a box cell whose content hangs off
   /// `d.enclosure`. Valence stays `axes.size()`; enclosure is static because a
@@ -59,6 +62,8 @@ struct CompilationResult {
   std::optional<zigzag::CellRef> cursor;
   std::vector<zigzag::CellRef> resultSlots;
   std::vector<zigzag::DirectedDim> resultAxes;
+  /// Registers for the result's per-axis stop cells (see CompiledBinding).
+  AxisStops resultStops;
   std::vector<zigzag::CellRef> resultDependencies;
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
       cellDependencies;
@@ -165,13 +170,18 @@ private:
   std::vector<zigzag::CellRef> allOps_;
   std::vector<zigzag::CellRef> lastResultCells_;
   std::vector<zigzag::DirectedDim> lastResultAxes_;
+  AxisStops lastResultStops_;
   std::vector<zigzag::CellRef> lastResultDependencies_;
 
   std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
   std::unordered_map<std::string, std::vector<zigzag::DirectedDim>> varAxes_;
+  std::unordered_map<std::string, AxisStops> varStops_;
   std::unordered_map<std::string, CompiledBinding> assignedBindings_;
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::DirectedDim>>
       rankAxes_;
+  /// Stop registers per axis of a view, keyed like rankAxes_; no entry means
+  /// every axis is unbounded.
+  std::unordered_map<zigzag::CellRef, AxisStops> rankStops_;
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
       rankDependencies_;
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>

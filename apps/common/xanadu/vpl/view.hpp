@@ -24,6 +24,19 @@
 namespace xanadu::vpl {
 
 /**
+ * The last cell of the walk on each axis of a view, inclusive, parallel to
+ * the axis list. An absent entry is an unbounded axis: the walk goes until
+ * the rank ends. The vector itself may be empty, which means every axis is
+ * unbounded.
+ *
+ * A stop identifies the end of the walk from the view's ORIGIN. On an array
+ * of valence above one that is one row's end, so the other rows take the
+ * first row's extent (the rectangular rule `shape` has always used); a stop is
+ * never a claim about where every row ends.
+ */
+using AxisStops = std::vector<std::optional<zigzag::CellRef>>;
+
+/**
  * @brief Represents a VPL multidimensional view or scalar value.
  *
  * A VPL value is either a scalar cell (valence 0, empty axes) or a view
@@ -116,6 +129,26 @@ public:
     return this;
   }
 
+  /// The stop cell of each axis (see AxisStops); empty when none is bounded.
+  [[nodiscard]] const AxisStops &stops() const noexcept { return stops_; }
+  VplView *setStops(AxisStops stops) {
+    if (!stops.empty() && stops.size() != axes_.size()) {
+      throw std::invalid_argument(
+          "VPL view stops must be parallel to its axes");
+    }
+    stops_ = std::move(stops);
+    if (std::ranges::none_of(
+            stops_, [](const auto &stop) { return stop.has_value(); })) {
+      stops_.clear();
+    }
+    return this;
+  }
+  /// The stop of axis `index`, absent when that axis is unbounded.
+  [[nodiscard]] std::optional<zigzag::CellRef>
+  stopAt(std::size_t index) const noexcept {
+    return index < stops_.size() ? stops_[index] : std::nullopt;
+  }
+
   /// Valence: number of dimensions indexed along (APL rank).
   [[nodiscard]] std::size_t valence() const noexcept { return axes_.size(); }
 
@@ -160,6 +193,7 @@ public:
    */
   void transpose() {
     std::ranges::reverse(axes_);
+    std::ranges::reverse(stops_);
     if (!extents_.empty()) {
       std::ranges::reverse(extents_);
     }
@@ -176,17 +210,20 @@ public:
     std::vector<zigzag::DirectedDim> newAxes;
     newAxes.reserve(axes_.size());
     std::vector<std::size_t> newExtents;
+    AxisStops newStops;
     if (!extents_.empty() && extents_.size() == axes_.size()) {
       newExtents.reserve(extents_.size());
     }
     for (std::size_t p : permutation) {
       if (p >= axes_.size()) return false;
       newAxes.push_back(axes_[p]);
+      if (!stops_.empty()) newStops.push_back(stops_[p]);
       if (!newExtents.empty()) {
         newExtents.push_back(extents_[p]);
       }
     }
-    axes_ = std::move(newAxes);
+    axes_  = std::move(newAxes);
+    stops_ = std::move(newStops);
     if (!newExtents.empty()) {
       extents_ = std::move(newExtents);
     }
@@ -238,6 +275,7 @@ public:
     std::size_t limit                  = arena.cellCount() + 1;
     while (cur && limit-- > 0) {
       count0++;
+      if (isStop(arena, *cur, 0)) break;
       cur = arena.linked(*cur, axes_[0].dim, axes_[0].dir);
     }
     dims.push_back(count0);
@@ -251,12 +289,16 @@ public:
       // Sample along previous axis positions
       std::optional<zigzag::CellRef> rowCur = origin_;
       std::size_t rowLimit                  = arena.cellCount() + 1;
+      std::size_t rowIndex                  = 0;
       while (rowCur && rowLimit-- > 0) {
         std::size_t extent               = 0;
         std::optional<zigzag::CellRef> c = rowCur;
         std::size_t l                    = arena.cellCount() + 1;
         while (c && l-- > 0) {
           extent++;
+          // Only the origin's row can end at the stop; any other row runs to
+          // its rank's end, so a longer row shows up as ragged.
+          if (rowIndex == 0 && isStop(arena, *c, a)) break;
           c = arena.linked(*c, axes_[a].dim, axes_[a].dir);
         }
         if (!extentSet) {
@@ -265,7 +307,9 @@ public:
         } else if (extent != firstExtent) {
           ragged = true;
         }
+        if (isStop(arena, *rowCur, 0)) break;
         rowCur = arena.linked(*rowCur, axes_[0].dim, axes_[0].dir);
+        ++rowIndex;
       }
       dims.push_back(firstExtent);
       if (ragged) {
@@ -295,6 +339,10 @@ public:
         steps = -steps;
       }
       while (steps > 0 && cur) {
+        // Walking on from the stop leaves the view; walking back never does.
+        if (dir == axes_[i].dir && i == 0 && isStop(arena, *cur, i)) {
+          return std::nullopt;
+        }
         cur = arena.linked(*cur, axes_[i].dim, dir);
         steps--;
       }
@@ -325,6 +373,7 @@ public:
                                                       : std::min(sh[0], arena.cellCount() + 1);
       while (cur && limit-- > 0) {
         cells.push_back(*cur);
+        if (isStop(arena, *cur, 0)) break;
         cur = arena.linked(*cur, axes_[0].dim, axes_[0].dir);
       }
       return cells;
@@ -353,6 +402,18 @@ public:
   }
 
 private:
+  // Identity, as the VM's SameCell has it: a proxy and the cell it names are
+  // one cell, so a stop recorded through one fold matches the other.
+  [[nodiscard]] bool isStop(const zigzag::ArenaManifold &arena,
+                            zigzag::CellRef cell,
+                            std::size_t axis) const noexcept {
+    const auto stop = stopAt(axis);
+    if (!stop) return false;
+    if (cell == *stop) return true;
+    const auto left  = arena.resolveSourceCell(cell);
+    const auto right = arena.resolveSourceCell(*stop);
+    return left && right && *left == *right;
+  }
   void requireKnownOrigin(const zigzag::ArenaManifold &arena) const {
     if (origin_ && !arena.contains(*origin_)) {
       throw std::invalid_argument(
@@ -361,6 +422,7 @@ private:
   }
   std::optional<zigzag::CellRef> origin_;
   std::vector<zigzag::DirectedDim> axes_;
+  AxisStops stops_;
   std::vector<std::size_t> extents_;
   std::vector<zigzag::CellRef> dependencies_;
   bool isRagged_{false};

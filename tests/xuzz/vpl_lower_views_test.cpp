@@ -77,21 +77,19 @@ TEST_F(VplViewsTest, ReverseRankOneWalksTheSameCellsNegward) {
   const auto a        = run("A ← 5⍳d.1; A");
   const auto original = a.view.collectCells(arena);
   ASSERT_EQ(original.size(), 5U);
-  const auto predecessor =
-      arena.linked(original.front(), dim("d.1"), DimVector::NEG);
-  ASSERT_TRUE(predecessor);
+  ASSERT_TRUE(arena.linked(original.front(), dim("d.1"), DimVector::NEG));
   for (const auto *source : {"⌽A", "|. A", "⊖A", "|.. A"}) {
     const auto r = run(source);
     ASSERT_EQ(r.view.axes().size(), 1U) << source;
     EXPECT_EQ(r.view.axes()[0].dir, DimVector::NEG) << source;
     EXPECT_EQ(r.view.origin(), original.back()) << source;
-    // The same cells in the opposite order: nothing was copied. A view has no
-    // extent, so the negward walk also runs on through the cell that precedes
-    // A's head on d.1 (the home cell here); only a copy could cut it off.
+    // The same cells in the opposite order: nothing was copied, and the
+    // reverse ends at A's head instead of running on into the cell that
+    // precedes it (card V4b; V4 alone walked that predecessor too).
     auto cells = r.view.collectCells(arena);
-    ASSERT_EQ(cells.size(), original.size() + 1) << source;
-    EXPECT_EQ(cells.back(), *predecessor) << source;
-    cells.pop_back();
+    ASSERT_EQ(cells.size(), original.size()) << source;
+    EXPECT_EQ(r.view.shape(arena), std::vector<std::size_t>{5}) << source;
+    EXPECT_EQ(r.view.stopAt(0), original.front()) << source;
     std::ranges::reverse(cells);
     EXPECT_EQ(cells, original) << source;
   }

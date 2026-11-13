@@ -94,6 +94,19 @@ public:
     const auto found = compiler_.rankAxes_.find(cell);
     return found == compiler_.rankAxes_.end() ? nullptr : &found->second;
   }
+  /// The registers holding each axis's stop cell (parallel to axesOf), or
+  /// nullptr when the value is unbounded on every axis.
+  [[nodiscard]] const AxisStops *stopsOf(zigzag::CellRef cell) const {
+    const auto found = compiler_.rankStops_.find(cell);
+    return found == compiler_.rankStops_.end() ? nullptr : &found->second;
+  }
+  /// The stop register of axis `index` of `cell`, absent when unbounded.
+  [[nodiscard]] std::optional<zigzag::CellRef> stopOf(zigzag::CellRef cell,
+                                                      std::size_t index) const {
+    const auto *stops = stopsOf(cell);
+    return stops != nullptr && index < stops->size() ? (*stops)[index]
+                                                     : std::nullopt;
+  }
   [[nodiscard]] std::size_t valenceOf(zigzag::CellRef cell) const {
     const auto *axes = axesOf(cell);
     return axes == nullptr ? 0U : axes->size();
@@ -121,6 +134,9 @@ public:
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::DirectedDim>> &
   rankAxes() const {
     return compiler_.rankAxes_;
+  }
+  std::unordered_map<zigzag::CellRef, AxisStops> &rankStops() const {
+    return compiler_.rankStops_;
   }
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>> &
   rankDependencies() const {

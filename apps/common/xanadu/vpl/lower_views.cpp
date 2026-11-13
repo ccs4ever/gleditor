@@ -3,12 +3,26 @@
  * @brief Card V4 view verbs: transpose, reverse, dimension values,
  * rho-to-dimensions.
  *
- * A view is (origin, axes), so these verbs mint no value cells and copy none:
- * a transpose or a dimension relabelling only changes the compile-time axis
- * list, and a reverse additionally walks the origin register to the far end of
- * the flipped axis. Each result gets a register of its own (an alias of the
+ * A view is (origin, axes, stops), so these verbs mint no value cells and
+ * copy none: a transpose or a dimension relabelling only changes the
+ * compile-time axis list (stops travel with their axes), and a reverse moves
+ * the origin to the far end of the flipped axis and bounds that axis there
+ * (card V4b). Each result gets a register of its own (an alias of the
  * operand's), because rankAxes_ is keyed by register and two views over one
  * origin would otherwise share a key.
+ *
+ * The reverse rule, per flipped axis, for a view [origin .. end] where `end`
+ * is the axis's stop when it has one and the rank's end when it has not:
+ *  - the result's origin is `end` and its stop is the operand's origin, so
+ *    the result is [end .. origin] walked the other way;
+ *  - an unstopped axis finds its `end` by walking (emit::extreme), a stopped
+ *    one already has it, so reversing twice costs no walk and lands exactly
+ *    on the operand's cells;
+ *  - the result is a snapshot: cells appended to the rank after the reverse
+ *    lie beyond `end` and are not in it, whereas the operand (no stop) grows.
+ * A stop only identifies the end of the walk from the origin, which on a
+ * valence-2 view is one row, so a reverse of a view that is already reversed
+ * on another axis is refused (kReverseRows) rather than guessed.
  */
 #include <cstdint>
 #include <optional>
@@ -33,6 +47,9 @@ constexpr std::string_view kReverseDimension =
     "VPL reverse of a dimension value is unsupported by the VM";
 constexpr std::string_view kReverseEnclosed =
     "VPL reverse of an enclosed value is unsupported by the VM";
+constexpr std::string_view kReverseRows =
+    "VPL reverse of an array already reversed along another axis is "
+    "unsupported by the VM (a stop cell names one row's end)";
 constexpr std::string_view kViewOriginDimension =
     "VPL dimension view of a dimension value is unsupported by the VM";
 constexpr std::string_view kViewOriginEnclosed =
@@ -59,9 +76,13 @@ CellRef clearedRegister(LowerContext &ctx) {
 // The result register of a view over `operand`: its own key in rankAxes_,
 // the operand's input dependencies.
 CellRef viewOver(LowerContext &ctx, CellRef origin, CellRef operand,
-                 std::vector<DirectedDim> axes) {
+                 std::vector<DirectedDim> axes, AxisStops stops = {}) {
   const auto view      = emit::aliasRegister(ctx, origin);
   ctx.rankAxes()[view] = std::move(axes);
+  if (std::ranges::any_of(stops,
+                          [](const auto &stop) { return stop.has_value(); })) {
+    ctx.rankStops()[view] = std::move(stops);
+  }
   const std::array inputs{operand};
   emit::mergeRankInputDependencies(ctx, view, inputs);
   return view;
@@ -111,35 +132,37 @@ Maybe lowerTransposeMonadic(LowerContext &ctx, const MonadicExpr &expr) {
   if (axes == nullptr) return operand;
   auto reversed = *axes;
   std::ranges::reverse(reversed);
-  return viewOver(ctx, operand, operand, std::move(reversed));
+  AxisStops stops;
+  if (const auto *held = ctx.stopsOf(operand)) {
+    stops = *held;
+    std::ranges::reverse(stops);
+  }
+  return viewOver(ctx, operand, operand, std::move(reversed), std::move(stops));
 }
 
 Maybe lowerReverseMonadic(LowerContext &ctx, const MonadicExpr &expr) {
-  // `⌽⌽X` is `X`. A view has no extent, so undoing a reversal by walking back
-  // to the far end would run through whatever precedes X's head (the home cell
-  // for an iota rank) and not stop at X's head; the identity is therefore
-  // taken on the syntax, where the nesting is known.
-  if (const auto *inner = dynamic_cast<const MonadicExpr *>(expr.right().get());
-      inner != nullptr && !inner->customVerb() &&
-      inner->verb() == expr.verb() && inner->right()) {
-    return ctx.compileNode(*inner->right());
-  }
   const auto operand = compileOperand(ctx, expr, "VPL reverse");
   if (ctx.dimensionValuesOf(operand) != nullptr) refuse(kReverseDimension);
   if (ctx.isEnclosed(operand)) refuse(kReverseEnclosed);
   const auto *axes = ctx.axesOf(operand);
   if (axes == nullptr || axes->empty()) return operand;
 
-  // Reversing the walk alone would leave the origin at the old head, where the
-  // flipped axis has nowhere to go: the origin moves to the old tail.
-  auto flipped         = *axes;
-  const auto index     = expr.verb() == TokenKind::ReverseFirst
-                             ? std::size_t{0}
-                             : flipped.size() - 1;
-  const auto old       = flipped[index];
-  flipped[index].dir   = -old.dir;
-  const auto newOrigin = emit::extreme(ctx, operand, old.dim, old.dir);
-  return viewOver(ctx, newOrigin, operand, std::move(flipped));
+  auto flipped     = *axes;
+  const auto index = expr.verb() == TokenKind::ReverseFirst
+                         ? std::size_t{0}
+                         : flipped.size() - 1;
+  for (std::size_t other = 0; other < flipped.size(); ++other) {
+    if (other != index && ctx.stopOf(operand, other)) refuse(kReverseRows);
+  }
+  const auto old     = flipped[index];
+  flipped[index].dir = -old.dir;
+  const auto oldStop = ctx.stopOf(operand, index);
+  const auto newOrigin =
+      oldStop ? *oldStop : emit::extreme(ctx, operand, old.dim, old.dir);
+  AxisStops stops(flipped.size());
+  stops[index] = emit::aliasRegister(ctx, operand);
+  return viewOver(ctx, newOrigin, operand, std::move(flipped),
+                  std::move(stops));
 }
 
 CellRef lowerRhoViewDyadic(LowerContext &ctx, const DyadicExpr &expr) {
@@ -180,6 +203,7 @@ CellRef lowerTransposeDyadic(LowerContext &ctx, const DyadicExpr &expr,
   if (permutation->size() != axes->size()) refuse(kPermutationInvalid);
   std::vector<bool> seen(axes->size(), false);
   std::vector<DirectedDim> permuted;
+  AxisStops permutedStops;
   permuted.reserve(axes->size());
   for (const auto index : *permutation) {
     if (index < 0 || static_cast<std::size_t>(index) >= axes->size() ||
@@ -188,8 +212,10 @@ CellRef lowerTransposeDyadic(LowerContext &ctx, const DyadicExpr &expr,
     }
     seen[static_cast<std::size_t>(index)] = true;
     permuted.push_back((*axes)[static_cast<std::size_t>(index)]);
+    permutedStops.push_back(ctx.stopOf(rCell, static_cast<std::size_t>(index)));
   }
-  return viewOver(ctx, rCell, rCell, std::move(permuted));
+  return viewOver(ctx, rCell, rCell, std::move(permuted),
+                  std::move(permutedStops));
 }
 
 CellRef lowerDimension(LowerContext &ctx, const DimensionExpr &expr) {
