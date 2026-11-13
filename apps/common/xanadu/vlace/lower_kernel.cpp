@@ -49,9 +49,9 @@ using zigzag::vortex::OpcodeKind;
 /// again. That is correct under nested forces too: within one run the epoch is
 /// constant, so a thunk demanding itself through any depth of other forces
 /// still sees its own epoch and is reported as a loop.
-constexpr std::int64_t thunkSuspended = 0;
-constexpr std::int64_t thunkDone      = 2;
-constexpr std::int64_t firstEpoch     = 3;
+/// thunkSuspended and thunkDone are shared with the constructor field slots
+/// (lower_data.cpp), so they live in kernel.hpp.
+constexpr std::int64_t firstEpoch = 3;
 
 /// Link direction operand for the Link opcode: +1 reads/writes posward.
 constexpr std::int64_t linkPosward = 1;

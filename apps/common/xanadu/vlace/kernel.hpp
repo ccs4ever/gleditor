@@ -10,6 +10,13 @@
 
 namespace xanadu::vlace::lower {
 
+/// The two thunk states a card other than L2 must name: a freshly boxed cell
+/// holds the constant 0, which is a suspended thunk without a write, and a
+/// forced thunk holds 2. (The running state is an evaluation epoch, private to
+/// the force frame.)
+inline constexpr std::int64_t thunkSuspended = 0;
+inline constexpr std::int64_t thunkDone      = 2;
+
 /// Emit `dst := src` into the current block as a *reference* copy: @p dst
 /// afterwards names the same cell @p src names, and nothing about that cell is
 /// read or written. This is the copy for a closure, a thunk or any other
