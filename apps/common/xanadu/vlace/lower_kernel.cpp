@@ -49,9 +49,9 @@ using zigzag::vortex::OpcodeKind;
 /// again. That is correct under nested forces too: within one run the epoch is
 /// constant, so a thunk demanding itself through any depth of other forces
 /// still sees its own epoch and is reported as a loop.
-constexpr std::int64_t thunkSuspended = 0;
-constexpr std::int64_t thunkDone      = 2;
-constexpr std::int64_t firstEpoch     = 3;
+/// thunkSuspended and thunkDone are shared with the constructor field slots
+/// (lower_data.cpp), so they live in kernel.hpp.
+constexpr std::int64_t firstEpoch = 3;
 
 /// Link direction operand for the Link opcode: +1 reads/writes posward.
 constexpr std::int64_t linkPosward = 1;
@@ -794,6 +794,8 @@ Lowered<Operand> lowerLambda(LowerContext &ctx, const ELambda &e,
                              SourceLocation loc) {
   if (e.params.empty())
     return internalError("a lambda without parameters", loc);
+  if (auto linear = checkLinear(e.params); !linear)
+    return std::unexpected(linear.error());
   auto built = buildLambdaClosure(ctx, e.params, 0, *e.body, loc);
   if (!built) return std::unexpected(built.error());
   return emitClosureCreation(ctx, *built, loc);
@@ -822,6 +824,8 @@ Lowered<Operand> lowerDollar(LowerContext &ctx, const EBinOp &e,
 
 Lowered<void> lowerValueDecl(LowerContext &ctx, const ValueDecl &d,
                              SourceLocation loc) {
+  if (auto linear = checkLinear(d.params); !linear)
+    return std::unexpected(linear.error());
   auto copy = std::make_shared<DeclCopy>();
   for (const auto &p : d.params) copy->params.push_back(clonePattern(*p));
   copy->body = cloneExpr(*d.body);

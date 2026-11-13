@@ -184,9 +184,8 @@ public:
   /// dimensions: under R8 evaluation mints nothing in a store, so these are as
   /// ephemeral as the cells that use them.
   struct KernelDims {
-    zigzag::DimRef thunk;     ///< thunk cell -> its suspended closure
-    zigzag::DimRef memo;      ///< thunk cell -> its forced value, once forced
-    zigzag::DimRef blackhole; ///< thunk cell -> itself while being forced
+    zigzag::DimRef thunk; ///< thunk cell -> its suspended closure, then the
+                          ///< box of its forced value
   };
   [[nodiscard]] const KernelDims &kernelDims(zigzag::vortex::VortexCore &core);
 
