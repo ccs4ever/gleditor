@@ -2529,11 +2529,15 @@ ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
                                     spaceStoreRefsDimensions_.end());
     // Dimension bindings that named a detached space would dangle.
     for (auto it = boundDimensions_.begin(); it != boundDimensions_.end();) {
-      std::erase_if(it->second.members, [&](const BoundDimensionMember &b) {
+      auto &members     = it->second.members;
+      const bool before = !members.empty();
+      std::erase_if(members, [&](const BoundDimensionMember &b) {
         return b.space > m.spaceCount;
       });
-      it = it->second.members.empty() ? boundDimensions_.erase(it)
-                                      : std::next(it);
+      // Only a set this sweep emptied goes; one that was empty before is not
+      // this mark's to undo.
+      it = before && members.empty() ? boundDimensions_.erase(it)
+                                     : std::next(it);
     }
     if (spaces_.empty())
       storesRankTail_.reset();
@@ -3222,7 +3226,8 @@ ArenaManifold::exportPrefix(const Mark &m) const {
       m.quoteOccurrenceCount > quoteOccurrenceOrder_.size() ||
       m.proxyShadowedEdgeCount > proxyShadowedEdgeOrder_.size() ||
       m.quoteSpaceCount > quoteSpaceOrder_.size() ||
-      m.dimensionCount > dimensionOrder_.size() || m.cellCount > ephemeralBit ||
+      m.dimensionCount > dimensionOrder_.size() ||
+      m.spaceCount > spaces_.size() || m.cellCount > ephemeralBit ||
       m.liveLinks > m.linkSize || m.liveContent > m.contentSize) {
     return std::unexpected{ArenaRefusal::MalformedPrefix};
   }
@@ -3276,6 +3281,8 @@ ArenaManifold::exportPrefix(const Mark &m) const {
   // the state at the mark, and therefore form a fresh rollback baseline.
   out.mark.trailSize      = 0;
   out.mark.dimensionCount = 0;
+  // A prefix carries no spaces (hasUnsupportedUntrackedPrefixIdentity).
+  out.mark.spaceCount = 0;
 
   const auto cellCount = static_cast<std::size_t>(m.cellCount);
   out.slots.assign(slots_.begin(),
@@ -3330,7 +3337,8 @@ ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
   }
   const auto &m = snapshot.mark;
   if (m.proxyCount != 0 || m.quoteOccurrenceCount != 0 ||
-      m.proxyShadowedEdgeCount != 0 || m.quoteSpaceCount != 0) {
+      m.proxyShadowedEdgeCount != 0 || m.quoteSpaceCount != 0 ||
+      m.spaceCount != 0) {
     return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
   }
   if (!prefixHasRepresentableSizes(snapshot) ||

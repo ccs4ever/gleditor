@@ -1314,24 +1314,34 @@ VQLEngine::applyVersionPin(const VersionPin &pin,
       const auto cacheKey =
           std::to_string(reinterpret_cast<std::uintptr_t>(info->store.get())) +
           ":" + version.str();
-      auto space = historicalSpaces_.find(cacheKey);
-      std::uint32_t spaceId{};
+      const auto label = info->label + "@" + version.str();
+      auto space       = historicalSpaces_.find(cacheKey);
+      std::optional<std::uint32_t> known;
+      // A release() can detach a cached space and reuse its id for another,
+      // so an id is trusted only while it still names this store's fold.
       if (space != historicalSpaces_.end()) {
-        spaceId = space->second;
-      } else {
+        const auto cached = core_->arena().spaceAt(space->second);
+        if (cached && cached->store == info->store.get() &&
+            cached->label == label)
+          known = space->second;
+        else
+          historicalSpaces_.erase(space);
+      }
+      if (!known) {
         auto fold = std::make_shared<zigzag::Manifold>(
             info->store->rebuildManifold(version));
         if (!fold->home()) continue;
-        spaceId = core_->arena().attach(zigzag::Space{
+        known = core_->arena().attach(zigzag::Space{
             .manifold      = fold.get(),
             .ownedManifold = fold,
             .store         = info->store.get(),
             .reader        = info->store.get(),
-            .label         = info->label + "@" + version.str(),
+            .label         = label,
         });
         core_->arena().bindDimensionsByNameMatch();
-        historicalSpaces_.emplace(cacheKey, spaceId);
+        historicalSpaces_.emplace(cacheKey, *known);
       }
+      const auto spaceId  = *known;
       const auto attached = core_->arena().spaceAt(spaceId);
       if (!attached || !attached->manifold) continue;
       if (const auto source = core_->arena().resolveSourceCell(input)) {

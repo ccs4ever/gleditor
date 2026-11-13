@@ -1650,4 +1650,85 @@ TEST(ArenaManifoldTest, releaseKeepsABaseTheArenaWasBuiltOver) {
   EXPECT_EQ(arena.store(), &doc.store);
 }
 
+TEST(ArenaManifoldTest, releaseLeavesNothingDanglingToADetachedSpacesProxy) {
+  ArenaManifold arena;
+  const auto dim    = arena.ensureDimension("d.link");
+  const auto anchor = arena.makeCell("older than the mark");
+  const auto cells  = arena.cellCount();
+  const auto mark   = arena.mark();
+  const auto space  = arena.attach(Space{.label = "pinned"});
+  const auto proxy  = arena.proxyFor(space, 11);
+  const auto young  = arena.makeCell("younger");
+  zigzag::expectWritten(arena.link(young, dim, DimVector::POS, proxy));
+  zigzag::expectWritten(arena.link(anchor, dim, DimVector::POS, proxy));
+
+  arena.release(mark);
+
+  EXPECT_EQ(arena.cellCount(), cells);
+  EXPECT_FALSE(arena.contains(young));
+  EXPECT_FALSE(arena.contains(proxy));
+  EXPECT_FALSE(arena.linked(anchor, dim, DimVector::POS));
+  EXPECT_EQ(arena.spaceCount(), 0U);
+  // The arena is whole: the same work done again lands on the same ids.
+  const auto again = arena.attach(Space{.label = "pinned"});
+  EXPECT_EQ(again, space);
+  EXPECT_EQ(arena.proxyFor(again, 11), proxy);
+}
+
+TEST(ArenaManifoldTest, marksReleasedOutOfOrderNeverRegrowTheSpaces) {
+  ArenaManifold arena;
+  const auto outer = arena.mark();
+  (void)arena.attach(Space{.label = "a"});
+  const auto inner = arena.mark();
+  (void)arena.attach(Space{.label = "b"});
+  arena.release(outer);
+  ASSERT_EQ(arena.spaceCount(), 0U);
+  // The inner mark now names a state that is gone; its space count is above
+  // the arena's, and releasing it must not conjure spaces back.
+  arena.release(inner);
+  EXPECT_EQ(arena.spaceCount(), 0U);
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+}
+
+TEST(ArenaManifoldTest, aPrefixRefusesAMarkNamingMoreSpacesThanAreAttached) {
+  ArenaManifold arena;
+  auto stale         = arena.mark();
+  stale.spaceCount   = 3;
+  const auto refused = arena.exportPrefix(stale);
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::MalformedPrefix);
+}
+
+TEST(ArenaManifoldTest, aHydratedPrefixRefusesAMarkNamingSpaces) {
+  ArenaManifold source;
+  auto snapshot = source.exportPrefix(source.mark());
+  ASSERT_TRUE(snapshot);
+  snapshot->mark.spaceCount = 1;
+  ArenaManifold target;
+  const auto refused = target.hydratePrefix(*snapshot);
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::UnsupportedPrefixState);
+}
+
+TEST(ArenaManifoldTest, promoteStillWorksAfterAReleaseDetachedASpace) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  const auto mark  = arena.mark();
+  const auto space = arena.attach(Space{.label = "pinned"});
+  (void)arena.proxyFor(space, 3);
+  arena.release(mark);
+  ASSERT_EQ(arena.spaceCount(), 0U);
+
+  const auto fresh = arena.makeCell("fresh");
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, fresh));
+  zigzag::PromotionBudget budget{};
+  budget.commitShadowed = zigzag::commitStateSide(0);
+  const auto promoted =
+      zigzag::promote(doc.store, doc.at, arena, doc.first, budget);
+  ASSERT_TRUE(promoted.has_value());
+  const auto after = doc.store.rebuildManifold(promoted->version);
+  EXPECT_EQ(after.textOf(promoted->cells.front(), doc.store), "fresh");
+}
+
 } // namespace

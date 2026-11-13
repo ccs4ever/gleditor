@@ -37,7 +37,8 @@ struct Harness {
     core.bindInput(op, right);
     core.bindOutput(op, output);
     const auto result = vm.step(vm.spawnCursor(op));
-    return {result, core.render(output).value_or(CellValue{std::string{"unset"}})};
+    return {result,
+            core.render(output).value_or(CellValue{std::string{"unset"}})};
   }
 
   bool isSame(const CellRef left, const CellRef right) {
@@ -268,6 +269,93 @@ TEST(VortexSameCellTest, RunsAsAParameterPipelineStage) {
   ASSERT_TRUE(result.success) << result.errorMessage;
   // left and right are distinct, so the stage wrote false and Not saw it.
   EXPECT_EQ(h.core.render(sink), std::optional<CellValue>{true});
+}
+
+TEST(VortexSameCellTest, BranchFalseCellTakesTheJumpOnlyForDifferentCells) {
+  ArenaHarness h;
+  const auto a    = h.arena.makeCell("x");
+  const auto b    = h.arena.makeCell("x");
+  const auto take = [&](const CellRef left, const CellRef right) {
+    const auto hit     = h.arena.makeCell("hit");
+    const auto compare = h.vm.mintOpcode(OpcodeKind::SameCell);
+    const auto branch  = h.vm.mintOpcode(OpcodeKind::BranchFalseCell);
+    const auto onSame  = h.vm.mintOpcode(OpcodeKind::Nop);
+    const auto onDiff  = h.vm.mintOpcode(OpcodeKind::Nop);
+    h.core.bindInput(compare, left);
+    h.core.bindInput(compare, right);
+    h.core.bindOutput(compare, hit);
+    h.core.bindInput(branch, hit);
+    h.core.bindInput(branch, onDiff);
+    zigzag::expectWritten(
+        h.arena.link(compare, h.core.dims().spin, DimVector::POS, branch));
+    zigzag::expectWritten(
+        h.arena.link(branch, h.core.dims().spin, DimVector::POS, onSame));
+    const auto cursor = h.vm.spawnCursor(compare);
+    EXPECT_TRUE(h.vm.step(cursor).success);
+    EXPECT_TRUE(h.vm.step(cursor).success);
+    return h.vm.getCursorOpcode(cursor) == std::optional<CellRef>{onDiff};
+  };
+  EXPECT_FALSE(take(a, a));
+  EXPECT_TRUE(take(a, b));
+}
+
+TEST(VortexSameCellTest, AsAPreconditionItGuardsOnIdentity) {
+  ArenaHarness h;
+  const auto a       = h.arena.makeCell("x");
+  const auto b       = h.arena.makeCell("x");
+  const auto guarded = [&](const std::vector<CellRef> &inputs) {
+    const auto clause = h.vm.mintOpcode(OpcodeKind::SameCell);
+    for (const auto input : inputs) h.core.bindInput(clause, input);
+    const auto op = h.vm.mintOpcode(OpcodeKind::Nop);
+    h.core.attachPrecondition(op, clause);
+    return h.vm.step(h.vm.spawnCursor(op));
+  };
+  EXPECT_TRUE(guarded({a, a}).success);
+  EXPECT_FALSE(guarded({a, b}).success);
+  // A clause of the wrong arity can never hold.
+  EXPECT_FALSE(guarded({a}).success);
+  EXPECT_FALSE(guarded({a, a, a}).success);
+}
+
+TEST(VortexSameCellTest, ThePipelineStageKeepsTheInputArityRule) {
+  ArenaHarness h;
+  const auto a         = h.arena.makeCell("a");
+  const auto stageWith = [&](const std::vector<CellRef> &inputs,
+                             const std::vector<CellRef> &outputs) {
+    const auto probe = h.arena.makeCell("probe");
+    const auto stage = h.vm.mintOpcode(OpcodeKind::SameCell);
+    for (const auto input : inputs) h.core.bindInput(stage, input);
+    for (const auto output : outputs) h.core.bindOutput(stage, output);
+    h.core.attachPipeline(probe, stage);
+    const auto consumer = h.vm.mintOpcode(OpcodeKind::Not);
+    h.core.bindInput(consumer, probe);
+    h.core.bindOutput(consumer, h.arena.makeCell("sink"));
+    return h.vm.step(h.vm.spawnCursor(consumer));
+  };
+  const auto one = stageWith({a}, {});
+  EXPECT_FALSE(one.success);
+  EXPECT_NE(one.errorMessage.find("exactly two cell inputs"),
+            std::string::npos);
+  EXPECT_FALSE(stageWith({a, a, a}, {}).success);
+  const auto two =
+      stageWith({a, a}, {h.arena.makeCell("o1"), h.arena.makeCell("o2")});
+  EXPECT_FALSE(two.success);
+  EXPECT_NE(two.errorMessage.find("at most one output"), std::string::npos);
+  EXPECT_TRUE(stageWith({a, a}, {}).success);
+}
+
+TEST(VortexSameCellTest, AShadowedBaseCellIsStillTheBaseCell) {
+  StoreFixture f;
+  Harness h(f.arena);
+  const auto dim = h.core.findOrMintDimension("d.shadow");
+  // Writing to a base cell shadows it in the arena; the CellRef is kept.
+  zigzag::expectWritten(f.arena.link(f.first, dim, DimVector::POS,
+                                     f.arena.makeCell("elsewhere")));
+  ASSERT_TRUE(f.arena.holdsOwn(f.first));
+  EXPECT_TRUE(h.isSame(f.first, h.registerFor(f.first)));
+  EXPECT_TRUE(h.isSame(f.first, f.arena.proxyFor(f.attach("live"), f.first)));
+  EXPECT_FALSE(h.isSame(f.first, f.second));
+  EXPECT_FALSE(h.isSame(f.first, f.arena.makeCell("twin")));
 }
 
 // The pattern a bounded rank walk needs: step along a rank and stop when the

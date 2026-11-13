@@ -2654,11 +2654,20 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::SameCell: {
+    // Arity rules, the same in a step, a pipeline stage and a condition:
+    // exactly two input cells, and no more than one output. A step also needs
+    // its one output (checked where steps are prepared); a stage or condition
+    // legitimately has none, since the parameter or the truth value is its
+    // result.
     const auto inCells = inputsOf(opcode);
     if (inCells.size() != 2)
       return {.success       = false,
               .failingClause = opcode,
               .errorMessage  = "SameCell expects exactly two cell inputs"};
+    if (outputsOf(opcode).size() > 1)
+      return {.success       = false,
+              .failingClause = opcode,
+              .errorMessage  = "SameCell expects at most one output"};
     auto &arena = core_.arena();
     arena.consumeWork();
     const auto left  = resolveCell(inCells, inputs, cellReferences_, 0, arena);
