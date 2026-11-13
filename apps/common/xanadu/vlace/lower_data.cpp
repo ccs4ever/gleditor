@@ -51,29 +51,35 @@ using zigzag::vortex::OpcodeKind;
 /// Link direction operand for the Link opcode: +1 reads/writes posward.
 constexpr std::int64_t linkPosward = 1;
 
-/// The runtime-owned constructor tags and their arities (the prelude ADTs, the
-/// opaque capability tags, and the scalar wrappers). `Tuple` has no entry: its
-/// arity is the tuple's own. IO.* tags are declared by the card that builds
-/// them, on first use.
+/// The runtime-owned constructor tags and their arities (the prelude ADTs and
+/// the scalar wrappers). `Tuple` has no entry: its arity is the tuple's own.
+/// IO.* tags are declared by the card that builds them, on first use.
 struct BuiltinCtor {
   std::string_view tag;
   std::size_t arity;
 };
-constexpr std::array<BuiltinCtor, 14> builtinCtors{{
+constexpr std::array<BuiltinCtor, 11> builtinCtors{{
     {"Nil", 0},
     {"Cons", 2},
-    {"Unit", 0},
     {"None", 0},
     {"Some", 1},
     {"Ok", 1},
     {"Err", 1},
     {"True", 0},
     {"False", 0},
-    {"Cell", 1},
-    {"Dim", 1},
     {"SInt", 1},
     {"SFloat", 1},
     {"SBool", 1},
+}};
+
+/// The opaque tags a program may match on but never construct. They are kept
+/// out of the constructor table on purpose: an application of a tabled
+/// constructor to its arity is built directly by the kernel, without passing
+/// lowerCtor's refusal, so a tabled `Cell` would be forgeable.
+constexpr std::array<BuiltinCtor, 3> opaqueCtors{{
+    {"Cell", 1},
+    {"Dim", 1},
+    {"Unit", 0},
 }};
 
 constexpr std::string_view nilTag   = "Nil";
@@ -537,10 +543,16 @@ Lowered<Operand> makeTerm(LowerContext &ctx, std::string_view tag,
 Lowered<Operand> termBuilder(LowerContext &ctx, std::string_view tag,
                              std::size_t arity, SourceLocation loc) {
   if (arity == 0) return atomFor(ctx, tag);
-  // An internal tag (IO.*) is known by its builder alone; record its arity so
-  // the application the builder is made of saturates.
+  // An IO.* tag is known by its builder alone (no program can write one);
+  // record its arity so the application the builder is made of saturates. A
+  // runtime-owned tag such as Cell is built by makeTerm and has no builder.
   const auto known = ctx.state().ctors().find(tag);
   if (!known) {
+    if (!tag.starts_with("IO.")) {
+      return internalError("constructor '" + std::string(tag) +
+                               "' is not declared, so it has no builder",
+                           loc);
+    }
     ctx.state().ctors().declare(
         CtorInfo{.name = std::string(tag), .arity = arity, .fields = {}});
   } else if (known->arity != arity) {
@@ -643,7 +655,13 @@ Lowered<void> lowerPatConstructor(LowerContext &ctx, const PConstructor &p,
         site);
     return {};
   }
-  const auto info = ctx.state().ctors().find(p.ctor);
+  auto info = ctx.state().ctors().find(p.ctor);
+  if (!info) {
+    for (const auto &[tag, arity] : opaqueCtors) {
+      if (tag == p.ctor)
+        info = CtorInfo{.name = p.ctor, .arity = arity, .fields = {}};
+    }
+  }
   if (!info) {
     return fail(CompileError::UnboundIdentifier,
                 "unknown constructor '" + p.ctor + "' in pattern", loc);
