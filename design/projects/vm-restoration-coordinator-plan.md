@@ -465,7 +465,7 @@ nothing newly failing, 35 turned green against the baseline; `gleditor_test` and
 unchanged. The current failing list is `/data/git/gleditor-restore/.logs/w1/gate-e-xuzz-failed.txt`.
 
 Gate F (2026-11-13, shared branch at `ab6993dd`, adding L2 and O2a): `xuzz_test` 154 failures of
-4149, 53 turned green against the baseline (18 since gate E: the VLace kernel and the mesh tests
+4177, 53 turned green against the baseline (18 since gate E: the VLace kernel and the mesh tests
 that run every frontend); `gleditor_test` and `zigzag_test` unchanged. The one name outside the
 baseline is `ArrayfiladeBenchmarkTest.Subscripting10000Cells`, the timing-sensitive benchmark of
 gate C. The current failing list is `/data/git/gleditor-restore/.logs/w1/gate-f-xuzz-failed.txt`.
