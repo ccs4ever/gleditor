@@ -176,10 +176,12 @@ TEST(VlaceLowerScalarsTest, RuntimeOverflowIsAnEvalFailure) {
 
 TEST(VlaceLowerScalarsTest, RunningAdvancesTheVmCycleCounter) {
   Rig rig;
-  const auto before = rig.vm.totalCycles();
+  const auto before      = rig.vm.totalCycles();
+  const auto depthBefore = rig.vm.frameLimits().maxDepth;
   EXPECT_EQ(rig.show("1 + 2"), "3");
   EXPECT_GT(rig.vm.totalCycles(), before);
-  EXPECT_EQ(rig.vm.frameLimits().maxDepth, lower::evaluationNestingBudget);
+  // A run raises the frame-depth limit for its own extent only (L2 review).
+  EXPECT_EQ(rig.vm.frameLimits().maxDepth, depthBefore);
 }
 
 TEST(VlaceLowerScalarsTest, CycleLimitFailsAsBudget) {

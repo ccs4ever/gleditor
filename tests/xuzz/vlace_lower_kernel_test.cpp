@@ -287,7 +287,7 @@ TEST(VlaceLowerKernelTest, ACycleLimitStopsALazyLoop) {
 // -- the two copies
 // -----------------------------------------------------------------------
 
-TEST(VlaceLowerKernelTest, ReferenceCopyKeepsAClosureAndValueCopyKeepsAScalar) {
+TEST(VlaceLowerKernelTest, ReferenceCopyKeepsAClosureAndAScalar) {
   Rig rig;
   Parser parser("fn x => x + 1");
   auto prog = parser.parseProgram();
@@ -303,10 +303,6 @@ TEST(VlaceLowerKernelTest, ReferenceCopyKeepsAClosureAndValueCopyKeepsAScalar) {
   // Reference copy of a scalar: reads as the scalar.
   const auto scalarRef = ctx.newRegister();
   lower::emitCopyReference(ctx, scalar, scalarRef);
-  // Value copy of a scalar.
-  const auto scalarValue = ctx.newRegister();
-  lower::emitCopy(ctx, scalar, scalarValue);
-
   auto applied = lower::applyOperand(ctx, closureCopy, scalarRef, {});
   ASSERT_TRUE(applied.has_value());
   auto ran = lower::runBlock(ctx, ctx.swapBlock(lower::Block{}), *applied);
@@ -315,28 +311,6 @@ TEST(VlaceLowerKernelTest, ReferenceCopyKeepsAClosureAndValueCopyKeepsAScalar) {
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ((*result)->kind, Value::Kind::Int);
   EXPECT_EQ((*result)->i, 8);
-  auto copied = lower::readbackCell(rig.compiler, scalarValue.cell);
-  ASSERT_TRUE(copied.has_value());
-  EXPECT_EQ((*copied)->i, 7);
-}
-
-TEST(VlaceLowerKernelTest, ValueCopyOfAClosureLosesTheClosure) {
-  // The reason emitCopy is not used for references: it copies the cell's
-  // content, which for a closure root is not the closure.
-  Rig rig;
-  Parser parser("fn x => x + 1");
-  auto prog = parser.parseProgram();
-  ASSERT_TRUE(prog.has_value());
-  lower::LowerContext ctx(rig.compiler);
-  auto closure = lower::lowerExpr(ctx, **prog->result);
-  ASSERT_TRUE(closure.has_value());
-  const auto copy = ctx.newRegister();
-  lower::emitCopy(ctx, *closure, copy);
-  const auto arg = ctx.emitConstant(std::int64_t{1});
-  auto applied   = lower::applyOperand(ctx, copy, arg, {});
-  ASSERT_TRUE(applied.has_value());
-  auto ran = lower::runBlock(ctx, ctx.swapBlock(lower::Block{}), *applied);
-  EXPECT_FALSE(ran.has_value());
 }
 
 // -- forcing a read-back thunk
@@ -440,14 +414,119 @@ TEST(VlaceLowerKernelJoinTest, NestedIfsMixClosureAndScalarArmsAcrossLets) {
             "104");
 }
 
-TEST(VlaceLowerKernelJoinTest, AClosureThroughAndOrIsAnErrorNotACrash) {
-  for (const std::string_view src :
-       {"(fn x => x) && True", "True && (fn x => x)", "False || (fn x => x)"}) {
+TEST(VlaceLowerKernelJoinTest, NonBoolOperandsOfAndOrIfAreTypeErrors) {
+  const std::string_view operands[] = {"(fn x => x)", "1", "\"true\""};
+  for (const auto operand : operands) {
+    const std::string o(operand);
+    for (const std::string &src :
+         {o + " && True", "True && " + o, o + " || False", "False || " + o,
+          "if " + o + " then 1 else 2"}) {
+      Rig rig;
+      auto v = rig.eval(src);
+      ASSERT_FALSE(v.has_value()) << src;
+      EXPECT_EQ(v.error().code, CompileError::TypeMismatch) << src;
+      EXPECT_NE(v.error().detail.find("needs a Bool"), std::string::npos)
+          << src << " -> " << v.error().detail;
+    }
+  }
+  // A thunk operand is forced first, then judged by what it holds.
+  Rig rig;
+  auto v = rig.eval("let t = 1 + 1 in if t then 1 else 2");
+  ASSERT_FALSE(v.has_value());
+  EXPECT_EQ(v.error().code, CompileError::TypeMismatch);
+}
+
+TEST(VlaceLowerKernelJoinTest, ShortCircuitStillSkipsTheRightOperand) {
+  EXPECT_EQ(Rig{}.show("False && (1 / 0 == 0)"), "False");
+  EXPECT_EQ(Rig{}.show("True || (1 / 0 == 0)"), "True");
+}
+
+TEST(VlaceLowerKernelTest, AFailedForceLeavesATopLevelThunkRunnable) {
+  {
+    Rig rig;
+    EXPECT_EQ(rig.show("x = 1 / 0 ; 0"), "0");
+    for (int i = 0; i < 2; ++i) {
+      auto v = rig.eval("x");
+      ASSERT_FALSE(v.has_value());
+      EXPECT_EQ(v.error().code, CompileError::ArithFault) << i;
+    }
+  }
+  {
+    Rig rig;
+    EXPECT_EQ(rig.show("count n = if n == 0 then 0 else 1 + count (n - 1) ; "
+                       "x = count 60 ; 0"),
+              "0");
+    lower::setCycleLimit(rig.compiler, 150);
+    auto starved = rig.eval("x");
+    ASSERT_FALSE(starved.has_value());
+    EXPECT_EQ(starved.error().code, CompileError::BudgetExhausted);
+    lower::setCycleLimit(rig.compiler, std::nullopt);
+    EXPECT_EQ(rig.show("x"), "60");
+    EXPECT_EQ(rig.show("x"), "60");
+  }
+  {
+    Rig rig;
+    EXPECT_EQ(rig.show("x = x + 1 ; 0"), "0");
+    for (int i = 0; i < 2; ++i) {
+      auto v = rig.eval("x");
+      ASSERT_FALSE(v.has_value());
+      EXPECT_EQ(v.error().code, CompileError::BudgetExhausted);
+      EXPECT_NE(v.error().detail.find("<<loop>>"), std::string::npos) << i;
+    }
+  }
+}
+
+TEST(VlaceLowerKernelTest, AFailedNestedForceIsStaleNextRun) {
+  Rig rig;
+  EXPECT_EQ(rig.show("inner = 1 / 0 ; outer = inner + 1 ; 0"), "0");
+  for (int i = 0; i < 2; ++i) {
+    auto v = rig.eval("outer");
+    ASSERT_FALSE(v.has_value());
+    EXPECT_EQ(v.error().code, CompileError::ArithFault) << i;
+  }
+}
+
+TEST(VlaceLowerKernelTest, RunsRestoreTheVmLimitsTheyRaised) {
+  Rig rig;
+  const auto frameBefore   = rig.vm.frameLimits();
+  const auto closureBefore = rig.vm.closureLimits();
+  const auto same          = [&] {
+    const auto f = rig.vm.frameLimits();
+    const auto c = rig.vm.closureLimits();
+    return f.maxDepth == frameBefore.maxDepth &&
+           f.maxLocalsPerFrame == frameBefore.maxLocalsPerFrame &&
+           f.maxBackingCells == frameBefore.maxBackingCells &&
+           c.maxValuesCreated == closureBefore.maxValuesCreated &&
+           c.maxEnvironmentCellsCreated ==
+               closureBefore.maxEnvironmentCellsCreated &&
+           c.maxCaptureStreams == closureBefore.maxCaptureStreams;
+  };
+  EXPECT_EQ(rig.show("let f = fn x => x + 1 in f 1"), "2");
+  EXPECT_TRUE(same());
+  EXPECT_FALSE(rig.eval("1 / 0").has_value());
+  EXPECT_TRUE(same());
+  EXPECT_FALSE(rig.eval("loop x = loop x ; loop 0").has_value());
+  EXPECT_TRUE(same());
+}
+
+TEST(VlaceLowerKernelTest, ApplyingANonFunctionFailsWithoutCrashing) {
+  for (const std::string_view src : {"1 2", "(fn x => 5) 1 2", "\"s\" 1"}) {
     Rig rig;
     auto v = rig.eval(src);
-    // Either refused or reads back as something; it must not crash or hang.
-    if (v) SUCCEED() << src;
+    ASSERT_FALSE(v.has_value()) << src;
+    // The VM reports the failure; it is not given a VLace-specific name.
+    EXPECT_NE(v.error().detail.find("VM failure"), std::string::npos)
+        << src << " -> " << v.error().detail;
   }
+}
+
+TEST(VlaceLowerKernelTest, PathologicalNestingIsABudgetErrorNotAStackOverflow) {
+  std::string src = "1";
+  for (int i = 0; i < 1500; ++i) src = "(fn x => x) (" + src + ")";
+  Rig rig;
+  auto v = rig.eval(src);
+  ASSERT_FALSE(v.has_value());
+  EXPECT_EQ(v.error().code, CompileError::BudgetExhausted);
 }
 
 } // namespace

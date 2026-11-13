@@ -42,21 +42,45 @@ using zigzag::vortex::FramePortKind;
 using zigzag::vortex::OpcodeKind;
 
 /// A thunk cell's scalar content. Zero first so a freshly boxed cell, whose
-/// content is the constant 0, is a suspended thunk without a write.
+/// content is the constant 0, is a suspended thunk without a write. While a
+/// thunk runs its content is the evaluation epoch (never below
+/// firstEpoch), so a thunk left "running" by a run that failed halfway is
+/// recognised as stale by the next run, whose epoch differs, and is simply run
+/// again. That is correct under nested forces too: within one run the epoch is
+/// constant, so a thunk demanding itself through any depth of other forces
+/// still sees its own epoch and is reported as a loop.
 constexpr std::int64_t thunkSuspended = 0;
-constexpr std::int64_t thunkRunning   = 1;
 constexpr std::int64_t thunkDone      = 2;
+constexpr std::int64_t firstEpoch     = 3;
 
 /// Link direction operand for the Link opcode: +1 reads/writes posward.
 constexpr std::int64_t linkPosward = 1;
 
-/// The VM refuses to create more than 65,536 closure values (and a million
-/// environment cells) in total, a figure sized for a handful of callbacks. A
-/// lazy program makes two closures per thunk, so an ordinary loop would hit
-/// it. The cycle and frame-depth budgets are what bound a VLace run; these
-/// ceilings only keep the VM's own safety limits from firing first.
-constexpr std::size_t closureValueCeiling       = 1U << 24;
-constexpr std::size_t closureEnvironmentCeiling = 1U << 28;
+/// How deeply one expression may nest before lowering (and copying a
+/// declaration) is refused. The parser does not bound nesting (the mesh
+/// evaluator bounds the source before parsing), and lowering recurses on the
+/// host stack, so a Compiler fed a pathological tree directly needs its own
+/// limit. Reported as BudgetExhausted like the other evaluation budgets.
+constexpr std::size_t maxAstDepth = 1000;
+
+/// Host recursion depth of the functions that walk an expression tree.
+thread_local std::size_t astDepth = 0;
+
+class DepthGuard {
+public:
+  DepthGuard() {
+    if (++astDepth > maxAstDepth) {
+      --astDepth;
+      throw LoweringBudgetExceeded(EvalError{
+          .code   = CompileError::BudgetExhausted,
+          .detail = "Vlace evaluation budget exhausted: expression nesting",
+          .loc    = {}});
+    }
+  }
+  DepthGuard(const DepthGuard &)            = delete;
+  DepthGuard &operator=(const DepthGuard &) = delete;
+  ~DepthGuard() { --astDepth; }
+};
 
 /// Name prefix for a capture the frame records; the name is never looked up
 /// (captureOperand receives a ScopeHit, which carries no name).
@@ -103,10 +127,10 @@ void emitLinkWrite(LowerContext &ctx, CellRef subject, zigzag::DimRef dim,
 
 /// Overwrite the scalar content of the cell @p subject names (the Value opcode
 /// resolves a reference register to its target, an output would not).
-void emitStateWrite(LowerContext &ctx, CellRef subject, std::int64_t state) {
+void emitStateWrite(LowerContext &ctx, CellRef subject, CellRef state) {
   const auto zero = intConstant(ctx, 0);
   emit(ctx, OpcodeKind::Value, "#vlace_thunk_state",
-       {subject, zero, zero, intConstant(ctx, state)});
+       {subject, zero, zero, state});
 }
 
 std::vector<CellRef> distinct(std::vector<CellRef> cells) {
@@ -147,6 +171,7 @@ Pattern clonePattern(const PatternNode &p);
 Expr cloneExpr(const ExprNode &e);
 
 Pattern clonePattern(const PatternNode &p) {
+  const DepthGuard depth;
   auto out  = std::make_unique<PatternNode>();
   out->loc  = p.loc;
   out->node = std::visit(
@@ -174,6 +199,7 @@ Pattern clonePattern(const PatternNode &p) {
 }
 
 Expr cloneExpr(const ExprNode &e) {
+  const DepthGuard depth;
   auto out  = std::make_unique<ExprNode>();
   out->loc  = e.loc;
   out->node = std::visit(
@@ -258,7 +284,7 @@ struct TopLevel {
 struct KernelState {
   std::optional<CellRef> forceFrame;
   std::optional<CellRef> boxClosure;
-  bool limitsRaised{false};
+  std::optional<CellRef> epochCell;
   std::unordered_map<std::string, TopLevel> top;
   std::vector<FrameBuild> frames;
 };
@@ -267,16 +293,11 @@ KernelState &kernel(LowerContext &ctx) {
   return ctx.state().cardState<KernelState>(Card::Kernel);
 }
 
-void ensureClosureHeadroom(LowerContext &ctx) {
+/// The cell holding the current evaluation epoch.
+CellRef epochCell(LowerContext &ctx) {
   auto &k = kernel(ctx);
-  if (k.limitsRaised) return;
-  auto limits = ctx.vm().closureLimits();
-  limits.maxValuesCreated =
-      std::max(limits.maxValuesCreated, closureValueCeiling);
-  limits.maxEnvironmentCellsCreated =
-      std::max(limits.maxEnvironmentCellsCreated, closureEnvironmentCeiling);
-  ctx.vm().setClosureLimits(limits);
-  k.limitsRaised = true;
+  if (!k.epochCell) k.epochCell = ctx.arena().makeScalarCell(firstEpoch);
+  return *k.epochCell;
 }
 
 /// Finalise a reserved frame descriptor from a finished block.
@@ -325,7 +346,6 @@ void emitUnpackFirst(LowerContext &ctx, CellRef streamPort, CellRef dst) {
 Lowered<CellRef> boxClosureDescriptor(LowerContext &ctx) {
   auto &k = kernel(ctx);
   if (k.boxClosure) return *k.boxClosure;
-  ensureClosureHeadroom(ctx);
   const auto reserved = ctx.vm().reserveFrameDescriptor();
   if (!reserved)
     return internalError("frame descriptor: " + reserved.error().message);
@@ -369,10 +389,10 @@ Lowered<CellRef> forceFrameDescriptor(LowerContext &ctx) {
   const auto subject = ctx.newRegister();
   const auto result  = ctx.newRegister();
   const auto zero    = intConstant(ctx, thunkSuspended);
-  const auto one     = intConstant(ctx, thunkRunning);
   const auto two     = intConstant(ctx, thunkDone);
   const auto plain   = ctx.mintLabel("#vlace_force_plain");
   const auto notRun  = ctx.mintLabel("#vlace_force_not_running");
+  const auto epoch   = epochCell(ctx);
   const auto compute = ctx.mintLabel("#vlace_force_compute");
   const auto ret     = ctx.mintLabel("#vlace_force_return");
 
@@ -384,26 +404,28 @@ Lowered<CellRef> forceFrameDescriptor(LowerContext &ctx) {
 
   const auto state = ctx.newRegister();
   emit(ctx, OpcodeKind::Add, "#vlace_thunk_read", {subject.cell}, {state.cell});
-  const auto isRunning = ctx.newRegister();
-  emit(ctx, OpcodeKind::Eq, "#vlace_is_running", {state.cell, one},
-       {isRunning.cell});
-  ctx.branchIfFalse(isRunning, notRun);
-  ctx.emitRuntimeFailure(
-      CompileError::BudgetExhausted, {},
-      "evaluation budget exhausted: <<loop>> (a thunk demanded its own value)");
-  ctx.placeLabel(notRun);
-
   const auto isDone = ctx.newRegister();
   emit(ctx, OpcodeKind::Eq, "#vlace_is_done", {state.cell, two}, {isDone.cell});
-  ctx.branchIfFalse(isDone, compute);
+  ctx.branchIfFalse(isDone, notRun);
   const auto remembered = ctx.newRegister();
   emit(ctx, OpcodeKind::ApplyClosure, "#vlace_memo_apply", {code.cell},
        {remembered.cell});
   emitCopyReference(ctx, remembered, result);
   ctx.jumpTo(ret);
 
+  ctx.placeLabel(notRun);
+  const auto current = ctx.newRegister();
+  emit(ctx, OpcodeKind::Add, "#vlace_epoch_read", {epoch}, {current.cell});
+  const auto isRunning = ctx.newRegister();
+  emit(ctx, OpcodeKind::Eq, "#vlace_is_running", {state.cell, current.cell},
+       {isRunning.cell});
+  ctx.branchIfFalse(isRunning, compute);
+  ctx.emitRuntimeFailure(
+      CompileError::BudgetExhausted, {},
+      "evaluation budget exhausted: <<loop>> (a thunk demanded its own value)");
+
   ctx.placeLabel(compute);
-  emitStateWrite(ctx, subject.cell, thunkRunning);
+  emitStateWrite(ctx, subject.cell, epoch);
   const auto value = ctx.newRegister();
   emit(ctx, OpcodeKind::ApplyClosure, "#vlace_thunk_run", {code.cell},
        {value.cell});
@@ -414,7 +436,7 @@ Lowered<CellRef> forceFrameDescriptor(LowerContext &ctx) {
   emit(ctx, OpcodeKind::CreateClosure, "#vlace_box", {*box, stream.cell},
        {boxed.cell});
   emitLinkWrite(ctx, subject.cell, thunkDim, boxed.cell);
-  emitStateWrite(ctx, subject.cell, thunkDone);
+  emitStateWrite(ctx, subject.cell, intConstant(ctx, thunkDone));
   emitCopyReference(ctx, value, result);
   ctx.jumpTo(ret);
 
@@ -477,7 +499,7 @@ Lowered<Operand> toWhnf(LowerContext &ctx, Operand v, SourceLocation loc) {
 /// frame's result expression, already in WHNF.
 Lowered<BuiltClosure> buildClosure(LowerContext &ctx, bool takesArgument,
                                    const BodyFn &body, SourceLocation loc) {
-  ensureClosureHeadroom(ctx);
+  const DepthGuard depth;
   const auto reserved = ctx.vm().reserveFrameDescriptor();
   if (!reserved)
     return internalError("frame descriptor: " + reserved.error().message, loc);
@@ -728,6 +750,7 @@ void emitCopyReference(LowerContext &ctx, Operand src, Operand dst) {
 }
 
 Lowered<Operand> lowerLet(LowerContext &ctx, const ELet &e, SourceLocation) {
+  const DepthGuard depth;
   // The type checker and the evaluator this replaces both treat `let` as a
   // recursive group, so every right-hand side sees every name; `recursive` is
   // not consulted.
@@ -778,6 +801,7 @@ Lowered<Operand> lowerLambda(LowerContext &ctx, const ELambda &e,
 
 Lowered<Operand> lowerApp(LowerContext &ctx, const EApp &e,
                           SourceLocation loc) {
+  const DepthGuard depth;
   if (const auto ctor = saturatedConstructor(ctx, e)) {
     std::vector<Operand> fields;
     fields.reserve(ctor->args.size());
@@ -975,6 +999,12 @@ Lowered<Operand> applyOperand(LowerContext &ctx, Operand fn, Operand arg,
   emit(ctx, OpcodeKind::ApplyClosure, "#vlace_apply",
        {function->cell, arg.cell}, {out.cell});
   return Operand(out.cell, Evaluation::Whnf);
+}
+
+void beginEvaluation(LowerContext &ctx) {
+  const auto cell = epochCell(ctx);
+  const auto now  = ctx.arena().asInt64(cell).value_or(firstEpoch);
+  ctx.core().writeValue(cell, 0, std::nullopt, CellValue{now + 1});
 }
 
 std::expected<ValuePtr, EvalError> forceValueOnVm(Compiler &compiler,

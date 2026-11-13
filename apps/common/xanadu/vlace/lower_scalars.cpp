@@ -110,13 +110,37 @@ void emitDivisorGuard(LowerContext &ctx, Operand divisor, SourceLocation loc) {
   }
 }
 
+/// Fail at run time unless @p operand is exactly a Bool. With type checking
+/// off nothing else stops a number, a string or a closure from reaching a
+/// branch, and BranchFalseCell would then test the truthiness of whatever the
+/// cell holds. Eq compares variants (an Int 1 or the String "true" is not the
+/// Bool true; a closure root renders as text), so the pair of Eq tests accepts
+/// only a Bool.
+void emitBoolGuard(LowerContext &ctx, Operand operand, SourceLocation loc,
+                   std::string_view message) {
+  const auto isTrue  = emitBinary(ctx, OpcodeKind::Eq, operand,
+                                  ctx.emitConstant(CellValue{true}));
+  const auto isFalse = emitBinary(ctx, OpcodeKind::Eq, operand,
+                                  ctx.emitConstant(CellValue{false}));
+  const auto isBool  = emitBinary(ctx, OpcodeKind::Or, isTrue, isFalse);
+  const auto bad     = ctx.mintLabel("#vlace_not_bool");
+  const auto ok      = ctx.mintLabel("#vlace_is_bool");
+  ctx.branchIfFalse(isBool, bad);
+  ctx.jumpTo(ok);
+  ctx.placeLabel(bad);
+  ctx.emitRuntimeFailure(CompileError::TypeMismatch, loc, message);
+  ctx.placeLabel(ok);
+}
+
 /// `lhs && rhs` and `lhs || rhs`: the right operand is lowered after a branch
 /// that skips it when the left already decides, so its effects (a run-time
 /// failure, a divergence) are never reached.
 Lowered<Operand> lowerShortCircuit(LowerContext &ctx, const EBinOp &e,
-                                   bool isAnd) {
-  auto lhs = lowerForced(ctx, *e.lhs);
+                                   bool isAnd, SourceLocation loc) {
+  const std::string message = "operator '" + e.op + "' needs a Bool";
+  auto lhs                  = lowerForced(ctx, *e.lhs);
   if (!lhs) return lhs;
+  emitBoolGuard(ctx, *lhs, loc, message);
   const auto result = ctx.newRegister();
   const auto done = ctx.mintLabel(isAnd ? "#vlace_and_done" : "#vlace_or_done");
   emitCopyReference(ctx, *lhs, result);
@@ -132,6 +156,7 @@ Lowered<Operand> lowerShortCircuit(LowerContext &ctx, const EBinOp &e,
   }
   auto rhs = lowerForced(ctx, *e.rhs);
   if (!rhs) return rhs;
+  emitBoolGuard(ctx, *rhs, loc, message);
   emitCopyReference(ctx, *rhs, result);
   ctx.placeLabel(done);
   return Operand(result.cell, Evaluation::Whnf);
@@ -167,8 +192,8 @@ Lowered<Operand> lowerVar(LowerContext &ctx, const EVar &e,
 
 Lowered<Operand> lowerBinOp(LowerContext &ctx, const EBinOp &e,
                             SourceLocation loc) {
-  if (e.op == andOp) return lowerShortCircuit(ctx, e, true);
-  if (e.op == orOp) return lowerShortCircuit(ctx, e, false);
+  if (e.op == andOp) return lowerShortCircuit(ctx, e, true, loc);
+  if (e.op == orOp) return lowerShortCircuit(ctx, e, false, loc);
   const auto kind = opcodeFor(e.op);
   if (!kind) {
     return fail(CompileError::UnexpectedToken,
@@ -186,9 +211,10 @@ Lowered<Operand> lowerBinOp(LowerContext &ctx, const EBinOp &e,
   return emitBinary(ctx, *kind, *lhs, *rhs);
 }
 
-Lowered<Operand> lowerIf(LowerContext &ctx, const EIf &e, SourceLocation) {
+Lowered<Operand> lowerIf(LowerContext &ctx, const EIf &e, SourceLocation loc) {
   auto cond = lowerForced(ctx, *e.cond);
   if (!cond) return cond;
+  emitBoolGuard(ctx, *cond, loc, "'if' needs a Bool condition");
   const auto result  = ctx.newRegister();
   const auto elseArm = ctx.mintLabel("#vlace_else");
   const auto done    = ctx.mintLabel("#vlace_endif");
