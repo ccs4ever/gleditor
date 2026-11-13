@@ -12,9 +12,11 @@
 #include <string>
 
 #include "common/xanadu/vlace/compiler.hpp"
+#include "common/xanadu/vlace/driver.hpp"
 #include "common/xanadu/vlace/lower_cards.hpp"
 #include "common/xanadu/vlace/lower_context.hpp"
 #include "common/xanadu/vlace/parser.hpp"
+#include "common/xanadu/vlace/render_error.hpp"
 #include "common/xanadu/vlace/run_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
@@ -651,11 +653,43 @@ TEST(VlaceLowerDataTest, RenderingHonoursTheDepthBudget) {
   EXPECT_EQ(rig.compiler.render(*v, 0), "...");
 }
 
-TEST(VlaceLowerDataTest, AFailingFieldRendersAsAnErrorMarker) {
+TEST(VlaceLowerDataTest, AFailingFieldFailsTheRenderInsteadOfShowingAMarker) {
   Rig rig;
   auto v = rig.eval("(1, 1 / 0)");
   ASSERT_TRUE(v.has_value());
-  EXPECT_EQ(rig.compiler.render(*v), "(1, <error>)");
+  try {
+    (void)rig.compiler.render(*v);
+    FAIL() << "the render succeeded";
+  } catch (const lower::RenderFailure &failure) {
+    EXPECT_EQ(failure.error().code, CompileError::ArithFault);
+  }
+  // Through the Driver the same failure is the eval phase's error, code kept.
+  Driver driver;
+  driver.withTypeChecking(false);
+  auto r = driver.run("(1, 1 / 0)");
+  ASSERT_FALSE(r.has_value());
+  EXPECT_EQ(r.error().phase, "eval");
+  EXPECT_EQ(r.error().code, CompileError::ArithFault);
+  // A failing tail of a list is the same.
+  auto list = rig.eval("[1, 2 / 0]");
+  ASSERT_TRUE(list.has_value());
+  EXPECT_THROW((void)rig.compiler.render(*list), lower::RenderFailure);
+}
+
+TEST(VlaceLowerDataTest, ACutOffListIsClosedWithAnEllipsis) {
+  Rig rig;
+  auto inf = rig.eval("from n = n : from (n + 1) ; from 0");
+  ASSERT_TRUE(inf.has_value());
+  EXPECT_EQ(rig.compiler.render(*inf, 5), "[0, 1, 2, 3, 4, ...]");
+  auto cyc = rig.eval("letrec xs = 1 : xs in xs");
+  ASSERT_TRUE(cyc.has_value());
+  EXPECT_EQ(rig.compiler.render(*cyc, 3), "[1, 1, 1, ...]");
+  // A list that fits the budget exactly, or ends early, closes plainly.
+  auto three = rig.eval("[1, 2, 3]");
+  ASSERT_TRUE(three.has_value());
+  EXPECT_EQ(rig.compiler.render(*three, 3), "[1, 2, 3]");
+  EXPECT_EQ(rig.compiler.render(*three, 10), "[1, 2, 3]");
+  EXPECT_EQ(rig.compiler.render(*three, 2), "[1, 2, ...]");
 }
 
 TEST(VlaceLowerDataTest, AForcedLongListReadsBackWithoutRecursingToItsDepth) {
@@ -670,6 +704,128 @@ TEST(VlaceLowerDataTest, AForcedLongListReadsBackWithoutRecursingToItsDepth) {
                         "case range 300 of (h : _) => h");
   ASSERT_TRUE(again.has_value());
   EXPECT_EQ((*again)->i, 300);
+}
+
+// -- nesting beyond the budget, linearity across parameters, more scrutinees
+// ------------------------------------------------------------------------
+
+TEST(VlaceLowerDataTest, DeeplyNestedConstructionEndsInABudgetError) {
+  const int depth = 1500;
+  Rig rig;
+  // [[[[...]]]]
+  std::string lists = std::string(depth, '[') + "1" + std::string(depth, ']');
+  auto err          = rig.failure(lists);
+  ASSERT_TRUE(err.has_value());
+  EXPECT_EQ(err->code, CompileError::BudgetExhausted);
+  // ((((1 : 2) : 3) : 4) ...), the head of each cons is the next one.
+  std::string cons = std::string(depth, '(') + "1";
+  for (int i = 0; i < depth; ++i) cons += " : 2)";
+  err = rig.failure(cons);
+  ASSERT_TRUE(err.has_value());
+  EXPECT_EQ(err->code, CompileError::BudgetExhausted);
+  // Some (Some (... 1)) as an expression.
+  std::string some;
+  for (int i = 0; i < depth; ++i) some += "Some (";
+  some += "1" + std::string(depth, ')');
+  err = rig.failure(some);
+  ASSERT_TRUE(err.has_value());
+  EXPECT_EQ(err->code, CompileError::BudgetExhausted);
+  // The VM is usable afterwards.
+  EXPECT_EQ(rig.render("[[1], [2]]"), "[[1], [2]]");
+}
+
+TEST(VlaceLowerDataTest, ADeeplyNestedConstructorPatternEndsInABudgetError) {
+  const int depth = 1500;
+  std::string pattern;
+  for (int i = 0; i < depth; ++i) pattern += "Some (";
+  pattern += "n" + std::string(depth, ')');
+  Rig rig;
+  const auto err = rig.failure("case None of " + pattern + " => 1 ; _ => 0");
+  ASSERT_TRUE(err.has_value());
+  EXPECT_EQ(err->code, CompileError::BudgetExhausted);
+  // Within the budget the same shape matches.
+  std::string small;
+  for (int i = 0; i < 20; ++i) small += "Some (";
+  small += "n" + std::string(20, ')');
+  std::string value;
+  for (int i = 0; i < 20; ++i) value += "Some (";
+  value += "7" + std::string(20, ')');
+  EXPECT_EQ(rig.render("case " + value + " of " + small + " => n"), "7");
+}
+
+TEST(VlaceLowerDataTest, ParameterPatternsOfOneFunctionShareALinearityScope) {
+  for (const std::string_view src :
+       {"(fn (a, b) (c, a) => a) (1, 2) (3, 4)", "f (a, b) (c, a) = a ; 0",
+        "(fn x x => x) 1 2", "(fn (Some a) [a, b] => b) (Some 1) [2, 3]"}) {
+    const auto err = Rig{}.failure(src);
+    ASSERT_TRUE(err.has_value()) << src;
+    EXPECT_EQ(err->code, CompileError::NonLinearPattern) << src;
+  }
+  // Distinct names across parameters, and the same name in different
+  // lambdas or alternatives, are fine.
+  EXPECT_EQ(run("(fn (a, b) (c, d) => a + b + c + d) (1, 2) (3, 4)"), "10");
+  EXPECT_EQ(run("(fn (a, b) => (fn (a, c) => a + c)) (1, 2) (3, 4)"), "7");
+  EXPECT_EQ(run("case (1, 2) of (a, _) => a ; (_, a) => a"), "1");
+  // A pattern that binds nothing is fine however often it is used.
+  EXPECT_EQ(run("case (1, 2) of (_, _) => 0"), "0");
+  EXPECT_EQ(run("g (_, _) (_, _) = 5 ; g (1, 2) (3, 4)"), "5");
+}
+
+TEST(VlaceLowerDataTest, OnlyALaterAlternativeMayInspectAnUnforcedScrutinee) {
+  // The first alternative is a guarded variable: the scrutinee stays a thunk
+  // until the second one looks at it, and a thunk that fails fails there.
+  EXPECT_EQ(run("case 1 + 1 of x if False => 0 ; 2 => 5 ; _ => 6"), "5");
+  EXPECT_EQ(run("case Some (1 + 1) of s if False => 0 ; Some n => n"), "2");
+  const auto err =
+      Rig{}.failure("case 1 / 0 of x if False => 0 ; 2 => 5 ; _ => 6");
+  ASSERT_TRUE(err.has_value());
+  EXPECT_EQ(err->code, CompileError::ArithFault);
+  // If nothing ever inspects it, it never runs.
+  EXPECT_EQ(run("case 1 / 0 of x if False => 0 ; y => 3"), "3");
+}
+
+TEST(VlaceLowerDataTest, AClosureScrutineeMatchesOnlyAVariableOrWildcard) {
+  EXPECT_EQ(run("case (fn x => x + 1) of f => f 1"), "2");
+  EXPECT_EQ(run("case (fn x => x) of _ => 4"), "4");
+  EXPECT_EQ(run("case (fn x => x) of 1 => 1 ; \"fn\" => 2 ; None => 3 ; "
+                "(a, b) => 4 ; f => f 9"),
+            "9");
+  EXPECT_EQ(run("case (fn x => x) of Some y => y ; (a : b) => a ; _ => 0"),
+            "0");
+}
+
+TEST(VlaceLowerDataTest, OpaqueCapabilityTagsMatchButCannotBeBuilt) {
+  // Patterns on Cell, Dim and Unit are accepted (and match nothing a program
+  // can make); expressions naming them are refused.
+  EXPECT_EQ(run("case 5 of Cell n => n ; Dim n => n ; Unit => 1 ; _ => 0"),
+            "0");
+  for (const std::string_view src :
+       {"Cell 1", "Dim 2", "Unit", "(fn n => Cell n) 1"}) {
+    const auto err = Rig{}.failure(src);
+    ASSERT_TRUE(err.has_value()) << src;
+    EXPECT_EQ(err->code, CompileError::TypeMismatch) << src;
+  }
+  // `Cell` of the wrong arity in a pattern is an arity error.
+  const auto bad = Rig{}.failure("case 1 of Cell a b => a ; _ => 0");
+  ASSERT_TRUE(bad.has_value());
+  EXPECT_EQ(bad->code, CompileError::TypeMismatch);
+}
+
+TEST(VlaceLowerDataTest, EmptyParenthesesAreNotAnExpression) {
+  Parser parser("()");
+  const auto prog = parser.parseProgram();
+  EXPECT_FALSE(prog.has_value());
+}
+
+TEST(VlaceLowerDataTest, ALongForcedListReadsBackAndRenders) {
+  Rig rig;
+  const auto v = rig.eval("from n = n : from (n + 1) ;" + takeDef +
+                          "take 3000 (from 1)");
+  ASSERT_TRUE(v.has_value());
+  const auto text = rig.compiler.render(*v, 20000);
+  EXPECT_EQ(text.substr(0, 13), "[1, 2, 3, 4, ");
+  EXPECT_NE(text.find(", 3000]"), std::string::npos);
+  EXPECT_EQ(text.find("..."), std::string::npos);
 }
 
 // -- what still refuses

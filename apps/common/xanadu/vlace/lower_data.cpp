@@ -26,12 +26,14 @@
  */
 #include <array>
 #include <stdexcept>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
 
 #include "common/xanadu/vlace/kernel.hpp"
 #include "common/xanadu/vlace/lower_cards.hpp"
+#include "common/xanadu/vlace/render_error.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu::vlace::lower {
@@ -82,6 +84,9 @@ constexpr std::array<BuiltinCtor, 3> opaqueCtors{{
     {"Unit", 0},
 }};
 
+/// What closes a rendered list that was cut off by the depth budget.
+constexpr std::string_view truncationTail = ", ...";
+
 constexpr std::string_view nilTag   = "Nil";
 constexpr std::string_view consTag  = "Cons";
 constexpr std::string_view tupleTag = "Tuple";
@@ -115,10 +120,6 @@ struct DataState {
   std::unordered_map<std::string, CellRef> atoms;
   /// The closure descriptor of a forwarder's code.
   std::optional<CellRef> forwarder;
-  /// Variables bound so far by the pattern whose mismatch label is the key,
-  /// for the compile-time linearity check. Cleared per `case` alternative; a
-  /// lambda parameter pattern leaves its (small) entry behind.
-  std::unordered_map<CellRef, std::unordered_set<std::string>> bound;
 };
 
 DataState &data(LowerContext &ctx) {
@@ -316,6 +317,7 @@ bool isConsExpr(const ExprNode &e) {
 /// A slot for the field @p e. The slot is lazy: nothing in @p e runs until the
 /// slot is forced.
 Lowered<Operand> fieldSlot(LowerContext &ctx, const ExprNode &e) {
+  const DepthGuard depth;
   if (const auto *lit = std::get_if<ELiteral>(&e.node)) {
     const auto constant = lowerLiteral(ctx, *lit, e.loc); // L1
     if (!constant) return constant;
@@ -475,6 +477,50 @@ private:
 
 } // namespace
 
+// -- Linearity
+
+namespace {
+
+Lowered<void> collectNames(const PatternNode &p,
+                           std::unordered_set<std::string> &seen) {
+  const DepthGuard depth;
+  return std::visit(
+      [&](const auto &node) -> Lowered<void> {
+        using T = std::decay_t<decltype(node)>;
+        if constexpr (std::is_same_v<T, PVar>) {
+          if (!seen.insert(node.name).second) {
+            return fail(CompileError::NonLinearPattern,
+                        "'" + node.name + "' bound twice in one pattern",
+                        p.loc);
+          }
+        } else if constexpr (std::is_same_v<T, PConstructor>) {
+          for (const auto &arg : node.args) {
+            if (auto r = collectNames(*arg, seen); !r) return r;
+          }
+        } else if constexpr (std::is_same_v<T, PTuple>) {
+          for (const auto &elem : node.elems) {
+            if (auto r = collectNames(*elem, seen); !r) return r;
+          }
+        } else if constexpr (std::is_same_v<T, PRecord>) {
+          for (const auto &field : node.fields) {
+            if (auto r = collectNames(*field.second, seen); !r) return r;
+          }
+        }
+        return {};
+      },
+      p.node);
+}
+
+} // namespace
+
+Lowered<void> checkLinear(std::span<const Pattern> patterns) {
+  std::unordered_set<std::string> seen;
+  for (const auto &p : patterns) {
+    if (auto r = collectNames(*p, seen); !r) return r;
+  }
+  return {};
+}
+
 // -- Constructors and tuples
 
 Lowered<Operand> lowerCtor(LowerContext &ctx, const ECtor &e,
@@ -594,10 +640,9 @@ Lowered<Operand> termBuilder(LowerContext &ctx, std::string_view tag,
 
 Lowered<void> lowerPatVar(LowerContext &ctx, const PVar &p, SourceLocation loc,
                           PatternSite &site) {
-  if (!data(ctx).bound[site.join].insert(p.name).second) {
-    return fail(CompileError::NonLinearPattern,
-                "'" + p.name + "' bound twice in one pattern", loc);
-  }
+  // Linearity was checked up front (checkLinear), where the whole scope of the
+  // pattern is known.
+  (void)loc;
   ctx.bind(p.name, site.scrutinee);
   return {};
 }
@@ -692,6 +737,11 @@ Lowered<void> lowerPatTuple(LowerContext &ctx, const PTuple &p,
 Lowered<Operand> lowerCase(LowerContext &ctx, const ECase &e,
                            SourceLocation loc) {
   const DepthGuard depth;
+  for (const auto &alt : e.alts) {
+    if (auto linear = checkLinear(std::span<const Pattern>(&alt.pattern, 1));
+        !linear)
+      return std::unexpected(linear.error());
+  }
   // The scrutinee is forced to weak head normal form only, and only if the
   // first alternative looks at it (a variable or wildcard first leaves it a
   // thunk); a later alternative forces it itself.
@@ -713,7 +763,6 @@ Lowered<Operand> lowerCase(LowerContext &ctx, const ECase &e,
                      .join      = ctx.mintLabel("#vlace_alt_next"),
                      .branches  = {}};
     const auto matched = lowerPattern(ctx, *alt.pattern, site);
-    data(ctx).bound.erase(site.join);
     if (!matched) return std::unexpected(matched.error());
     if (alt.guard) {
       auto guard = lowerExpr(ctx, **alt.guard);
@@ -820,6 +869,7 @@ std::string renderData(Compiler &compiler, const Value &v, int depthBudget) {
   if (v.tag == consTag && v.args.size() == 2) {
     std::string out = "[";
     bool first      = true;
+    bool finished   = false; // stopped on Nil or an improper tail
     int budget      = depthBudget;
     ValuePtr node   = std::make_shared<Value>(v);
     while (budget-- > 0) {
@@ -828,18 +878,21 @@ std::string renderData(Compiler &compiler, const Value &v, int depthBudget) {
         first = false;
         out += compiler.render(node->args[0], depthBudget - 1);
         auto tail = compiler.forceValue(node->args[1]);
-        if (!tail) {
-          out += ", <error>";
-          break;
-        }
+        if (!tail) throw RenderFailure(tail.error());
         node = *tail;
       } else if (node->tag == nilTag) {
+        finished = true;
         break;
       } else {
         out += " | " + compiler.render(node, depthBudget - 1); // improper tail
+        finished = true;
         break;
       }
     }
+    // The budget ran out with the list still going (long, infinite or cyclic):
+    // say so rather than close it as if it ended. A list whose last element was
+    // the final one the budget allowed still ends in Nil and closes plainly.
+    if (!finished && node->tag != nilTag) out += truncationTail;
     out += "]";
     return out;
   }

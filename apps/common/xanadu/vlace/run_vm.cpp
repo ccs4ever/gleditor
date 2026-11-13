@@ -5,6 +5,7 @@
  */
 #include "common/xanadu/vlace/run_vm.hpp"
 #include "common/xanadu/vlace/kernel.hpp"
+#include "common/xanadu/vlace/render_error.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -86,6 +87,8 @@ private:
 
 /// A thrown arena fuel or lowering failure as an EvalError.
 EvalError exceptionToEval(const std::exception &error) {
+  if (const auto *render = dynamic_cast<const RenderFailure *>(&error))
+    return render->error();
   if (auto budget = rewordBudgetFailure(error.what())) return *budget;
   return EvalError{.code   = CompileError::UnexpectedToken,
                    .detail = std::string("vlace: ") + error.what(),
