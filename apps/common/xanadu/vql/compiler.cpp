@@ -301,6 +301,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "POW";
   case OpcodeKind::SameCell:
     return "SAMECELL";
+  case OpcodeKind::PinHistorical:
+    return "PINHISTORICAL";
   default:
     return "UNKNOWN";
   }
@@ -672,11 +674,7 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
 std::optional<CellRef>
 VQLCompiler::compilePathExpression(const PathExpression &path,
                                    CellRef ctxCell) {
-  if (path.anchor.versionPin ||
-      std::ranges::any_of(path.steps, [](const PathStep &step) {
-        return step.versionPin.has_value();
-      }))
-    return compileVersionPinnedPath(path, ctxCell);
+  if (path.anchor.versionPin) return compileVersionPinnedPath(path, ctxCell);
   std::vector<CellRef> stream;
   if (path.anchor.kind == AnchorKind::Variable &&
       streamBindings_.contains(path.anchor.name)) {

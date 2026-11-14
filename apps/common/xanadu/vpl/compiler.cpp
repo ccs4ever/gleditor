@@ -351,6 +351,8 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "POW";
   case OpcodeKind::SameCell:
     return "SAMECELL";
+  case OpcodeKind::PinHistorical:
+    return "PINHISTORICAL";
   default:
     return "UNKNOWN";
   }

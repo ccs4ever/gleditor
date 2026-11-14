@@ -103,16 +103,12 @@ TEST(VQLHistoryVmTest, PinOnTheAnchorLeavesTheLiveStoreAlone) {
   EXPECT_EQ(fixture.coordinator.arena().textOf(live.front()), "born");
 }
 
-TEST(VQLHistoryVmTest, PinOnAPathStepRefusesByName) {
+TEST(VQLHistoryVmTest, PinOnAPathStepSucceedsThroughVM) {
   PinnedStore fixture;
-  try {
-    (void)fixture.engine.execute("##/d.pin-test@(" +
-                                 fixture.linkedVersion.str() + ")");
-    FAIL() << "a step pin must be refused";
-  } catch (const std::runtime_error &error) {
-    EXPECT_THAT(error.what(),
-                testing::HasSubstr("version pins on a path step"));
-  }
+  const auto results = fixture.engine.execute(
+      "##/d.pin-test@(" + fixture.linkedVersion.str() + ")");
+  ASSERT_EQ(results.size(), 1U);
+  EXPECT_EQ(fixture.coordinator.arena().textOf(results.front()), "born");
 }
 
 TEST(VQLHistoryVmTest, PinWithoutStoreRefusesInsteadOfAnsweringEmpty) {
@@ -155,8 +151,7 @@ TEST(VQLHistoryVmTest, SecondPinOfTheSameFoldAttachesNothingNew) {
 TEST(VQLHistoryVmTest, RefusalBeforeAnyFoldLeavesNoSpaceBehind) {
   PinnedStore fixture;
   const auto attached = fixture.coordinator.arena().spaceCount();
-  EXPECT_THROW(fixture.engine.execute("##/d.pin-test@(" +
-                                      fixture.linkedVersion.str() + ")"),
+  EXPECT_THROW(fixture.engine.execute("##/d.pin-test@($unbound)"),
                std::runtime_error);
   EXPECT_EQ(fixture.coordinator.arena().spaceCount(), attached);
 }
@@ -168,8 +163,7 @@ TEST(VQLHistoryVmTest, FailedCompileAfterAPinLeavesNoSpaceBehind) {
   // refused, so the compile fails with that space already attached.
   EXPECT_THROW(fixture.engine.execute("let $early := ##@(" +
                                       fixture.cellVersion.str() +
-                                      ") return ##/d.pin-test@(" +
-                                      fixture.linkedVersion.str() + ")"),
+                                      ") return ##/d.pin-test@($unbound)"),
                std::runtime_error);
   EXPECT_EQ(fixture.coordinator.arena().spaceCount(), attached);
   // The same fold pins again afterwards, from a clean arena.
@@ -187,8 +181,7 @@ TEST(VQLHistoryVmTest,
   // The failed compile attaches the early fold's space and gives it back.
   EXPECT_THROW(fixture.engine.execute("let $early := ##@(" +
                                       fixture.cellVersion.str() +
-                                      ") return ##/d.pin-test@(" +
-                                      fixture.linkedVersion.str() + ")"),
+                                      ") return ##/d.pin-test@($unbound)"),
                std::runtime_error);
   // The late fold now takes the freed id; the early one must not read it.
   EXPECT_EQ(fixture.engine.execute(later).size(), 1U);
