@@ -362,7 +362,7 @@ TEST(LogicCompileCoreTest, UnloweredBuiltinsRefuseByNameButUnknownNamesFail) {
   // symbolic names as atoms. An entry deleted when its card lands drops out of
   // this sweep by itself.
   const auto owned = ownedGoalSignatures();
-  ASSERT_FALSE(owned.empty());
+  EXPECT_TRUE(owned.empty());
   for (const auto &[name, arity] : owned) {
     // Inside a quoted atom a backslash is an escape, so it is doubled.
     std::string quoted;
@@ -389,13 +389,8 @@ TEST(LogicCompileCoreTest, UnloweredBuiltinsRefuseByNameButUnknownNamesFail) {
           << goal << ": " << what;
     }
   }
-  try {
-    (void)h.all("known(X), vortex_module(2).", "X");
-    ADD_FAILURE() << "a conjunction through a P3 goal did not refuse";
-  } catch (const logic::LogicRefusal &refusal) {
-    EXPECT_NE(std::string(refusal.what()).find("awaits P2/P3/P4"),
-              std::string::npos);
-  }
+  // With P3/P4 lowered, vortex_module(2) fails normally rather than refusing.
+  EXPECT_TRUE(h.all("known(X), vortex_module(2).", "X").empty());
   EXPECT_TRUE(h.all("nosuch(X).", "X").empty());
   EXPECT_TRUE(h.all("nosuch(X, 1, 2).", "X").empty());
   EXPECT_EQ(h.all("known(X).", "X").size(), 1u);

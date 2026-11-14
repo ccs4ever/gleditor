@@ -74,29 +74,7 @@ struct OwnedGoal {
 };
 // One row per line so a card deleting its rows touches nothing else.
 // clang-format off
-constexpr std::array kOwnedGoals{
-    OwnedGoal{"vortex_module", 1},
-    OwnedGoal{"stdlib_module", 1},
-    OwnedGoal{"vortex_function", 1},
-    OwnedGoal{"vortex_function", 2},
-    OwnedGoal{"vortex_function", 3},
-    OwnedGoal{"stdlib_function", 1},
-    OwnedGoal{"stdlib_function", 2},
-    OwnedGoal{"stdlib_function", 3},
-    OwnedGoal{"vortex_instruction", 3},
-    OwnedGoal{"vortex_contract", 3},
-    OwnedGoal{"vortex_param", 4},
-    OwnedGoal{"setting", 2},
-    OwnedGoal{"setting_shape", 2},
-    OwnedGoal{"setting_default", 2},
-    OwnedGoal{"transclude", 3},
-    OwnedGoal{"xanalink", 3},
-    OwnedGoal{"cell_value", 2},
-    OwnedGoal{"cell_link", 4},
-    OwnedGoal{"cell_span", 2},
-    OwnedGoal{"bridge_edge", 2},
-    OwnedGoal{"bridge_edge", 3},
-};
+constexpr std::array<OwnedGoal, 0> kOwnedGoals{};
 // clang-format on
 
 [[nodiscard]] bool isOwnedGoal(const PredicateKey &key) {
@@ -600,7 +578,9 @@ CellRef emitCutTo(CompileContext &ctx, Chain &chain, CellRef barrier) {
 bool hasUserClauses(const CompileContext &ctx, const PredicateKey &key) {
   // The old solver tried its builtin arms before any clause, so a user clause
   // named like a builtin never replaced it; the same holds here.
-  if (isOwnedGoal(key) || isControlBuiltin(key)) return false;
+  if (isOwnedGoal(key) || isControlBuiltin(key) ||
+      ctx.relations.find(key) != nullptr)
+    return false;
   auto &arena = arenaOf(ctx);
   return std::ranges::any_of(ctx.candidatePredicates, [&](const CellRef pred) {
     return pred != noCell && arena.contains(pred) &&
