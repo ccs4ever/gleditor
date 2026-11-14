@@ -841,15 +841,12 @@ TEST(VlaceLowerDataTest, DestructuringLetStillRefusesByName) {
   EXPECT_NE(err->detail.find("let binds a simple variable"), std::string::npos);
 }
 
-TEST(VlaceLowerDataTest, FormsOfLaterCardsRefuseByName) {
-  const std::string refusal = "VM lowering is not implemented for VLace";
+TEST(VlaceLowerDataTest, FormsOfLaterCardsEvaluate) {
   Rig rig;
-  for (const std::string_view src : {"makeText \"x\""}) {
-    const auto err = rig.failure(src);
-    ASSERT_TRUE(err.has_value()) << src;
-    EXPECT_NE(err->detail.find(refusal), std::string::npos)
-        << src << " -> " << err->detail;
-  }
+  auto v = rig.eval("makeText \"x\"");
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ((*v)->kind, Value::Kind::Ctor);
+  EXPECT_EQ((*v)->tag, "Cell");
 }
 
 // The parser never produces a record expression, so build one by hand.
