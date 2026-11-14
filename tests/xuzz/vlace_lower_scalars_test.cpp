@@ -240,7 +240,7 @@ TEST(VlaceLowerScalarsTest, DriverNamesThePhaseThatFailed) {
 
 TEST(VlaceLowerScalarsTest, ConstructsOwnedByLaterCardsStillRefuse) {
   Rig rig;
-  auto v = rig.eval("putStrLn \"x\"");
+  auto v = rig.eval("makeText \"x\"");
   ASSERT_FALSE(v.has_value());
   EXPECT_NE(v.error().detail.find("VM lowering is not implemented"),
             std::string::npos);
