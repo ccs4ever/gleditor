@@ -250,7 +250,7 @@ TEST_F(VplIotaTest, UnsupportedFormsStillRefuseByName) {
   expectRefusal("5 ⍳ 3", "single dimension");
   // A literal enclosure is refused by the enclose lowering before the shape
   // sees it; an enclosed variable reaches the shape refusal in full.
-  expectRefusal("⍴ ⊂ 1 2 3", "unsupported VPL monadic verb in VM compiler");
+  expectRefusal("⍴ ⊂ 1 2 3", "shape of an enclosed value");
   VplView boxed = VplView::makeScalar(std::int64_t{0});
   boxed.enclose(
       std::make_shared<VplView>(VplView::makeScalar(std::int64_t{1})));

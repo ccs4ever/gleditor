@@ -65,41 +65,12 @@ constexpr std::string_view kDropReversed =
     "VPL drop of a reversed rank is unsupported by the VM: the new far end "
     "would need a bound the view does not have";
 
-std::int64_t asValue(DimRef dimension) {
-  return static_cast<std::int64_t>(dimension);
-}
-
-std::int64_t asValue(DimVector direction) {
-  return static_cast<std::int64_t>(zigzag::toSign(direction));
-}
-
 // A literal count APL or this lowering rejects is refused at compile time.
 void refuseBadLiteral(const AstNode *node) {
   const auto value = literalNumber(node);
   if (!value) return;
   if (std::trunc(*value) != *value) refuse(kDropNonIntegerLiteral);
   if (*value < 0.0) refuse(kDropNegativeLiteral);
-}
-
-// A register that ends `count` read-form links along the axis from `origin`.
-// A link read off an absent register answers nothing and a copy of nothing
-// clears its target, so running off the end leaves the register absent
-// instead of stuck on the last cell.
-CellRef hop(LowerContext &ctx, CellRef origin, CellRef count, DimRef dimension,
-            DimVector direction) {
-  const auto cursor = emit::aliasRegister(ctx, origin);
-  emit::countedLoop(ctx, count, [&](CellRef) {
-    const auto read = ctx.emitOp(OpcodeKind::Link, "#DROP_HOP");
-    ctx.emitInput(read, cursor);
-    ctx.emitInputConstant(read, asValue(dimension));
-    ctx.emitInputConstant(read, asValue(direction));
-    const auto next = ctx.core().arena().makeCell();
-    ctx.emitOutput(read, next);
-    const auto advance = ctx.emitOp(OpcodeKind::CopyCellRefs, "#DROP_ADVANCE");
-    ctx.emitInput(advance, next);
-    ctx.emitOutput(advance, cursor);
-  });
-  return cursor;
 }
 
 } // namespace

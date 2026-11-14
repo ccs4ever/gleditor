@@ -258,7 +258,8 @@ TEST_F(VplViewsTest, RefusalsNameTheForm) {
                 "VPL reverse of a dimension value is unsupported by the VM");
   expectRefusal("⊖ (d.1 d.2)",
                 "VPL reverse of a dimension value is unsupported by the VM");
-  expectRefusal("⍉ ⊂ 1 2 3", "unsupported VPL monadic verb in VM compiler");
+  expectRefusal("⍉ ⊂ 1 2 3",
+                "VPL transpose of an enclosed value is unsupported by the VM");
   expectRefusal("(1 2 3) ⍴ d.1",
                 "VPL dimension view of a rank is unsupported by the VM; use "
                 "the shape link form");

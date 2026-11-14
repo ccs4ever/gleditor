@@ -275,7 +275,7 @@ TEST(VPLEngineTest, EncloseAndDisclose) {
   EXPECT_EQ(sh[0], 3u);
 }
 
-TEST(VPLEngineTest, DISABLED_IndexingAndSorting) {
+TEST(VPLEngineTest, IndexingAndSorting) {
   VPLEngine engine;
 
   engine.evaluate("A ← 10 20 30 40 50");

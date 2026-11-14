@@ -113,6 +113,44 @@ scalarDyadicVerb(const TokenKind verb) {
 
 namespace xanadu::vpl::lower {
 
+inline void zero(LowerContext &ctx, zigzag::CellRef counter,
+                 std::string_view label) {
+  using zigzag::vortex::OpcodeKind;
+  const auto op = ctx.emitOp(OpcodeKind::Add, label);
+  ctx.emitInputConstant(op, std::int64_t{0});
+  ctx.emitInputConstant(op, std::int64_t{0});
+  ctx.emitOutput(op, counter);
+}
+
+inline void increment(LowerContext &ctx, zigzag::CellRef counter,
+                      std::string_view label) {
+  using zigzag::vortex::OpcodeKind;
+  const auto op = ctx.emitOp(OpcodeKind::Add, label);
+  ctx.emitInput(op, counter);
+  ctx.emitInputConstant(op, std::int64_t{1});
+  ctx.emitOutput(op, counter);
+}
+
+inline zigzag::CellRef hop(LowerContext &ctx, zigzag::CellRef origin,
+                           zigzag::CellRef count, zigzag::DimRef dimension,
+                           zigzag::DimVector direction) {
+  using zigzag::vortex::OpcodeKind;
+  const auto cursor = emit::aliasRegister(ctx, origin);
+  emit::countedLoop(ctx, count, [&](zigzag::CellRef) {
+    const auto read = ctx.emitOp(OpcodeKind::Link, "#HOP_LINK");
+    ctx.emitInput(read, cursor);
+    ctx.emitInputConstant(read, static_cast<std::int64_t>(dimension));
+    ctx.emitInputConstant(read,
+                          static_cast<std::int64_t>(zigzag::toSign(direction)));
+    const auto next = ctx.core().arena().makeCell();
+    ctx.emitOutput(read, next);
+    const auto advance = ctx.emitOp(OpcodeKind::CopyCellRefs, "#HOP_ADVANCE");
+    ctx.emitInput(advance, next);
+    ctx.emitOutput(advance, cursor);
+  });
+  return cursor;
+}
+
 struct Minting {
   zigzag::CellRef tail;
   zigzag::CellRef before;
