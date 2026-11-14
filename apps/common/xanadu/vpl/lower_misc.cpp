@@ -1,44 +1,84 @@
 /**
  * @file lower_misc.cpp
- * @brief Card V13 print marker, compress, key, rank operator and named
+ * @brief Card V13: print marker, compress, key, rank operator and named
  * refusals.
  *
- * Refusing stubs for the dispatch sites listed in lower_decls.hpp. The card
- * that owns this file replaces each body and keeps the refusals for the forms
- * it still does not lower.
+ * Provides named refusals for VPL features not yet lowered to the VM:
+ * scrub (⍫), compress (⌿), rank conjunction (⍤), key conjunction (⌸),
+ * and quad functions (⎕READ, ⎕SPLIT, ⎕).
  */
+#include <string_view>
+
 #include "common/xanadu/vpl/lower_decls.hpp"
 
 namespace xanadu::vpl::lower {
+namespace {
 
-Maybe lowerScrubMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
-  refuseMonadicOperand(ctx, rCell);
+constexpr std::string_view kScrubUnsupported =
+    "VPL scrub (⍫) is unsupported by the VM";
+constexpr std::string_view kCompressUnsupported =
+    "VPL compress (⌿) is unsupported by the VM";
+constexpr std::string_view kRankUnsupported =
+    "VPL rank conjunction (⍤) is unsupported by the VM";
+constexpr std::string_view kKeyUnsupported =
+    "VPL key conjunction (⌸) is unsupported by the VM";
+constexpr std::string_view kConjunctionUnsupported =
+    "unsupported VPL conjunction in VM compiler";
+constexpr std::string_view kQuadReadUnsupported =
+    "VPL ⎕READ is unsupported by the VM (requires store reader)";
+constexpr std::string_view kQuadSplitUnsupported =
+    "VPL ⎕SPLIT is unsupported by the VM (requires string split)";
+constexpr std::string_view kQuadUnsupported =
+    "VPL quad IO is unsupported by the VM";
+
+[[noreturn]] void refuseConjunctionKind(TokenKind kind) {
+  if (kind == TokenKind::RankOp) {
+    refuse(kRankUnsupported);
+  }
+  if (kind == TokenKind::Key) {
+    refuse(kKeyUnsupported);
+  }
+  refuse(kConjunctionUnsupported);
+}
+
+} // namespace
+
+Maybe lowerScrubMonadic(LowerContext &, const MonadicExpr &, CellRef) {
+  refuse(kScrubUnsupported);
 }
 
 CellRef lowerScrubDyadic(LowerContext &, const DyadicExpr &) {
-  refuse(msg::dyadicUnsupported);
+  refuse(kScrubUnsupported);
 }
 
-CellRef lowerCompressDyadic(LowerContext &ctx, const DyadicExpr &,
-                            CellRef lCell, CellRef rCell) {
-  refuseDyadicOperands(ctx, lCell, rCell);
+CellRef lowerCompressDyadic(LowerContext &, const DyadicExpr &, CellRef,
+                            CellRef) {
+  refuse(kCompressUnsupported);
 }
 
 Maybe lowerConjunctionMonadic(LowerContext &, const MonadicExpr &,
-                              const ConjunctionExpr &) {
-  refuse(msg::customUnsupported);
+                              const ConjunctionExpr &conjunction) {
+  refuseConjunctionKind(conjunction.conjunction());
 }
 
-CellRef lowerConjunctionDyadic(LowerContext &ctx, const DyadicExpr &,
-                               const ConjunctionExpr &, CellRef lCell,
-                               CellRef rCell) {
-  refuseDyadicOperands(ctx, lCell, rCell);
+CellRef lowerConjunctionDyadic(LowerContext &, const DyadicExpr &,
+                               const ConjunctionExpr &conjunction, CellRef,
+                               CellRef) {
+  refuseConjunctionKind(conjunction.conjunction());
 }
 
-CellRef lowerConjunctionExpr(LowerContext &, const ConjunctionExpr &) {
-  refuse(msg::conjunctions);
+CellRef lowerConjunctionExpr(LowerContext &, const ConjunctionExpr &expr) {
+  refuseConjunctionKind(expr.conjunction());
 }
 
-Maybe lowerQuad(LowerContext &, const QuadExpr &) { refuse(msg::quad); }
+Maybe lowerQuad(LowerContext &, const QuadExpr &expr) {
+  if (expr.quadKind() == TokenKind::QuadRead) {
+    refuse(kQuadReadUnsupported);
+  }
+  if (expr.quadKind() == TokenKind::QuadSplit) {
+    refuse(kQuadSplitUnsupported);
+  }
+  refuse(kQuadUnsupported);
+}
 
 } // namespace xanadu::vpl::lower
