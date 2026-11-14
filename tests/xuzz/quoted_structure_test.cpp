@@ -219,7 +219,7 @@ TEST(QuotedStructureTest, releasingTheMarkDetachesTheQuotationsSpace) {
   resolveQuotations(arena, bobFold, *bob.store, source, QuotationBudget{});
   ASSERT_GT(arena.spaceCount(), spaces);
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   EXPECT_EQ(arena.spaceCount(), spaces);
   EXPECT_EQ(arena.cellCount(), cells);

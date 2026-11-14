@@ -368,7 +368,7 @@ TEST(VAgentCompilerTest,
   const auto mark   = h.arena.mark();
   EXPECT_FALSE(h.compiler.compileStatement(**expression));
   EXPECT_EQ(h.arena.cellCount(), before);
-  h.arena.release(mark);
+  EXPECT_TRUE(h.arena.release(mark));
   zigzag::ArenaManifold otherArena;
   zigzag::vortex::VortexCore otherCore(otherArena);
   zigzag::vortex::VortexVM otherVM(otherCore);

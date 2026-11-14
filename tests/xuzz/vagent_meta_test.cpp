@@ -334,7 +334,7 @@ TEST(VagentMetaTest, BindMintRefusesUnderLiveMarks) {
   const auto mark    = h.arena.mark();
   const auto refused = mintMetaBindSet(h.arena, h.core, h.programRoot, extra);
   EXPECT_FALSE(refused.has_value());
-  h.arena.release(mark);
+  EXPECT_TRUE(h.arena.release(mark));
 }
 
 TEST(VagentMetaTest, ModuleSymbolAndPlanNamed) {
@@ -569,8 +569,9 @@ TEST(VagentMetaTest, ValidateReadsEmissionShapeControlTargets) {
   // The emission convention is two hops: the wing slot holds int64(refBox),
   // the ref-box holds int64(referent) (compiler.cpp bindIn/reference).
   const auto landing = h.vm.mintOpcode(OpcodeKind::Return);
-  const auto refBox  = h.arena.makeScalarCell(static_cast<std::int64_t>(landing));
-  const auto jump    = h.vm.mintOpcode(OpcodeKind::Jump);
+  const auto refBox =
+      h.arena.makeScalarCell(static_cast<std::int64_t>(landing));
+  const auto jump = h.vm.mintOpcode(OpcodeKind::Jump);
   h.core.bindInput(jump,
                    h.arena.makeScalarCell(static_cast<std::int64_t>(refBox)));
   // Known defect (design/vagent-metacircular-compiler.md §2): validate's
@@ -641,8 +642,7 @@ struct Recipe {
   /// A ref-capture member: +d.refFor → the source slot, optional
   /// +d.name (dimension ref) and +d.values (cap$N binding hint).
   static CellRef refCapture(MetaHarness &h, CellRef slot,
-                            std::string_view dimName = {},
-                            bool mark              = false) {
+                            std::string_view dimName = {}, bool mark = false) {
     const auto member = h.arena.makeScalarCell(static_cast<std::int64_t>(slot));
     zigzag::expectWritten(
         h.arena.link(member, h.binds().dims.refFor, Posward, slot));
@@ -766,8 +766,7 @@ TEST(VagentMetaTest, ReifyRefCaptureRebindsAndAppendsCloneRank) {
   // the binding rides the slot's int64 (external → verbatim, shared
   // never copied).
   const auto binding = h.arena.makeCell();
-  const auto slot =
-      h.arena.makeScalarCell(static_cast<std::int64_t>(binding));
+  const auto slot = h.arena.makeScalarCell(static_cast<std::int64_t>(binding));
 
   std::vector<CellRef> members;
   members.push_back(Recipe::literal(h, a));
@@ -806,7 +805,7 @@ TEST(VagentMetaTest, ReifyRefusesDimensionMintUnderMarks) {
   const auto copy = h.rt().reify(head);
   EXPECT_FALSE(copy.has_value());
   if (!copy) EXPECT_NE(copy.error().find("live marks"), std::string::npos);
-  h.arena.release(mark);
+  EXPECT_TRUE(h.arena.release(mark));
 
   // Outside marks the same dim mints and the replay proceeds.
   const auto after = h.rt().reify(head);

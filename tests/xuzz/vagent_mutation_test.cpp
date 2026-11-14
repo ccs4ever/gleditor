@@ -526,7 +526,7 @@ TEST(VagentMutationTest, MutationRestoresUnderMarkRelease) {
   ASSERT_EQ(h.rt().clausesOf(goal).size(), 2U);
   ASSERT_TRUE(h.rt().prune(keep).has_value());
   EXPECT_EQ(h.rt().clausesOf(goal).size(), 1U);
-  h.arena.release(mark);
+  EXPECT_TRUE(h.arena.release(mark));
 
   // Both mutations replay out: the pruned clause returns, the grafted
   // one is gone, and the consumed heads are installable again.
@@ -894,13 +894,11 @@ TEST(VagentMutationTest, VerifyClosedRefusesUncoveredProgramSideMember) {
   const auto head = mintFragmentHead(h, OpcodeKind::Return, "f", true, "Bool");
   // A ref-record marking a member whose pos names a program-side cell the
   // recipe never covered — outbound, refused.
-  const auto smuggled =
-      h.arena.makeScalarCell(static_cast<std::int64_t>(demo));
+  const auto smuggled = h.arena.makeScalarCell(static_cast<std::int64_t>(demo));
   appendRefs(h, head.head, refRecord(h, smuggled, std::nullopt, std::nullopt));
   const auto report = h.rt().verifyClosed(head.head);
   EXPECT_FALSE(report.closed);
-  EXPECT_NE(report.detail.find("outbound"), std::string::npos)
-      << report.detail;
+  EXPECT_NE(report.detail.find("outbound"), std::string::npos) << report.detail;
 }
 
 // A malformed patch/vars field parses to nullopt rather than throwing —

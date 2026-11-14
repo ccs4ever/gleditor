@@ -74,7 +74,7 @@ struct Harness {
 
   zigzag::Mark snapshot() {
     const auto state = arena.mark();
-    arena.discard(state);
+    EXPECT_TRUE(arena.discard(state));
     return state;
   }
 

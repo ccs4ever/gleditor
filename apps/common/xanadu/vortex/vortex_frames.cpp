@@ -468,7 +468,7 @@ ExecutionResult VortexVM::invokeFramePrepared(
     activationFrames_[cursor].push_back(
         std::make_shared<const ActivationFrame>(std::move(frame)));
     setCursorOpcode(cursor, descriptor.entry.value());
-    arena.discard(mark);
+    zigzag::expectMarkOrder(arena.discard(mark));
     frameBackingCellsAllocated_ += descriptor.locals.size();
     ++nextActivationId_;
     committed = true;
@@ -483,7 +483,7 @@ ExecutionResult VortexVM::invokeFramePrepared(
       activationFrames_.swap(previousFrames);
       cursorPC_.swap(previousCursorPC);
       streamCursor_ = previousStreamCursor;
-      arena.release(mark);
+      zigzag::expectMarkOrder(arena.release(mark));
       return fail(error.what());
     }
     return fail(error.what());
@@ -677,9 +677,9 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
             arena.setValueBits(cursor, xanadu::ValueKind::None, 0));
       }
     }
-    arena.discard(mark);
+    zigzag::expectMarkOrder(arena.discard(mark));
   } catch (const std::exception &error) {
-    arena.release(mark);
+    zigzag::expectMarkOrder(arena.release(mark));
     guardScopes_.swap(previousGuardScopes);
     guardStacks_.swap(previousGuards);
     cellReferences_.swap(previousReferences);

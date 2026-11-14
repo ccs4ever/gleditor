@@ -322,7 +322,7 @@ TEST(ArenaResultTest, WritesNameTheRefUsedWrongly) {
 
   const auto mark = line.arena.mark();
   EXPECT_EQ(line.arena.compact().error(), ArenaRefusal::MarksOutstanding);
-  line.arena.discard(mark);
+  EXPECT_TRUE(line.arena.discard(mark));
   EXPECT_TRUE(line.arena.compact());
 }
 

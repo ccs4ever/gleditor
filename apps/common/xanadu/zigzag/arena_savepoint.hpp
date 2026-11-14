@@ -13,12 +13,12 @@ public:
   ArenaSavepoint &operator=(const ArenaSavepoint &) = delete;
 
   ~ArenaSavepoint() {
-    if (active_) arena_.release(mark_);
+    if (active_) zigzag::expectMarkOrder(arena_.release(mark_));
   }
 
   ArenaSavepoint *rollback() noexcept {
     if (active_) {
-      arena_.release(mark_);
+      zigzag::expectMarkOrder(arena_.release(mark_));
       active_ = false;
     }
     return this;
@@ -26,7 +26,7 @@ public:
 
   ArenaSavepoint *commit() noexcept {
     if (active_) {
-      arena_.discard(mark_);
+      zigzag::expectMarkOrder(arena_.discard(mark_));
       active_ = false;
     }
     return this;

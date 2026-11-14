@@ -4,6 +4,7 @@
 #include <array>
 #include <bit>
 #include <cstddef>
+#include <format>
 #include <limits>
 #include <span>
 #include <sstream>
@@ -258,6 +259,15 @@ ArenaManifold *ArenaManifold::projectProvenance(const xanadu::Store &store) {
   return this;
 }
 
+void expectMarkOrder(const MarkResult &result,
+                     const std::source_location where) noexcept {
+  if (!result) {
+    GLEDITOR_LOG_ERROR("zigzag.arena", "mark release refused ({}) at {}:{}",
+                       toString(result.error()), where.file_name(),
+                       where.line());
+  }
+}
+
 void expectWritten(const ArenaResult &result,
                    const std::source_location where) noexcept {
   if (!result) {
@@ -504,13 +514,13 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
     if (!inserted) {
       const CellRef existing = it->second;
       proxyOrder_.pop_back();
-      release(savepoint);
+      expectMarkOrder(release(savepoint));
       return existing;
     }
     spaceStoreRefsTail_[space - 1] = proxy;
-    discard(savepoint);
+    expectMarkOrder(discard(savepoint));
   } catch (...) {
-    release(savepoint);
+    expectMarkOrder(release(savepoint));
     throw;
   }
   const auto found = map.find(foreignIndex);
@@ -2212,13 +2222,13 @@ ArenaResult ArenaManifold::link(const CellRef from, const DimRef dim,
     applyLinkWrites(dim, std::span{writes}.first(writeCount));
   } catch (...) {
     if (savepoint.has_value()) {
-      release(*savepoint);
+      expectMarkOrder(release(*savepoint));
     }
     throw;
   }
 
   if (savepoint.has_value()) {
-    discard(*savepoint);
+    expectMarkOrder(discard(*savepoint));
   }
   return this;
 }
@@ -2416,7 +2426,7 @@ void ArenaManifold::trail(const std::uint32_t dense) {
 }
 
 Mark ArenaManifold::mark() {
-  const Mark taken{
+  Mark taken{
       .cellCount   = static_cast<std::uint32_t>(slots_.size()),
       .linkSize    = static_cast<std::uint32_t>(links_.size()),
       .contentSize = static_cast<std::uint32_t>(content_.size()),
@@ -2434,17 +2444,46 @@ Mark ArenaManifold::mark() {
       .dimensionCount  = static_cast<std::uint32_t>(dimensionOrder_.size()),
       .spaceCount      = static_cast<std::uint32_t>(spaces_.size()),
   };
-  floors_.push_back(Floors{.cells   = taken.cellCount,
+  taken.serial = ++lastMarkSerial_;
+  floors_.push_back(Floors{.serial  = taken.serial,
+                           .cells   = taken.cellCount,
                            .links   = taken.linkSize,
                            .content = taken.contentSize});
   outstandingMarks_++;
   return taken;
 }
 
-ArenaManifold *ArenaManifold::discard(const Mark &m) noexcept {
-  std::ignore = m;
-  if (0 == outstandingMarks_) {
-    return this;
+std::optional<MarkRefusal>
+ArenaManifold::markOrderRefusal(const Mark &m) const noexcept {
+  const std::optional<std::uint64_t> innermost =
+      floors_.empty() ? std::nullopt
+                      : std::optional<std::uint64_t>{floors_.back().serial};
+  if (innermost == m.serial) {
+    return std::nullopt;
+  }
+  const bool live = std::ranges::any_of(
+      floors_, [&](const Floors &f) { return f.serial == m.serial; });
+  return MarkRefusal{.reason = live ? MarkRefusal::Reason::LaterMarkOutstanding
+                                    : MarkRefusal::Reason::NotOutstanding,
+                     .requested   = m.serial,
+                     .outstanding = innermost};
+}
+
+std::string toString(const MarkRefusal &refusal) {
+  const std::string outstanding =
+      refusal.outstanding ? std::to_string(*refusal.outstanding) : "none";
+  return std::format(
+      "mark {} cannot be released: {} (innermost outstanding mark: {})",
+      refusal.requested,
+      refusal.reason == MarkRefusal::Reason::LaterMarkOutstanding
+          ? "a later mark is still outstanding"
+          : "it is not outstanding",
+      outstanding);
+}
+
+MarkResult ArenaManifold::discard(const Mark &m) noexcept {
+  if (const auto refusal = markOrderRefusal(m)) {
+    return std::unexpected{*refusal};
   }
   outstandingMarks_--;
   floors_.pop_back();
@@ -2458,7 +2497,10 @@ ArenaManifold *ArenaManifold::discard(const Mark &m) noexcept {
   return this;
 }
 
-ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
+MarkResult ArenaManifold::release(const Mark &m) noexcept {
+  if (const auto refusal = markOrderRefusal(m)) {
+    return std::unexpected{*refusal};
+  }
   for (std::size_t i = dimensionOrder_.size(); i > m.dimensionCount; i--) {
     const auto &entry = dimensionOrder_[i - 1];
     const auto found  = arenaDims_.find(entry.name);
@@ -3368,8 +3410,10 @@ ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
   std::vector<CellRef> shadowOrder(snapshot.shadowOrder);
   std::unordered_map<std::string, DimRef> arenaDims(snapshot.arenaDims);
   std::vector<Floors> floors;
-  floors.push_back(Floors{
-      .cells = m.cellCount, .links = m.linkSize, .content = m.contentSize});
+  floors.push_back(Floors{.serial  = m.serial,
+                          .cells   = m.cellCount,
+                          .links   = m.linkSize,
+                          .content = m.contentSize});
 
   slots_.swap(slots);
   links_.swap(links);
@@ -3399,6 +3443,7 @@ ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
   authorshipRoot_.reset();
   storesRankTail_.reset();
   floors_.swap(floors);
+  lastMarkSerial_   = std::max(lastMarkSerial_, m.serial);
   liveLinks_        = m.liveLinks;
   liveContent_      = m.liveContent;
   outstandingMarks_ = 1;

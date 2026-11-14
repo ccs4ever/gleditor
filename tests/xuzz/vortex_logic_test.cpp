@@ -619,7 +619,7 @@ TEST(VortexLogicTest, HighThroughputResolutionBenchmark) {
     EXPECT_TRUE(ok);
 
     // Rollback instantly
-    h.core.arena().release(mark);
+    EXPECT_TRUE(h.core.arena().release(mark));
   }
 
   auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(

@@ -49,7 +49,7 @@ ViewManifold::baseAsInt64(zigzag::CellRef cell) const noexcept {
 }
 
 ViewManifold *ViewManifold::toss() noexcept {
-  derived_.release(emptyDerivedMark_);
+  zigzag::expectMarkOrder(derived_.release(emptyDerivedMark_));
   emptyDerivedMark_ = derived_.mark();
   ++epoch_;
   return this;

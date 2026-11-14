@@ -155,7 +155,7 @@ TEST(VlogTest, aFailedUnificationIsUndoneByReleasingTheMark) {
   EXPECT_FALSE(e.v.unify(left, right));
   EXPECT_FALSE(e.v.isUnbound(x));
 
-  e.arena.release(mark);
+  EXPECT_TRUE(e.arena.release(mark));
   EXPECT_TRUE(e.v.isUnbound(x));
   EXPECT_TRUE(e.v.isUnbound(y));
 }
@@ -169,12 +169,12 @@ TEST(VlogTest, retryingAfterAReleaseBindsTheOtherWay) {
   const auto first = e.arena.mark();
   ASSERT_TRUE(e.v.unify(x, e.arena.makeCell("one")));
   EXPECT_EQ(e.arena.textOf(e.v.deref(x)), "one");
-  e.arena.release(first);
+  EXPECT_TRUE(e.arena.release(first));
 
   const auto second = e.arena.mark();
   ASSERT_TRUE(e.v.unify(x, e.arena.makeCell("two")));
   EXPECT_EQ(e.arena.textOf(e.v.deref(x)), "two");
-  e.arena.discard(second);
+  EXPECT_TRUE(e.arena.discard(second));
 
   // Discarded rather than released: this one succeeded, so the binding stands.
   EXPECT_EQ(e.arena.textOf(e.v.deref(x)), "two");

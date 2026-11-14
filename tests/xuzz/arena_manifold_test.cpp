@@ -296,7 +296,7 @@ TEST(ArenaManifoldTest, releaseTruncatesCellsMintedUnderTheMark) {
   ASSERT_TRUE(arena.m.link(a, arena.step, DimVector::POS, b));
   EXPECT_EQ(arena.m.cellCount(), before + 2);
 
-  arena.m.release(mark);
+  EXPECT_TRUE(arena.m.release(mark));
 
   // Gone, not garbage: there is nothing to collect afterwards.
   EXPECT_EQ(arena.m.cellCount(), before);
@@ -317,7 +317,7 @@ TEST(ArenaManifoldTest, theTrailStaysEmptyWhileOnlyYoungCellsAreWritten) {
   // writes no trail entry, because the truncation that removes the cell is
   // already the undo. This is the WAM's conditional-trailing rule.
   EXPECT_EQ(arena.m.trailSize(), 0U);
-  arena.m.release(mark);
+  EXPECT_TRUE(arena.m.release(mark));
 }
 
 TEST(ArenaManifoldTest, writingAnOlderCellTrailsItOnceAndReleaseRestoresIt) {
@@ -347,7 +347,7 @@ TEST(ArenaManifoldTest, writingAnOlderCellTrailsItOnceAndReleaseRestoresIt) {
   ASSERT_TRUE(arena.m.link(old, arena.clone, DimVector::POS, next));
   EXPECT_EQ(arena.m.trailSize(), 2U);
 
-  arena.m.release(mark);
+  EXPECT_TRUE(arena.m.release(mark));
 
   // The link *inside a run below the mark* is what a header-only trail entry
   // would have got wrong: truncating the arena cannot unwrite a DimLink that
@@ -371,7 +371,7 @@ TEST(ArenaManifoldTest, releaseRestoresScalarBitsForEmptyRunsAtTheFloor) {
   ASSERT_TRUE(arena.setValueBits(scalar, ValueKind::Bool, 1));
   EXPECT_EQ(arena.slot(scalar)->valueKind,
             static_cast<std::uint8_t>(ValueKind::Bool));
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   ASSERT_TRUE(arena.slot(scalar));
   EXPECT_EQ(arena.slot(scalar)->valueKind,
@@ -388,12 +388,12 @@ TEST(ArenaManifoldTest, repeatedScalarWritesRestoreAcrossNestedMarks) {
   const auto inner = arena.mark();
   ASSERT_TRUE(arena.setValueBits(scalar, ValueKind::Bool, 1));
   ASSERT_TRUE(arena.setValueBits(scalar, ValueKind::Int64, 19));
-  arena.release(inner);
+  EXPECT_TRUE(arena.release(inner));
   EXPECT_EQ(arena.slot(scalar)->valueKind,
             static_cast<std::uint8_t>(ValueKind::Int64));
   EXPECT_EQ(arena.slot(scalar)->valueBits, 11U);
 
-  arena.release(outer);
+  EXPECT_TRUE(arena.release(outer));
   EXPECT_EQ(arena.slot(scalar)->valueKind,
             static_cast<std::uint8_t>(ValueKind::Int64));
   EXPECT_EQ(arena.slot(scalar)->valueBits, 7U);
@@ -424,18 +424,18 @@ TEST(ArenaManifoldTest, hydratedPrefixTrailsEmptyRunSlotHeaders) {
   ASSERT_TRUE(hydrated.hydratePrefix(*decoded));
   EXPECT_EQ(hydrated.cellCount(), 1U);
   ASSERT_TRUE(hydrated.setValueBits(scalar, ValueKind::Bool, 1));
-  hydrated.release(decoded->mark);
+  EXPECT_TRUE(hydrated.release(decoded->mark));
 
   EXPECT_EQ(hydrated.slot(scalar)->valueKind,
             static_cast<std::uint8_t>(ValueKind::Int64));
   EXPECT_EQ(hydrated.slot(scalar)->valueBits, 31U);
   EXPECT_EQ(source.slot(scalar)->valueKind,
             static_cast<std::uint8_t>(ValueKind::Bool));
-  source.release(mark);
+  EXPECT_TRUE(source.release(mark));
   EXPECT_EQ(source.slot(scalar)->valueKind,
             static_cast<std::uint8_t>(ValueKind::Int64));
   EXPECT_EQ(source.slot(scalar)->valueBits, 31U);
-  source.release(outer);
+  EXPECT_TRUE(source.release(outer));
   EXPECT_EQ(source.slot(scalar)->valueKind,
             static_cast<std::uint8_t>(ValueKind::Int64));
   EXPECT_EQ(source.slot(scalar)->valueBits, 23U);
@@ -450,7 +450,7 @@ TEST(ArenaManifoldTest, releaseRestoresContentRestatedUnderTheMark) {
   ASSERT_TRUE(arena.m.setContent(cell, std::span{&after, 1}));
   EXPECT_EQ(arena.m.textOf(cell), "after");
 
-  arena.m.release(mark);
+  EXPECT_TRUE(arena.m.release(mark));
   EXPECT_EQ(arena.m.textOf(cell), "before");
 }
 
@@ -495,13 +495,13 @@ TEST(ArenaManifoldTest, oversizedContentRunRefusesBeforeChangingAnOwnCell) {
   EXPECT_EQ(refusedState.contentSize, mark.contentSize);
   EXPECT_EQ(refusedState.liveContent, mark.liveContent);
   EXPECT_EQ(refusedState.trailSize, mark.trailSize);
-  arena.m.discard(refusedState);
+  EXPECT_TRUE(arena.m.discard(refusedState));
 
   // A later valid write under this same choice point still trails and rolls
   // back normally; the refusal did not partially consume the run or trail.
   const auto replacement = arena.m.intern("replacement");
   ASSERT_TRUE(arena.m.setContent(cell, std::span{&replacement, 1}));
-  arena.m.release(mark);
+  EXPECT_TRUE(arena.m.release(mark));
   EXPECT_THAT(arena.m.contentOf(cell),
               testing::ElementsAreArray(originalContent));
 }
@@ -533,11 +533,11 @@ TEST(ArenaManifoldTest, marksNestAndReleaseInReverse) {
   ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, two));
   EXPECT_EQ(arena.m.outstandingMarks(), 2U);
 
-  arena.m.release(inner);
+  EXPECT_TRUE(arena.m.release(inner));
   EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), one);
   EXPECT_TRUE(arena.m.contains(one));
 
-  arena.m.release(outer);
+  EXPECT_TRUE(arena.m.release(outer));
   EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), std::nullopt);
   EXPECT_FALSE(arena.m.contains(one));
 }
@@ -550,7 +550,7 @@ TEST(ArenaManifoldTest, releaseRemovesDimensionsMintedUnderTheMark) {
 
   EXPECT_EQ(arena.dimensionNamed("d.existing"), existing);
   EXPECT_EQ(arena.dimensionNamed("d.temporary"), rolledBack);
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   EXPECT_EQ(arena.dimensionNamed("d.existing"), existing);
   EXPECT_EQ(arena.dimensionNamed("d.temporary"), std::nullopt);
@@ -566,20 +566,20 @@ TEST(ArenaManifoldTest, nestedDimensionJournalFollowsReleaseAndDiscard) {
   const auto inner     = arena.mark();
   const auto discarded = arena.ensureDimension("d.inner");
 
-  arena.discard(inner);
+  EXPECT_TRUE(arena.discard(inner));
   EXPECT_EQ(arena.dimensionNamed("d.inner"), discarded);
-  arena.release(outer);
+  EXPECT_TRUE(arena.release(outer));
   EXPECT_EQ(arena.dimensionNamed("d.outer"), std::nullopt);
   EXPECT_EQ(arena.dimensionNamed("d.inner"), std::nullopt);
 
   const auto nextOuter = arena.mark();
   const auto committed = arena.ensureDimension("d.committed");
-  arena.discard(nextOuter);
+  EXPECT_TRUE(arena.discard(nextOuter));
   EXPECT_EQ(arena.dimensionNamed("d.committed"), committed);
 
   const auto probe     = arena.mark();
   const auto temporary = arena.ensureDimension("d.probe");
-  arena.release(probe);
+  EXPECT_TRUE(arena.release(probe));
   EXPECT_EQ(arena.dimensionNamed("d.committed"), committed);
   EXPECT_EQ(arena.dimensionNamed("d.probe"), std::nullopt);
   EXPECT_NE(retained, discarded);
@@ -608,7 +608,7 @@ TEST(ArenaManifoldTest, hydratedPrefixTreatsItsDimensionMapAsCommitted) {
   EXPECT_EQ(hydrated.dimensionNamed("d.inherited"), inherited);
   EXPECT_EQ(hydrated.dimensionNamed("d.after-mark"), std::nullopt);
   const auto child = hydrated.mark();
-  hydrated.release(child);
+  EXPECT_TRUE(hydrated.release(child));
   EXPECT_EQ(hydrated.dimensionNamed("d.inherited"), inherited);
 }
 
@@ -700,7 +700,7 @@ TEST(ArenaManifoldTest, prefixExportRefusesARealQuoteWithoutConsumingItsMark) {
   EXPECT_EQ(arena.outstandingMarks(), 1U);
   EXPECT_TRUE(arena.contains(quote));
   ASSERT_TRUE(arena.setValueBits(quote, ValueKind::Bool, 1));
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
   EXPECT_EQ(arena.valueKindOf(quote), ValueKind::None);
   EXPECT_THAT(arena.contentOf(quote), testing::ElementsAre(quoteSpan));
 }
@@ -720,7 +720,7 @@ TEST(ArenaManifoldTest, prefixExportExcludesQuoteStateCreatedAfterItsMark) {
   EXPECT_EQ(exported->mark.quoteSpaceCount, 0U);
   EXPECT_TRUE(exported->slots.empty());
   EXPECT_TRUE(arena.contains(quote));
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
   EXPECT_FALSE(arena.contains(quote));
 }
 
@@ -786,7 +786,7 @@ TEST(ArenaManifoldTest, discardKeepsTheBindingsMadeUnderTheChoicePoint) {
 
   // Cut, and success: §5.4's distinction. What is thrown away is the ability
   // to retry, not the work.
-  arena.m.discard(mark);
+  EXPECT_TRUE(arena.m.discard(mark));
   EXPECT_EQ(arena.m.outstandingMarks(), 0U);
   EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), bound);
   EXPECT_TRUE(arena.m.contains(bound));
@@ -801,7 +801,7 @@ TEST(ArenaManifoldTest,
   ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, bound));
   ASSERT_GT(arena.m.trailSize(), 0U);
 
-  arena.m.discard(mark);
+  EXPECT_TRUE(arena.m.discard(mark));
   EXPECT_EQ(arena.m.outstandingMarks(), 0U);
   EXPECT_EQ(arena.m.trailSize(), 0U);
   EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), bound);
@@ -811,7 +811,7 @@ TEST(ArenaManifoldTest,
   EXPECT_EQ(nextMark.trailSize, 0U);
   const auto rejected = arena.m.makeCell("rejected");
   ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, rejected));
-  arena.m.release(nextMark);
+  EXPECT_TRUE(arena.m.release(nextMark));
   EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), bound);
   EXPECT_EQ(arena.m.linked(bound, arena.step, DimVector::NEG), base);
   EXPECT_FALSE(arena.m.contains(rejected));
@@ -831,15 +831,15 @@ TEST(ArenaManifoldTest, discardNestedMarkKeepsUndoForTheEnclosingMark) {
   ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, innerValue));
   ASSERT_GT(arena.m.trailSize(), inner.trailSize);
 
-  arena.m.discard(inner);
+  EXPECT_TRUE(arena.m.discard(inner));
   EXPECT_EQ(arena.m.outstandingMarks(), 1U);
   EXPECT_GT(arena.m.trailSize(), inner.trailSize);
   EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), innerValue);
   const auto probe = arena.m.mark();
   EXPECT_GT(probe.trailSize, 0U);
-  arena.m.release(probe);
+  EXPECT_TRUE(arena.m.release(probe));
 
-  arena.m.release(outer);
+  EXPECT_TRUE(arena.m.release(outer));
   EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), original);
   EXPECT_EQ(arena.m.linked(original, arena.step, DimVector::NEG), base);
   EXPECT_FALSE(arena.m.contains(outerValue));
@@ -859,7 +859,7 @@ TEST(ArenaManifoldTest, committedTurnsDoNotRetainUnusableUndoRecords) {
     const auto content = arena.m.intern(text);
     ASSERT_TRUE(arena.m.setContent(cell, std::span{&content, 1}));
     ASSERT_GT(arena.m.trailSize(), 0U);
-    arena.m.discard(mark);
+    EXPECT_TRUE(arena.m.discard(mark));
     EXPECT_EQ(arena.m.trailSize(), 0U);
     EXPECT_EQ(arena.m.textOf(cell), text);
   }
@@ -875,7 +875,7 @@ TEST(ArenaManifoldTest, compactionIsRefusedWhileAChoicePointIsOutstanding) {
   // compaction moves every run those offsets name.
   EXPECT_FALSE(arena.m.compact());
 
-  arena.m.release(mark);
+  EXPECT_TRUE(arena.m.release(mark));
   EXPECT_TRUE(arena.m.compact());
 }
 
@@ -895,7 +895,7 @@ TEST(ArenaManifoldTest, releaseReclaimsTheDeadRunsAFailedBranchLeft) {
 
   // Which is why refusing to compact costs nothing: the truncation is the
   // reclamation.
-  arena.m.release(mark);
+  EXPECT_TRUE(arena.m.release(mark));
   EXPECT_EQ(arena.m.deadLinks(), tightBefore);
 }
 
@@ -1162,7 +1162,7 @@ TEST(ArenaManifoldTest,
 
   ASSERT_TRUE(hydrated.setValueBits(doc.first, ValueKind::Bool, 1));
   ASSERT_TRUE(hydrated.setValueBits(doc.second, ValueKind::Bool, 1));
-  hydrated.release(decoded->mark);
+  EXPECT_TRUE(hydrated.release(decoded->mark));
   EXPECT_EQ(hydrated.slot(doc.first)->valueKind,
             static_cast<std::uint8_t>(ValueKind::Int64));
   EXPECT_EQ(hydrated.slot(doc.first)->valueBits, 41U);
@@ -1220,8 +1220,8 @@ TEST(ArenaManifoldTest, oversizedContentRunDoesNotShadowABaseCell) {
   EXPECT_EQ(refusedState.contentSize, mark.contentSize);
   EXPECT_EQ(refusedState.liveContent, mark.liveContent);
   EXPECT_EQ(refusedState.shadowCount, mark.shadowCount);
-  arena.discard(refusedState);
-  arena.discard(mark);
+  EXPECT_TRUE(arena.discard(refusedState));
+  EXPECT_TRUE(arena.discard(mark));
 }
 
 TEST(ArenaManifoldTest, anOverlayReadsThroughToTheDocument) {
@@ -1274,7 +1274,7 @@ TEST(ArenaManifoldTest, releasingDropsTheShadowsAFailedBranchTook) {
   ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, fresh));
   EXPECT_TRUE(arena.holdsOwn(doc.first));
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   // Dropping the shadow *is* the undo for an overlaid cell: the unmodified
   // state was never moved out of the base, so nothing had to be saved to
@@ -1299,7 +1299,7 @@ TEST(ArenaManifoldTest, aShadowedCellIsStillTrailedWhenItIsOlderThanTheMark) {
   ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, late));
   EXPECT_GT(arena.trailSize(), 0U);
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
   EXPECT_EQ(arena.linked(doc.first, doc.dim, DimVector::POS), early);
 }
 
@@ -1520,7 +1520,7 @@ TEST(ArenaManifoldTest, releaseDetachesSpacesAttachedAfterTheMark) {
   ASSERT_EQ(arena.spaceCount(), 1U);
   ASSERT_TRUE(arena.foreignOf(proxy));
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   EXPECT_EQ(arena.spaceCount(), 0U);
   EXPECT_FALSE(arena.spaceAt(space));
@@ -1542,7 +1542,7 @@ TEST(ArenaManifoldTest, releaseKeepsSpacesAttachedBeforeTheMark) {
   (void)arena.proxyFor(dropped, 9);
   (void)arena.proxyFor(kept, 8);
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   EXPECT_EQ(arena.spaceCount(), 1U);
   EXPECT_TRUE(arena.spaceAt(kept));
@@ -1560,9 +1560,9 @@ TEST(ArenaManifoldTest, nestedMarksEachTruncateToTheirOwnSpaceCount) {
   (void)arena.attach(Space{.label = "c"});
   ASSERT_EQ(arena.spaceCount(), 3U);
 
-  arena.release(inner);
+  EXPECT_TRUE(arena.release(inner));
   EXPECT_EQ(arena.spaceCount(), 2U);
-  arena.release(outer);
+  EXPECT_TRUE(arena.release(outer));
   EXPECT_EQ(arena.spaceCount(), 1U);
   EXPECT_EQ(arena.spaceAt(1)->label, "a");
   EXPECT_EQ(arena.outstandingMarks(), 0U);
@@ -1574,7 +1574,7 @@ TEST(ArenaManifoldTest, discardKeepsTheAttachesLikeItKeepsTheCells) {
   const auto space = arena.attach(Space{.label = "cut"});
   const auto proxy = arena.proxyFor(space, 5);
 
-  arena.discard(mark);
+  EXPECT_TRUE(arena.discard(mark));
 
   EXPECT_EQ(arena.spaceCount(), 1U);
   EXPECT_EQ(arena.findExistingProxy(space, 5), proxy);
@@ -1586,9 +1586,9 @@ TEST(ArenaManifoldTest, aDiscardedInnerMarkLeavesItsAttachesToTheOuterRelease) {
   const auto outer = arena.mark();
   const auto inner = arena.mark();
   (void)arena.attach(Space{.label = "inner"});
-  arena.discard(inner);
+  EXPECT_TRUE(arena.discard(inner));
   ASSERT_EQ(arena.spaceCount(), 1U);
-  arena.release(outer);
+  EXPECT_TRUE(arena.release(outer));
   EXPECT_EQ(arena.spaceCount(), 0U);
 }
 
@@ -1599,7 +1599,7 @@ TEST(ArenaManifoldTest, compactIsStillRefusedWhileAMarkIsOutstanding) {
   const auto refused = arena.compact();
   ASSERT_FALSE(refused);
   EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::MarksOutstanding);
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
   EXPECT_TRUE(arena.compact());
 }
 
@@ -1614,7 +1614,7 @@ TEST(ArenaManifoldTest, releaseUnbindsDimensionsOfADetachedSpace) {
   const auto only = arena.ensureDimension("d.only-dropped");
   arena.bindDimension(only, dropped, 13);
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   EXPECT_EQ(arena.arenaDimFor(kept, 11), std::optional<DimRef>{sharedAs});
   EXPECT_FALSE(arena.arenaDimFor(std::nullopt, 12));
@@ -1630,7 +1630,7 @@ TEST(ArenaManifoldTest, releaseHandsBackTheBaseAndStoreAnAttachAdopted) {
   (void)arena.attach(Space{.manifold = &base, .store = &doc.store});
   ASSERT_EQ(arena.base(), &base);
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   EXPECT_EQ(arena.base(), nullptr);
   EXPECT_EQ(arena.store(), nullptr);
@@ -1643,7 +1643,7 @@ TEST(ArenaManifoldTest, releaseKeepsABaseTheArenaWasBuiltOver) {
   const auto mark = arena.mark();
   (void)arena.attach(Space{.manifold = &base, .store = &doc.store});
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   EXPECT_EQ(arena.spaceCount(), 0U);
   EXPECT_EQ(arena.base(), &base);
@@ -1662,7 +1662,7 @@ TEST(ArenaManifoldTest, releaseLeavesNothingDanglingToADetachedSpacesProxy) {
   zigzag::expectWritten(arena.link(young, dim, DimVector::POS, proxy));
   zigzag::expectWritten(arena.link(anchor, dim, DimVector::POS, proxy));
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   EXPECT_EQ(arena.cellCount(), cells);
   EXPECT_FALSE(arena.contains(young));
@@ -1675,17 +1675,20 @@ TEST(ArenaManifoldTest, releaseLeavesNothingDanglingToADetachedSpacesProxy) {
   EXPECT_EQ(arena.proxyFor(again, 11), proxy);
 }
 
-TEST(ArenaManifoldTest, marksReleasedOutOfOrderNeverRegrowTheSpaces) {
+TEST(ArenaManifoldTest, marksReleasedOutOfOrderAreRefusedAndKeepTheSpaces) {
   ArenaManifold arena;
   const auto outer = arena.mark();
   (void)arena.attach(Space{.label = "a"});
   const auto inner = arena.mark();
   (void)arena.attach(Space{.label = "b"});
-  arena.release(outer);
-  ASSERT_EQ(arena.spaceCount(), 0U);
-  // The inner mark now names a state that is gone; its space count is above
-  // the arena's, and releasing it must not conjure spaces back.
-  arena.release(inner);
+  // Releasing the outer mark under a live inner one is refused by name; it
+  // used to detach every space and leave the inner mark naming a state that
+  // was gone.
+  EXPECT_FALSE(arena.release(outer));
+  EXPECT_EQ(arena.spaceCount(), 2U);
+  EXPECT_TRUE(arena.release(inner));
+  EXPECT_EQ(arena.spaceCount(), 1U);
+  EXPECT_TRUE(arena.release(outer));
   EXPECT_EQ(arena.spaceCount(), 0U);
   EXPECT_EQ(arena.outstandingMarks(), 0U);
 }
@@ -1717,7 +1720,7 @@ TEST(ArenaManifoldTest, promoteStillWorksAfterAReleaseDetachedASpace) {
   const auto mark  = arena.mark();
   const auto space = arena.attach(Space{.label = "pinned"});
   (void)arena.proxyFor(space, 3);
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
   ASSERT_EQ(arena.spaceCount(), 0U);
 
   const auto fresh = arena.makeCell("fresh");

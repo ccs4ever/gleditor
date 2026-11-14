@@ -14,9 +14,9 @@ public:
   AssemblyTransaction &operator=(const AssemblyTransaction &) = delete;
   ~AssemblyTransaction() {
     if (committed_)
-      vm_.core().arena().discard(mark_);
+      zigzag::expectMarkOrder(vm_.core().arena().discard(mark_));
     else {
-      vm_.core().arena().release(mark_);
+      zigzag::expectMarkOrder(vm_.core().arena().release(mark_));
       vm_.pruneAssemblyState();
     }
   }

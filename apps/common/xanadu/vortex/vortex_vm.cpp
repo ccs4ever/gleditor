@@ -463,12 +463,12 @@ void VortexVM::abortOwnedMutationGroups(
       choiceStack_[group.checkpointIndex].choiceId != group.choiceId)
     return;
   while (choiceStack_.size() > group.checkpointIndex + 1) {
-    core_.arena().discard(choiceStack_.back().mark);
+    zigzag::expectMarkOrder(core_.arena().discard(choiceStack_.back().mark));
     choiceStack_.pop_back();
   }
   ChoicePoint saved = std::move(choiceStack_.back());
   choiceStack_.pop_back();
-  core_.arena().release(saved.mark);
+  zigzag::expectMarkOrder(core_.arena().release(saved.mark));
   if (const auto pc = cursorPC_.find(cursor); pc != cursorPC_.end())
     pc->second = saved.altOp;
   cellReferences_.swap(saved.cellReferences);
@@ -1412,7 +1412,7 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
     ChoicePoint cp = choiceStack_.back();
     choiceStack_.pop_back();
     if (!cursor || cp.cursor == cursor || !cp.cursor) {
-      core_.arena().release(cp.mark);
+      zigzag::expectMarkOrder(core_.arena().release(cp.mark));
       cellReferences_     = std::move(cp.cellReferences);
       streams_            = std::move(cp.streams);
       iterators_          = std::move(cp.iterators);
@@ -1478,7 +1478,7 @@ void VortexVM::cut(std::size_t cutBarrier) {
     const bool internal = choiceStack_.size() > scopeBoundary;
     ChoicePoint cp      = choiceStack_.back();
     choiceStack_.pop_back();
-    core_.arena().discard(cp.mark);
+    zigzag::expectMarkOrder(core_.arena().discard(cp.mark));
     removedOrdinary |= !internal;
     if (!internal && cutCallback_ && !cp.deweyPath.empty()) {
       const auto parentSpan =
@@ -1507,11 +1507,11 @@ VortexVM *VortexVM::abortScopedChoices(const CellRef cursor) noexcept {
       static_cast<std::size_t>(std::distance(choiceStack_.begin(), outer));
   ChoicePoint saved = std::move(*outer);
   while (choiceStack_.size() > outerIndex + 1) {
-    core_.arena().discard(choiceStack_.back().mark);
+    zigzag::expectMarkOrder(core_.arena().discard(choiceStack_.back().mark));
     choiceStack_.pop_back();
   }
   choiceStack_.pop_back();
-  core_.arena().release(saved.mark);
+  zigzag::expectMarkOrder(core_.arena().release(saved.mark));
 
   cellReferences_.swap(saved.cellReferences);
   streams_.swap(saved.streams);
@@ -2312,7 +2312,8 @@ ExecutionResult VortexVM::executeMutationScopeOpcode(const OpcodeKind kind,
     } catch (const std::exception &error) {
       if (checkpointCreated && choiceStack_.size() == checkpointIndex + 1 &&
           checkpointId && choiceStack_.back().choiceId == *checkpointId) {
-        core_.arena().release(choiceStack_.back().mark);
+        zigzag::expectMarkOrder(
+            core_.arena().release(choiceStack_.back().mark));
         choiceStack_.pop_back();
       }
       return fail(error.what());
@@ -2384,12 +2385,12 @@ ExecutionResult VortexVM::executeMutationScopeOpcode(const OpcodeKind kind,
     return fail(error.what());
   }
   while (choiceStack_.size() > group.checkpointIndex + 1) {
-    core_.arena().discard(choiceStack_.back().mark);
+    zigzag::expectMarkOrder(core_.arena().discard(choiceStack_.back().mark));
     choiceStack_.pop_back();
   }
   ChoicePoint checkpoint = std::move(choiceStack_.back());
   choiceStack_.pop_back();
-  core_.arena().discard(checkpoint.mark);
+  zigzag::expectMarkOrder(core_.arena().discard(checkpoint.mark));
   mutationGroups_.swap(nextGroups);
   return {};
 }
@@ -4588,7 +4589,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
   }
   const auto rollbackBoxScalar = [&] {
     if (!boxScalarMark) return;
-    core_.arena().release(*boxScalarMark);
+    zigzag::expectMarkOrder(core_.arena().release(*boxScalarMark));
     boxScalarMark.reset();
     if (boxReferenceSnapshotTaken) {
       if (hadBoxOutputReference) {
@@ -4640,7 +4641,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
         boxReferenceSnapshotTaken = true;
         try {
           writeCellReferences(outCells, newOutputs);
-          core_.arena().discard(*boxScalarMark);
+          zigzag::expectMarkOrder(core_.arena().discard(*boxScalarMark));
           boxScalarMark.reset();
         } catch (const std::exception &error) {
           rollbackBoxScalar();
