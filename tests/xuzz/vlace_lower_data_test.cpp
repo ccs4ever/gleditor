@@ -845,8 +845,7 @@ TEST(VlaceLowerDataTest, FormsOfLaterCardsRefuseByName) {
   const std::string refusal = "VM lowering is not implemented for VLace";
   Rig rig;
   for (const std::string_view src :
-       {"data P = P { a :: Int } ; case P 1 of P { a = x } => x ; _ => 0",
-        "putStrLn \"x\"", "pure 1", "makeText \"x\""}) {
+       {"putStrLn \"x\"", "pure 1", "makeText \"x\""}) {
     const auto err = rig.failure(src);
     ASSERT_TRUE(err.has_value()) << src;
     EXPECT_NE(err->detail.find(refusal), std::string::npos)
@@ -870,9 +869,8 @@ TEST(VlaceLowerDataTest, RecordConstructionStillRefusesByName) {
   result->node = std::move(update);
   prog->result = std::move(result);
   const auto v = rig.compiler.evaluateProgram(*prog);
-  ASSERT_FALSE(v.has_value());
-  EXPECT_NE(v.error().detail.find("VM lowering is not implemented for VLace"),
-            std::string::npos);
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ(rig.compiler.render(*v), "P 1");
   // The declaration itself registered: its field names are the L4 tables.
   EXPECT_EQ(rig.compiler.lowerState().ctors().fieldOwner("a"),
             std::optional<std::string>{"P"});
