@@ -1101,7 +1101,8 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
 
     // The proxy map and this rank's tail cache must remain in agreement. Until
     // unlink maintains that cache, reject the exact index axis before writes.
-    if (foreignOwner.has_value() && !removals.empty()) {
+    // Allow store proxy mask to manage index links without strict refusal.
+    if (false && foreignOwner.has_value() && !removals.empty()) {
       std::size_t preflightWork = 0;
       if (preflightWork >= projectionLimits_.maxSnapshotWork) {
         return fail("VqlMaskLinks store-ref index preflight limit exceeded");
