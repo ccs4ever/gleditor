@@ -19,21 +19,13 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vortex/logic_compile.hpp"
+#include "common/xanadu/vortex/logic_relations_internal.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace zigzag::vortex::logic {
-
-// Abstract base class for providers that bind to VortexCore at install time.
-class CoreBoundProvider : public RelationProvider {
-public:
-  void bindCore(VortexCore *c) noexcept { core_ = c; }
-
-protected:
-  VortexCore *core_{nullptr};
-};
 
 namespace {
 
