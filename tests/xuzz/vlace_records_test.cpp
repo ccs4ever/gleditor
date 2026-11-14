@@ -206,6 +206,132 @@ TEST(VlaceRecordsTest, UnknownFieldIsRefused) {
                                    "has no field 'z'");
 }
 
+TEST(VlaceRecordsTest, UnsetFieldIsRefused) {
+  // Point { x = 1 } leaves y unset
+  std::vector<std::pair<std::string, Expr>> fields;
+  fields.emplace_back("x", mkInt(1));
+  auto prog = pointProgram(mkRecord(mkCtor("Point"), std::move(fields)));
+  EXPECT_EQ(eval(std::move(prog)),
+            "ERR:NonExhaustiveMatch:record construction of 'Point' leaves "
+            "field 'y' unset");
+}
+
+TEST(VlaceRecordsTest, PatternMatching) {
+  // case Point { x = 10, y = 20 } of Point { y = b, x = a } => a + b
+  std::vector<std::pair<std::string, Expr>> fields;
+  fields.emplace_back("x", mkInt(10));
+  fields.emplace_back("y", mkInt(20));
+  auto rec = mkRecord(mkCtor("Point"), std::move(fields));
+
+  auto pat = std::make_unique<PatternNode>();
+  PRecord prec;
+  prec.ctor  = "Point";
+  auto patA  = std::make_unique<PatternNode>();
+  patA->node = PVar{.name = "a"};
+  auto patB  = std::make_unique<PatternNode>();
+  patB->node = PVar{.name = "b"};
+  prec.fields.emplace_back("y", std::move(patB));
+  prec.fields.emplace_back("x", std::move(patA));
+  pat->node = std::move(prec);
+
+  Alt alt;
+  alt.pattern = std::move(pat);
+  alt.body    = mkBinOp("+", mkVar("a"), mkVar("b"));
+
+  ECase c;
+  c.scrutinee = std::move(rec);
+  c.alts.push_back(std::move(alt));
+
+  auto prog = pointProgram(mkExpr(std::move(c)));
+  EXPECT_EQ(eval(std::move(prog)), "30");
+}
+
+TEST(VlaceRecordsTest, PatternMatchingPartial) {
+  // case Point { x = 42, y = 99 } of Point { x = a } => a
+  std::vector<std::pair<std::string, Expr>> fields;
+  fields.emplace_back("x", mkInt(42));
+  fields.emplace_back("y", mkInt(99));
+  auto rec = mkRecord(mkCtor("Point"), std::move(fields));
+
+  auto pat = std::make_unique<PatternNode>();
+  PRecord prec;
+  prec.ctor  = "Point";
+  auto patA  = std::make_unique<PatternNode>();
+  patA->node = PVar{.name = "a"};
+  prec.fields.emplace_back("x", std::move(patA));
+  pat->node = std::move(prec);
+
+  Alt alt;
+  alt.pattern = std::move(pat);
+  alt.body    = mkVar("a");
+
+  ECase c;
+  c.scrutinee = std::move(rec);
+  c.alts.push_back(std::move(alt));
+
+  auto prog = pointProgram(mkExpr(std::move(c)));
+  EXPECT_EQ(eval(std::move(prog)), "42");
+}
+
+TEST(VlaceRecordsTest, PatternUnknownFieldIsRefused) {
+  // case Point { x = 1, y = 2 } of Point { z = a } => a
+  std::vector<std::pair<std::string, Expr>> fields;
+  fields.emplace_back("x", mkInt(1));
+  fields.emplace_back("y", mkInt(2));
+  auto rec = mkRecord(mkCtor("Point"), std::move(fields));
+
+  auto pat = std::make_unique<PatternNode>();
+  PRecord prec;
+  prec.ctor  = "Point";
+  auto patA  = std::make_unique<PatternNode>();
+  patA->node = PVar{.name = "a"};
+  prec.fields.emplace_back("z", std::move(patA));
+  pat->node = std::move(prec);
+
+  Alt alt;
+  alt.pattern = std::move(pat);
+  alt.body    = mkVar("a");
+
+  ECase c;
+  c.scrutinee = std::move(rec);
+  c.alts.push_back(std::move(alt));
+
+  auto prog = pointProgram(mkExpr(std::move(c)));
+  EXPECT_EQ(eval(std::move(prog)),
+            "ERR:UnboundIdentifier:record 'Point' has no field 'z'");
+}
+
+TEST(VlaceRecordsTest, PatternDuplicateFieldIsRefused) {
+  // case Point { x = 1, y = 2 } of Point { x = a, x = b } => a
+  std::vector<std::pair<std::string, Expr>> fields;
+  fields.emplace_back("x", mkInt(1));
+  fields.emplace_back("y", mkInt(2));
+  auto rec = mkRecord(mkCtor("Point"), std::move(fields));
+
+  auto pat = std::make_unique<PatternNode>();
+  PRecord prec;
+  prec.ctor  = "Point";
+  auto patA  = std::make_unique<PatternNode>();
+  patA->node = PVar{.name = "a"};
+  auto patB  = std::make_unique<PatternNode>();
+  patB->node = PVar{.name = "b"};
+  prec.fields.emplace_back("x", std::move(patA));
+  prec.fields.emplace_back("x", std::move(patB));
+  pat->node = std::move(prec);
+
+  Alt alt;
+  alt.pattern = std::move(pat);
+  alt.body    = mkVar("a");
+
+  ECase c;
+  c.scrutinee = std::move(rec);
+  c.alts.push_back(std::move(alt));
+
+  auto prog = pointProgram(mkExpr(std::move(c)));
+  EXPECT_EQ(eval(std::move(prog)),
+            "ERR:NonLinearPattern:field 'x' bound twice in record pattern");
+}
+
 // -- type checker ------------------------------------------------------------
 
 TEST(VlaceRecordsTest, ConstructionType) {
