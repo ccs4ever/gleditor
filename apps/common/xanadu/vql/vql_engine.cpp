@@ -172,6 +172,12 @@ void VQLEngine::publishCompilerBindings(
   putGetLenses_.swap(nextLenses);
 }
 
+void VQLEngine::publishUserDefs(const std::vector<DefDeclaration> &defs) {
+  for (const auto &def : defs) {
+    userDefs_[def.name] = def;
+  }
+}
+
 namespace {
 
 /// The one place a QueryError becomes an exception.

@@ -1025,6 +1025,9 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
       DimVector direction;
     };
     std::vector<Removal> removals;
+    const auto foreignIndexDimension =
+        foreignOwner.has_value() ? arena.storeRefsDimension(foreignOwner->space)
+                                 : std::nullopt;
     const auto planRow = [&](const DimRef dimension,
                              const std::optional<EffectiveLinkNeighbor> &pos,
                              const std::optional<EffectiveLinkNeighbor> &neg) {
@@ -1039,6 +1042,13 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
                                      const std::uint8_t bit) {
         if (!neighbor) return;
         arena.consumeWork();
+        if (foreignOwner.has_value() && foreignIndexDimension &&
+            dimension == *foreignIndexDimension && rule == rules.end() &&
+            !rules.empty()) {
+          // Wildcard mask on a store proxy preserves the internal store-ref
+          // index dimension.
+          return;
+        }
         const bool keep =
             rule != rules.end() ? (rule->second & bit) != 0 : *defaultKeep;
         if (!keep) removals.push_back({dimension, direction});
@@ -1101,8 +1111,7 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
 
     // The proxy map and this rank's tail cache must remain in agreement. Until
     // unlink maintains that cache, reject the exact index axis before writes.
-    // Allow store proxy mask to manage index links without strict refusal.
-    if (false && foreignOwner.has_value() && !removals.empty()) {
+    if (foreignOwner.has_value() && !removals.empty()) {
       std::size_t preflightWork = 0;
       if (preflightWork >= projectionLimits_.maxSnapshotWork) {
         return fail("VqlMaskLinks store-ref index preflight limit exceeded");

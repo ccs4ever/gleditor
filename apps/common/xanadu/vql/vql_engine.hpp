@@ -104,6 +104,11 @@ public:
   void publishCompilerBindings(
       ContractBindings bindings,
       std::unordered_map<std::string, std::vector<PathStep>> functors);
+  [[nodiscard]] const std::unordered_map<std::string, DefDeclaration> &
+  userDefs() const noexcept {
+    return userDefs_;
+  }
+  void publishUserDefs(const std::vector<DefDeclaration> &defs);
 
   /// Executes a single statement in the query.
   std::vector<zigzag::CellRef> executeStatement(const Statement &stmt);
