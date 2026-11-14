@@ -23,6 +23,11 @@ using zigzag::vortex::OpcodeKind;
 
 namespace {
 
+template <typename Action> struct RestoreScope {
+  Action action;
+  ~RestoreScope() { action(); }
+};
+
 constexpr std::string_view pollingApi =
     "use VQLEngine::subscribeWatch and pollWatch to observe changes";
 
@@ -152,14 +157,179 @@ VQLCompiler::compileWatchOrPerspectiveStatement(const Statement &statement) {
           "watch since requires a target backed by a local Store; this arena "
           "has no store-backed history to take the baseline from (" +
           std::string(pollingApi) + ")");
-    // Waiting on the history card: the baseline must pin the whole watched
-    // path once and compare it with the current path (membership, rendered
-    // value and topology). A per-cell existence test would miss a cell that
-    // existed but was not yet on the path, so nothing is emitted.
-    refuseUnsupported(
-        "watch since requires a path-level version pin, which is not lowered "
-        "yet (" +
-        std::string(pollingApi) + ")");
+    if (watch.targetPath.anchor.versionPin) {
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          "watch since cannot be combined with a pinned path anchor");
+    }
+
+    PathExpression historicalPath = watch.targetPath;
+    VersionPin pin;
+    pin.versions.push_back(*watch.sinceVersion);
+    historicalPath.anchor.versionPin = std::move(pin);
+    compileVersionPinnedPath(historicalPath, core_.home());
+    const std::vector<CellRef> historicalStream = lastResultCells_;
+
+    compilePathExpression(watch.targetPath, core_.home());
+    const std::vector<CellRef> currentStream = lastResultCells_;
+
+    const CellRef deltaStream = emitStreamClear();
+
+    const CellRef currentIterator = core_.arena().makeCell();
+    const CellRef currentBegin =
+        emitOp(OpcodeKind::StreamBegin, "#WATCH_CURR_BEGIN");
+    for (const auto s : currentStream) emitInput(currentBegin, s);
+    emitOutput(currentBegin, currentIterator);
+
+    emitIteratorLoop(currentIterator, [&](const CellRef currentItem) {
+      const CellRef foundMatch = core_.arena().makeCell();
+      const auto initFound     = emitOp(OpcodeKind::Value, "#WATCH_INIT_MATCH");
+      emitInputConstant(initFound, false);
+      emitOutput(initFound, foundMatch);
+
+      const CellRef histIterator = core_.arena().makeCell();
+      const CellRef histBegin =
+          emitOp(OpcodeKind::StreamBegin, "#WATCH_HIST_BEGIN");
+      for (const auto h : historicalStream) emitInput(histBegin, h);
+      emitOutput(histBegin, histIterator);
+
+      emitIteratorLoop(histIterator, [&](const CellRef histItem) {
+        const CellRef isSame = core_.arena().makeCell();
+        const CellRef sameOp =
+            emitOp(OpcodeKind::SameCell, "#WATCH_CHECK_SAME");
+        emitInput(sameOp, currentItem);
+        emitInput(sameOp, histItem);
+        emitOutput(sameOp, isSame);
+
+        const CellRef skipMatch =
+            mintOpcode(OpcodeKind::Nop, "#WATCH_SKIP_MATCH");
+        const CellRef branch =
+            emitOp(OpcodeKind::BranchFalseCell, "#WATCH_BRANCH_SAME");
+        emitInput(branch, isSame);
+        emitInput(branch, skipMatch);
+
+        const CellRef setFound = emitOp(OpcodeKind::Value, "#WATCH_SET_FOUND");
+        emitInputConstant(setFound, true);
+        emitOutput(setFound, foundMatch);
+
+        appendOpcode(skipMatch);
+      });
+
+      const CellRef notFound   = core_.arena().makeCell();
+      const CellRef notFoundOp = emitOp(OpcodeKind::Not, "#WATCH_NOT_FOUND");
+      emitInput(notFoundOp, foundMatch);
+      emitOutput(notFoundOp, notFound);
+
+      const CellRef skipAdd = mintOpcode(OpcodeKind::Nop, "#WATCH_SKIP_ADD");
+      const CellRef branchAdd =
+          emitOp(OpcodeKind::BranchFalseCell, "#WATCH_BRANCH_ADD");
+      emitInput(branchAdd, notFound);
+      emitInput(branchAdd, skipAdd);
+
+      emitAppendStream(deltaStream, std::span{&currentItem, 1});
+
+      appendOpcode(skipAdd);
+    });
+
+    const CellRef histRevIterator = core_.arena().makeCell();
+    const CellRef histRevBegin =
+        emitOp(OpcodeKind::StreamBegin, "#WATCH_HIST_REV_BEGIN");
+    for (const auto h : historicalStream) emitInput(histRevBegin, h);
+    emitOutput(histRevBegin, histRevIterator);
+
+    emitIteratorLoop(histRevIterator, [&](const CellRef histItem) {
+      const CellRef foundMatch = core_.arena().makeCell();
+      const auto initFound = emitOp(OpcodeKind::Value, "#WATCH_INIT_MATCH2");
+      emitInputConstant(initFound, false);
+      emitOutput(initFound, foundMatch);
+
+      const CellRef currIterator = core_.arena().makeCell();
+      const CellRef currBegin =
+          emitOp(OpcodeKind::StreamBegin, "#WATCH_CURR_BEGIN2");
+      for (const auto s : currentStream) emitInput(currBegin, s);
+      emitOutput(currBegin, currIterator);
+
+      emitIteratorLoop(currIterator, [&](const CellRef currentItem) {
+        const CellRef isSame = core_.arena().makeCell();
+        const CellRef sameOp =
+            emitOp(OpcodeKind::SameCell, "#WATCH_CHECK_SAME2");
+        emitInput(sameOp, histItem);
+        emitInput(sameOp, currentItem);
+        emitOutput(sameOp, isSame);
+
+        const CellRef skipMatch =
+            mintOpcode(OpcodeKind::Nop, "#WATCH_SKIP_MATCH2");
+        const CellRef branch =
+            emitOp(OpcodeKind::BranchFalseCell, "#WATCH_BRANCH_SAME2");
+        emitInput(branch, isSame);
+        emitInput(branch, skipMatch);
+
+        const CellRef setFound = emitOp(OpcodeKind::Value, "#WATCH_SET_FOUND2");
+        emitInputConstant(setFound, true);
+        emitOutput(setFound, foundMatch);
+
+        appendOpcode(skipMatch);
+      });
+
+      const CellRef notFound   = core_.arena().makeCell();
+      const CellRef notFoundOp = emitOp(OpcodeKind::Not, "#WATCH_NOT_FOUND2");
+      emitInput(notFoundOp, foundMatch);
+      emitOutput(notFoundOp, notFound);
+
+      const CellRef skipAdd = mintOpcode(OpcodeKind::Nop, "#WATCH_SKIP_ADD2");
+      const CellRef branchAdd =
+          emitOp(OpcodeKind::BranchFalseCell, "#WATCH_BRANCH_ADD2");
+      emitInput(branchAdd, notFound);
+      emitInput(branchAdd, skipAdd);
+
+      emitAppendStream(deltaStream, std::span{&histItem, 1});
+
+      appendOpcode(skipAdd);
+    });
+
+    if (!watch.body || watch.body->statements.empty()) {
+      lastResultCells_ = {deltaStream};
+      return deltaStream;
+    }
+
+    const CellRef resultStream = emitStreamClear();
+    const CellRef deltaIter    = core_.arena().makeCell();
+    const CellRef deltaBegin =
+        emitOp(OpcodeKind::StreamBegin, "#WATCH_BODY_BEGIN");
+    emitInput(deltaBegin, deltaStream);
+    emitOutput(deltaBegin, deltaIter);
+
+    emitIteratorLoop(deltaIter, [&](const CellRef item) {
+      auto variables     = varBindings_;
+      auto streams       = streamBindings_;
+      auto functors      = functorBindings_;
+      const auto context = ambientContext_;
+      const RestoreScope restore{[&] {
+        varBindings_     = std::move(variables);
+        streamBindings_  = std::move(streams);
+        functorBindings_ = std::move(functors);
+        ambientContext_  = context;
+      }};
+      ambientContext_           = item;
+      const std::string varName = watch.asVar.value_or(".");
+      functorBindings_.erase(varName);
+      streamBindings_[varName] = {item};
+      varBindings_[varName]    = item;
+      if (varName != ".") {
+        functorBindings_.erase(".");
+        streamBindings_["."] = {item};
+        varBindings_["."]    = item;
+      }
+
+      for (const auto &inner : watch.body->statements) {
+        lastResultCells_.clear();
+        compileStatement(inner);
+        emitAppendStream(resultStream, lastResultCells_);
+      }
+    });
+
+    lastResultCells_ = {resultStream};
+    return resultStream;
   };
 
   const auto lowerPerspective = [&](const PerspectiveBlock &block) {
