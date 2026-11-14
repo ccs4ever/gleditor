@@ -216,7 +216,7 @@ TEST(VQLHistoryVmTest, InterpreterPinCacheDropsAnIdAReleaseFreed) {
   const auto mark = arena.mark();
   (void)pinned(fixture.cellVersion);
   const auto attached = arena.spaceCount();
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
   ASSERT_LT(arena.spaceCount(), attached);
   // The freed id is reused by the other fold ...
   EXPECT_EQ(pinned(fixture.linkedVersion).size(), 1U);

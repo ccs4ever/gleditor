@@ -1060,7 +1060,7 @@ TEST(ArenaFederationTest,
   ASSERT_TRUE(arena.findExistingProxy(space, b));
   ASSERT_TRUE(arena.linked(proxyA, *storeRefs, DimVector::NEG));
 
-  arena.release(outer);
+  EXPECT_TRUE(arena.release(outer));
 
   EXPECT_EQ(arena.cellCount(), beforeCells);
   EXPECT_FALSE(arena.findExistingProxy(space, a));
@@ -1239,7 +1239,7 @@ TEST(ArenaFederationTest, ProxiesVanishWithTheirMark) {
   EXPECT_EQ(*arena.findExistingProxy(sp, 50), p);
   EXPECT_TRUE(arena.isQuoteOccurrence(occ));
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   EXPECT_FALSE(arena.findExistingProxy(sp, 50));
   EXPECT_FALSE(arena.isQuoteOccurrence(occ));
@@ -1297,7 +1297,7 @@ TEST(ArenaFederationTest, AQuotationVanishesWithItsMark) {
   const auto sp   = arena.attach(Space{.store = quoted.get(), .label = "q"});
   const auto mark = arena.mark();
   const auto gone = arena.makeQuote(sp, spans);
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
 
   // The ref is free again, and what takes it is no quotation of that store.
   const auto reused = arena.makeCell(spans.front());

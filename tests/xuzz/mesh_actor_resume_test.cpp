@@ -84,8 +84,9 @@ protected:
     });
     auto *runtimePointer = &runtime;
     runtime.setGenesisHook(
-        [&, resuming](const ActorGenesis &genesis, WorkerContext &context)
-            -> std::expected<void, ActorError> {
+        [&,
+         resuming](const ActorGenesis &genesis,
+                   WorkerContext &context) -> std::expected<void, ActorError> {
           ++genesisWires[resuming ? 1 : 0];
           EXPECT_EQ(genesis.transported != nullptr, resuming);
           if (resuming) {
@@ -307,7 +308,7 @@ TEST_F(MeshActorResumeTest,
   const auto mark = previousContext->arena.mark();
   EXPECT_EQ(previous.checkpointView(*pid, *root).error(),
             ActorError::NotQuiescent);
-  previousContext->arena.release(mark);
+  EXPECT_TRUE(previousContext->arena.release(mark));
   EXPECT_TRUE(previous.checkpointView(*pid, *root));
 }
 

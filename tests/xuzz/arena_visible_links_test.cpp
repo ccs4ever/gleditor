@@ -784,7 +784,7 @@ TEST(ArenaVisibleLinksTest,
   const auto staleAxis  = arena.storeRefsDimension(staleSpace);
   ASSERT_TRUE(staleAxis);
 
-  arena.release(mark);
+  EXPECT_TRUE(arena.release(mark));
   EXPECT_FALSE(arena.storeRefsDimension(staleSpace));
   static_cast<void>(arena.makeCell("reuse released dimension index"));
   const auto reusedAxis = arena.ensureDimension("d.store-refs");

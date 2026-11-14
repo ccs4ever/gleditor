@@ -864,7 +864,7 @@ SolutionDriver::~SolutionDriver() {
   } catch (...) {
     GLEDITOR_LOG_DEBUG("vortex.logic", "driver cleanup could not close cursor");
   }
-  impl_->ctx.core.arena().release(impl_->mark);
+  zigzag::expectMarkOrder(impl_->ctx.core.arena().release(impl_->mark));
   vm.pruneAssemblyState();
 }
 
@@ -950,7 +950,7 @@ public:
   explicit CompileArea(CompileContext &ctx)
       : ctx_(ctx), mark_(ctx.core.arena().mark()) {}
   ~CompileArea() {
-    ctx_.core.arena().release(mark_);
+    zigzag::expectMarkOrder(ctx_.core.arena().release(mark_));
     ctx_.vm.pruneAssemblyState();
   }
   CompileArea(const CompileArea &)            = delete;

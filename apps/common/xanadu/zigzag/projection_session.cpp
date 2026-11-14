@@ -294,7 +294,7 @@ std::size_t ProjectionSession::refresh() {
   recomputeRoots(present, containedTargets);
   presentKeys_ = present; // revertKey's source-vanished signal
 
-  arena.discard(guard);
+  zigzag::expectMarkOrder(arena.discard(guard));
   return minted;
 }
 
@@ -522,10 +522,10 @@ ProjectionSession::rewind(const Checkpoint &cp) {
 
   // Pop cps above cp (discard, no undo), then release cp's mark.
   for (std::size_t i = cps_.size() - 1; i > idx; --i) {
-    arena.discard(cps_[i].mark);
+    zigzag::expectMarkOrder(arena.discard(cps_[i].mark));
   }
   cps_.resize(idx + 1);
-  arena.release(cp.mark);
+  zigzag::expectMarkOrder(arena.release(cp.mark));
   cps_.pop_back();
 
   // The lens-side discard is driven by the earliest node key minted above

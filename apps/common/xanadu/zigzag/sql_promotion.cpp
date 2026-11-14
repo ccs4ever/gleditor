@@ -131,7 +131,7 @@ SqlPromotion::promoteImpl(const ExternalKey &key) {
   const auto guard = staging_.mark();
   auto env         = lens_.buildEnvelope(staging_, key);
   if (!env) {
-    staging_.release(guard);
+    zigzag::expectMarkOrder(staging_.release(guard));
     return std::unexpected(env.error());
   }
   // The reconcile-rank membership rides inside the same microversion:
@@ -140,7 +140,7 @@ SqlPromotion::promoteImpl(const ExternalKey &key) {
   const auto dPromoted = staging_.ensureDimension("d.promoted");
   (void)staging_.link(*env, dPromoted, Posward, *headCell_);
   auto res = promote(store_, head_, staging_, *env);
-  staging_.release(guard);
+  zigzag::expectMarkOrder(staging_.release(guard));
   if (!res.has_value()) {
     return std::unexpected("promote() refused the envelope");
   }

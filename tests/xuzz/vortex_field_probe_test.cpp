@@ -239,7 +239,7 @@ TEST(VortexFieldProbeTest, WorkRefusalRestoresDimensionScratchAndOutput) {
   const std::string name = "d.never";
   const auto cursor      = h.vm.spawnCursor(h.probe(owner, name, 1, output));
   const auto before      = h.arena.mark();
-  h.arena.discard(before);
+  EXPECT_TRUE(h.arena.discard(before));
   h.arena.setExecutionLimits(100000, name.size() + 2, 100000);
   const auto result = h.vm.step(cursor);
   EXPECT_FALSE(result.success);
@@ -247,7 +247,7 @@ TEST(VortexFieldProbeTest, WorkRefusalRestoresDimensionScratchAndOutput) {
   EXPECT_FALSE(h.core.findDimension(name));
   EXPECT_EQ(h.arena.textOf(output), "unchanged");
   const auto after = h.arena.mark();
-  h.arena.discard(after);
+  EXPECT_TRUE(h.arena.discard(after));
   EXPECT_EQ(after.cellCount, before.cellCount);
   EXPECT_EQ(after.scratchSize, before.scratchSize);
   EXPECT_EQ(h.arena.outstandingMarks(), 0u);

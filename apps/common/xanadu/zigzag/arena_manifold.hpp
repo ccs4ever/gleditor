@@ -221,7 +221,28 @@ struct Mark {
   /// failed branch that pinned a historical space leaves none behind; discard
   /// keeps them, as it keeps the cells.
   std::uint32_t spaceCount{0};
+  /// Which choice point this is, so release() and discard() can tell the
+  /// innermost one from an earlier one. Counts and sizes cannot: two marks
+  /// taken with nothing between them are equal in every other field. Not part
+  /// of the APF2 prefix wire (a hydrated arena adopts whatever its mark says).
+  std::uint64_t serial{0};
 };
+
+/// Why release() or discard() changed nothing: marks are a stack.
+struct MarkRefusal {
+  enum class Reason : std::uint8_t {
+    LaterMarkOutstanding, ///< a mark taken after the requested one is live
+    NotOutstanding,       ///< the requested mark was already released,
+                          ///< discarded or evicted, or never taken here
+  };
+  Reason reason{Reason::NotOutstanding};
+  std::uint64_t requested{0};
+  /// The innermost outstanding mark, absent when none is.
+  std::optional<std::uint64_t> outstanding;
+};
+
+/// A sentence that names both marks, for logs and exceptions.
+[[nodiscard]] std::string toString(const MarkRefusal &refusal);
 
 /// What promote() refuses above, so that a runaway evaluation cannot write an
 /// unbounded number of operations into a document.
@@ -242,6 +263,9 @@ class ArenaManifold;
 /// An arena write: pointer to the arena on success for fluid chaining, refusal
 /// reason if not.
 using ArenaResult = std::expected<ArenaManifold *, ArenaRefusal>;
+
+/// release() and discard(): the arena on success, the named refusal if not.
+using MarkResult = std::expected<ArenaManifold *, MarkRefusal>;
 
 [[nodiscard]] constexpr std::string_view
 toString(const ArenaRefusal refusal) noexcept {
@@ -265,6 +289,13 @@ toString(const ArenaRefusal refusal) noexcept {
   }
   return "unknown refusal";
 }
+
+/// Log a refused release() or discard(). Callers that unwind (destructors,
+/// catch blocks) cannot recover from one, and the arena is unchanged, so the
+/// refusal is made loud instead of dropped.
+void expectMarkOrder(
+    const MarkResult &result,
+    std::source_location where = std::source_location::current()) noexcept;
 
 /**
  * @brief Accept a write the caller has already made valid -- linking cells it
@@ -811,11 +842,16 @@ public:
 
   /// Undo everything since @p m: replay its trail tail in reverse, then
   /// truncate. Cells minted under the mark are *gone*, not garbage.
-  ArenaManifold *release(const Mark &m) noexcept;
+  ///
+  /// Refused unless @p m is the innermost outstanding mark: unwinding past a
+  /// later mark would leave its floor behind and a later release would regrow
+  /// the cells this one truncated.
+  [[nodiscard]] MarkResult release(const Mark &m) noexcept;
 
   /// Give up a choice point without undoing it -- success, or a cut. The
   /// bindings made under it stand; only the ability to retry is discarded.
-  ArenaManifold *discard(const Mark &m) noexcept;
+  /// Refused under the same rule as release().
+  [[nodiscard]] MarkResult discard(const Mark &m) noexcept;
 
   /// How many choice points are outstanding. Nonzero forbids compaction.
   [[nodiscard]] std::uint32_t outstandingMarks() const noexcept {
@@ -959,11 +995,17 @@ private:
   /// *innermost* mark and nesting is how a resolution engine uses these. Marks
   /// are assumed well nested: release() and discard() pop.
   struct Floors {
+    std::uint64_t serial{0};
     std::uint32_t cells{0};
     std::uint32_t links{0};
     std::uint32_t content{0};
   };
   std::vector<Floors> floors_;
+  std::uint64_t lastMarkSerial_{0};
+
+  /// The refusal for releasing or discarding @p m now, if any.
+  [[nodiscard]] std::optional<MarkRefusal>
+  markOrderRefusal(const Mark &m) const noexcept;
 
   // Federation storage (§5.7)
   std::vector<Space> spaces_;

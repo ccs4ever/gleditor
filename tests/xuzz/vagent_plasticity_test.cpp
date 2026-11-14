@@ -783,7 +783,7 @@ TEST(VagentPlasticityTest, ProgramSearchIsCellSearch) {
   ASSERT_TRUE(low.result.has_value());
   EXPECT_DOUBLE_EQ(std::get<double>(*low.result), 0.4);
 
-  h.arena.release(mark); // fail — drains to the pre-graft mark.
+  EXPECT_TRUE(h.arena.release(mark)); // fail — drains to the pre-graft mark.
   EXPECT_EQ(h.rt().clausesOf(feed).size(), 1U)
       << "the rejected candidate's clause is gone, incumbent stands";
   EXPECT_FALSE(
@@ -806,7 +806,7 @@ TEST(VagentPlasticityTest, ProgramSearchIsCellSearch) {
   ASSERT_TRUE(high.result.has_value());
   EXPECT_DOUBLE_EQ(std::get<double>(*high.result), 0.9);
 
-  h.arena.discard(markB); // cut — the mark's bindings stand.
+  EXPECT_TRUE(h.arena.discard(markB)); // cut — the mark's bindings stand.
   EXPECT_EQ(h.rt().clausesOf(feed).size(), 2U);
   EXPECT_EQ(h.rt().clausesOf(feed).back(), *retry);
   EXPECT_EQ(h.rt().weightOf(*retry), 0.9);
@@ -1045,8 +1045,8 @@ Session makeSession(Image &f) {
   EXPECT_TRUE(binds.has_value()) << (binds ? "" : binds.error());
   binds->ownModule = f.demoModule;
   binds->lineage   = MetaLineage{
-      .programRef  = f.programRoot,
-      .imageExtent = f.imageExtent,
+        .programRef  = f.programRoot,
+        .imageExtent = f.imageExtent,
   };
   s.binds = *binds;
   return s;
@@ -1268,9 +1268,8 @@ TEST(VagentPlasticityTest, ActorExecutorRunsTheWorkedExamples) {
     }
   )");
   ASSERT_TRUE(artifacts) << artifacts.error().front().detail;
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image) << image.error().front().detail;
 
   zigzag::vortex::mesh::ActorExecution exec;
@@ -1306,7 +1305,7 @@ TEST(VagentPlasticityTest, ActorExecutorRunsTheWorkedExamples) {
   // entry names Meal — the chosen clause's emit — never Alarm.
   const auto outboxDim = ctx.core.findOrMintDimension("d.outbox");
   const auto outbox    = zigzag::rankAfter(arena, image->agentCell, outboxDim) |
-                         std::ranges::to<std::vector>();
+                      std::ranges::to<std::vector>();
   ASSERT_EQ(outbox.size(), 1U);
   const auto payloadRec =
       varsRecord(arena, ctx.core, outbox.front(), "payload", false);
