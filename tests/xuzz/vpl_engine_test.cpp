@@ -15,7 +15,7 @@ using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::noCell;
 
-TEST(VPLEngineTest, DISABLED_CatenateKeepsBudgetAndAliasesIntact) {
+TEST(VPLEngineTest, CatenateKeepsBudgetAndAliasesIntact) {
   VPLEngine engine;
   auto original            = engine.evaluate("data ← 12 10 5");
   const auto originalCells = original.collectCells(engine.arena());
@@ -35,7 +35,7 @@ TEST(VPLEngineTest, DISABLED_CatenateKeepsBudgetAndAliasesIntact) {
             originalCells);
 }
 
-TEST(VPLEngineTest, DISABLED_CatenateScalarReportsAndMixedTypes) {
+TEST(VPLEngineTest, CatenateScalarReportsAndMixedTypes) {
   VPLEngine engine;
   engine.evaluate("ready ← 2; unready ← 1; total ← 3");
   auto report = engine.evaluate("ready , unready , total");
@@ -56,7 +56,7 @@ TEST(VPLEngineTest, DISABLED_CatenateScalarReportsAndMixedTypes) {
   EXPECT_THROW(engine.evaluate(","), std::runtime_error);
 }
 
-TEST(VPLEngineTest, DISABLED_CalculationsKeepOperandProvenanceAcrossBindings) {
+TEST(VPLEngineTest, CalculationsKeepOperandProvenanceAcrossBindings) {
   VPLEngine engine;
   auto first             = engine.evaluate("12 10 5");
   const auto firstSource = first.collectCells(engine.arena());
@@ -81,7 +81,7 @@ TEST(VPLEngineTest, DISABLED_CalculationsKeepOperandProvenanceAcrossBindings) {
   EXPECT_EQ(engine.evaluate("total").dependencies(), firstSource);
 }
 
-TEST(VPLEngineTest, DISABLED_ScalarArithmeticAndScalarExtension) {
+TEST(VPLEngineTest, ScalarArithmeticAndScalarExtension) {
   VPLEngine engine;
 
   // Basic scalar expressions
@@ -321,7 +321,7 @@ TEST(VPLEngineTest, SysArrayStdLibIntegration) {
 } // namespace
 
 TEST(VPLEngineCellPresenceTest,
-     DISABLED_InvalidOriginCannotBecomeNumericZeroOrEmptyText) {
+     InvalidOriginCannotBecomeNumericZeroOrEmptyText) {
   VPLEngine engine;
   const auto dim = engine.arena().ensureDimension("d.1");
   const std::vector<zigzag::DirectedDim> axes{{dim, zigzag::DimVector::POS}};
