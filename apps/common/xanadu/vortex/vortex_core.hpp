@@ -106,10 +106,15 @@ resolve_range(std::size_t size, std::int64_t offset,
   std::int64_t from      = (offset < 0) ? signed_size + offset : offset;
   from                   = std::clamp<std::int64_t>(from, 0, signed_size);
 
-  std::int64_t to = !length         ? signed_size
-                    : (*length < 0) ? signed_size + *length + 1
-                                    : from + *length;
-  to              = std::clamp<std::int64_t>(to, from, signed_size);
+  // Clamp positive lengths before adding to avoid overflowing the endpoint.
+  std::int64_t to = signed_size;
+  if (length) {
+    if (*length < 0)
+      to = signed_size + *length + 1;
+    else if (*length < signed_size - from)
+      to = from + *length;
+  }
+  to = std::clamp<std::int64_t>(to, from, signed_size);
 
   return {static_cast<std::size_t>(from), static_cast<std::size_t>(to - from)};
 }

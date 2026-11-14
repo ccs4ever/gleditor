@@ -247,6 +247,12 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
                          const std::vector<ValueExpr> &arguments,
                          std::optional<CellRef> context, bool ufcs,
                          const bool entersActiveCallStack) {
+  const bool hasVariadic =
+      !definition.params.empty() && definition.params.back().isVariadic;
+  if (!hasVariadic && arguments.size() > definition.params.size())
+    throw QueryRefusal(QueryErrorCategory::Unsupported,
+                       "VQL function '" + definition.name +
+                           "' received too many arguments");
   std::vector<ClosedFunctorFormalKey> functorTemplates;
   std::vector<StaticFunctorProgram> staticFunctorPrograms;
   std::unordered_set<std::string> staticProgramCaptureNames;

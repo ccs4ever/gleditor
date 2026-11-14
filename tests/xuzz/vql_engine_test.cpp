@@ -429,6 +429,10 @@ TEST(VQLEngineTest, RootStepsOnSlices) {
 
   zigzag::CellRef defaultCursor = arena.makeCell("default");
   zigzag::CellRef workerCursor  = arena.makeCell("worker");
+  EXPECT_TRUE(arena.link(defaultCursor, coordinator.core().dims().name,
+                         DimVector::POS, arena.makeCell("default")));
+  EXPECT_TRUE(arena.link(workerCursor, coordinator.core().dims().name,
+                         DimVector::POS, arena.makeCell("worker")));
 
   EXPECT_TRUE(arena.link(workerHome, dCursors, DimVector::POS, defaultCursor));
   EXPECT_TRUE(
@@ -444,10 +448,11 @@ TEST(VQLEngineTest, RootStepsOnSlices) {
   ASSERT_EQ(genesisRes.size(), 1u);
   EXPECT_EQ(genesisRes[0], workerHome);
 
-  // 2. /$slice/^ -> defaultCursor
+  // The slice-relative operator streams every registered scheduler cursor.
   auto activeCursorRes = engine.execute("/$slice/^");
-  ASSERT_EQ(activeCursorRes.size(), 1u);
+  ASSERT_EQ(activeCursorRes.size(), 2u);
   EXPECT_EQ(activeCursorRes[0], defaultCursor);
+  EXPECT_EQ(activeCursorRes[1], workerCursor);
 
   // 3. /$slice/^worker -> workerCursor
   auto namedCursorRes = engine.execute("/$slice/^worker");

@@ -1979,9 +1979,9 @@ VQL rejects nominal inheritance hierarchies ("class taxonomies") that shatter as
 Instead, VQL adopts **Gradual Structural Typing**:
 
 - Typing is completely optional: prototype queries omit types without ceremony.
-- The direct evaluator checks parameter matching and declared returns at runtime. A return check
-  occurs after the body and is not mutation preflight. The compiler refuses unchecked typed
-  definitions; a future static pass must prove checks redundant before erasing them.
+- Compiled VM graphs check parameter matching and declared returns at runtime. A return check occurs
+  after the body. Supported mutation groups also restore their changes when a guarded contract
+  fails. A static pass must prove checks redundant before erasing them.
 
 The atomic types are:
 
@@ -2033,12 +2033,20 @@ Binds the parent cell handle to `$task` while destructuring its internal dimensi
 ```vql
 def weave archive_task($task: Cell { +d.priority: $p: String, +d.owner: $o: Cell }): Cell := {
   weave $task {
+    *,
     +d.status => "archived",
     +d.archived_at => @now
   };
   return $task;
 };
 ```
+
+The wildcard retains the priority and owner fields required by the parameter contract. Without it,
+the exclusive projection removes those fields and the guarded mutation refuses atomically. `@now`
+samples the current UTC wall clock during VM execution and creates a fresh Timestamp cell with
+signed epoch-nanosecond bits and canonical UTC ISO8601 text. It is separate from logical
+microversions. `now()` is the callable builtin form; a user definition may shadow that name, while
+the reserved literal retains its clock meaning. Wall-clock samples need not be monotonic.
 
 #### 4.12.3 Point-Free Topological Traversal Functors & Currying
 

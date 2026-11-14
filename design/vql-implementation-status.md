@@ -1032,3 +1032,24 @@ architecture, senior and resource reviews accepted the bounded stage. The broade
 seven callable and eight route failures plus one skip. Non-closed static formal defaults, computed
 shape targets, projections/history, value-lambda extensions and remaining
 route/lifecycle/measurement gates keep §4.12 incomplete.
+
+## Runtime graph integrity after VM restoration merges
+
+The [integrity restoration](projects/vql-vm-integrity-restoration.md) replaces compile-time topology
+selection/mutation and placeholder cursor handling with executable VM graphs. Runtime quantifiers
+short-circuit per occurrence and share lambda contract/destructuring lowering; cardinality/identity
+checks inspect actual streams. Morphisms allocate fresh targets at execution, skip absent targets
+without losing the chain, and survive AST-free export/reload and host/mesh source execution.
+Qualified dimension perspectives retain runtime canonical fallback; general root enumeration and
+full perspective clone-map transport remain open.
+
+Mutation indices now reject invalid values before writes, and maximal lengths clamp without signed
+overflow. Arity preflight preserves valid caller argument preparation before parameter matching. All
+four corrected §4.12 example bodies execute through the real CLI, including the documented runtime
+UTC clock semantics and archive wildcard retention.
+
+The full build passed. The final engine run has 4,376 active tests: 4,310 passed, 38 failed and 28
+skipped, with 12 disabled profiling/benchmark probes. All 30 added regressions passed, eight old
+failures were fixed and no failing name was new. Independent Luna architecture, senior and resource
+gates accepted the stage. Rank traversal still materializes O(n) data; constant generated opcode
+count is not a speedup or constant-memory claim. §4.12 and the full specification remain incomplete.

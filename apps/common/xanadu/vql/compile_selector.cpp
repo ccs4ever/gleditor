@@ -124,6 +124,9 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
   } else if (std::holds_alternative<FunctionInvocation>(step.selector)) {
     const auto &fn = std::get<FunctionInvocation>(step.selector);
     if (fn.name == "value") {
+      if (fn.args.size() > 3)
+        throw QueryRefusal(QueryErrorCategory::Unsupported,
+                           "VQL value takes at most three arguments");
       for (CellRef current : stream) {
         if (fn.isSliceRead || fn.args.empty()) {
           std::optional<CellRef> offset;

@@ -186,6 +186,29 @@ std::int64_t toInt(const CellValue &val) {
   }
 }
 
+std::optional<std::int64_t> checkedValueIndex(const CellValue &value) {
+  if (const auto *integer = std::get_if<std::int64_t>(&value)) return *integer;
+  if (const auto *boolean = std::get_if<bool>(&value)) return *boolean ? 1 : 0;
+  if (const auto *number = std::get_if<double>(&value)) {
+    // The upper Int64 endpoint rounds to 2^63 as a Double. Check that
+    // exclusive bound before converting, rather than overflowing the cast.
+    const double limit =
+        std::ldexp(1.0, std::numeric_limits<std::int64_t>::digits);
+    if (!std::isfinite(*number) || *number < -limit || *number >= limit)
+      return std::nullopt;
+    return static_cast<std::int64_t>(*number);
+  }
+  try {
+    const auto &text     = std::get<std::string>(value);
+    std::size_t consumed = 0;
+    const auto index     = std::stoll(text, &consumed);
+    if (consumed == text.size()) return index;
+  } catch (const std::invalid_argument &) {
+  } catch (const std::out_of_range &) {
+  }
+  return std::nullopt;
+}
+
 std::optional<CellRef> resolveCell(
     const std::vector<CellRef> &inCells, const std::vector<CellValue> &inputs,
     const std::unordered_map<CellRef, std::optional<CellRef>> &cellReferences,
@@ -3323,23 +3346,27 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     if (!inCells.empty() || !inputs.empty()) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
-      std::int64_t off = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
-      std::optional<std::int64_t> len =
-          inputs.size() >= 3 ? std::optional<std::int64_t>{toInt(inputs[2])}
-                             : std::nullopt;
+      const auto off = inputs.size() >= 2 ? checkedValueIndex(inputs[1])
+                                          : std::optional<std::int64_t>{0};
+      const auto len =
+          inputs.size() >= 3 ? checkedValueIndex(inputs[2]) : std::nullopt;
+      if (!off || (inputs.size() >= 3 && !len))
+        return {.success = false,
+                .errorMessage =
+                    "Value offset and length must be valid Int64 indices"};
       std::optional<CellValue> repl = inputs.size() >= 4
                                           ? std::optional<CellValue>(inputs[3])
                                           : std::nullopt;
       if (c) {
         if (repl) {
           WriteFault fault = WriteFault::None;
-          const auto res   = core_.writeValue(*c, off, len, *repl, &fault);
+          const auto res   = core_.writeValue(*c, *off, len, *repl, &fault);
           if (fault == WriteFault::OpcodeKind) {
             return kindImmutabilityFault();
           }
           outputs.emplace_back(res ? *res : noCell);
         } else {
-          const auto res = core_.readValue(*c, off, len);
+          const auto res = core_.readValue(*c, *off, len);
           outputs.emplace_back(res ? *res : noCell);
         }
       } else {
@@ -3353,11 +3380,15 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     if (inCells.size() >= 4 || inputs.size() >= 4) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
-      std::int64_t off = toInt(inputs[1]);
-      std::int64_t len = toInt(inputs[2]);
+      const auto off = checkedValueIndex(inputs[1]);
+      const auto len = checkedValueIndex(inputs[2]);
+      if (!off || !len)
+        return {.success = false,
+                .errorMessage =
+                    "Splice offset and length must be valid Int64 indices"};
       if (c) {
         WriteFault fault = WriteFault::None;
-        const auto res   = core_.splice(*c, off, len, inputs[3], &fault);
+        const auto res   = core_.splice(*c, *off, *len, inputs[3], &fault);
         if (fault == WriteFault::OpcodeKind) {
           return kindImmutabilityFault();
         }
