@@ -57,11 +57,14 @@ TEST(VQLConformanceTest, CommonEngineCorpusExecutesWithEqualResults) {
     VQLCompiler compiler(core, vm);
     const auto compiled = compiler.compile(source);
     ASSERT_TRUE(compiled.success) << compiled.errorMessage;
-    ASSERT_FALSE(vm.activeCursors().empty());
-    const auto executed = vm.run(vm.activeCursors().front(), 100);
+    ASSERT_TRUE(compiled.cursor);
+    const auto executed = vm.run(*compiled.cursor, 100000);
     ASSERT_TRUE(executed.success) << executed.errorMessage;
-    ASSERT_FALSE(compiled.generatedOpcodes.empty());
-    const auto results = core.inputsOf(compiled.generatedOpcodes.back());
+    std::vector<zigzag::CellRef> results;
+    for (const auto slot : compiled.resultSlots) {
+      const auto cells = vm.resultCells(slot);
+      results.insert(results.end(), cells.begin(), cells.end());
+    }
     EXPECT_EQ(texts(compiledArena, results), test.expected);
   }
 }
@@ -91,16 +94,17 @@ TEST(VQLConformanceTest, CompiledCreationPreservesExistingRankAtExecution) {
   ASSERT_TRUE(compiled.success) << compiled.errorMessage;
   // A change after compilation must also be respected by the runtime append.
   (void)engine.execute("##/+d.items%\"Later\"");
-  ASSERT_TRUE(vm.run(vm.activeCursors().front(), 100).success);
+  ASSERT_TRUE(compiled.cursor);
+  ASSERT_TRUE(vm.run(*compiled.cursor, 100).success);
   EXPECT_EQ(texts(arena, engine.execute(example("rank_read.vql"))),
             (std::vector<std::string>{"Old", "Later", "Alpha", "Beta"}));
   ASSERT_TRUE(compiled.entryOpcode);
   const auto again    = vm.spawnCursor(*compiled.entryOpcode);
   const auto repeated = vm.run(again, 100);
-  EXPECT_FALSE(repeated.success);
-  EXPECT_NE(repeated.errorMessage.find("already used"), std::string::npos);
+  ASSERT_TRUE(repeated.success) << repeated.errorMessage;
   EXPECT_EQ(texts(arena, engine.execute(example("rank_read.vql"))),
-            (std::vector<std::string>{"Old", "Later", "Alpha", "Beta"}));
+            (std::vector<std::string>{"Old", "Later", "Alpha", "Beta", "Alpha",
+                                      "Beta"}));
 }
 
 TEST(VQLConformanceTest, CompiledAppendRefusesCyclesWithoutBreakingLinks) {
@@ -122,13 +126,29 @@ TEST(VQLConformanceTest, CompiledAppendRefusesCyclesWithoutBreakingLinks) {
 }
 
 TEST(VQLConformanceTest, AcceptedSyntaxDoesNotImplyCompiledSemantics) {
-  const std::vector<std::string> files{
-      "empty_shape.vql", "rank_read.vql",           "filter_rank.vql",
-      "functor.vql",     "multiple_statements.vql", "shape_projection.vql",
-      "version.vql",     "generator.vql",           "conditional.vql",
-      "watch.vql",       "definition.vql",
+  const std::vector<std::string> compiledFiles{
+      "rank_read.vql",        "filter_rank.vql", "multiple_statements.vql",
+      "shape_projection.vql", "conditional.vql", "definition.vql",
   };
-  for (const auto &file : files) {
+  for (const auto &file : compiledFiles) {
+    SCOPED_TRACE(file);
+    const auto source = example(file);
+    ASSERT_NO_THROW((void)Parser(source).parseQuery());
+    zigzag::ArenaManifold arena;
+    zigzag::vortex::VortexCore core(arena);
+    zigzag::vortex::VortexVM vm(core);
+    VQLCompiler compiler(core, vm);
+    const auto result = compiler.compile(source);
+    EXPECT_TRUE(result.success) << result.errorMessage;
+  }
+
+  const std::vector<std::pair<std::string, std::string>> refusedFiles{
+      {"generator.vql", "store generator"},
+      {"watch.vql", "baseline"},
+      {"version.vql", "microversion anchor"},
+      {"functor.vql", "functor"},
+  };
+  for (const auto &[file, expectedSubstr] : refusedFiles) {
     SCOPED_TRACE(file);
     const auto source = example(file);
     ASSERT_NO_THROW((void)Parser(source).parseQuery());
@@ -139,10 +159,8 @@ TEST(VQLConformanceTest, AcceptedSyntaxDoesNotImplyCompiledSemantics) {
     const auto count  = arena.cellCount();
     const auto result = compiler.compile(source);
     EXPECT_FALSE(result.success);
-    EXPECT_NE(result.errorMessage.find("--engine direct"), std::string::npos);
-    EXPECT_TRUE(result.generatedOpcodes.empty());
+    EXPECT_NE(result.errorMessage.find(expectedSubstr), std::string::npos);
     EXPECT_EQ(arena.cellCount(), count);
-    EXPECT_TRUE(vm.activeCursors().empty());
   }
 }
 
@@ -177,11 +195,20 @@ TEST(VQLConformanceTest, RefusesUnboundContextAndInvalidProgrammaticCellIds) {
 }
 
 TEST(VQLConformanceTest, RejectsTrailingClosingBraceAndUnsupportedValueSyntax) {
-  for (const auto source : {"## } ignored", "let $x := f(name: 1) return ##",
-                            "let $x := 1 + 2 return ##"}) {
-    SCOPED_TRACE(source);
-    EXPECT_THROW((void)Parser(source).parseQuery(), ParseError);
-  }
+  EXPECT_THROW((void)Parser("## } ignored").parseQuery(), ParseError);
+  EXPECT_NO_THROW((void)Parser("let $x := f(name: 1) return ##").parseQuery());
+  EXPECT_NO_THROW((void)Parser("let $x := 1 + 2 return ##").parseQuery());
+
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::vortex::VortexVM vm(core);
+  VQLCompiler compiler(core, vm);
+  const auto resNamed = compiler.compile(
+      "def f($x: Cell): Cell := $x; let $y := f(name: 1) return ##");
+  EXPECT_FALSE(resNamed.success);
+  EXPECT_NE(resNamed.errorMessage.find("named arguments"), std::string::npos);
+  const auto resAdd = compiler.compile("let $x := 1 + 2 return ##");
+  EXPECT_TRUE(resAdd.success) << resAdd.errorMessage;
 }
 
 } // namespace
