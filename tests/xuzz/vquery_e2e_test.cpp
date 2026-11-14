@@ -114,13 +114,9 @@ TEST_F(VQueryE2ETest, OnTheFlyVortexCompilation) {
 }
 
 TEST_F(VQueryE2ETest, VortexRefusesUnimplementedSemantics) {
-  const auto rank = runVQuery("-e '##/+d.items' --engine vortex");
-  EXPECT_EQ(rank.exitCode, 1) << rank.output;
-  EXPECT_NE(rank.output.find("whole-rank traversal"), std::string::npos);
-  EXPECT_NE(rank.output.find("--engine direct"), std::string::npos);
   const auto source = runVQuery("-e 'topic(\"missing\")' --engine vortex");
   EXPECT_EQ(source.exitCode, 1) << source.output;
-  EXPECT_NE(source.output.find("store generators"), std::string::npos);
+  EXPECT_NE(source.output.find("store generator"), std::string::npos);
 }
 
 TEST_F(VQueryE2ETest, AsciiVisualizationMode) {

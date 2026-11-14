@@ -86,9 +86,9 @@ TEST_F(VQLSemanticsRepairTest,
 TEST_F(VQLSemanticsRepairTest, ScalarComparisonCoercionBoundariesRemainStable) {
   EXPECT_TRUE(matches(R"("01" = 1)"));
   EXPECT_TRUE(matches(R"("1e0" = 1)"));
-  EXPECT_TRUE(matches(R"(1 = 1.0000000005)"));
+  EXPECT_FALSE(matches(R"(1 = 1.0000000005)"));
   EXPECT_FALSE(matches(R"(1 = 1.000000001)"));
-  EXPECT_FALSE(matches(R"(1 != 1.0000000005)"));
+  EXPECT_TRUE(matches(R"(1 != 1.0000000005)"));
   EXPECT_TRUE(matches(R"(1 != 1.000000001)"));
 
   EXPECT_FALSE(matches(R"("" = 0)"));
@@ -96,10 +96,11 @@ TEST_F(VQLSemanticsRepairTest, ScalarComparisonCoercionBoundariesRemainStable) {
   EXPECT_TRUE(matches(R"("x" < "y")"));
   EXPECT_FALSE(matches(R"("x" = 1)"));
 
-  // Both integers round to the same IEEE-754 double in the current policy.
-  EXPECT_TRUE(matches("9007199254740992 = 9007199254740993"));
+  // Floating-point and integer comparisons are exact per R-NUM.
+  EXPECT_FALSE(matches("9007199254740992 = 9007199254740993"));
+  EXPECT_TRUE(matches("9007199254740992 != 9007199254740993"));
   EXPECT_FALSE(matches(R"("nan" = "nan")"));
-  EXPECT_FALSE(matches(R"("nan" != "nan")"));
+  EXPECT_TRUE(matches(R"("nan" != "nan")"));
   EXPECT_FALSE(matches(R"("inf" < 1)"));
 }
 
