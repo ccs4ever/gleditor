@@ -93,7 +93,8 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
         } else if (call.name == "string" && !definitions_.contains(call.name)) {
           if (call.args.size() != 1) rejectTarget();
           validateComputedTarget(call.args.front());
-        } else if (readOnlyDefinitions_.contains(call.name)) {
+        } else if (readOnlyDefinitions_.contains(call.name) ||
+                   call.name == "lens") {
           if (const auto captures = frameFreeCaptureNames_.find(call.name);
               captures != frameFreeCaptureNames_.end()) {
             for (const auto &name : captures->second) {
