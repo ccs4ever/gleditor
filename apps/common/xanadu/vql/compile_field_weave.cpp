@@ -12,6 +12,5 @@ void VQLCompiler::compileFieldWeave(const FieldWeave &weave,
                         ambientContext_.has_value() || !contextInputs_.empty());
   emitAppendStream(resultStream, stream);
 }
-}
 
 } // namespace xanadu::vql
