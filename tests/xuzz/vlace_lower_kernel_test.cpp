@@ -348,15 +348,12 @@ TEST(VlaceLowerKernelTest, ForceValueRunsAnUnforcedThunkOnTheVm) {
 // -- what still refuses
 // -------------------------------------------------------------------
 
-TEST(VlaceLowerKernelTest, FormsOwnedByLaterCardsRefuseByName) {
+TEST(VlaceLowerKernelTest, FormsOwnedByLaterCardsEvaluate) {
   Rig rig;
-  const std::string refusal = "VM lowering is not implemented for VLace";
-  for (const std::string_view src : {"makeText \"x\""}) {
-    auto v = rig.eval(src);
-    ASSERT_FALSE(v.has_value()) << src;
-    EXPECT_NE(v.error().detail.find(refusal), std::string::npos)
-        << src << " -> " << v.error().detail;
-  }
+  auto v = rig.eval("makeText \"x\"");
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ((*v)->kind, Value::Kind::Ctor);
+  EXPECT_EQ((*v)->tag, "Cell");
 }
 
 } // namespace

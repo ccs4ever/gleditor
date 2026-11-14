@@ -238,12 +238,12 @@ TEST(VlaceLowerScalarsTest, DriverNamesThePhaseThatFailed) {
   EXPECT_EQ(unbound.error().phase, "compile");
 }
 
-TEST(VlaceLowerScalarsTest, ConstructsOwnedByLaterCardsStillRefuse) {
+TEST(VlaceLowerScalarsTest, ConstructsOwnedByLaterCardsEvaluate) {
   Rig rig;
   auto v = rig.eval("makeText \"x\"");
-  ASSERT_FALSE(v.has_value());
-  EXPECT_NE(v.error().detail.find("VM lowering is not implemented"),
-            std::string::npos);
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ((*v)->kind, Value::Kind::Ctor);
+  EXPECT_EQ((*v)->tag, "Cell");
 }
 
 // `/` and `%` by a zero divisor fail at run time, for both kinds, instead of
