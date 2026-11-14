@@ -239,7 +239,7 @@ TEST(VPLEngineTest, ReductionsAndScans) {
   EXPECT_EQ(engine.arena().asInt64(cells[4]).value_or(0), 15);
 }
 
-TEST(VPLEngineTest, DISABLED_OuterProduct) {
+TEST(VPLEngineTest, OuterProduct) {
   VPLEngine engine;
 
   // Outer product addition: (1 2 3) ∘.+ (10 20)
@@ -259,7 +259,7 @@ TEST(VPLEngineTest, DISABLED_OuterProduct) {
   EXPECT_EQ(shAscii[1], 2u);
 }
 
-TEST(VPLEngineTest, DISABLED_EncloseAndDisclose) {
+TEST(VPLEngineTest, EncloseAndDisclose) {
   VPLEngine engine;
 
   // Enclose view into cell
@@ -275,7 +275,7 @@ TEST(VPLEngineTest, DISABLED_EncloseAndDisclose) {
   EXPECT_EQ(sh[0], 3u);
 }
 
-TEST(VPLEngineTest, DISABLED_IndexingAndSorting) {
+TEST(VPLEngineTest, IndexingAndSorting) {
   VPLEngine engine;
 
   engine.evaluate("A ← 10 20 30 40 50");

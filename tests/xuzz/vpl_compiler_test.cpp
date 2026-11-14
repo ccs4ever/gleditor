@@ -270,24 +270,27 @@ TEST_F(VPLCompilerTest, CompileOptimizationConstantFolding) {
   EXPECT_EQ(resOpt.generatedOpcodes.size(), 1u); // Only Halt
 }
 
-TEST_F(VPLCompilerTest, RejectsUnsupportedEncloseAndDisclose) {
+TEST_F(VPLCompilerTest, EncloseAndDiscloseLowering) {
   VPLCompiler compiler(*core, *vm);
 
   const auto enclose = compiler.compile("⊂ 42");
-  EXPECT_FALSE(enclose.success);
-  EXPECT_NE(enclose.errorMessage.find("unsupported VPL monadic verb"),
-            std::string::npos);
+  EXPECT_TRUE(enclose.success) << enclose.errorMessage;
+  EXPECT_TRUE(enclose.resultEnclosed);
 
   EXPECT_FALSE(compiler.compile("⊃ C").success);
 }
 
-TEST_F(VPLCompilerTest, RejectsUnsupportedIndexing) {
+TEST_F(VPLCompilerTest, IndexingLowering) {
   VPLCompiler compiler(*core, *vm);
 
-  const auto indexing = compiler.compile("A[3]");
-  EXPECT_FALSE(indexing.success);
-  EXPECT_NE(indexing.errorMessage.find("VPL indexing is unsupported"),
+  const auto unbound = compiler.compile("A[3]");
+  EXPECT_FALSE(unbound.success);
+  EXPECT_NE(unbound.errorMessage.find("unbound VPL identifier"),
             std::string::npos);
+
+  const auto bound = compiler.compile("A ← 10 20 30; A[1]");
+  EXPECT_TRUE(bound.success) << bound.errorMessage;
+  EXPECT_TRUE(bound.resultAxes.empty());
 }
 
 // A dimension is lowered: its value is compile-time structure (no cells), so
