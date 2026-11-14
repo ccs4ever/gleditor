@@ -1,8 +1,8 @@
 # Runtime timestamps and computed VQL projection targets
 
 Iteration 55 is committed as `588277f2`. Iteration 56 combines the remaining fourth §4.12 example
-with graph-native timestamps and pure computed projection targets. Implementation and validation
-are in progress; this document does not establish completion.
+with graph-native timestamps and pure computed projection targets. Implementation and validation are
+in progress; this document does not establish completion.
 
 ## Owner decisions and example audit
 
@@ -22,10 +22,10 @@ body as an atomic-refusal regression and correct the example with `*` before its
 
 ## Graph implementation
 
-Append `CurrentTimestamp` to the VM opcode enum and use the existing scalar-output transaction
-path. Return an actual CellRef through the register map; timestamp bits are ordinary data. Preserve
-output maps, cursor state and arena contents on malformed input, quota or publication failure.
-Fresh runtime calls return distinct cells; UTC wall-clock samples are not required to be monotonic.
+Append `CurrentTimestamp` to the VM opcode enum and use the existing scalar-output transaction path.
+Return an actual CellRef through the register map; timestamp bits are ordinary data. Preserve output
+maps, cursor state and arena contents on malformed input, quota or publication failure. Fresh
+runtime calls return distinct cells; UTC wall-clock samples are not required to be monotonic.
 
 Parse the reserved timestamp literal into a compiler intrinsic and lower it and the callable form to
 the native opcode. Literal identity must remain separate from user-defined function lookup. No new

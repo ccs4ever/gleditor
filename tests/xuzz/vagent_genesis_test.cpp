@@ -494,11 +494,11 @@ GenesisContext freshContext(Store &store, const DurableProgram &f) {
       std::make_unique<zigzag::Manifold>(store.rebuildManifold(store.latest()));
   out.context = std::make_unique<WorkerContext>(out.fold.get(), &store);
   out.roots   = GenesisRoots{
-      .programRoot = f.programRoot,
-      .agentCell   = f.agentCell,
-      .ownModule   = f.ownModule,
-      .imageRecord = f.imageRecord,
-      .imageExtent = f.imageExtent,
+        .programRoot = f.programRoot,
+        .agentCell   = f.agentCell,
+        .ownModule   = f.ownModule,
+        .imageRecord = f.imageRecord,
+        .imageExtent = f.imageExtent,
   };
   return out;
 }
@@ -933,8 +933,8 @@ TEST(VagentGenesisTest, SessionLearnRegenesisLearnCycles) {
   ASSERT_TRUE(binds0.has_value()) << (binds0 ? "" : binds0.error());
   binds0->ownModule = f.sysModule;
   binds0->lineage   = MetaLineage{
-      .programRef  = f.programRoot,
-      .imageExtent = f.imageExtent,
+        .programRef  = f.programRoot,
+        .imageExtent = f.imageExtent,
   };
   MetaRuntime meta0(ctx0->core, ctx0->vm, *binds0);
   const auto clause = meta0.learnPlan("boot", "main", f.progHeadA, f.progHeadB);
@@ -997,8 +997,8 @@ TEST(VagentGenesisTest, SessionLearnRegenesisLearnCycles) {
   ASSERT_TRUE(binds1.has_value());
   binds1->ownModule = f.sysModule;
   binds1->lineage   = MetaLineage{
-      .programRef  = f.programRoot,
-      .imageExtent = f.imageExtent,
+        .programRef  = f.programRoot,
+        .imageExtent = f.imageExtent,
   };
   MetaRuntime meta1(c1->context->core, c1->context->vm, *binds1);
   const auto replaced = meta1.learnWhere(c0, f.progHeadB);
@@ -1072,8 +1072,8 @@ TEST(VagentGenesisTest, MetaSerialStaysMonotoneAcrossCycles) {
     ASSERT_TRUE(binds.has_value()) << (binds ? "" : binds.error());
     binds->ownModule = f.sysModule;
     binds->lineage   = MetaLineage{
-        .programRef  = f.programRoot,
-        .imageExtent = f.imageExtent,
+          .programRef  = f.programRoot,
+          .imageExtent = f.imageExtent,
     };
     MetaRuntime meta(ctx->core, ctx->vm, *binds);
     const auto clause = meta.learnPlan("boot", std::format("m{}", round),
@@ -1125,8 +1125,8 @@ TEST(VagentGenesisTest, UnlearnedPatchStaysOutOfReplay) {
   ASSERT_TRUE(binds0.has_value()) << (binds0 ? "" : binds0.error());
   binds0->ownModule = f.sysModule;
   binds0->lineage   = MetaLineage{
-      .programRef  = f.programRoot,
-      .imageExtent = f.imageExtent,
+        .programRef  = f.programRoot,
+        .imageExtent = f.imageExtent,
   };
   MetaRuntime meta0(ctx0->core, ctx0->vm, *binds0);
   const auto clause = meta0.learnPlan("boot", "main", f.progHeadA, f.progHeadB);
@@ -1155,8 +1155,8 @@ TEST(VagentGenesisTest, UnlearnedPatchStaysOutOfReplay) {
   ASSERT_TRUE(binds1.has_value());
   binds1->ownModule = f.sysModule;
   binds1->lineage   = MetaLineage{
-      .programRef  = f.programRoot,
-      .imageExtent = f.imageExtent,
+        .programRef  = f.programRoot,
+        .imageExtent = f.imageExtent,
   };
   MetaRuntime meta1(c1->context->core, c1->context->vm, *binds1);
   const auto live = meta1.planNamed(label);
@@ -1183,8 +1183,8 @@ TEST(VagentGenesisTest, UnlearnedPatchStaysOutOfReplay) {
   ASSERT_TRUE(binds2.has_value());
   binds2->ownModule = f.sysModule;
   binds2->lineage   = MetaLineage{
-      .programRef  = f.programRoot,
-      .imageExtent = f.imageExtent,
+        .programRef  = f.programRoot,
+        .imageExtent = f.imageExtent,
   };
   MetaRuntime meta2(c2->context->core, c2->context->vm, *binds2);
   EXPECT_FALSE(meta2.planNamed(label).has_value())

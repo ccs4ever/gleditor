@@ -1095,11 +1095,10 @@ historyFromSeal(const std::span<const std::string_view> segments,
                 const Scroll &from,
                 const std::map<std::string, Scroll> &scrolls,
                 const DocumentId *const documentId) {
-  auto history =
-      documentId != nullptr
-          ? std::make_unique<Store>(std::shared_ptr<UserPermascroll>{},
-                                    *documentId)
-          : std::make_unique<Store>();
+  auto history                   = documentId != nullptr
+                                       ? std::make_unique<Store>(
+                           std::shared_ptr<UserPermascroll>{}, *documentId)
+                                       : std::make_unique<Store>();
   const auto selfScrollInHistory = history->addScroll(from);
   for (const auto &segment : segments) {
     applyOpsSegment(segment, *history, selfScrollInHistory, scrolls);

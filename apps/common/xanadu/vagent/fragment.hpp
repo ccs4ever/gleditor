@@ -228,7 +228,7 @@ fragmentLabelOf(const FragmentKey &key,
 compileFragment(const Expr &literal, const FragmentContext &context,
                 Compiler &compiler,
                 const CompilerBindings *frameLocals = nullptr,
-                const OwnerFields *memberFields = nullptr);
+                const OwnerFields *memberFields     = nullptr);
 
 // File the phase-3 apparatus dims the emission needs (idempotent —
 // findOrMintDimension's find arm resolves a sibling-filed name).

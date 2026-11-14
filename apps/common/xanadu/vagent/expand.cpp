@@ -113,21 +113,20 @@ public:
     sweepDeadLets();
     removeTemplates();
     residualScan();
-    if (!diagnostics_.empty())
-      return std::unexpected(std::move(diagnostics_));
+    if (!diagnostics_.empty()) return std::unexpected(std::move(diagnostics_));
     return Expansion{std::move(fragments_), std::move(metas_),
                      std::move(captures_), std::move(synthesized_)};
   }
 
 private:
   void report(Diagnostic diagnostic, const LiteralChain &chain) {
-    for (auto it = chain.literals.rbegin(); it != chain.literals.rend();
-         ++it)
+    for (auto it = chain.literals.rbegin(); it != chain.literals.rend(); ++it)
       diagnostic = innerDiagnostic(std::move(diagnostic), *it);
     diagnostics_.push_back(std::move(diagnostic));
   }
 
-  // ---- declaration indexing --------------------------------------------------
+  // ---- declaration indexing
+  // --------------------------------------------------
 
   // Registers every declaration, its owner, its method members (template
   // call lookup) and the env scope id its bindings mint under, when the
@@ -150,9 +149,8 @@ private:
   // clauses walk in env copies, so their nodes' own scopes differ while
   // their binding stamps still carry the env id).
   static std::optional<std::uint64_t> envScopeOf(const Decl &decl) {
-    for (const ExprPtr *slot :
-         {&decl.body, &decl.initializer, &decl.guard, &decl.trigger,
-          &decl.deadline})
+    for (const ExprPtr *slot : {&decl.body, &decl.initializer, &decl.guard,
+                                &decl.trigger, &decl.deadline})
       if (*slot && (*slot)->stamp) return (*slot)->stamp->scope;
     return std::nullopt;
   }
@@ -169,8 +167,7 @@ private:
   // in an env copy), a stamped identifier bound to one of its parameters
   // supplies the id.
   const Decl *declOfScope(std::uint64_t scope, const Expr &bindingUse) {
-    if (const auto found = declScope_.find(scope);
-        found != declScope_.end())
+    if (const auto found = declScope_.find(scope); found != declScope_.end())
       return found->second;
     if (!bindingUse.stamp || !bindingUse.stamp->ordinal) return nullptr;
     const auto ordinal = *bindingUse.stamp->ordinal;
@@ -185,7 +182,8 @@ private:
     return nullptr;
   }
 
-  // ---- name helpers -----------------------------------------------------------
+  // ---- name helpers
+  // -----------------------------------------------------------
 
   // The source-level name a reference spells, chased through the alias
   // chain: a cap$N alias resolves one hop toward its captured name, and a
@@ -193,8 +191,7 @@ private:
   // the checker's displayName is.
   std::string_view sourceName(const Expr &expression) const {
     std::string_view name = expression.text;
-    for (std::size_t hops = 0; hops < 16 && name.starts_with("cap$");
-         ++hops) {
+    for (std::size_t hops = 0; hops < 16 && name.starts_with("cap$"); ++hops) {
       const auto found = captures_.find(std::string(name));
       if (found == captures_.end()) break;
       name = found->second.captured;
@@ -204,7 +201,8 @@ private:
 
   static bool codeType(const Type &type) { return type.name == "Code"; }
 
-  // ---- the expression walk ----------------------------------------------------
+  // ---- the expression walk
+  // ----------------------------------------------------
 
   void walkDecl(Decl &decl, const Decl *owner) {
     if (auto scope = envScopeOf(decl)) declScope_[*scope] = &decl;
@@ -215,9 +213,8 @@ private:
     detectTemplate(decl);
     Site site;
     site.owner = owner;
-    for (ExprPtr *slot :
-         {&decl.initializer, &decl.body, &decl.guard, &decl.trigger,
-          &decl.deadline})
+    for (ExprPtr *slot : {&decl.initializer, &decl.body, &decl.guard,
+                          &decl.trigger, &decl.deadline})
       if (*slot) {
         parentSlot_[slot->get()] = slot;
         walkExpr(*slot, site);
@@ -249,21 +246,18 @@ private:
             declScope_.contains(operand.stamp->scope) &&
             declScope_.at(operand.stamp->scope) == &decl &&
             *operand.stamp->ordinal < decl.parameters.size() &&
-            decl.parameters[*operand.stamp->ordinal].name ==
-                operand.text &&
+            decl.parameters[*operand.stamp->ordinal].name == operand.text &&
             codeType(decl.parameters[*operand.stamp->ordinal].type))
           markTemplate(&decl, {});
       }
       for (const auto &child : node.children)
         if (child) scan(*child);
-      for (const ExprPtr *meta :
-           {&node.scope, &node.recipients, &node.deadline, &node.guard,
-            &node.recovery})
+      for (const ExprPtr *meta : {&node.scope, &node.recipients, &node.deadline,
+                                  &node.guard, &node.recovery})
         if (*meta) scan(**meta);
     };
-    for (const ExprPtr *slot :
-         {&decl.initializer, &decl.body, &decl.guard, &decl.trigger,
-          &decl.deadline})
+    for (const ExprPtr *slot : {&decl.initializer, &decl.body, &decl.guard,
+                                &decl.trigger, &decl.deadline})
       if (*slot) scan(**slot);
     for (const auto &contract : decl.contracts)
       if (contract.condition) scan(*contract.condition);
@@ -326,7 +320,7 @@ private:
       registerLet(node, site);
       return;
     case ExprKind::Block: {
-      Expr *outer    = site.currentBlock;
+      Expr *outer       = site.currentBlock;
       site.currentBlock = &node;
       for (auto &child : node.children) {
         if (!child) continue;
@@ -356,8 +350,8 @@ private:
   // splice is the place itself or a field/index base below it.
   bool placeCheck(const Expr &place, const Site &site) {
     const Expr *node = &place;
-    while (node && (node->kind == ExprKind::Field ||
-                    node->kind == ExprKind::Index) &&
+    while (node &&
+           (node->kind == ExprKind::Field || node->kind == ExprKind::Index) &&
            !node->children.empty())
       node = node->children.front().get();
     if (node && node->kind == ExprKind::Splice) {
@@ -375,10 +369,11 @@ private:
   void registerLet(Expr &node, Site &site) {
     if (!node.stamp) return;
     lets_[{node.stamp->scope, node.text}] = &node;
-    letBlock_[&node]                 = site.currentBlock;
+    letBlock_[&node]                      = site.currentBlock;
   }
 
-  // ---- cap$N captures ----------------------------------------------------------
+  // ---- cap$N captures
+  // ----------------------------------------------------------
 
   // The outside-reference pass over one literal body, run on resolve's
   // stamps after resolveFragment and before splice substitution. Every
@@ -387,9 +382,8 @@ private:
   // the captured binding's stamp; cells"…" $-anchors rewrite through the
   // same map; record.env gets each {alias → captured spelling} hop for
   // the checker's env seeding.
-  void capturePass(Expr &body, const LiteralSeed &seed,
-                   const FragmentKey &key, FragmentRecord &record,
-                   FragmentMeta &meta, Site &site) {
+  void capturePass(Expr &body, const LiteralSeed &seed, const FragmentKey &key,
+                   FragmentRecord &record, FragmentMeta &meta, Site &site) {
     std::optional<std::uint64_t> ownerScope;
     if (const auto self = seed.bindings.find("self");
         self != seed.bindings.end())
@@ -409,18 +403,16 @@ private:
           meta.captures.push_back(existing->second->alias);
         return *existing->second;
       }
-      const auto number  = capCounter_++;
+      const auto number = capCounter_++;
       CaptureRecord entry;
-      entry.alias        = "cap$" + std::to_string(number);
-      entry.anchorAlias  = "cap_" + std::to_string(number);
-      entry.captured     = std::string(spelling);
-      entry.binding      = binding;
-      entry.stable =
-          ownerScope && binding.scope == *ownerScope;
-      entry.literal = key.loc;
-      entry.loc     = loc;
-      auto [it, inserted] =
-          captures_.emplace(entry.alias, std::move(entry));
+      entry.alias         = "cap$" + std::to_string(number);
+      entry.anchorAlias   = "cap_" + std::to_string(number);
+      entry.captured      = std::string(spelling);
+      entry.binding       = binding;
+      entry.stable        = ownerScope && binding.scope == *ownerScope;
+      entry.literal       = key.loc;
+      entry.loc           = loc;
+      auto [it, inserted] = captures_.emplace(entry.alias, std::move(entry));
       (void)inserted;
       meta.captures.push_back(it->first);
       capByBinding_[id] = &it->second;
@@ -470,8 +462,7 @@ private:
         }
         if (outside(node)) {
           const std::string spelling = node.text;
-          const auto &capture =
-              captureFor(spelling, *node.stamp, node.loc);
+          const auto &capture = captureFor(spelling, *node.stamp, node.loc);
           record.env[capture.alias] = spelling;
           node.text                 = capture.alias;
         }
@@ -479,8 +470,7 @@ private:
       }
       case ExprKind::Cells: {
         const auto path = parseCellsPath(node.text, node.loc);
-        if (!path ||
-            path->anchor.kind != CellsPath::Anchor::Kind::Variable ||
+        if (!path || path->anchor.kind != CellsPath::Anchor::Kind::Variable ||
             !node.stamp || !node.stamp->ordinal ||
             node.stamp->scope > meta.scopeWatermark)
           return; // no $-anchor, unbound anchor, or a body-internal one
@@ -491,14 +481,14 @@ private:
         const auto &capture =
             captureFor(path->anchor.variable, *node.stamp, node.loc);
         if (!capture.stable) {
-          report(Diagnostic{
-                     DiagnosticCode::InvalidPosition,
-                     "cells\"…\" $-anchor '$" + path->anchor.variable +
-                         "' captures a frame-bound binding — anchors are "
-                         "supported for stable captures (fields, member "
-                         "vars and implicit names) only",
-                     node.loc},
-                 site.chain);
+          report(
+              Diagnostic{DiagnosticCode::InvalidPosition,
+                         "cells\"…\" $-anchor '$" + path->anchor.variable +
+                             "' captures a frame-bound binding — anchors are "
+                             "supported for stable captures (fields, member "
+                             "vars and implicit names) only",
+                         node.loc},
+              site.chain);
           return;
         }
         record.env[capture.alias] = path->anchor.variable;
@@ -512,9 +502,8 @@ private:
       }
       for (auto &child : node.children)
         if (child) visit(*child);
-      for (ExprPtr *meta2 :
-           {&node.scope, &node.recipients, &node.deadline, &node.guard,
-            &node.recovery})
+      for (ExprPtr *meta2 : {&node.scope, &node.recipients, &node.deadline,
+                             &node.guard, &node.recovery})
         if (*meta2) visit(**meta2);
     };
     visit(body);
@@ -529,7 +518,7 @@ private:
   // behind, which is what substitution is for.
   void reclassify(Expr &root, FragmentRecord &record,
                   const FragmentMeta &meta) {
-    bool closed = true;
+    bool closed      = true;
     const auto visit = [&](this auto &&visit, const Expr &node) -> void {
       if (node.kind == ExprKind::Code) return;
       if ((node.kind == ExprKind::Identifier ||
@@ -539,28 +528,27 @@ private:
             found != captures_.end() && !found->second.stable)
           closed = false;
       }
-      if (node.kind == ExprKind::Cells &&
-          node.text.starts_with("$cap_")) {
+      if (node.kind == ExprKind::Cells && node.text.starts_with("$cap_")) {
         // Anchor aliases mint under the stable gate — the refusal
         // already fired for frame-bound ones.
       }
       for (const auto &child : node.children)
         if (child) visit(*child);
-      for (const ExprPtr *meta :
-           {&node.scope, &node.recipients, &node.deadline, &node.guard,
-            &node.recovery})
+      for (const ExprPtr *meta : {&node.scope, &node.recipients, &node.deadline,
+                                  &node.guard, &node.recovery})
         if (*meta) visit(**meta);
     };
     visit(root);
     record.closed = closed && !meta.outerParamRefs;
   }
 
-  // ---- literals ----------------------------------------------------------------
+  // ---- literals
+  // ----------------------------------------------------------------
 
   void literal(Expr &literalExpr, Site &site) {
-    const FragmentKey key{literalExpr.loc,
-                          literalExpr.stamp ? literalExpr.stamp->ordinal
-                                            : std::nullopt};
+    const FragmentKey key{literalExpr.loc, literalExpr.stamp
+                                               ? literalExpr.stamp->ordinal
+                                               : std::nullopt};
     if (fragments_.contains(key)) return; // processed or a cloneExpr copy
     if (site.depth >= limits_.check.maxExpansionDepth) {
       report(Diagnostic{DiagnosticCode::InvalidDeclaration,
@@ -582,8 +570,7 @@ private:
     if (!record.body.body) return;
     for (const auto &parameter : record.body.parameters)
       if (codeType(parameter.type)) meta.spliceOnly = true;
-    if (!record.body.parameters.empty())
-      meta.paramScope = ++seeds_.nextScope;
+    if (!record.body.parameters.empty()) meta.paramScope = ++seeds_.nextScope;
     LiteralChain chain = site.chain;
     chain.literals.push_back(literalExpr.loc);
     const auto seed = seeds_.byLiteral.find(key);
@@ -594,22 +581,20 @@ private:
       return;
     }
     meta.scopeWatermark = seeds_.nextScope;
-    auto resolved =
-        resolveFragment(program_, *record.body.body, seed->second, seeds_,
-                        limits_.resolve);
+    auto resolved = resolveFragment(program_, *record.body.body, seed->second,
+                                    seeds_, limits_.resolve);
     if (!resolved)
       for (auto &diagnostic : resolved.error())
         report(std::move(diagnostic), chain);
     Site body;
-    body.owner      = seed->second.owner;
-    body.params     = &record.body.parameters;
-    body.paramScope = meta.paramScope;
-    body.subst      = site.subst;
-    body.actuals    = site.actuals;
+    body.owner           = seed->second.owner;
+    body.params          = &record.body.parameters;
+    body.paramScope      = meta.paramScope;
+    body.subst           = site.subst;
+    body.actuals         = site.actuals;
     body.enclosingParams = site.enclosingParams;
     if (site.params)
-      body.enclosingParams.insert(body.enclosingParams.begin(),
-                                  site.params);
+      body.enclosingParams.insert(body.enclosingParams.begin(), site.params);
     body.chain      = chain;
     body.depth      = site.depth + 1;
     body.insideBody = true;
@@ -619,7 +604,8 @@ private:
     reclassify(*record.body.body, record, meta);
   }
 
-  // ---- splice substitution ------------------------------------------------------
+  // ---- splice substitution
+  // ------------------------------------------------------
 
   struct Judged {
     enum class Kind : std::uint8_t { Fragment, Pending, Refused } kind;
@@ -633,8 +619,7 @@ private:
   // enclosing template's Code parameter. `role` names the operand
   // position in refusals — a splice's operand, a splice's Code
   // argument, or a template call's Code argument.
-  Judged judgeOperand(Expr &operand, Site &site,
-                      const std::string &role) {
+  Judged judgeOperand(Expr &operand, Site &site, const std::string &role) {
     if (operand.kind == ExprKind::Code) {
       literal(operand, site);
       return {Judged::Kind::Fragment, &operand, nullptr};
@@ -662,8 +647,8 @@ private:
     if (operand.stamp && operand.stamp->ordinal && site.params &&
         operand.stamp->scope == site.paramScope &&
         *operand.stamp->ordinal < site.params->size()) {
-      const auto index   = *operand.stamp->ordinal;
-      const auto &param  = (*site.params)[index];
+      const auto index  = *operand.stamp->ordinal;
+      const auto &param = (*site.params)[index];
       if (site.subst && site.subst->paramScope == site.paramScope) {
         if (const auto actual = site.subst->actuals.find(index);
             actual != site.subst->actuals.end())
@@ -694,8 +679,7 @@ private:
       }
       // A direct Code parameter of a declaration — splicing it anywhere
       // makes that declaration a template (M13).
-      if (const Decl *decl =
-              declOfScope(operand.stamp->scope, operand)) {
+      if (const Decl *decl = declOfScope(operand.stamp->scope, operand)) {
         const auto &params = decl->parameters;
         if (*operand.stamp->ordinal < params.size() &&
             params[*operand.stamp->ordinal].name == name &&
@@ -766,8 +750,7 @@ private:
   // or a substituted block ending in one.
   const Expr *judgeLet(const Expr &let, Site &site,
                        std::set<const Expr *> &visiting) {
-    if (!visiting.insert(&let).second || let.children.empty())
-      return nullptr;
+    if (!visiting.insert(&let).second || let.children.empty()) return nullptr;
     return judgeInit(*let.children.front(), site, visiting);
   }
 
@@ -784,8 +767,7 @@ private:
             found != site.actuals->end())
           return found->second;
       if (const auto found =
-              lets_.find({init.stamp->scope,
-                          std::string(sourceName(init))});
+              lets_.find({init.stamp->scope, std::string(sourceName(init))});
           found != lets_.end())
         return judgeLet(*found->second, site, visiting);
       return nullptr;
@@ -805,8 +787,7 @@ private:
     Expr &node = *slot;
     if (++splices_ > limits_.check.maxSplices) {
       report(Diagnostic{DiagnosticCode::InvalidDeclaration,
-                        "expansion exceeds CheckLimits::maxSplices",
-                        node.loc},
+                        "expansion exceeds CheckLimits::maxSplices", node.loc},
              site.chain);
       spliceReported_.insert(&node);
       return;
@@ -840,9 +821,8 @@ private:
       walkExpr(node.children.front(), site);
       parentSlot_[node.children.front().get()] = &node.children.front();
     }
-    Expr &operand = *node.children.front();
-    const Judged judged =
-        judgeOperand(operand, site, "'splice' operand");
+    Expr &operand       = *node.children.front();
+    const Judged judged = judgeOperand(operand, site, "'splice' operand");
     if (judged.kind != Judged::Kind::Fragment) {
       spliceReported_.insert(&node);
       return; // pending or refused
@@ -859,10 +839,9 @@ private:
   // (pending, failed): a Pending actual defers to the enclosing
   // template's instantiation, a non-Fragment fails already reported.
   template <typename Context>
-  std::pair<bool, bool>
-  judgeCodeActuals(Substitution &subst, Expr &node,
-                   const std::vector<Parameter> &params, Site &site,
-                   Context &&context) {
+  std::pair<bool, bool> judgeCodeActuals(Substitution &subst, Expr &node,
+                                         const std::vector<Parameter> &params,
+                                         Site &site, Context &&context) {
     bool pending = false, failed = false;
     for (std::size_t i = 0; i < params.size(); ++i) {
       const auto &parameter = params[i];
@@ -907,24 +886,23 @@ private:
     return let;
   }
 
-  void substitute(ExprPtr &slot, const Expr &literalExpr,
-                  const Expr *consumed, Site &site) {
+  void substitute(ExprPtr &slot, const Expr &literalExpr, const Expr *consumed,
+                  Site &site) {
     Expr &node = *slot;
-    const FragmentKey key{literalExpr.loc,
-                          literalExpr.stamp ? literalExpr.stamp->ordinal
-                                            : std::nullopt};
+    const FragmentKey key{literalExpr.loc, literalExpr.stamp
+                                               ? literalExpr.stamp->ordinal
+                                               : std::nullopt};
     const auto found = fragments_.find(key);
     if (found == fragments_.end() || !found->second.body.body) {
       report(Diagnostic{DiagnosticCode::InvalidDeclaration,
-                        "splice operand has no parsed fragment body",
-                        node.loc},
+                        "splice operand has no parsed fragment body", node.loc},
              site.chain);
       spliceReported_.insert(&node);
       return;
     }
-    const FragmentRecord &record  = found->second;
-    const FragmentMeta &meta      = metas_.at(key);
-    const std::size_t arity       = record.body.parameters.size();
+    const FragmentRecord &record = found->second;
+    const FragmentMeta &meta     = metas_.at(key);
+    const std::size_t arity      = record.body.parameters.size();
     if (node.children.size() - 1 != arity) {
       report(Diagnostic{DiagnosticCode::TypeMismatch,
                         "splice passes " +
@@ -945,10 +923,9 @@ private:
     // the whole splice pending: it resolves where the enclosing
     // template is instantiated.
     const auto [pending, failed] = judgeCodeActuals(
-        *subst, node, record.body.parameters, site,
-        [](std::string_view name) {
-          return "splice argument for Code parameter '" +
-                 std::string{name} + "'";
+        *subst, node, record.body.parameters, site, [](std::string_view name) {
+          return "splice argument for Code parameter '" + std::string{name} +
+                 "'";
         });
     // Pending resolves per-site inside a clone (or vanishes with the
     // template that owns it); failed already reported — neither should
@@ -965,8 +942,8 @@ private:
       if (codeType(parameter.type)) continue;
       // Call-by-value: one fresh `let p<k> := <arg>` per value argument,
       // evaluated once in argument order at the expanded body's head.
-      lets.push_back(
-          synthesizeValueLet(*subst, node, i, parameter, synthScope, synthOrd++));
+      lets.push_back(synthesizeValueLet(*subst, node, i, parameter, synthScope,
+                                        synthOrd++));
     }
     auto cloned = cloneExpr(*record.body.body);
     remapScopes(*cloned, meta.scopeWatermark, meta.paramScope);
@@ -978,8 +955,7 @@ private:
     sub.actuals         = site.actuals;
     sub.enclosingParams = site.enclosingParams;
     if (site.params)
-      sub.enclosingParams.insert(sub.enclosingParams.begin(),
-                                 site.params);
+      sub.enclosingParams.insert(sub.enclosingParams.begin(), site.params);
     sub.enclosingParams.insert(sub.enclosingParams.begin(), sub.params);
     sub.chain      = site.chain;
     sub.depth      = site.depth + 1;
@@ -994,11 +970,9 @@ private:
       block->kind  = ExprKind::Block;
       block->loc   = node.loc;
       block->stamp = node.stamp;
-      for (auto &let : lets)
-        block->children.push_back(std::move(let));
+      for (auto &let : lets) block->children.push_back(std::move(let));
       block->children.push_back(std::move(cloned));
-      for (auto &child : block->children)
-        parentSlot_[child.get()] = &child;
+      for (auto &child : block->children) parentSlot_[child.get()] = &child;
       slot = std::move(block);
     }
   }
@@ -1019,25 +993,22 @@ private:
         node2.text = std::string(sourceName(node2));
       if (node2.kind == ExprKind::Cells) {
         const auto path = parseCellsPath(node2.text, node2.loc);
-        if (path &&
-            path->anchor.kind == CellsPath::Anchor::Kind::Variable &&
+        if (path && path->anchor.kind == CellsPath::Anchor::Kind::Variable &&
             path->anchor.variable.starts_with("cap_")) {
-          const std::string alias =
-              "cap$" + path->anchor.variable.substr(4);
+          const std::string alias = "cap$" + path->anchor.variable.substr(4);
           if (const auto found = captures_.find(alias);
               found != captures_.end() &&
               node2.text.starts_with("$" + path->anchor.variable))
             node2.text = "$" + found->second.captured +
-                         node2.text.substr(1 +
-                                           path->anchor.variable.size());
+                         node2.text.substr(1 + path->anchor.variable.size());
         }
         return;
       }
       for (auto &child : node2.children)
         if (child) visit(*child);
       for (const ExprPtr *meta :
-           {&node2.scope, &node2.recipients, &node2.deadline,
-            &node2.guard, &node2.recovery})
+           {&node2.scope, &node2.recipients, &node2.deadline, &node2.guard,
+            &node2.recovery})
         if (*meta) visit(**meta);
     };
     visit(node);
@@ -1062,9 +1033,8 @@ private:
       }
       for (auto &child : node2.children)
         if (child) visit(*child);
-      for (ExprPtr *meta :
-           {&node2.scope, &node2.recipients, &node2.deadline, &node2.guard,
-            &node2.recovery})
+      for (ExprPtr *meta : {&node2.scope, &node2.recipients, &node2.deadline,
+                            &node2.guard, &node2.recovery})
         if (*meta) visit(**meta);
     };
     visit(node);
@@ -1100,7 +1070,8 @@ private:
     }
   }
 
-  // ---- template expansion (M13) -------------------------------------------------
+  // ---- template expansion (M13)
+  // -------------------------------------------------
 
   // The template bars from spec :456-470, reported once per marked decl:
   // no effect/native/capacity membership and no control flow in template
@@ -1129,32 +1100,38 @@ private:
     const auto scan = [&](this auto &&scan, const Expr &node) -> void {
       std::string_view barred;
       switch (node.kind) {
-      case ExprKind::Return:    barred = "return"; break;
-      case ExprKind::Yield:     barred = "yield"; break;
-      case ExprKind::Consume:   barred = "consume"; break;
-      case ExprKind::Terminate: barred = "terminate"; break;
-      default: break;
+      case ExprKind::Return:
+        barred = "return";
+        break;
+      case ExprKind::Yield:
+        barred = "yield";
+        break;
+      case ExprKind::Consume:
+        barred = "consume";
+        break;
+      case ExprKind::Terminate:
+        barred = "terminate";
+        break;
+      default:
+        break;
       }
       if (!barred.empty()) {
-        report(Diagnostic{
-                   DiagnosticCode::InvalidPosition,
-                   "'" + std::string(barred) +
-                       "' is refused in a template body — inlined, it "
-                       "would exit the caller",
-                   node.loc},
+        report(Diagnostic{DiagnosticCode::InvalidPosition,
+                          "'" + std::string(barred) +
+                              "' is refused in a template body — inlined, it "
+                              "would exit the caller",
+                          node.loc},
                chain);
         return;
       }
       for (const auto &child : node.children)
         if (child) scan(*child);
-      for (const ExprPtr *meta :
-           {&node.scope, &node.recipients, &node.deadline, &node.guard,
-            &node.recovery})
+      for (const ExprPtr *meta : {&node.scope, &node.recipients, &node.deadline,
+                                  &node.guard, &node.recovery})
         if (*meta) scan(**meta);
     };
-    for (const ExprPtr *slot :
-         {&decl->initializer, &decl->body, &decl->guard, &decl->trigger,
-          &decl->deadline})
+    for (const ExprPtr *slot : {&decl->initializer, &decl->body, &decl->guard,
+                                &decl->trigger, &decl->deadline})
       if (*slot) scan(**slot);
     for (const auto &contract : decl->contracts)
       if (contract.condition) scan(*contract.condition);
@@ -1169,8 +1146,7 @@ private:
       std::string_view name;
       if (callee.kind == ExprKind::Identifier) {
         name = callee.text;
-      } else if (callee.kind == ExprKind::Field &&
-                 !callee.children.empty() &&
+      } else if (callee.kind == ExprKind::Field && !callee.children.empty() &&
                  callee.children.front()->kind == ExprKind::Identifier) {
         name = callee.text; // self.t(…) resolves on the same owner
       }
@@ -1186,9 +1162,9 @@ private:
             // so the call defers to the end of the pass when every
             // decl's status is final.
             DeferredCall deferred;
-            deferred.call            = &node;
-            deferred.owner           = site.owner;
-            deferred.subst           = site.subst;
+            deferred.call  = &node;
+            deferred.owner = site.owner;
+            deferred.subst = site.subst;
             if (site.actuals) deferred.actuals = *site.actuals;
             deferred.enclosingParams = site.enclosingParams;
             deferred.chain           = site.chain;
@@ -1219,19 +1195,17 @@ private:
   void templateCall(ExprPtr &slot, Site &site, const Decl *def) {
     Expr &node = *slot;
     if (std::ranges::find(expanding_, def) != expanding_.end()) {
-      report(Diagnostic{
-                 DiagnosticCode::InvalidDeclaration,
-                 "recursive-template: expansion of '" + def->name +
-                     "' cycles back to itself — template cycles are "
-                     "refused, directly or transitively",
-                 node.loc},
+      report(Diagnostic{DiagnosticCode::InvalidDeclaration,
+                        "recursive-template: expansion of '" + def->name +
+                            "' cycles back to itself — template cycles are "
+                            "refused, directly or transitively",
+                        node.loc},
              site.chain);
       return;
     }
     if (++splices_ > limits_.check.maxSplices) {
       report(Diagnostic{DiagnosticCode::InvalidDeclaration,
-                        "expansion exceeds CheckLimits::maxSplices",
-                        node.loc},
+                        "expansion exceeds CheckLimits::maxSplices", node.loc},
              site.chain);
       return;
     }
@@ -1249,26 +1223,24 @@ private:
       report(Diagnostic{DiagnosticCode::TypeMismatch,
                         "call passes " +
                             std::to_string(node.children.size() - 1) +
-                            " argument(s) to '" + def->name +
-                            "' declaring " +
+                            " argument(s) to '" + def->name + "' declaring " +
                             std::to_string(def->parameters.size()) +
                             " parameter(s)",
                         node.loc},
              site.chain);
       return;
     }
-    auto subst        = std::make_shared<Substitution>();
-    subst->params     = &def->parameters;
-    subst->paramScope = s_d;
-    subst->outer      = site.subst;
+    auto subst                   = std::make_shared<Substitution>();
+    subst->params                = &def->parameters;
+    subst->paramScope            = s_d;
+    subst->outer                 = site.subst;
     const auto [pending, failed] = judgeCodeActuals(
-        *subst, node, def->parameters, site,
-        [&](std::string_view name) {
-          return "Code argument '" + std::string{name} + "' to '" +
-                 def->name + "'";
+        *subst, node, def->parameters, site, [&](std::string_view name) {
+          return "Code argument '" + std::string{name} + "' to '" + def->name +
+                 "'";
         });
     if (pending || failed) return;
-    auto actuals = std::make_shared<Actuals>();
+    auto actuals          = std::make_shared<Actuals>();
     const auto synthScope = ++seeds_.nextScope;
     std::size_t synthOrd  = 0;
     std::vector<ExprPtr> lets;
@@ -1278,8 +1250,8 @@ private:
         if (s_d) (*actuals)[BindingId{*s_d, i}] = subst->actuals.at(i);
         continue;
       }
-      lets.push_back(
-          synthesizeValueLet(*subst, node, i, parameter, synthScope, synthOrd++));
+      lets.push_back(synthesizeValueLet(*subst, node, i, parameter, synthScope,
+                                        synthOrd++));
     }
     auto cloned = cloneExpr(*def->body);
     // Parameter references re-point at the actuals and the synthesized
@@ -1292,8 +1264,7 @@ private:
         if (node2.kind == ExprKind::Identifier && node2.stamp &&
             node2.stamp->ordinal && node2.stamp->scope == *s_d &&
             *node2.stamp->ordinal < def->parameters.size() &&
-            def->parameters[*node2.stamp->ordinal].name ==
-                sourceName(node2)) {
+            def->parameters[*node2.stamp->ordinal].name == sourceName(node2)) {
           const auto index = *node2.stamp->ordinal;
           if (const auto actual = subst->actuals.find(index);
               actual != subst->actuals.end()) {
@@ -1312,9 +1283,8 @@ private:
           repoint(child);
           parentSlot_[child.get()] = &child;
         }
-        for (ExprPtr *meta : {&node2.scope, &node2.recipients,
-                              &node2.deadline, &node2.guard,
-                              &node2.recovery})
+        for (ExprPtr *meta : {&node2.scope, &node2.recipients, &node2.deadline,
+                              &node2.guard, &node2.recovery})
           if (*meta) {
             repoint(*meta);
             parentSlot_[meta->get()] = meta;
@@ -1333,16 +1303,15 @@ private:
         }
         for (auto &child : node2.children)
           if (child) freshen(*child);
-        for (ExprPtr *meta : {&node2.scope, &node2.recipients,
-                              &node2.deadline, &node2.guard,
-                              &node2.recovery})
+        for (ExprPtr *meta : {&node2.scope, &node2.recipients, &node2.deadline,
+                              &node2.guard, &node2.recovery})
           if (*meta) freshen(**meta);
       };
       freshen(*cloned);
     }
     Site sub;
-    sub.owner           = site.owner;
-    sub.subst           = subst;
+    sub.owner = site.owner;
+    sub.subst = subst;
     static const Actuals emptyActuals;
     sub.actuals         = s_d ? &*actuals : &emptyActuals;
     sub.enclosingParams = site.enclosingParams;
@@ -1360,11 +1329,9 @@ private:
       block->kind  = ExprKind::Block;
       block->loc   = node.loc;
       block->stamp = node.stamp;
-      for (auto &let : lets)
-        block->children.push_back(std::move(let));
+      for (auto &let : lets) block->children.push_back(std::move(let));
       block->children.push_back(std::move(cloned));
-      for (auto &child : block->children)
-        parentSlot_[child.get()] = &child;
+      for (auto &child : block->children) parentSlot_[child.get()] = &child;
       slot = std::move(block);
     }
   }
@@ -1374,26 +1341,26 @@ private:
       // A local copy keeps the actuals map alive for the whole
       // expansion whatever the queue does meanwhile.
       DeferredCall deferred = deferred_[i];
-      const auto slot = parentSlot_.find(deferred.call);
+      const auto slot       = parentSlot_.find(deferred.call);
       if (slot == parentSlot_.end() || !*slot->second) continue;
       const Expr &node = *deferred.call;
       if (node.children.empty()) continue;
       const Expr &callee = *node.children.front();
       std::string_view name;
-      if (callee.kind == ExprKind::Identifier) name = callee.text;
-      else if (callee.kind == ExprKind::Field &&
-               !callee.children.empty() &&
+      if (callee.kind == ExprKind::Identifier)
+        name = callee.text;
+      else if (callee.kind == ExprKind::Field && !callee.children.empty() &&
                callee.children.front()->kind == ExprKind::Identifier)
         name = callee.text;
       if (name.empty()) continue;
       const Decl *def = methodOf(deferred.owner, name);
       if (!def || !templates_.contains(def)) continue;
       Site site;
-      site.owner           = deferred.owner;
-      site.subst           = deferred.subst;
+      site.owner = deferred.owner;
+      site.subst = deferred.subst;
       static const Actuals emptyActuals;
-      site.actuals = deferred.actuals.empty() ? &emptyActuals
-                                             : &deferred.actuals;
+      site.actuals =
+          deferred.actuals.empty() ? &emptyActuals : &deferred.actuals;
       site.enclosingParams = deferred.enclosingParams;
       site.chain           = deferred.chain;
       site.depth           = deferred.depth;
@@ -1403,7 +1370,8 @@ private:
     deferred_.clear();
   }
 
-  // ---- dead-let erasure and residual checks ---------------------------------------
+  // ---- dead-let erasure and residual checks
+  // ---------------------------------------
 
   // A binding has references iff an Identifier or LogicVariable still
   // carries its (scope, source-name) pair — cap$N aliases resolve to
@@ -1416,9 +1384,8 @@ private:
       refs.emplace(node.stamp->scope, std::string(sourceName(node)));
     for (const auto &child : node.children)
       if (child) collectRefs(*child, refs);
-    for (const ExprPtr *meta : {&node.scope, &node.recipients,
-                                &node.deadline, &node.guard,
-                                &node.recovery})
+    for (const ExprPtr *meta : {&node.scope, &node.recipients, &node.deadline,
+                                &node.guard, &node.recovery})
       if (*meta) collectRefs(**meta, refs);
   }
 
@@ -1432,9 +1399,8 @@ private:
       std::set<std::pair<std::uint64_t, std::string>> refs;
       const auto collectDecl = [&](this auto &&collectDecl,
                                    const Decl &decl) -> void {
-        for (const ExprPtr *slot :
-             {&decl.initializer, &decl.body, &decl.guard, &decl.trigger,
-              &decl.deadline})
+        for (const ExprPtr *slot : {&decl.initializer, &decl.body, &decl.guard,
+                                    &decl.trigger, &decl.deadline})
           if (*slot) collectRefs(**slot, refs);
         for (const auto &contract : decl.contracts)
           if (contract.condition) collectRefs(*contract.condition, refs);
@@ -1456,9 +1422,8 @@ private:
         // never an erasure candidate.
         if (let->children.front()->kind == ExprKind::Code) {
           const Expr &init = *let->children.front();
-          const FragmentKey initKey{
-              init.loc,
-              init.stamp ? init.stamp->ordinal : std::nullopt};
+          const FragmentKey initKey{init.loc, init.stamp ? init.stamp->ordinal
+                                                         : std::nullopt};
           const auto meta = metas_.find(initKey);
           if (meta != metas_.end() && meta->second.spliceOnly) continue;
         }
@@ -1475,9 +1440,7 @@ private:
         auto *block = letBlock_[let];
         if (!block) continue;
         std::erase_if(block->children,
-                      [&](const ExprPtr &child) {
-                        return child.get() == let;
-                      });
+                      [&](const ExprPtr &child) { return child.get() == let; });
         lets_.erase(key);
         letBlock_.erase(let);
       }
@@ -1494,8 +1457,7 @@ private:
       for (std::size_t i = 0; i < decl.members.size(); ++i)
         if (templates_.contains(&decl.members[i])) doomed.push_back(i);
       for (auto it = doomed.rbegin(); it != doomed.rend(); ++it)
-        decl.members.erase(decl.members.begin() +
-                           static_cast<long>(*it));
+        decl.members.erase(decl.members.begin() + static_cast<long>(*it));
       for (auto &member : decl.members) sweep(member);
     };
     for (auto &decl : program_.declarations) sweep(decl);
@@ -1503,18 +1465,14 @@ private:
 
   void residualScan() {
     std::set<const Expr *> seen;
-    const auto scanDecl = [&](this auto &&scanDecl,
-                              const Decl &decl) -> void {
-      for (const ExprPtr *slot :
-           {&decl.initializer, &decl.body, &decl.guard, &decl.trigger,
-            &decl.deadline})
+    const auto scanDecl = [&](this auto &&scanDecl, const Decl &decl) -> void {
+      for (const ExprPtr *slot : {&decl.initializer, &decl.body, &decl.guard,
+                                  &decl.trigger, &decl.deadline})
         if (*slot) residualExpr(**slot, {}, seen);
       for (const auto &contract : decl.contracts)
-        if (contract.condition)
-          residualExpr(*contract.condition, {}, seen);
+        if (contract.condition) residualExpr(*contract.condition, {}, seen);
       for (const auto &clause : decl.goalClauses)
-        if (clause.condition)
-          residualExpr(*clause.condition, {}, seen);
+        if (clause.condition) residualExpr(*clause.condition, {}, seen);
       for (const auto &member : decl.members) scanDecl(member);
     };
     for (const auto &decl : program_.declarations) scanDecl(decl);
@@ -1531,8 +1489,7 @@ private:
       if (imported.path != "std:meta") continue;
       const bool selected =
           imported.symbols.empty() ||
-          std::ranges::find(imported.symbols, name) !=
-              imported.symbols.end();
+          std::ranges::find(imported.symbols, name) != imported.symbols.end();
       const bool qualified =
           !qualifier || *qualifier == imported.alias.value_or("std:meta");
       if (selected && qualified) return true;
@@ -1551,8 +1508,7 @@ private:
       return metaFormOperand(callee.text, std::nullopt);
     if (callee.kind == ExprKind::Field && !callee.children.empty() &&
         callee.children.front()->kind == ExprKind::Identifier)
-      return metaFormOperand(callee.text,
-                             callee.children.front()->text);
+      return metaFormOperand(callee.text, callee.children.front()->text);
     return false;
   }
 
@@ -1566,37 +1522,33 @@ private:
       // judgment — the residual arm covers only splices that produced
       // no diagnostic of their own.
       if (spliceReported_.contains(&node)) return;
-      report(Diagnostic{
-                 DiagnosticCode::InvalidDeclaration,
-                 "a 'splice' that reaches checking is a compile error — "
-                 "its operand is not a statically-known fragment",
-                 node.loc},
+      report(Diagnostic{DiagnosticCode::InvalidDeclaration,
+                        "a 'splice' that reaches checking is a compile error — "
+                        "its operand is not a statically-known fragment",
+                        node.loc},
              chain);
       return;
     case ExprKind::Code: {
       const FragmentKey key{node.loc,
-                            node.stamp ? node.stamp->ordinal
-                                       : std::nullopt};
+                            node.stamp ? node.stamp->ordinal : std::nullopt};
       const auto meta = metas_.find(key);
       if (meta != metas_.end()) {
         if (meta->second.spliceOnly && !runOperand)
-          report(Diagnostic{
-                     DiagnosticCode::InvalidPosition,
-                     "a Code-parameterized literal is splice-only — it "
-                     "may appear only as a splice or template actual, "
-                     "never in an evaluated position",
-                     node.loc},
+          report(Diagnostic{DiagnosticCode::InvalidPosition,
+                            "a Code-parameterized literal is splice-only — it "
+                            "may appear only as a splice or template actual, "
+                            "never in an evaluated position",
+                            node.loc},
                  chain);
         for (const auto &alias : meta->second.captures) {
           const auto &capture = captures_.at(alias);
-          const auto decl = declScope_.find(capture.binding.scope);
+          const auto decl     = declScope_.find(capture.binding.scope);
           if (decl != declScope_.end() && templates_.contains(decl->second))
-            report(Diagnostic{
-                       DiagnosticCode::InvalidDeclaration,
-                       "capture '" + capture.captured +
-                           "' binds a template parameter — it exists "
-                           "only at expansion time",
-                       node.loc},
+            report(Diagnostic{DiagnosticCode::InvalidDeclaration,
+                              "capture '" + capture.captured +
+                                  "' binds a template parameter — it exists "
+                                  "only at expansion time",
+                              node.loc},
                    chain);
         }
       }
@@ -1612,11 +1564,9 @@ private:
       break;
     }
     for (const auto &child : node.children)
-      if (child)
-        residualExpr(*child, chain, seen, runOperandOf(node, *child));
-    for (const ExprPtr *meta : {&node.scope, &node.recipients,
-                                &node.deadline, &node.guard,
-                                &node.recovery})
+      if (child) residualExpr(*child, chain, seen, runOperandOf(node, *child));
+    for (const ExprPtr *meta : {&node.scope, &node.recipients, &node.deadline,
+                                &node.guard, &node.recovery})
       if (*meta) residualExpr(**meta, chain, seen);
   }
 

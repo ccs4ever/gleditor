@@ -30,29 +30,25 @@ namespace xanadu::vagent {
 
 struct PerceptSpec {
   std::string name;
-  std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
-      fields;
+  std::vector<std::pair<std::string, zigzag::vortex::CellValue>> fields;
 };
 
 [[nodiscard]] inline std::optional<PerceptSpec>
 parsePercept(std::string_view text) {
-  std::size_t  pos = 0;
-  const auto ws    = [&] {
+  std::size_t pos = 0;
+  const auto ws   = [&] {
     while (pos < text.size() && std::isspace(text[pos])) ++pos;
   };
   const auto ident = [&]() -> std::optional<std::string> {
     ws();
     const auto start = pos;
-    if (pos >= text.size() ||
-        !(std::isalpha(text[pos]) || text[pos] == '_'))
+    if (pos >= text.size() || !(std::isalpha(text[pos]) || text[pos] == '_'))
       return std::nullopt;
-    while (pos < text.size() &&
-           (std::isalnum(text[pos]) || text[pos] == '_'))
+    while (pos < text.size() && (std::isalnum(text[pos]) || text[pos] == '_'))
       ++pos;
     return std::string{text.substr(start, pos - start)};
   };
-  const auto literal =
-      [&]() -> std::optional<zigzag::vortex::CellValue> {
+  const auto literal = [&]() -> std::optional<zigzag::vortex::CellValue> {
     ws();
     if (pos >= text.size()) return std::nullopt;
     if (text[pos] == '"') {
@@ -96,7 +92,7 @@ parsePercept(std::string_view text) {
     }
   };
   PerceptSpec spec;
-  const auto  name = ident();
+  const auto name = ident();
   if (!name) return std::nullopt;
   spec.name = *name;
   ws();
@@ -132,8 +128,8 @@ parsePercept(std::string_view text) {
 
 [[nodiscard]] inline std::string renderPercept(
     std::string_view name,
-    const std::vector<std::pair<std::string,
-                                zigzag::vortex::CellValue>> &fields) {
+    const std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
+        &fields) {
   std::string out{name};
   if (fields.empty()) return out;
   out += '{';

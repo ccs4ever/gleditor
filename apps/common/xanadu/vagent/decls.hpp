@@ -93,7 +93,7 @@ struct LoweredImage {
 [[nodiscard]] std::expected<LoweredImage, std::vector<Diagnostic>>
 lowerProgram(const Program &program, zigzag::vortex::VortexCore &core,
              zigzag::vortex::VortexVM &vm, ScalarCompilerLimits limits = {},
-             Expansion *expansion = nullptr,
+             Expansion *expansion                = nullptr,
              const FragmentInfoMap *fragmentInfo = nullptr);
 
 } // namespace xanadu::vagent

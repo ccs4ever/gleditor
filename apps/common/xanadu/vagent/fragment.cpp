@@ -174,8 +174,7 @@ compileFragment(const Expr &literal, const FragmentContext &context,
     // hop rather than a cell) stays unbound and refuses below rather
     // than silently binding.
     std::optional<CompilerBindings> joined;
-    if (!record->second.env.empty() &&
-        (context.bindings || frameLocals)) {
+    if (!record->second.env.empty() && (context.bindings || frameLocals)) {
       CompilerBindings merged =
           context.bindings ? *context.bindings : CompilerBindings{};
       if (frameLocals)
@@ -184,9 +183,9 @@ compileFragment(const Expr &literal, const FragmentContext &context,
       for (const auto &[alias, captured] : record->second.env) {
         const auto found = merged.find(captured);
         if (found == merged.end()) continue;
-        merged.emplace(alias, CompilerBinding{found->second.cell,
-                                              found->second.type,
-                                              found->second.stateSide});
+        merged.emplace(alias,
+                       CompilerBinding{found->second.cell, found->second.type,
+                                       found->second.stateSide});
         if (context.captures)
           if (const auto rec = context.captures->find(alias);
               rec != context.captures->end() &&
@@ -214,8 +213,7 @@ compileFragment(const Expr &literal, const FragmentContext &context,
             : (info->second.ownerFields.empty() ? nullptr
                                                 : &info->second.ownerFields);
     if (fields) {
-      if (effectiveParams.empty() ||
-          effectiveParams.back().name != "$owner")
+      if (effectiveParams.empty() || effectiveParams.back().name != "$owner")
         effectiveParams.push_back(
             Parameter{.name = "$owner", .type = Type{"Cell"}});
       for (const auto &[alias, captured] : record->second.env)
@@ -226,11 +224,11 @@ compileFragment(const Expr &literal, const FragmentContext &context,
     // name-keyed frame-bound locals, the Return tail and published
     // result/produced cells inside the usual choice wrapper.
     FragmentBodyRequest request{
-        .body       = record->second.body.body.get(),
-        .parameters = effectiveParams,
-        .bindings   = joined ? &*joined : context.bindings,
-        .fragments  = &context,
-        .use        = ResultUse::Value,
+        .body          = record->second.body.body.get(),
+        .parameters    = effectiveParams,
+        .bindings      = joined ? &*joined : context.bindings,
+        .fragments     = &context,
+        .use           = ResultUse::Value,
         .ownerFields   = fields,
         .capFieldNames = capFieldNames.empty() ? nullptr : &capFieldNames,
     };

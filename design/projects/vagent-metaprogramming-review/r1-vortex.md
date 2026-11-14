@@ -7,12 +7,11 @@ relocation, MeshActorRuntime invariants. All line numbers verified against the w
 (:217), `backtrack`'s release (:234), `Cut`'s discard (:255), `New`'s already-used refusal
 (:736-743), `Linked`'s seen-set and `consumeWork` (:686, :699-703), `Halt` (:1220-1225), the
 `+d.spin` advance (:1333-1335), the contract phases (:1229-1239, :1306-1322), `emitStatement`
-(compiler.cpp:849-872), the `cells"…"` subset (cell_path.cpp:147-182), `pureBody`
-(checker.cpp:827, :861-865), `validateType` (:553-567), `PrefixedStringLiteral`
-(lexer.cpp:379-393, token.hpp:22), `checkpointView`'s quiescence gates (mesh_actor.cpp:668-694),
-`resume`'s `baseRef == contentHash` binding (:215-216), `compact()`'s MarksOutstanding refusal
-(arena_manifold.hpp:667-679), the conditional-trailing argument (:721-730) and its cpp mirror
-(:1506-1570) all check out as cited.
+(compiler.cpp:849-872), the `cells"…"` subset (cell_path.cpp:147-182), `pureBody` (checker.cpp:827,
+:861-865), `validateType` (:553-567), `PrefixedStringLiteral` (lexer.cpp:379-393, token.hpp:22),
+`checkpointView`'s quiescence gates (mesh_actor.cpp:668-694), `resume`'s `baseRef == contentHash`
+binding (:215-216), `compact()`'s MarksOutstanding refusal (arena_manifold.hpp:667-679), the
+conditional-trailing argument (:721-730) and its cpp mirror (:1506-1570) all check out as cited.
 
 ## Findings
 
@@ -50,20 +49,19 @@ and the plasticity pitch lose their durable half.
 `getCursorOpcode` consults `cursorPC_` first and falls back to the cursor cell's bits only when the
 map misses (vortex_vm.cpp:116-128) — the map is the authority; the cell is the persistence backing.
 `backtrack()` restores the PC not because the write was trailed but because it explicitly calls
-`setCursorOpcode(*cursor, cp.altOp)` (:238-243), which rewrites *both*. A bare
-`arena.release(m)` — exactly the "release(m0) undo" containment M9 and §6.4 invoke for runaway
-mutation — restores the cursor cell's bits but leaves `cursorPC_` holding the post-mutation PC, and
-the map wins: the cursor resumes mid-mutation, on an op that may have been truncated (decodes to
-Nop → silent "Finished" while the cell bits say otherwise) or on a surviving op that resumes as if
-never rewound. This is the identical untrailed-VM-cache-vs-arena-state hazard the doc correctly
-identifies for `opcodeMap_` and prices as P15 — but the PC instance is missed, and the doc's own
-containment story depends on it. vortex-distribution.md:112 likewise treats `cursorPC_` as
-per-process scheduler state, not arena content. **Fix:** spec the containment as the drain idiom
-the stdlib already uses — `while (choiceDepth() > base && backtrack(cursor))`
-(vortex_stdlib.cpp:3800-3802, :3841-3843), which rewinds PC, stack top and marks in LIFO order —
-and state explicitly that bare `arena.release` must never be called on a cursor's arena mid-turn
-without a following `setCursorOpcode` (or register a P16 `vm`-side resync that rebuilds `cursorPC_`
-from cursor cells after a host-driven release).
+`setCursorOpcode(*cursor, cp.altOp)` (:238-243), which rewrites *both*. A bare `arena.release(m)` —
+exactly the "release(m0) undo" containment M9 and §6.4 invoke for runaway mutation — restores the
+cursor cell's bits but leaves `cursorPC_` holding the post-mutation PC, and the map wins: the cursor
+resumes mid-mutation, on an op that may have been truncated (decodes to Nop → silent "Finished"
+while the cell bits say otherwise) or on a surviving op that resumes as if never rewound. This is
+the identical untrailed-VM-cache-vs-arena-state hazard the doc correctly identifies for `opcodeMap_`
+and prices as P15 — but the PC instance is missed, and the doc's own containment story depends on
+it. vortex-distribution.md:112 likewise treats `cursorPC_` as per-process scheduler state, not arena
+content. **Fix:** spec the containment as the drain idiom the stdlib already uses —
+`while (choiceDepth() > base && backtrack(cursor))` (vortex_stdlib.cpp:3800-3802, :3841-3843), which
+rewinds PC, stack top and marks in LIFO order — and state explicitly that bare `arena.release` must
+never be called on a cursor's arena mid-turn without a following `setCursorOpcode` (or register a
+P16 `vm`-side resync that rebuilds `cursorPC_` from cursor cells after a host-driven release).
 
 ### 3. MAJOR — §6.4/M9: `release(m0)` with outstanding inner marks corrupts the mark machinery; containment needs an ordering rule
 
@@ -79,16 +77,16 @@ exhaustion is a `throw std::runtime_error` (arena_manifold.hpp:420-426, fired fr
 `Linked`/`New`/mint paths), not an `ExecutionResult` — it escapes `step()` uncaught and lands in the
 executor's `catch (const std::exception&)` (mesh_actor.cpp:473-479 → `ActorDown`), outside any
 result-code path the doc describes. **Fix:** state the ordering: on hard failure, drain choice
-points via `backtrack` (per finding 2), *then* `release(m0)` — never `release` over live marks —
-and name `consumeWork`'s exception channel in §6.4's failure taxonomy so the adapter spec catches
-the right thing.
+points via `backtrack` (per finding 2), *then* `release(m0)` — never `release` over live marks — and
+name `consumeWork`'s exception channel in §6.4's failure taxonomy so the adapter spec catches the
+right thing.
 
 ### 4. MAJOR — §6.5/§10.2 (P15): the proposal misses `step()`'s output write-back paths, the largest write surface to op cells
 
-P15 guards `executeOpcodeBody`'s `Value`/`Splice` cases and `runPipeline`'s
-`writeValue(paramCell)`, but `step()` writes `newOutputs[i]` into `outCells[i]` for every
-non-structural op (vortex_vm.cpp:1288-1294) and the memo-hit path does the same (:1269-1273), both
-through `core_.writeValue` with no target screening. An op cell bound as another op's output wing —
+P15 guards `executeOpcodeBody`'s `Value`/`Splice` cases and `runPipeline`'s `writeValue(paramCell)`,
+but `step()` writes `newOutputs[i]` into `outCells[i]` for every non-structural op
+(vortex_vm.cpp:1288-1294) and the memo-hit path does the same (:1269-1273), both through
+`core_.writeValue` with no target screening. An op cell bound as another op's output wing —
 unreachable in today's compiler output discipline, immediately reachable the moment grafted graphs
 bind outputs, which is this document's whole subject — gets its `int64` kind rewritten by any
 `Add`/`Eq`/`Value`-read, bypassing P15 entirely. A second placement problem: `getOpcodeKind` is
@@ -106,20 +104,20 @@ visible.
 
 `graft_where(clause: Cell, …)`, `set_weight(cell: Cell, …)`, `sprout_synapse(from,to: Cell)` and
 friends take ref-boxes whose `int64` names the target. But `Link`/`Break`/`New`/`Value` resolve
-their subject through `resolveCell(inCells, inputs, i)` which returns the *operand cell itself* —
-a bound ref-box resolves to the box, never the referent (vortex_vm.cpp:50-67; the wing decode at
+their subject through `resolveCell(inCells, inputs, i)` which returns the *operand cell itself* — a
+bound ref-box resolves to the box, never the referent (vortex_vm.cpp:50-67; the wing decode at
 vortex_core.cpp:358-364 turns a slot's int64 into the operand it names). The only opcode that reads
-through a box's int is `Linked`'s `follow` input (vortex_vm.cpp:666-672) — traversal, not mutation
-— and `cells"…%"` anchored on a `$` binding is refused outright (compiler.cpp:484-486), so the
+through a box's int is `Linked`'s `follow` input (vortex_vm.cpp:666-672) — traversal, not mutation —
+and `cells"…%"` anchored on a `$` binding is refused outright (compiler.cpp:484-486), so the
 high-level path cannot write through a handle either. §8.1's "`w := w + lr * s` is an ordinary
-trailed write" and §8.3's "the update is `Value` on a scalar cell" are false as written: `:=`
-writes a binding cell, and a `Value` op targeting a `Cell` handle writes the *box*. Every verb in
-the §6.1 table needs the same plumbing — read the box's int64, `Value`-write it into the structural
-op's input slot, then execute — an indirection idiom that appears nowhere in the document and that
-makes "the surgery is `Link`/`New`/`Value`/`Break`/`Splice`/`Linked` — all present" (§11) true of
-primitives but not of the composition. **Fix:** name the convention in §6.1 (e.g., a per-verb
-"focus slot" preamble: `Value`-write the handle's referent int into a scratch wing slot bound to
-the structural op), or propose a `Deref`-style operand mechanism as a P16; also restate §8.1/§8.3's
+trailed write" and §8.3's "the update is `Value` on a scalar cell" are false as written: `:=` writes
+a binding cell, and a `Value` op targeting a `Cell` handle writes the *box*. Every verb in the §6.1
+table needs the same plumbing — read the box's int64, `Value`-write it into the structural op's
+input slot, then execute — an indirection idiom that appears nowhere in the document and that makes
+"the surgery is `Link`/`New`/`Value`/`Break`/`Splice`/`Linked` — all present" (§11) true of
+primitives but not of the composition. **Fix:** name the convention in §6.1 (e.g., a per-verb "focus
+slot" preamble: `Value`-write the handle's referent int into a scratch wing slot bound to the
+structural op), or propose a `Deref`-style operand mechanism as a P16; also restate §8.1/§8.3's
 "ordinary write" claims to name the actual op sequence.
 
 ### 6. MAJOR — M6/§6.2/§8.5: `run` is not re-entrant on creation-bearing graphs — the spill restores values, not links
@@ -169,8 +167,8 @@ reassembled via `DivMod`, or a modulus-form LCG — and say so.
 
 `pureBody` admits non-mutating `cells` paths (checker.cpp:861-865), so `static cells"##/+d.vars"`
 reads the partially-built compile arena — deterministic per compile but reading compiler-internal
-state the "closed over literals/statics" rule doesn't obviously intend to allow; and a `CellList`
-or `Cell` result has no literal form to emit ("the value becomes a `literal()`" only covers scalar
+state the "closed over literals/statics" rule doesn't obviously intend to allow; and a `CellList` or
+`Cell` result has no literal form to emit ("the value becomes a `literal()`" only covers scalar
 `CellValue`). Say `static` refuses `cells"…"` and non-scalar result types.
 
 ### 11. MINOR — §6.1: `reify` must rewrite internal Int64 refs to the copy's cells
@@ -178,9 +176,9 @@ or `Cell` result has no literal form to emit ("the value becomes a `literal()`" 
 "Compile-assisted" copy of a literal-born fragment: copying the cells copies their Int64 contents
 verbatim, so the copy's wing slots and control targets still name the *original's* cells — a shared
 operand is mutated through both copies and the "closed copy" is not closed-independent. The reify
-recipe needs an old→new map pass over ref-bearing cells (positionally identifiable: wing slots
-under `+d.grab`/`+d.step`, control-target inputs of `Jump`/`Branch`/`Call`/`Choice`). One sentence
-prices it; today it reads as free.
+recipe needs an old→new map pass over ref-bearing cells (positionally identifiable: wing slots under
+`+d.grab`/`+d.step`, control-target inputs of `Jump`/`Branch`/`Call`/`Choice`). One sentence prices
+it; today it reads as free.
 
 ### 12. MINOR — §12/§6.2: the "inert foreign `Code`" mechanism is mis-cited, and `run`'s two failure paths are conflated
 

@@ -25,8 +25,9 @@ checks `getOpcodeKind` on the `Value` and `Splice` *opcode bodies* and on `runPi
 `writeValue(paramCell)`. But three further paths write content into cells chosen by wing slots, and
 wing slots are exactly what M9 makes mutable:
 
-- `step()`'s generic output writeback: `core_.writeValue(outCells[i], 0, std::nullopt,
-  newOutputs[i])` for every non-structural op (`vortex_vm.cpp:1288-1294`);
+- `step()`'s generic output writeback:
+  `core_.writeValue(outCells[i], 0, std::nullopt, newOutputs[i])` for every non-structural op
+  (`vortex_vm.cpp:1288-1294`);
 - the memo-hit writeback (`vortex_vm.cpp:1269-1272`);
 - `runPipeline`'s `writeValue(outCells[i], ...)` (`vortex_vm.cpp:343-346`) — the row names only
   `writeValue(paramCell)` at `:337`.
@@ -56,10 +57,10 @@ cells via `mint()` → `vm_.mintOpcode` (`compiler.cpp:512-514`), so they enter 
 rank (`spawnCursor`, `vortex_vm.cpp:148-161`). Neither cleanup alternative is stated:
 
 - **mark + release** — the obvious move, mirroring `bounded()` — mints op cells under a live mark
-  and then releases them. §4.2 item 2 describes exactly this as the map-poisoning hazard ("the
-  dense slot could be re-minted as a non-op cell that `opcodeMap_` still claims is an op") and
-  asserts it "cannot happen" because ops are minted only with no marks outstanding
-  (`compiler.cpp:108-110`). `static` under a mark breaks that invariant in the kernel itself.
+  and then releases them. §4.2 item 2 describes exactly this as the map-poisoning hazard ("the dense
+  slot could be re-minted as a non-op cell that `opcodeMap_` still claims is an op") and asserts it
+  "cannot happen" because ops are minted only with no marks outstanding (`compiler.cpp:108-110`).
+  `static` under a mark breaks that invariant in the kernel itself.
 - **no release** — the eval graph, its `opcodeMap_` entries (consistent, since the cells really are
   ops), a registered cursor on `+d.cursors`, and temporaries all persist in the compile arena.
   Whatever sealing reads from that arena then carries dead weight per `static`, and an agent-side
@@ -86,10 +87,9 @@ once". Two mechanical facts stand in the way, neither addressed:
   the public entry), or a new expand stage that rewrites `Program` between parse and check.
 - `Expr` children are `std::unique_ptr` (`ast.hpp:90-109`); there is no clone helper in `vagent/`
   (grep finds none). Splicing one fragment at N sites *requires* deep-copying the checked subtree —
-  sharing is structurally impossible (one parent per node) and semantically wrong (kernel tables
-  key on `const Expr *`: `localReferences_`, `types_`, `paths_`, `discarded_` —
-  `compiler.cpp:884-891`; shared nodes would share local cells, breaking §5.3 hygiene and "N sites
-  mint N graphs").
+  sharing is structurally impossible (one parent per node) and semantically wrong (kernel tables key
+  on `const Expr *`: `localReferences_`, `types_`, `paths_`, `discarded_` — `compiler.cpp:884-891`;
+  shared nodes would share local cells, breaking §5.3 hygiene and "N sites mint N graphs").
 
 This is not a detail: the choice between a rewriting `check`, a mutable `infer`, and a separate
 `expand` stage determines whether fragment bodies are checked once (definition-site) or twice, and
@@ -99,9 +99,9 @@ environment.
 **Fix.** Specify the channel in §5.6/§10.1: either an `expand` stage (`Program → Program`, runs
 after parse, before `check` — and then say how it gets each literal's definition-site environment,
 since that needs a name-resolution walk before the checker has run), or a documented `cloneExpr` +
-mutation convention inside `check` (and then `check` stops being `void`-returning or takes a
-mutable program — say which). Add `cloneExpr` to the §10.1 file list and budget expansion copies
-(see finding 12).
+mutation convention inside `check` (and then `check` stops being `void`-returning or takes a mutable
+program — say which). Add `cloneExpr` to the §10.1 file list and budget expansion copies (see
+finding 12).
 
 ### 4. MAJOR — `reify` has no stated mechanism; the admitted-missing primitive is hand-waved as "compile-assisted" (§6.1, §15 U-M7)
 
@@ -114,9 +114,9 @@ emits to assist, what a copy covers, or how wing ref-boxes are remapped. A graph
 - decide a dimension schema — ops may carry `+d.contract` clause ranks (§6.4 explicitly allows
   `requires`/`ensures` on grafted methods), `d.cache` pins, and param pipelines; a fixed-schema copy
   silently drops them;
-- face the primitive U-M7 itself defers: per-cell dimension enumeration is C++-only
-  (`dimensionsOf`, `arena_manifold.hpp` CellGraph concept) — claimed unnecessary here because
-  literal-born fragments have kernel-known shape, but that claim is asserted, not argued.
+- face the primitive U-M7 itself defers: per-cell dimension enumeration is C++-only (`dimensionsOf`,
+  `arena_manifold.hpp` CellGraph concept) — claimed unnecessary here because literal-born fragments
+  have kernel-known shape, but that claim is asserted, not argued.
 
 An implementer can legitimately read this as "write a Vortex fixed-schema copy", "re-emit the
 fragment from a stored recipe", or "defer the verb" — three different builds.
@@ -139,15 +139,15 @@ allowlist; std:meta member signatures").
 
 ### 6. MINOR — `validate`'s opcode ceiling and impure-op set are magic numbers that must not live in prelude source (§7.2)
 
-The check "every op cell's `int64` decodes within `[0, Linked]`" is "checkable in Vortex ops" only by
-comparing against the integer value of `OpcodeKind::Linked` (currently 47, `vortex_vm.hpp:27-93`),
-and the `pure`-flag scan needs a table of impure kinds — both duplicating the enum in Vortex source
-where a later appended opcode silently stales it (the enum's tail comment exists precisely because
-ints are serialized data). Bind the ceiling and the impure-kind set as cells through the adapter
-(the same V10 `ensureDimension`-style binding the doc already uses for `d.code`/`d.patch`/
-`d.weight`/`d.synapse`), or generate the prelude constants from `OpcodeKind` at build time. Same
-point, smaller: `next_rand` is named "SplitMix-style" but no `Xor`/shift opcode exists
-(`vortex_vm.hpp:27-93`) — name the actual multiply/add recurrence or register the gap.
+The check "every op cell's `int64` decodes within `[0, Linked]`" is "checkable in Vortex ops" only
+by comparing against the integer value of `OpcodeKind::Linked` (currently 47,
+`vortex_vm.hpp:27-93`), and the `pure`-flag scan needs a table of impure kinds — both duplicating
+the enum in Vortex source where a later appended opcode silently stales it (the enum's tail comment
+exists precisely because ints are serialized data). Bind the ceiling and the impure-kind set as
+cells through the adapter (the same V10 `ensureDimension`-style binding the doc already uses for
+`d.code`/`d.patch`/ `d.weight`/`d.synapse`), or generate the prelude constants from `OpcodeKind` at
+build time. Same point, smaller: `next_rand` is named "SplitMix-style" but no `Xor`/shift opcode
+exists (`vortex_vm.hpp:27-93`) — name the actual multiply/add recurrence or register the gap.
 
 ### 7. MINOR — M2's price overstates owed work; the CodeParams parse site is unnamed (§3 M2, §5.1)
 
@@ -155,9 +155,9 @@ point, smaller: `next_rand` is named "SplitMix-style" but no `Xor`/shift opcode 
 `Parser::parseExpression()` already exists and consumes the whole source (`parser.hpp:25`,
 `parser.cpp:271-281`). The genuinely new work is narrower: accepting `code` beside `cells` in the
 `PrefixedStringLiteral` case (`parser.cpp:848-854`), plus the `#label`/`CodeParams '|'` header. To
-keep the "no shadow grammar" ruling load-bearing, say where the header is parsed — a
-`parseCodeBody` entry on the real `Parser`, not a hand-rolled scanner in `code_path.cpp`. Also the
-EBNF `'code' StrLit` depicts two tokens; the lexer produces one `PrefixedStringLiteral`
+keep the "no shadow grammar" ruling load-bearing, say where the header is parsed — a `parseCodeBody`
+entry on the real `Parser`, not a hand-rolled scanner in `code_path.cpp`. Also the EBNF
+`'code' StrLit` depicts two tokens; the lexer produces one `PrefixedStringLiteral`
 (`lexer.cpp:386-393`) — write it as such or note it is metagrammar.
 
 ### 8. MINOR — new vagent files hit the Makefile's explicit source lists, which are already stale (§10.1)
@@ -184,16 +184,16 @@ or memoize wrappers per clause cell on `d.code`. One sentence in §13's cost lis
 Genesis "walks `d.patch` in ordinal order and re-runs each graft"; a patch whose target no longer
 resolves "is skipped with a `ConditionFault`-style record" but stays on the rank, so it is
 re-skipped at every subsequent genesis — replay is O(all patches ever recorded), not O(live
-patches). `unlearn` removes only patches whose target still resolves to an unlearnable clause.
-State a reaping rule (genesis drops unresolved patches after recording the fault, or a periodic
+patches). `unlearn` removes only patches whose target still resolves to an unlearnable clause. State
+a reaping rule (genesis drops unresolved patches after recording the fault, or a periodic
 `unlearn`-style sweep) — a compaction, not a ceiling, so the house rule holds.
 
 ### 11. MINOR — `splice` name collides with `OpcodeKind::Splice` (§5.1)
 
 The unquote `splice c` and the content-restate opcode `Splice` (`vortex_vm.hpp:53`, used by P15) are
-different things spelled the same; P15's row reads "`Value` and `Splice` … refuse a target" while
-§5 talks about `splice` expansion. One line in §2 distinguishing `splice` (unquote, checked away)
-from `#Splice` (opcode, survives to runtime) prevents real confusion in the P15 discussion.
+different things spelled the same; P15's row reads "`Value` and `Splice` … refuse a target" while §5
+talks about `splice` expansion. One line in §2 distinguishing `splice` (unquote, checked away) from
+`#Splice` (opcode, survives to runtime) prevents real confusion in the P15 discussion.
 
 ### 12. MINOR — the expansion budgets are gestures, not named settings (§3 M4, §5.5)
 
@@ -208,11 +208,11 @@ check and possibly `static` eval. Name the new fields (e.g. `CheckLimits::maxExp
 
 "costs O(fragment cells + links) in `consumeWork` budget" — `consumeWork` is a C++ counter charged
 inside rank walks (`Linked`'s loop, `New`'s append walk, `vortex_vm.cpp:686/703/747`); a
-Vortex-coded `validate` pays per executed op under the turn's `maxCycles`, and its cycle guard
-("a seen-set like `Linked`'s") must be cells — a rank membership test per visited op, O(n·membership)
+Vortex-coded `validate` pays per executed op under the turn's `maxCycles`, and its cycle guard ("a
+seen-set like `Linked`'s") must be cells — a rank membership test per visited op, O(n·membership)
 unless the walk is restricted to the linear `+d.spin`/`+d.step` chains where a step counter
-suffices. Restate the bound honestly; if the seen-set is needed for `Jump`/`Call` target graphs,
-say what structure bounds the membership test.
+suffices. Restate the bound honestly; if the seen-set is needed for `Jump`/`Call` target graphs, say
+what structure bounds the membership test.
 
 ### 14. MINOR — the `closed` flag needs a provenance channel the kernel does not have (§5.3, §6.1, M11)
 

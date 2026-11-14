@@ -105,11 +105,10 @@ std::string formatDiagnostic(const Diagnostic &diagnostic) {
   // §5.1: positions inside a code"…" body qualify the literal's own loc
   // with one '+<off-line>:<off-col>' arm per enclosing level.
   for (const auto &arm : diagnostic.inner) {
-    result += "+" + std::to_string(arm.line) + ":" +
-              std::to_string(arm.column);
+    result += "+" + std::to_string(arm.line) + ":" + std::to_string(arm.column);
   }
-  result += ": " + std::string(diagnosticCodeName(diagnostic.code)) +
-            ": " + diagnostic.detail;
+  result += ": " + std::string(diagnosticCodeName(diagnostic.code)) + ": " +
+            diagnostic.detail;
   return result;
 }
 

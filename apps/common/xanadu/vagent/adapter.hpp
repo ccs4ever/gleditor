@@ -26,8 +26,8 @@
 #include <string>
 #include <string_view>
 
-#include "executor.hpp"
 #include "../identity/identity_layout.hpp"
+#include "executor.hpp"
 
 namespace xanadu::vagent {
 
@@ -91,14 +91,12 @@ public:
   /// is not reliably known. The drain decides wire-vs-local off the
   /// member's `pid` record, so the same staging serves both arms.
   /// Returns the durable request id the wire dedupe keys on.
-  std::string stageSend(zigzag::vortex::WorkerContext &ctx,
-                        zigzag::CellRef sender,
-                        zigzag::CellRef targetMember,
-                        std::string_view percept,
-                        const std::vector<std::pair<
-                            std::string, zigzag::vortex::CellValue>>
-                            &fields,
-                        std::string_view id) const;
+  std::string
+  stageSend(zigzag::vortex::WorkerContext &ctx, zigzag::CellRef sender,
+            zigzag::CellRef targetMember, std::string_view percept,
+            const std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
+                &fields,
+            std::string_view id) const;
 
   /// MeshActorRuntime::Executor. Translates before delegating: the
   /// exec pid's mesh spawnSequence becomes the member's directory
@@ -107,8 +105,7 @@ public:
   /// consumed rather than dispatched, because the language-level
   /// percept is `ChildDown{child}`, never a generic "ActorDown"
   /// event. A committed turn ends with the §3.7 outbox drain.
-  [[nodiscard]] std::expected<std::string,
-                              zigzag::vortex::mesh::ActorError>
+  [[nodiscard]] std::expected<std::string, zigzag::vortex::mesh::ActorError>
   operator()(const zigzag::vortex::mesh::ActorExecution &exec,
              zigzag::vortex::WorkerContext &ctx);
 
@@ -126,14 +123,12 @@ public:
   /// reachable targets. A concrete target naming no member faults the
   /// sender through deliveryFailed; an empty-scoped or broadcast fan-
   /// out to nobody is not a failure.
-  void drain(zigzag::vortex::WorkerContext &ctx,
-             zigzag::CellRef member) const;
+  void drain(zigzag::vortex::WorkerContext &ctx, zigzag::CellRef member) const;
 
   /// Write the member's durable mesh identity — the `pid` record a
   /// later memberForPid resolves through. Idempotent; a reincarnation
   /// overwrites the prior incarnation's key.
-  void noteMemberPid(zigzag::vortex::WorkerContext &ctx,
-                     zigzag::CellRef member,
+  void noteMemberPid(zigzag::vortex::WorkerContext &ctx, zigzag::CellRef member,
                      const zigzag::vortex::mesh::ActorPid &pid) const;
 
   /// The member whose `pid` record names @p pid's rendered key, if
@@ -148,8 +143,7 @@ public:
   /// resolution: a refused member carries a name but never received a
   /// pid.
   [[nodiscard]] std::optional<zigzag::CellRef>
-  memberNamed(zigzag::vortex::WorkerContext &ctx,
-              std::string_view name) const;
+  memberNamed(zigzag::vortex::WorkerContext &ctx, std::string_view name) const;
 
   /// The home directory's +d.agents rank, in order — members.front()
   /// is the actor's own declared member. The spawn-request builder
@@ -161,27 +155,25 @@ public:
   /// parsed back into the mesh identity it names. Empty until an
   /// incarnation notes one.
   [[nodiscard]] std::optional<zigzag::vortex::mesh::ActorPid>
-  memberPid(zigzag::vortex::WorkerContext &ctx,
-            zigzag::CellRef member) const;
+  memberPid(zigzag::vortex::WorkerContext &ctx, zigzag::CellRef member) const;
 
   /// @p member's index across the home directory's +d.agents ranks —
   /// the language-level spawnSequence the executor resolves. Empty
   /// when @p member is not in the directory.
   [[nodiscard]] std::optional<std::size_t>
-  memberIndex(zigzag::vortex::WorkerContext &ctx,
-              zigzag::CellRef member) const;
+  memberIndex(zigzag::vortex::WorkerContext &ctx, zigzag::CellRef member) const;
 
   /// §5.4's Moved receiver half — the mesh observed the peer at a new
   /// reference; @p member is the adapter's fresh reference cell for
   /// @p holder's stale binding.
-  void memberRebound(zigzag::vortex::WorkerContext &ctx,
-                     zigzag::CellRef holder, zigzag::CellRef member) const;
+  void memberRebound(zigzag::vortex::WorkerContext &ctx, zigzag::CellRef holder,
+                     zigzag::CellRef member) const;
 
   /// §8.6's refused spawn — the runtime's ActorSpawn reply named no
   /// pid; @p parent is the member that staged the request, @p child
   /// the refused member cell (its `+d.name` is the spawn's name).
-  void spawnRefused(zigzag::vortex::WorkerContext &ctx,
-                    zigzag::CellRef parent, zigzag::CellRef child) const;
+  void spawnRefused(zigzag::vortex::WorkerContext &ctx, zigzag::CellRef parent,
+                    zigzag::CellRef child) const;
 
   /// §4.5's announcement for the causes only the mesh observes — a
   /// genesis refusal ("init"), a lease lapsed without renewal
@@ -211,11 +203,12 @@ public:
   /// through deliver's seen/pending shape, so the member's next
   /// settle dispatches it like a wire arrival. `id` rides
   /// +d.delivered's idempotence.
-  void sendPercept(zigzag::vortex::WorkerContext &ctx,
-                   zigzag::CellRef member, std::string_view name,
-                   const std::vector<std::pair<
-                       std::string, zigzag::vortex::CellValue>> &fields,
-                   std::string_view id = {}) const;
+  void sendPercept(
+      zigzag::vortex::WorkerContext &ctx, zigzag::CellRef member,
+      std::string_view name,
+      const std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
+          &fields,
+      std::string_view id = {}) const;
 
   /// §3.7's intra-program backlog: a drained delivery lands on the
   /// receiver's +d.pending or +d.inbox rank — the member's own settle
@@ -241,8 +234,7 @@ public:
       zigzag::vortex::WorkerContext &ctx,
       const zigzag::vortex::mesh::ActorMessage &request,
       const std::expected<zigzag::vortex::mesh::ActorPid,
-                          zigzag::vortex::mesh::ActorError> &result)
-      const;
+                          zigzag::vortex::mesh::ActorError> &result) const;
 
 private:
   VagentExecutor executor_;

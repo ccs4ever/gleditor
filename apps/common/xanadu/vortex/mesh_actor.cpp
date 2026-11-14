@@ -110,8 +110,7 @@ MeshActorRuntime *MeshActorRuntime::setGenesisHook(GenesisHook hook) {
   genesisHook_ = std::move(hook);
   return this;
 }
-MeshActorRuntime *
-MeshActorRuntime::setSpawnResultHook(SpawnResultHook hook) {
+MeshActorRuntime *MeshActorRuntime::setSpawnResultHook(SpawnResultHook hook) {
   spawnResultHook_ = std::move(hook);
   return this;
 }
@@ -189,8 +188,7 @@ MeshActorRuntime::spawn(const xanadu::identity::Fingerprint &identity,
   // both through the two-argument WorkerContext ctor before initGenesis's
   // first-resolution ran inside VortexCore's construction.
   actor->context = std::make_unique<WorkerContext>(
-      lineage ? lineage->base : nullptr,
-      lineage ? lineage->reader : nullptr);
+      lineage ? lineage->base : nullptr, lineage ? lineage->reader : nullptr);
   // The opaque handle is derived from immutable spawn identity, never from
   // an arena address. Restart epoch and monotonic sequence prevent ABA reuse.
   actor->pid         = ActorPid{node_, content, epoch_, nextSpawn_++};
@@ -324,7 +322,7 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
     // the two-argument ctor rather than a post-construction bind.
     actor->context = std::make_unique<WorkerContext>(
         actor->checkpoint->manifold.get(), actor->checkpoint->store.get());
-    auto &context = *actor->context;
+    auto &context      = *actor->context;
     const auto initial = context.arena.cellCount();
     if (grant->maxCells >= ephemeralBit - initial) {
       return std::unexpected(ActorError::ResourceLimit);
@@ -357,10 +355,10 @@ std::expected<ActorPid, ActorError> MeshActorRuntime::resume(
         // take-or-verify comparand; the retained lineage is the rebuild in
         // `actor->checkpoint->store`, reachable from the hook as
         // `context.arena.base()->store()`.
-        if (const auto wired = genesisHook_(
-                ActorGenesis{actor->pid, checkpoint.store.get(),
-                             &actor->spawnRequest},
-                context);
+        if (const auto wired =
+                genesisHook_(ActorGenesis{actor->pid, checkpoint.store.get(),
+                                          &actor->spawnRequest},
+                             context);
             !wired) {
           return std::unexpected(wired.error());
         }
@@ -472,8 +470,7 @@ MeshActorRuntime::receive(const xanadu::identity::Fingerprint &identity,
     if (spawnResultHook_) {
       if (message.target)
         spawnResultHook_(prior->second.message,
-                         std::expected<ActorPid, ActorError>{
-                             *message.target});
+                         std::expected<ActorPid, ActorError>{*message.target});
       else
         spawnResultHook_(prior->second.message,
                          std::expected<ActorPid, ActorError>{
@@ -851,8 +848,7 @@ std::size_t MeshActorRuntime::pending(const ActorPid &pid) const {
   return actor ? actor->mailbox.size() : 0;
 }
 
-std::expected<void, ActorError>
-MeshActorRuntime::wake(const ActorPid &pid) {
+std::expected<void, ActorError> MeshActorRuntime::wake(const ActorPid &pid) {
   auto *actor = find(pid);
   if (!actor || actor->stopped) {
     return std::unexpected(ActorError::UnknownProcess);
@@ -875,8 +871,7 @@ MeshActorRuntime::setP16Ceremony(const ActorPid &pid,
   return this;
 }
 
-P16Ceremony *
-MeshActorRuntime::p16Ceremony(const ActorPid &pid) const {
+P16Ceremony *MeshActorRuntime::p16Ceremony(const ActorPid &pid) const {
   const auto *actor = find(pid);
   return actor ? actor->p16 : nullptr;
 }

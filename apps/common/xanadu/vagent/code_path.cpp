@@ -43,9 +43,8 @@ const Expr *suspendingNode(const Expr &node) {
     if (child)
       if (const auto *hit = suspendingNode(*child)) return hit;
   }
-  for (const ExprPtr *field :
-       {&node.scope, &node.recipients, &node.deadline, &node.guard,
-        &node.recovery}) {
+  for (const ExprPtr *field : {&node.scope, &node.recipients, &node.deadline,
+                               &node.guard, &node.recovery}) {
     if (*field)
       if (const auto *hit = suspendingNode(**field)) return hit;
   }
@@ -61,12 +60,10 @@ Diagnostic innerDiagnostic(Diagnostic inner, SourceLocation literal) {
 }
 
 std::expected<CodeBody, Diagnostic>
-parseCodePath(std::string_view source, SourceLocation loc,
-              ParseLimits limits) {
+parseCodePath(std::string_view source, SourceLocation loc, ParseLimits limits) {
   auto parsed = Parser::parseCodeBody(source, limits);
   if (!parsed) {
-    return std::unexpected(
-        innerDiagnostic(std::move(parsed.error()), loc));
+    return std::unexpected(innerDiagnostic(std::move(parsed.error()), loc));
   }
   if (const auto *hit = suspendingNode(*parsed->body)) {
     const std::string detail =
@@ -79,8 +76,7 @@ parseCodePath(std::string_view source, SourceLocation loc,
                   "cannot suspend; await/achieve/ask/yield are refused "
                   "per M6)";
     return std::unexpected(innerDiagnostic(
-        Diagnostic{DiagnosticCode::InvalidPosition, detail, hit->loc},
-        loc));
+        Diagnostic{DiagnosticCode::InvalidPosition, detail, hit->loc}, loc));
   }
   return parsed;
 }

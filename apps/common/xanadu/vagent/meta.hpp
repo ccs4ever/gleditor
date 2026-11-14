@@ -382,8 +382,8 @@ public:
   /// +d.step children in the `?` names' first-appearance order. The
   /// handler runs under the settle's own drain, never inside the
   /// asserting step.
-  void stageBeliefTriggers(std::string_view predicate,
-                           std::string_view sign, CellRef factClause);
+  void stageBeliefTriggers(std::string_view predicate, std::string_view sign,
+                           CellRef factClause);
 
   // -- §6.3-amended selection (actor-executor §3.4)
   // -----------------------------
@@ -410,8 +410,8 @@ public:
   [[nodiscard]] std::expected<std::optional<std::pair<CellRef, CellRef>>,
                               std::string>
   selectClause(CellRef host, const std::unordered_set<CellRef> &tried = {},
-               std::size_t whereFuel                    = 256,
-               const std::vector<CellValue> &args       = {});
+               std::size_t whereFuel              = 256,
+               const std::vector<CellValue> &args = {});
 
   // -- §3.5 intentions — data, not cursors
   // --------------------------------------
@@ -437,7 +437,7 @@ public:
   [[nodiscard]] std::expected<CellRef, std::string>
   adoptGoal(CellRef goal, std::int64_t turn, std::size_t whereFuel = 256,
             const std::vector<CellValue> &args = {},
-            std::span<const CellRef> argRefs           = {});
+            std::span<const CellRef> argRefs   = {});
   /// The intention record's integer field — `step`, `ready`, `faulted`,
   /// `waiting`, `blocked_until`, `id` — absent field is `std::nullopt`.
   [[nodiscard]] std::optional<std::int64_t>

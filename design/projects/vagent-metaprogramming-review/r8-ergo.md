@@ -1,8 +1,8 @@
 # Round 8 critique — Programming Language Design & Ergonomics (v1.7)
 
-Scope: v1.7 deltas only — verdicts on r7 findings (R7-F1; residuals of R6-F2, R6-F4; the nit
-bundle) plus new ergonomic defects in the changed regions (:1454-1467 clause/method patch-target
-split, :1500-1509 `run`-operand records, :1530-1554 role-split rebind + headless-`run` genesis arm,
+Scope: v1.7 deltas only — verdicts on r7 findings (R7-F1; residuals of R6-F2, R6-F4; the nit bundle)
+plus new ergonomic defects in the changed regions (:1454-1467 clause/method patch-target split,
+:1500-1509 `run`-operand records, :1530-1554 role-split rebind + headless-`run` genesis arm,
 :1119-1126 headless-`run` session arm, :1730-1765 labels/reserved prefixes/`+o:c`/clones/foreign
 heads, :2446-2452 U-M11). Verified against `vagent-agent-language.md` v3.9 (V15 handlers, §5.7) and
 the code (`vagent/lexer.cpp:14-24` Ident alphabet; `vortex_core.cpp:119-127` `exportSymbol`
@@ -13,16 +13,16 @@ the code (`vagent/lexer.cpp:14-24` Ident alphabet; `vortex_core.cpp:119-127` `ex
 - **R7-F1 (`plan_named`/patch-target first-`:` split vs `patch:<n>` storage, MINOR)** —
   **RESOLVED.** The two-layer fix landed cleanly: `patch:` joins `src:`/`reify:` as a module-name
   reservation — "may name no module — a module declaration carrying one is a compile-time refusal"
-  (:1749-1751) — so `patch` can never hijack the module arm, and the v1.6 dead text ("unless a module
-  literally takes that name") is gone (:1539-1542). The split test itself is uniform now: "the first
-  `:` separates the module qualifier … only when it resolves on `programRef`'s walk, otherwise the
-  whole string is the name" (:1745-1748, :1767-1769), `plan_named` is defined as verbatim `+d.name`
-  matching (:1775-1777), clause targets route through it and method/symbol targets through
-  `symbol_named`'s module-`d.vars` walk (:1457-1462), and `unlearn` matches the recorded name
-  (:1464-1467). `plan_named("patch:5")` now works end-to-end: `patch` can't be a module → whole
-  string is the name → verbatim `+d.name` hit. One wording seam survives — see R8-F2.
-- **R6-F2 residual (`code_named` hole for literal heads)** — **PARTIALLY RESOLVED, as ruled.**
-  The *foreign* case is now named exactly as the disposition required: "a `code"…"` head living in
+  (:1749-1751) — so `patch` can never hijack the module arm, and the v1.6 dead text ("unless a
+  module literally takes that name") is gone (:1539-1542). The split test itself is uniform now:
+  "the first `:` separates the module qualifier … only when it resolves on `programRef`'s walk,
+  otherwise the whole string is the name" (:1745-1748, :1767-1769), `plan_named` is defined as
+  verbatim `+d.name` matching (:1775-1777), clause targets route through it and method/symbol
+  targets through `symbol_named`'s module-`d.vars` walk (:1457-1462), and `unlearn` matches the
+  recorded name (:1464-1467). `plan_named("patch:5")` now works end-to-end: `patch` can't be a
+  module → whole string is the name → verbatim `+d.name` hit. One wording seam survives — see R8-F2.
+- **R6-F2 residual (`code_named` hole for literal heads)** — **PARTIALLY RESOLVED, as ruled.** The
+  *foreign* case is now named exactly as the disposition required: "a `code"…"` head living in
   *another* artifact's image has no re-resolution spelling at all this round … deferred as U-M11"
   (:1762-1765), with the U-M11 entry present (:2446-2452). The *own-image* case — the original
   finding — is still uncallable: "a caller re-resolving a literal head by label goes through `run`'s
@@ -31,17 +31,17 @@ the code (`vagent/lexer.cpp:14-24` Ident alphabet; `vortex_core.cpp:119-127` `ex
   you re-resolve by label" (:1781-1782) has a spelling for learned heads and none for literal heads.
   Residual MINOR — the one-line fix the doc's own disjointness argument invites (`code_named` falls
   through to the program-image walk on a `d.code` miss) remains untaken.
-- **R6-F4 residual (nested-literal `+o:c` arm)** — **RESOLVED in substance.** The arm is now in
-  the rule, matching the proposed fix: "a *nested* literal … labels from its innermost `src:` site
-  and chains `+o:c` per nesting level … a clone of a nested literal keeps its `+o:c` arms — so
-  cloned literals cannot collide" (:1732-1738), `+n` appends last (:1737-1738). Residual: the clone
-  trigger is still "M13 expansion" (:1736) — plain `splice`-site clones (`cloneExpr` per site,
-  :723-726, :200-201) are uncovered by the *assignment* rule even though the uniqueness check's scope
-  already counts them ("literals, splices, M13 clones", :1741-1743). One clause: "cloned by
-  expansion — `splice` substitution or M13 `def` expansion." MINOR.
-- **r7 nits** — user-`#label` uniqueness scope resolved ("across the merged program emission
-  set", :1741); "expansion site's position" ambiguity resolved (call-site reading, :1736); the
-  "module literally takes that name" dead arm deleted. Still standing: `symbol_named` listed among
+- **R6-F4 residual (nested-literal `+o:c` arm)** — **RESOLVED in substance.** The arm is now in the
+  rule, matching the proposed fix: "a *nested* literal … labels from its innermost `src:` site and
+  chains `+o:c` per nesting level … a clone of a nested literal keeps its `+o:c` arms — so cloned
+  literals cannot collide" (:1732-1738), `+n` appends last (:1737-1738). Residual: the clone trigger
+  is still "M13 expansion" (:1736) — plain `splice`-site clones (`cloneExpr` per site, :723-726,
+  :200-201) are uncovered by the *assignment* rule even though the uniqueness check's scope already
+  counts them ("literals, splices, M13 clones", :1741-1743). One clause: "cloned by expansion —
+  `splice` substitution or M13 `def` expansion." MINOR.
+- **r7 nits** — user-`#label` uniqueness scope resolved ("across the merged program emission set",
+  :1741); "expansion site's position" ambiguity resolved (call-site reading, :1736); the "module
+  literally takes that name" dead arm deleted. Still standing: `symbol_named` listed among
   first-`:`-splitting lookups though it takes `owner`/`name` separately (:1745-1748, and implied
   again at :1459-1461); `code_named`'s required `reify:<src>:<serial>` spelling still unguessable
   with no stated `label_of` workflow.
@@ -85,7 +85,7 @@ Two seams inside the :1454-1467 split:
    canonicalizes to `demo:Forager.patch:5`, `plan_named`'s verbatim match misses the `+d.name`
    `patch:5` → replay drop — the r7-F1 ambiguity transplanted from storage to the gloss. One clause:
    "records the name `plan_named`/`symbol_named` re-resolves — the clause's `+d.name` verbatim."
-2. `learn_handler` is now listed among `plan_named`-resolving clause targets (:1457-1458), but
+1. `learn_handler` is now listed among `plan_named`-resolving clause targets (:1457-1458), but
    `+d.name` is stated only for *plan* clauses (:1775-1776), and spec V15 makes declared handlers
    anonymous: "`on Event [guard] { }`" (language spec :265). `graft_handler`/`learn_handler` mint
    *named* clauses (:1040 "same shape"), so learned handler replacements resolve fine — but a

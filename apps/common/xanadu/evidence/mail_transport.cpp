@@ -1406,9 +1406,9 @@ MailObservation readImapMailbox(const ImapReadProfile &profile,
     mimeLimits.maxHeaders      = 4096;
     mimeLimits.maxRecipients   = request.retentionBounds.maxRecords;
     try {
-      auto message  = parseMimeMessage(body.bytes, uidValidity, uid,
-                                       attributes->att_number, mimeLimits);
-      message.flags = std::move(flags);
+      auto message            = parseMimeMessage(body.bytes, uidValidity, uid,
+                                                 attributes->att_number, mimeLimits);
+      message.flags           = std::move(flags);
       std::size_t recordsUsed = 1 + observation.gaps.size();
       for (const auto &prior : observation.messages)
         recordsUsed += retainedMailMessageRecordCount(prior);

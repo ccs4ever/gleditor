@@ -42,8 +42,7 @@ public:
   // synchronously from the same callback (no-interleave, spec
   // :2171-2179): no turn of either kind may run between this point and
   // publishValue.
-  [[nodiscard]] virtual std::expected<void, std::string>
-  onFlaggedTurnEnd() = 0;
+  [[nodiscard]] virtual std::expected<void, std::string> onFlaggedTurnEnd() = 0;
 
   // Kind-guarded restore on every exit path — abort/fault/short-turn.
   // Idempotent: safe to call when nothing was re-kinded.

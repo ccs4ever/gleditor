@@ -30,8 +30,8 @@ struct DeclHarness {
   lower(std::string_view source) {
     auto artifacts = compileArtifacts(source);
     if (!artifacts) return std::unexpected(artifacts.error());
-    return lowerProgram(artifacts->program, core, vm, {},
-                        &artifacts->expansion, &artifacts->fragmentInfo);
+    return lowerProgram(artifacts->program, core, vm, {}, &artifacts->expansion,
+                        &artifacts->fragmentInfo);
   }
 
   std::vector<CellRef> rank(CellRef cell, DimRef dim) const {
@@ -190,10 +190,8 @@ TEST(VagentDeclsTest, StubKindsMintSymbolsAndRecord) {
   const auto &dims = h.core.dims();
   // `q` lowers — the symbol and signature are its whole image; `S`
   // lowers for its field schema. Nothing here defers to a stub.
-  EXPECT_THAT(image->stubbed,
-              ::testing::Not(::testing::Contains("q")));
-  EXPECT_THAT(image->stubbed,
-              ::testing::Not(::testing::Contains("S")));
+  EXPECT_THAT(image->stubbed, ::testing::Not(::testing::Contains("q")));
+  EXPECT_THAT(image->stubbed, ::testing::Not(::testing::Contains("S")));
   EXPECT_TRUE(h.named(image->ownModule, dims.vars, "S").has_value());
   EXPECT_TRUE(h.named(image->ownModule, dims.vars, "q").has_value());
   EXPECT_TRUE(h.named(image->ownModule, dims.vars, "reading").has_value());
@@ -302,8 +300,7 @@ TEST(VagentDeclsTest, LoweredImageFilesItsDurableRoots) {
   const auto recRef =
       varsRecord(h.arena, h.core, image->programRoot, "imageRecord", false);
   ASSERT_TRUE(recRef.has_value());
-  const auto refValue =
-      h.arena.linked(*recRef, h.core.dims().values, Posward);
+  const auto refValue = h.arena.linked(*recRef, h.core.dims().values, Posward);
   ASSERT_TRUE(refValue.has_value());
   // A cell edge, not an Int64: the ref rides promote to the image
   // record's persistent twin, and the edge is what keeps the record
@@ -312,8 +309,7 @@ TEST(VagentDeclsTest, LoweredImageFilesItsDurableRoots) {
   const auto recExt =
       varsRecord(h.arena, h.core, image->programRoot, "imageExtent", false);
   ASSERT_TRUE(recExt.has_value());
-  const auto extValue =
-      h.arena.linked(*recExt, h.core.dims().values, Posward);
+  const auto extValue = h.arena.linked(*recExt, h.core.dims().values, Posward);
   ASSERT_TRUE(extValue.has_value());
   EXPECT_EQ(h.arena.asInt64(*extValue).value_or(-1),
             static_cast<std::int64_t>(image->imageExtent));
@@ -327,8 +323,8 @@ TEST(VagentDeclsTest, BindMintRecoversTheFiledLineage) {
   )");
   ASSERT_TRUE(image.has_value());
   if (!image) return;
-  auto binds = mintMetaBindSet(h.arena, h.core, image->programRoot,
-                               image->agentCell);
+  auto binds =
+      mintMetaBindSet(h.arena, h.core, image->programRoot, image->agentCell);
   ASSERT_TRUE(binds.has_value());
   // §6.6's lineage — learn_*'s sideness gate and the genesis
   // comparand read the same record: the image's own root and its
@@ -357,8 +353,7 @@ TEST(VagentDeclsTest, GapStubsFileUnderStubbedButDesignedOnesDoNot) {
   // stub is a gap, so both f and g join the audit. The plan body's
   // emit is a host verb: its head stubs by design (+d.step carries
   // the verbs), and the designed shadow stays out of the audit.
-  EXPECT_THAT(image->stubbed,
-              ::testing::UnorderedElementsAre("f", "g"));
+  EXPECT_THAT(image->stubbed, ::testing::UnorderedElementsAre("f", "g"));
 }
 
 TEST(VagentDeclsTest, CapturingCodeLiteralEmitsInsideMemberBodies) {

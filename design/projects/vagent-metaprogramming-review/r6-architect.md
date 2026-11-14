@@ -6,8 +6,8 @@ name-record/flag phases, `:1521-1540` genesis ordering, `:1896-1937` examples/in
 `:1957-2030` §10 inventory + P16 row, `:352-357` M11). Re-verified against the tree
 (`apps/common/xanadu/{vortex,zigzag,vagent}/`, `Makefile`, `design/vagent-agent-language.md`).
 
-v1.5 lands the r5 batch faithfully: the `birthOp` test is gone, replaced by ref-space ordering with a
-loader-recorded extent; the flag gained the no-turn window and reconciled clear semantics; P4 is
+v1.5 lands the r5 batch faithfully: the `birthOp` test is gone, replaced by ref-space ordering with
+a loader-recorded extent; the flag gained the no-turn window and reconciled clear semantics; P4 is
 named in the register row, M11 and §6.6; "pre-promotion" is fixed; the name-record rebind is the
 adopted shape-split design. All four of my r5 findings are resolved in substance. The residual work
 concentrates — as the disposition predicted — in the newest machinery: the recorded extent itself.
@@ -22,8 +22,8 @@ after `publishValue` returns". The clear/restore ambiguity is reconciled: the fl
 publish has succeeded *and* the head-of-turn restore has run — the restore itself is unconditional
 on marked cells still in `OpHandle` kind and runs on every exit path, so a `publishValue` failure or
 refusal still restores while the flag stays armed for the next attempt, and `ActorDown` clears it
-outright" (`:1489-1494`). The "two-phase" nit is also fixed — "a three-state marker" (`:1488`).
-One residual wording gap → new nit (the stated justification covers only checkpoint-minted wakes).
+outright" (`:1489-1494`). The "two-phase" nit is also fixed — "a three-state marker" (`:1488`). One
+residual wording gap → new nit (the stated justification covers only checkpoint-minted wakes).
 
 ### 2. MINOR (the empty-mailbox arm's P4 dependency unnamed in the "no new core mechanism" claim) — RESOLVED
 
@@ -53,47 +53,46 @@ it, it never re-derives it" (`:1524-1528`). My clause (a) — recorded once, nev
 post-overlay extent — is verbatim. Clause (b) — my proposed "non-ephemeral `birthOp` is outside the
 window" arm — was superseded by the disposition's better ruling: shadows classify program-side *by
 design* since their base ref is pre-extent and persistent (`:1305-1308`), which is coherent with the
-ref-space framing and states the ordering for the shadow case outright. Ephemeral refs
-(`refOf` = `ephemeralBit | dense`, `arena_manifold.hpp:468-470` — verified) always test above
-(`:1301-1304`). The provenance gap I flagged is closed in *rule* — but the construction the rule
-presumes is not → new finding 1.
+ref-space framing and states the ordering for the shadow case outright. Ephemeral refs (`refOf` =
+`ephemeralBit | dense`, `arena_manifold.hpp:468-470` — verified) always test above (`:1301-1304`).
+The provenance gap I flagged is closed in *rule* — but the construction the rule presumes is not →
+new finding 1.
 
 ## New findings
 
 ### 1. MAJOR — the `≤ extent` discriminator presumes a per-incarnation persistent ref layout that no step sequences (§6.6 `:1297-1308`; genesis `:1521-1540`; `:1548`)
 
 **Problem.** The boundary only discriminates if the persistent ref space at every incarnation is
-laid out **[program image `0..E`] below [promoted/checkpointed state `>E`]**. The text asserts the
-consequence — "a promoted cell's post-extent persistent ref keeps it state-side across `resume`"
+laid out **\[program image `0..E`\] below \[promoted/checkpointed state `>E`\]**. The text asserts
+the consequence — "a promoted cell's post-extent persistent ref keeps it state-side across `resume`"
 (`:1308`) — but never states the construction that produces it, and the pieces it does state point
 the other way:
 
 - The program image is **not** in the checkpoint: program cells "do not checkpoint" (M11 `:344`),
   and genesis "restores the program's own attachment for free because `programRef` **reloads the
   skeleton**" (`:1548`) — i.e., the image is re-materialized per incarnation, not carried.
-- The checkpointed manifold exists **before** genesis: `mesh_actor.cpp:260-271` shows
-  `receiveValue` → `store->rebuildManifold(version)` (`mesh_value.cpp:350-351`) →
+- The checkpointed manifold exists **before** genesis: `mesh_actor.cpp:260-271` shows `receiveValue`
+  → `store->rebuildManifold(version)` (`mesh_value.cpp:350-351`) →
   `WorkerContext(actor->checkpoint->manifold.get())` built at actor construction, with the arena
   overlaid on it. The received manifold already contains the promoted state cells — at whatever
   positions the rebuild assigned — before any genesis step runs.
 - Genesis's fixed ordering `(a) arena overlay → (c) extent → (d) bind programRef → …` never names
-  where or when the image re-materializes relative to that received state. A `Manifold` is flat
-  (no `base_`; `makeCell` appends), so the natural implementation — reload the artifact into the
+  where or when the image re-materializes relative to that received state. A `Manifold` is flat (no
+  `base_`; `makeCell` appends), so the natural implementation — reload the artifact into the
   received manifold at (c)/(d) — lands **every program ref above E**, silently inverting the test:
-  program cells classify state-side, `d.code`'s invariant is vacuous, `learn` may register
-  `code"…"` originals, and the checkpoint drags the skeleton — V12 verbatim, silently.
-  The mirror-image failure is equally available: if the checkpoint's rebuild re-densifies (state
-  ops replay into a fresh manifold at positions `0..k`), every durable cell tests `≤ E` and
-  classifies program-side — the transit clause then prunes all of it and `learn`'s re-verify
-  rejects its own registered heads.
+  program cells classify state-side, `d.code`'s invariant is vacuous, `learn` may register `code"…"`
+  originals, and the checkpoint drags the skeleton — V12 verbatim, silently. The mirror-image
+  failure is equally available: if the checkpoint's rebuild re-densifies (state ops replay into a
+  fresh manifold at positions `0..k`), every durable cell tests `≤ E` and classifies program-side —
+  the transit clause then prunes all of it and `learn`'s re-verify rejects its own registered heads.
 - "Never re-derives it" (`:1527`) forbids the one escape hatch — re-observing the high-water after
   image materialization.
 
 The only self-consistent construction is a two-phase materialization — the image's ops occupying the
 low persistent positions *before* the checkpointed state's cells join the space (deterministic
 artifact replay into a store the checkpoint's cells then extend, or an equivalent layering) — and
-that ordering constraint is exactly the kind of thing a "fixed ordering" step list exists to pin.
-It is pinned for `(a)–(g)` and absent for the step the new discriminator depends on.
+that ordering constraint is exactly the kind of thing a "fixed ordering" step list exists to pin. It
+is pinned for `(a)–(g)` and absent for the step the new discriminator depends on.
 
 **Fix.** One clause at (a) or before it: the persistent space is constructed image-first — e.g.,
 "the loader materializes the artifact into the persistent manifold before the incarnation's
@@ -149,10 +148,10 @@ is not a durable referent, so it is a closedness refusal at emission rather than
   the rule must hold behind publish. The flat clause covers it; the cited mechanism does not —
   saying "the pump orders publish ahead of all queued turns while the flag is armed" closes it.
 - **`d.name`/`+d.name` direction spelling** (`:1409`, `:1292-1293`). The rebind text says heads are
-  matched on "`+d.name`" while the emitter records "its `d.name` label", and the sideness
-  vocabulary lists both `+d.name` and `d.name` under an explicitly *outbound-following* walk —
-  pick one convention (or state that `d.name` in the list means the dim's negward edge is also
-  walked, contradicting "outbound").
+  matched on "`+d.name`" while the emitter records "its `d.name` label", and the sideness vocabulary
+  lists both `+d.name` and `d.name` under an explicitly *outbound-following* walk — pick one
+  convention (or state that `d.name` in the list means the dim's negward edge is also walked,
+  contradicting "outbound").
 
 ## Structural notes (no finding)
 
@@ -171,8 +170,8 @@ is not a durable referent, so it is a closedness refusal at emission rather than
   ceremony are all duties of new vagent/adapter code over existing APIs; P4's `mesh_actor` change
   remains the only outside-current-code dependency, and the P16 row's Where now says so (`:2030`).
 - **The `+d.name` discriminator is kind-honest.** Name-records never get markers and never re-kind,
-  so a program-cell target can never reach `promote`'s relocation gate (`arena_manifold.cpp:1759-
-  1764`, `:1797-1809`) — the rationale at `:1424-1429` is verified.
+  so a program-cell target can never reach `promote`'s relocation gate
+  (`arena_manifold.cpp:1759- 1764`, `:1797-1809`) — the rationale at `:1424-1429` is verified.
 - **Cites re-verified.** `exportSymbol` binds `sym +d.values → entryOp` with no head
   (`vortex_core.cpp:122-124`); `insertIntoRank`'s idempotence doc comment now lands at
   `arena_manifold.hpp:624-628`; `Makefile:643` (`COMMON_XANADU_SRCS` glob), `:688-690`
@@ -186,10 +185,10 @@ is not a durable referent, so it is a closedness refusal at emission rather than
 
 ## Verdict
 
-All four r5 findings resolved; the P4 dependency and wake-window seams are now stated precisely.
-The remaining defect is the newest machinery's foundation: the `≤ extent` test is correct as a rule
-but its spatial precondition — image refs below promoted state at *every* incarnation — is asserted
-as consequence and never sequenced as construction, with a plausible build order that inverts it
+All four r5 findings resolved; the P4 dependency and wake-window seams are now stated precisely. The
+remaining defect is the newest machinery's foundation: the `≤ extent` test is correct as a rule but
+its spatial precondition — image refs below promoted state at *every* incarnation — is asserted as
+consequence and never sequenced as construction, with a plausible build order that inverts it
 silently. Clause-fixable but load-bearing → 1 major, 2 minors, 3 nits.
 
 VERDICT: NOT CONVERGED — 0 blocking, 1 major, 2 minors, 3 nits

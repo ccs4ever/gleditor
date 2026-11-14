@@ -49,7 +49,7 @@ using zigzag::vortex::VortexCore;
 [[nodiscard]] inline std::expected<CellRef, Diagnostic>
 marshalTermExpr(zigzag::ArenaManifold &arena, VortexCore &core,
                 const Expr &expr) {
-  const auto &dims = core.dims();
+  const auto &dims        = core.dims();
   const auto namedLiteral = [&](const Expr &literal) -> CellRef {
     const auto cell = arena.makeCell(literal.text);
     switch (literal.kind) {
@@ -65,8 +65,8 @@ marshalTermExpr(zigzag::ArenaManifold &arena, VortexCore &core,
           xanadu::canonicalDoubleBits(std::stod(literal.text))));
       break;
     case ExprKind::Boolean:
-      zigzag::expectWritten(arena.setValueBits(
-          cell, xanadu::ValueKind::Bool, literal.text == "true" ? 1 : 0));
+      zigzag::expectWritten(arena.setValueBits(cell, xanadu::ValueKind::Bool,
+                                               literal.text == "true" ? 1 : 0));
       break;
     default:
       break;
@@ -85,16 +85,13 @@ marshalTermExpr(zigzag::ArenaManifold &arena, VortexCore &core,
                                          arena.makeCell(expr.names[i])));
       if (expr.children[i]->kind == ExprKind::Record ||
           expr.children[i]->kind == ExprKind::Term)
-        zigzag::expectWritten(
-            arena.link(*arg, core.findOrMintDimension("d.marshal"),
-                       DimVector::POS,
-                       arena.makeCell(expr.children[i]->kind ==
-                                              ExprKind::Record
-                                          ? "record"
-                                          : "term")));
-      zigzag::expectWritten(
-          arena.link(zigzag::rankTail(arena, cell, dims.step), dims.step,
-                     DimVector::POS, *arg));
+        zigzag::expectWritten(arena.link(
+            *arg, core.findOrMintDimension("d.marshal"), DimVector::POS,
+            arena.makeCell(expr.children[i]->kind == ExprKind::Record
+                               ? "record"
+                               : "term")));
+      zigzag::expectWritten(arena.link(zigzag::rankTail(arena, cell, dims.step),
+                                       dims.step, DimVector::POS, *arg));
     }
     return cell;
   }
@@ -121,9 +118,8 @@ marshalTermExpr(zigzag::ArenaManifold &arena, VortexCore &core,
 marshalPatternExpr(zigzag::ArenaManifold &arena, VortexCore &core,
                    const Expr &expr) {
   if (expr.kind == ExprKind::LogicVariable) {
-    const auto text = expr.text.starts_with('?')
-                          ? expr.text
-                          : std::format("?{}", expr.text);
+    const auto text =
+        expr.text.starts_with('?') ? expr.text : std::format("?{}", expr.text);
     return arena.makeCell(text);
   }
   // marshalTermExpr recurses on itself, so a Term or Record carrying a
@@ -131,16 +127,15 @@ marshalPatternExpr(zigzag::ArenaManifold &arena, VortexCore &core,
   // walk re-does the compound cases with itself as the child step.
   if (expr.kind == ExprKind::Term || expr.kind == ExprKind::Record) {
     const auto &dims = core.dims();
-    const auto  cell = arena.makeCell(expr.text);
+    const auto cell  = arena.makeCell(expr.text);
     for (std::size_t i = 0; i < expr.children.size(); ++i) {
       auto arg = marshalPatternExpr(arena, core, *expr.children[i]);
       if (!arg) return arg;
       if (expr.kind == ExprKind::Record && i < expr.names.size())
         zigzag::expectWritten(arena.link(*arg, dims.name, DimVector::POS,
                                          arena.makeCell(expr.names[i])));
-      zigzag::expectWritten(
-          arena.link(zigzag::rankTail(arena, cell, dims.step), dims.step,
-                     DimVector::POS, *arg));
+      zigzag::expectWritten(arena.link(zigzag::rankTail(arena, cell, dims.step),
+                                       dims.step, DimVector::POS, *arg));
     }
     return cell;
   }

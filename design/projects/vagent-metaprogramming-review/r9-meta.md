@@ -15,16 +15,16 @@ new defects in the deltas only.
   heads + (d)-handed install set, :1770–1774) is consistent. One wording regression inside the
   adopted text — new finding 3.
 - **`plan_named`-sourced `run` record arm — CLOSED.** Dropped outright as ruled: "there is **no
-  `plan_named`/`symbol_named` arm** — both builtins return `Opt<Cell>` where `run` demands
-  `Code<T>` and M3 bars the silent `Cell`→`Code` upgrade, so such a `run` never typechecks and
-  nothing is recorded — the head-less `def` symbol it would name is the headless-`run` refusal
-  class" (:1569–1571); the session-side surface is named at :1146–1149; the `Cell`→`Code` bar is
-  M3's refused-alternative (:2360). `Cell`→`Code` remains barred.
+  `plan_named`/`symbol_named` arm** — both builtins return `Opt<Cell>` where `run` demands `Code<T>`
+  and M3 bars the silent `Cell`→`Code` upgrade, so such a `run` never typechecks and nothing is
+  recorded — the head-less `def` symbol it would name is the headless-`run` refusal class"
+  (:1569–1571); the session-side surface is named at :1146–1149; the `Cell`→`Code` bar is M3's
+  refused-alternative (:2360). `Cell`→`Code` remains barred.
 - **Nested-literal label direction — CLOSED.** ":1828–1834 now labels a nested literal "from the
   **outermost** enclosing literal's `src:` site and chains `+o:c` descending inward per level", with
   arm order spelled: "the first arm sits inside the `src:` literal's body, the last names the
-  labelled literal's own spot in its immediate parent". The two carried nits are also resolved:
-  `+n` counts "that site's clones in expansion order, deterministically" (:1838–1840), and a user
+  labelled literal's own spot in its immediate parent". The two carried nits are also resolved: `+n`
+  counts "that site's clones in expansion order, deterministically" (:1838–1840), and a user
   `#label` inside a multiply-expanded body is "refused — labelled literals are not cloneable"
   (:1845–1847). Other carried nits applied: (b)'s op-cell walk is named as "(a)'s" (:1754); the P16
   row carries the qualified-run trigger (:2336); "outside the bound `programRef` lineage" phrasing
@@ -35,14 +35,14 @@ new defects in the deltas only.
 **Does dropping qualified-name `run` leave a coherent staging story?** Mostly yes. The dropped arm
 was dead text three lanes agreed on — `plan_named`/`symbol_named` return `Opt<Cell>`, `run` wants
 `Code<T>`, M3 bars the upgrade, and the clause-name/`d.vars` split meant the recorded names had no
-re-resolution path. Its removal loses nothing a session could ever have executed. The retained
-route — `run(code_named "m:N")` — is the right *shape* for the escape hatch: a grafted/learned
-method symbol's `+d.values` names a *head* (:1202–1203), so the qualified path genuinely has heads
-to land on, and genesis's role-split rebind (qualified path + head-or-op hop + `run`-role
-`int64(head)`, :1611–1621) is the disciplined version of "run a learned method by name". The loss
-is semantically consistent because `plan_named`'s referent is a clause cell, never a fragment head —
-running "a plan" means running its test/body heads, which label-resolution already covers. **But**
-the session-side story for the qualified arm is misdescribed — finding 2.
+re-resolution path. Its removal loses nothing a session could ever have executed. The retained route
+— `run(code_named "m:N")` — is the right *shape* for the escape hatch: a grafted/learned method
+symbol's `+d.values` names a *head* (:1202–1203), so the qualified path genuinely has heads to land
+on, and genesis's role-split rebind (qualified path + head-or-op hop + `run`-role `int64(head)`,
+:1611–1621) is the disciplined version of "run a learned method by name". The loss is semantically
+consistent because `plan_named`'s referent is a clause cell, never a fragment head — running "a
+plan" means running its test/body heads, which label-resolution already covers. **But** the
+session-side story for the qualified arm is misdescribed — finding 2.
 
 **Does the adapter-owned store affect staging semantics?** No defect found. The seam is honestly
 priced as owed adapter-API surface alongside P4's wake (:1648–1653, :2295–2301, :2326–2330); the
@@ -60,8 +60,8 @@ spell `:` (:1848–1849); the head-label lookup is restricted to head-layout cel
 `+d.name` labels cannot match (:1624–1628); `plan_named` and patch-target names take the first-`:`
 split only when the segment resolves as a module, else the whole string is the name (:1850–1853) —
 so `plan_named("patch:3")` verbatim-matches the clause label. The descriptor stores `patch:<n>`
-verbatim, never canonicalized `module:Agent.patch:<n>` (:1506–1508), and the anonymous-clause gap
-is extended correctly to declared handlers (V15 mints them no `+d.name`, :1520–1524).
+verbatim, never canonicalized `module:Agent.patch:<n>` (:1506–1508), and the anonymous-clause gap is
+extended correctly to declared handlers (V15 mints them no `+d.name`, :1520–1524).
 
 ## 3. New findings (v1.8 deltas only)
 
@@ -76,8 +76,8 @@ program-side anchor carries it — and the document explicitly admits the primar
 state-side test's root exemption is written for "a program-side `agent_cell()`" (:1424–1425). If the
 agent cell classifies program-side (≤E), the walk follows its outbound rank-membership edges —
 `agent +d.vars → member records` (the durable `reify:` serial counter lives there, :1858–1859;
-member-var cells too, :1543–1544), `+d.belief → predicate cells`, `+d.code → registered heads` —
-all post-E persistent cells, all violating "must hold a persistent ref `≤ E`". Consequence: genesis
+member-var cells too, :1543–1544), `+d.belief → predicate cells`, `+d.code → registered heads` — all
+post-E persistent cells, all violating "must hold a persistent ref `≤ E`". Consequence: genesis
 refuses the first resume of any agent that has reified once or carries member state — `learn`'s
 whole durability story bricks in exactly the configuration the exemption contemplates.
 
@@ -102,18 +102,18 @@ positions must cover `1..E`". Two sub-points:
 ### 2. MINOR — :1565–1571 — the qualified-`L` `run`-record's session mechanism is misdescribed; under the reading its own sentence implies, the arm is as dead as the one it replaced
 
 "a `code_named(L)` operand with `L` a string literal → `L` verbatim — including a qualified-looking
-`L`, the only route a `run`-role record has to the qualified resolution path (it fails `code_named`'s
-`d.code` walk in session, but the record it leaves resolves — or drops — at genesis)". Two readings,
-neither stated:
+`L`, the only route a `run`-role record has to the qualified resolution path (it fails
+`code_named`'s `d.code` walk in session, but the record it leaves resolves — or drops — at
+genesis)". Two readings, neither stated:
 
 - If `code_named` in `run` operand position is a **runtime-evaluated call** — what "fails
   `code_named`'s `d.code` walk in session" literally describes — the operand slot is the call's
-  output cell, and genesis's `writeValue(slot, int64(head))` is dead: post-resume `code_named`
-  still never takes the qualified path (first-`:` splitting is scoped to `plan_named`/patch-target
-  names and `symbol_named`'s pre-split `owner` — "never to `code_named`", :1850–1853), so the next
-  `run` evaluates it again, the empty `Opt` fails the statement at the operand read, and the record
-  resolves-then-is-never-consumed — the same "no path to effect" defect the dropped `plan_named`
-  arm carried.
+  output cell, and genesis's `writeValue(slot, int64(head))` is dead: post-resume `code_named` still
+  never takes the qualified path (first-`:` splitting is scoped to `plan_named`/patch-target names
+  and `symbol_named`'s pre-split `owner` — "never to `code_named`", :1850–1853), so the next `run`
+  evaluates it again, the empty `Opt` fails the statement at the operand read, and the record
+  resolves-then-is-never-consumed — the same "no path to effect" defect the dropped `plan_named` arm
+  carried.
 - If the operand is a **static slot** — which §6.2's "the emitter writes `int64(head)` into it"
   (:1123) and the divergence clause's "a session `run` retains the *emission-time* binding" (:1635)
   both imply — then `code_named` is emission-resolved sugar, no session walk exists to fail, and the
@@ -143,9 +143,9 @@ The conclusion survives — a ref slot's recorded literal is `int64(persistentPo
 across the lineage and equal to what the promoted handle target names (promote's gate excludes
 base-bound targets and restore writes Int64 back unchanged, :1721–1723) — but the mechanism phrase
 is wrong twice over, and the divergence is live exactly where the sweep cares: a registered head's
-name-record slots are rewritten by (e) itself on every genesis, so "current" vs "emission" differ
-on the second resume; a retargeted ref slot would likewise copy its emission literal. Say "the
-recipe's recorded contents" (and note they are stable *because* they are persistent positions), not
+name-record slots are rewritten by (e) itself on every genesis, so "current" vs "emission" differ on
+the second resume; a retargeted ref slot would likewise copy its emission literal. Say "the recipe's
+recorded contents" (and note they are stable *because* they are persistent positions), not
 "current"/"last write". (The slippage originates in my r8 suggested wording — flagging it honestly.)
 
 ### 4. MINOR — :1106–1108, :1506–1508 — `patch:<n>`'s `<n>` source is unstated, and the convention is collision-open to user-supplied clause names
@@ -157,9 +157,9 @@ directly. A collision is a real misbind, not a style issue: `plan_named` is firs
 (:1109–1110), the descriptor resolves `patch:<n>` verbatim (:1507), and `unlearn` matches "the
 latest patch whose recorded target name equals" the reverse-read name (:1525–1528) — two clauses
 named `patch:3` make all three resolve the wrong patch. Fix: reserve `patch:` for `learn_*`-minted
-clause names the same way `src:`/`reify:`/`patch:` are reserved at module declaration (a user
-`name` carrying it is refused at `graft_*`/`learn_*` emission), and pin `<n>` = the patch's
-`d.patch` ordinal (or a durable per-agent counter — the `reify:` serial's source is the model).
+clause names the same way `src:`/`reify:`/`patch:` are reserved at module declaration (a user `name`
+carrying it is refused at `graft_*`/`learn_*` emission), and pin `<n>` = the patch's `d.patch`
+ordinal (or a durable per-agent counter — the `reify:` serial's source is the model).
 
 ### 5. Micro-nits
 
@@ -169,8 +169,9 @@ clause names the same way `src:`/`reify:`/`patch:` are reserved at module declar
   re-resolution key — say the unit.
 - :1626–1628 — the head-layout restriction's stated purpose now covers *clause* `+d.name` labels;
   worth one word noting `patch:<n>` is the largest producer of those — currently implied only.
-- :1567 — "fails `code_named`'s `d.code` walk" predates the fallthrough; if the sentence survives the
-  finding-2 fix at all, `code_named`'s lookup is `d.code` *then* the image-label walk (:1863–1867).
+- :1567 — "fails `code_named`'s `d.code` walk" predates the fallthrough; if the sentence survives
+  the finding-2 fix at all, `code_named`'s lookup is `d.code` *then* the image-label walk
+  (:1863–1867).
 
 ## 4. Staging-discipline summary
 
@@ -179,8 +180,8 @@ record-role split (name shape selects the resolution path, `+d.grab` label selec
 convention) is now airtight, the label grammar is fully deterministic, and the adapter-owned store
 makes the lineage invariant reference a real object with an honest owed-API price. Two live defects:
 the (a) assertion was rewritten positionally without bounding the walk — the admitted
-program-side-`agent_cell()` configuration turns it into a genesis refusal on durable state
-(finding 1); and the qualified-`L` `run` escape hatch's session story names a mechanism that, taken
+program-side-`agent_cell()` configuration turns it into a genesis refusal on durable state (finding
+1); and the qualified-`L` `run` escape hatch's session story names a mechanism that, taken
 literally, dead-ends the record's write (finding 2). Findings 3–4 are wording/edge polish in the
 same cluster.
 

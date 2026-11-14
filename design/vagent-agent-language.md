@@ -1041,8 +1041,8 @@ ______________________________________________________________________
   reserved field names, which user code cannot declare or assign.
 
 - Literals: integers (`42`, `1_000`, `0x2A`), floats (`3.5`, `1e-3`), strings (`"..."` with `\n`,
-  `\t`, `\"`, `\\`, `\u{...}`), `true`, `false`, `()`, `none`, durations (`250ms`, `2s`, `5min`), and
-  the `cells"..."` prefixed string of §8.7. The prefix is part of one token: `cells "##"` is an
+  `\t`, `\"`, `\\`, `\u{...}`), `true`, `false`, `()`, `none`, durations (`250ms`, `2s`, `5min`),
+  and the `cells"..."` prefixed string of §8.7. The prefix is part of one token: `cells "##"` is an
   identifier followed by a string, and any other prefix on a string literal is a syntax error.
 
 - `<-` is one token, so `a<-1` is an assignment; the checker warns when `<-` has no space before it.
@@ -1261,15 +1261,15 @@ steps:
   their own `+d.flag` link.
 
 At most one traversal step is allowed and it must be the last step — `cells"##/d.items"` reads
-home's `d.items` rank, `cells"##/+d.items%"x"` appends a cell to it, and `cells"##/+d.a%"x"/+d.b%"y"`
-chains creation. A step after a multi-creation step is refused (several subjects cannot fan out).
-Every other VQL form — predicates, projections, clone tails, store/generator/version anchors,
-computed creation values, yield modes, negated or bidirectional filters — is rejected at check or
-compile time with a diagnostic, never silently narrowed. A path with `%` is an arena write: it is
-rejected wherever actions are (conditions, read-only answers, pure initializers). A traversal on an
-empty rank yields `[]`, never fails. The result `[Cell]` is a list head whose `+d.grab`/`+d.step`
-rank holds one ref-box per member, so the identity cells stay arena-owned and the result is rebuilt
-on re-execution.
+home's `d.items` rank, `cells"##/+d.items%"x"` appends a cell to it, and
+`cells"##/+d.a%"x"/+d.b%"y"` chains creation. A step after a multi-creation step is refused (several
+subjects cannot fan out). Every other VQL form — predicates, projections, clone tails,
+store/generator/version anchors, computed creation values, yield modes, negated or bidirectional
+filters — is rejected at check or compile time with a diagnostic, never silently narrowed. A path
+with `%` is an arena write: it is rejected wherever actions are (conditions, read-only answers, pure
+initializers). A traversal on an empty rank yields `[]`, never fails. The result `[Cell]` is a list
+head whose `+d.grab`/`+d.step` rank holds one ref-box per member, so the identity cells stay
+arena-owned and the result is rebuilt on re-execution.
 
 ### 8.8 Names in scope
 

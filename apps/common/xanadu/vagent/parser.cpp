@@ -291,8 +291,8 @@ std::expected<ExprPtr, Diagnostic> Parser::parseExpression() {
   }
 }
 
-std::expected<CodeBody, Diagnostic>
-Parser::parseCodeBody(std::string_view text, ParseLimits limits) {
+std::expected<CodeBody, Diagnostic> Parser::parseCodeBody(std::string_view text,
+                                                          ParseLimits limits) {
   // §5.1: '#' is not a vagent token, so a leading '#label' is consumed
   // textually before the inner lex runs. The consumed span is blanked
   // rather than removed, so every SourceLocation the inner parse produces
@@ -356,8 +356,7 @@ std::expected<CodeBody, Diagnostic> Parser::codeBody() {
       // unambiguously: no Expr can begin with a type annotation, exactly
       // the way 'Ident {' resolves to a record literal (§5.1).
       result.parameters = parameters();
-      expect(TokenKind::Alternation,
-             "'|' after the code parameter header");
+      expect(TokenKind::Alternation, "'|' after the code parameter header");
     }
     result.body = expression();
     separators();

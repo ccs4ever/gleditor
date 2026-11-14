@@ -248,8 +248,8 @@ private:
   // classified not-closed. `diagnose` reports the refusal reason at the
   // offending node; the let-initializer walk passes false — a non-closed
   // value is legal to bind, it only leaves the name unclosed.
-  bool staticClosed(const Expr &expression, Environment &env,
-                    const Decl *owner, bool diagnose);
+  bool staticClosed(const Expr &expression, Environment &env, const Decl *owner,
+                    bool diagnose);
   Type infer(const Expr &expression, Environment &env, Context context);
   Type condition(const Expr &expression, Environment &env, Context context);
   Type place(const Expr &expression, Environment &env, Context context);
@@ -610,18 +610,17 @@ const Decl *Checker::goal(const Decl *owner, std::string_view name) const {
       if (use.kind == DeclKind::BehaviorUse)
         if (const auto *behavior = global(use.name);
             behavior && behavior->kind == DeclKind::Behavior)
-          if (const auto *contributed =
-                  member(behavior, name, DeclKind::Goal))
+          if (const auto *contributed = member(behavior, name, DeclKind::Goal))
             return contributed;
   return nullptr;
 }
 
 bool Checker::event(std::string_view name) const {
   static const std::set<std::string_view> builtins{
-      "Event",          "Initialize",     "Destroy",     "GoalAchieved",
-      "GoalFailed",     "GoalDropped",    "PlanFailed",  "EffectFailed",
-      "EffectDone",     "ConditionFault", "ChildDown",   "ChildStopping",
-      "SpawnFailed",    "DeliveryFailed", "Moved"};
+      "Event",       "Initialize",     "Destroy",    "GoalAchieved",
+      "GoalFailed",  "GoalDropped",    "PlanFailed", "EffectFailed",
+      "EffectDone",  "ConditionFault", "ChildDown",  "ChildStopping",
+      "SpawnFailed", "DeliveryFailed", "Moved"};
   if (builtins.contains(name)) return true;
   auto *decl = global(name);
   return decl && decl->kind == DeclKind::Event;
@@ -1353,63 +1352,64 @@ Type Checker::term(const Expr &expression, Environment &env, Context context,
   // unify and is refused like infer's record arm.
   const std::function<void(const Expr &, const Type &)> bindArgument =
       [&](const Expr &argument, const Type &expected) {
-    if (argument.kind == ExprKind::LogicVariable) {
-      require(snake(argument.text), DiagnosticCode::InvalidIdentifier,
-              "query bindings must be snake_case", argument.loc);
-      if (argument.text == "_") {
-        require(bind, DiagnosticCode::InvalidPosition,
-                "asserted facts cannot contain a wildcard", argument.loc);
-        return;
-      }
-      auto found = env.find(argument.text);
-      if (found == env.end()) {
-        if (bind) {
-          reservedName(argument.text, argument.loc);
-          env[argument.text] = {expected, true, context.depth};
-        } else
-          report(DiagnosticCode::UnknownName,
-                 "asserted facts must be ground; unbound '" + argument.text +
-                     "'",
-                 argument.loc);
-      } else
-        expectType(read(found->second.type), expected, argument.loc);
-      return;
-    }
-    if (argument.kind == ExprKind::Identifier && argument.text == "_") {
-      require(bind, DiagnosticCode::InvalidPosition,
-              "asserted facts cannot contain a wildcard", argument.loc);
-      return;
-    }
-    if (argument.kind == ExprKind::Record)
-      if (const auto *decl = global(argument.text);
-          decl && decl->kind == DeclKind::Record) {
-        std::set<std::string> supplied;
-        for (std::size_t f = 0;
-             f < argument.children.size() && f < argument.names.size(); ++f) {
-          const Type *fieldType = nullptr;
-          for (const auto &param : decl->parameters)
-            if (param.name == argument.names[f]) {
-              fieldType = &param.type;
-              break;
-            }
-          if (!fieldType) {
-            report(DiagnosticCode::UnknownName,
-                   "unknown record field '" + argument.names[f] + "'",
-                   argument.loc);
-            continue;
+        if (argument.kind == ExprKind::LogicVariable) {
+          require(snake(argument.text), DiagnosticCode::InvalidIdentifier,
+                  "query bindings must be snake_case", argument.loc);
+          if (argument.text == "_") {
+            require(bind, DiagnosticCode::InvalidPosition,
+                    "asserted facts cannot contain a wildcard", argument.loc);
+            return;
           }
-          supplied.insert(argument.names[f]);
-          bindArgument(*argument.children[f], *fieldType);
+          auto found = env.find(argument.text);
+          if (found == env.end()) {
+            if (bind) {
+              reservedName(argument.text, argument.loc);
+              env[argument.text] = {expected, true, context.depth};
+            } else
+              report(DiagnosticCode::UnknownName,
+                     "asserted facts must be ground; unbound '" +
+                         argument.text + "'",
+                     argument.loc);
+          } else
+            expectType(read(found->second.type), expected, argument.loc);
+          return;
         }
-        for (const auto &param : decl->parameters)
-          require(supplied.contains(param.name),
-                  DiagnosticCode::TypeMismatch,
+        if (argument.kind == ExprKind::Identifier && argument.text == "_") {
+          require(bind, DiagnosticCode::InvalidPosition,
+                  "asserted facts cannot contain a wildcard", argument.loc);
+          return;
+        }
+        if (argument.kind == ExprKind::Record)
+          if (const auto *decl = global(argument.text);
+              decl && decl->kind == DeclKind::Record) {
+            std::set<std::string> supplied;
+            for (std::size_t f = 0;
+                 f < argument.children.size() && f < argument.names.size();
+                 ++f) {
+              const Type *fieldType = nullptr;
+              for (const auto &param : decl->parameters)
+                if (param.name == argument.names[f]) {
+                  fieldType = &param.type;
+                  break;
+                }
+              if (!fieldType) {
+                report(DiagnosticCode::UnknownName,
+                       "unknown record field '" + argument.names[f] + "'",
+                       argument.loc);
+                continue;
+              }
+              supplied.insert(argument.names[f]);
+              bindArgument(*argument.children[f], *fieldType);
+            }
+            for (const auto &param : decl->parameters)
+              require(
+                  supplied.contains(param.name), DiagnosticCode::TypeMismatch,
                   "missing record field '" + param.name + "'", argument.loc);
-        return;
-      }
-    expectType(infer(argument, env, operand(context)), expected,
-               argument.loc);
-  };
+            return;
+          }
+        expectType(infer(argument, env, operand(context)), expected,
+                   argument.loc);
+      };
   for (std::size_t i = 0; i < expression.children.size(); ++i) {
     const auto expected = i < predicate->parameters.size()
                               ? predicate->parameters[i].type
@@ -1577,8 +1577,7 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
                              ? nullptr
                              : expression.children.front().get();
     if (callee && callee->kind == ExprKind::Identifier &&
-        callee->text != "run" && owner &&
-        owner->kind == DeclKind::Agent) {
+        callee->text != "run" && owner && owner->kind == DeclKind::Agent) {
       if (const auto resolved = function(*callee, owner, false);
           resolved && resolved->declaration && resolved->pure &&
           !resolved->effect) {
@@ -1586,8 +1585,8 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
         if (declOwner != methodOwners_.end() && declOwner->second == owner) {
           for (std::size_t i = 1; i < expression.children.size(); ++i)
             if (expression.children[i])
-              closed &= staticClosed(*expression.children[i], env, owner,
-                                     diagnose);
+              closed &=
+                  staticClosed(*expression.children[i], env, owner, diagnose);
           return closed;
         }
       }
@@ -1645,7 +1644,8 @@ bool Checker::staticClosed(const Expr &expression, Environment &env,
   case ExprKind::For: {
     auto local = copyEnvironment(env, expression.loc);
     if (!expression.children.empty() && expression.children.front())
-      closed &= staticClosed(*expression.children.front(), local, owner, diagnose);
+      closed &=
+          staticClosed(*expression.children.front(), local, owner, diagnose);
     if (expression.binding && *expression.binding != "_")
       local[*expression.binding] = {unknown, true, 0};
     for (std::size_t i = 1; i < expression.children.size(); ++i)
@@ -1968,9 +1968,9 @@ Type Checker::infer(const Expr &expression, Environment &env, Context context) {
     // scalar literal, a `static`, or an alias of an already-closed
     // name. A composite or call initializer is a runtime value: legal
     // to bind, but the name stays unavailable to staged evaluation.
-    const auto *init = expression.children.empty()
-                           ? nullptr
-                           : expression.children.front().get();
+    const auto *init  = expression.children.empty()
+                            ? nullptr
+                            : expression.children.front().get();
     const auto closed = init && [&] {
       switch (init->kind) {
       case ExprKind::Static:
@@ -2620,7 +2620,7 @@ void Checker::declaration(const Decl &decl, const Decl *owner) {
     for (const auto &name : decl.names) {
       const auto *capacity = global(name);
       const bool builtin   = name == "Clock" || name == "Schedules" ||
-                             name == "Logging" || name == "Accepts";
+                           name == "Logging" || name == "Accepts";
       require(builtin || (capacity && capacity->kind == DeclKind::Capacity),
               DiagnosticCode::UnknownName,
               "unknown used capacity '" + name + "'", decl.loc);

@@ -109,7 +109,7 @@ CellRef emitUnary(LowerContext &ctx, TokenKind verb, CellRef item) {
     const auto op     = ctx.emitOp(negate   ? OpcodeKind::Neg
                                    : absval ? OpcodeKind::Abs
                                             : OpcodeKind::Not,
-                                   negate   ? "#NEG"
+                               negate   ? "#NEG"
                                    : absval ? "#ABS"
                                             : "#NOT");
     ctx.emitInput(op, item);

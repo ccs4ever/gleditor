@@ -25,14 +25,14 @@ check out end-to-end against code:
   position; post-ceremony the `Int64(*handleTarget)` writeback is the identity write on the
   continuing arena, so the dual-read ("live position in-session, `*handleTarget` at (d)",
   :1148-1149, mirrored at :2276-2278) is exact.
-- **No spurious records.** The field's own `+d.recipe` record is the inventory — the
-  `+d.refs`-only pairing ("one ref-capture record per `+d.refs` ref-record") is undisturbed, and
-  the mixed link/`int64` carrier is abolished: the record's `+d.values` is decorative,
-  never load-bearing, replay resolving the content channel alone (:1151-1155). This is the
-  normalization I asked for, achieved without dragging tuple fields into `closed`'s ref frontier.
+- **No spurious records.** The field's own `+d.recipe` record is the inventory — the `+d.refs`-only
+  pairing ("one ref-capture record per `+d.refs` ref-record") is undisturbed, and the mixed
+  link/`int64` carrier is abolished: the record's `+d.values` is decorative, never load-bearing,
+  replay resolving the content channel alone (:1151-1155). This is the normalization I asked for,
+  achieved without dragging tuple fields into `closed`'s ref frontier.
 
-**Residual (Finding 1, MINOR):** the uniform sweep is one subclass too broad — tuple `dim` fields.
-A dim's durable identity is *name*, not position — the doc's own dim-referent arm exists precisely
+**Residual (Finding 1, MINOR):** the uniform sweep is one subclass too broad — tuple `dim` fields. A
+dim's durable identity is *name*, not position — the doc's own dim-referent arm exists precisely
 because a session-minted dim folds as an orphan off the `d.dims` rank (frontier skips `d.dims`
 edges, `arena_manifold.cpp:1766-1768`; `dimensionNamed` walks base `d.dims` + `arenaDims_`,
 `manifold.cpp:781-815`, `arena_manifold.cpp:60-76`). A tuple `dim` field under the position rule
@@ -44,8 +44,8 @@ regenerated not tuple-replayed, and `+d.entry`/`d.refFor`/`d.recipe` are prelude
 is a scope-clause gap against an unspecified emission shape, not a live misroute. (If `+d.entry`
 head links are tuple-recorded *and* adapter-minted dims can land session-side, it upgrades.)
 **Fix:** scope :1145-1147 — "every field naming a source cell" → "every field naming a source
-*graph* cell; a tuple `dim` field names an image dim, or takes the `+d.name` dim-referent arm" —
-one clause, same vocabulary.
+*graph* cell; a tuple `dim` field names an image dim, or takes the `+d.name` dim-referent arm" — one
+clause, same vocabulary.
 
 ## 2. Carried minor verification — program-side/dim writeback: **FIXED**
 
@@ -64,23 +64,23 @@ reaches the fold only through a `handleTarget` enqueue, so `*handleTarget` binds
 program-side mark (`+d.name`) — … and never the endpoint value, the `+d.name`-bearing dim record
 excepted: there the record's `+d.name` *is* the endpoint source and the slot takes `Int64` of the
 resolved `DimRef`, not the donor's promoted twin". The excepted arm is exactly what the r15 minor
-required — the false universal is scoped. One leftover nit: "the program-side mark" is
-pre-rename vocabulary (Finding 2).
+required — the false universal is scoped. One leftover nit: "the program-side mark" is pre-rename
+vocabulary (Finding 2).
 
 ## 3. Nit verification — alias scoping lead: **FIXED**
 
-:1776-1778 now reads "the alias present only where the verb takes a *user-alias* name
-(`learn_plan`, `learn_handler`; `learn_where`/`learn_body` take none and `learn_method`'s `name` is
-never an alias)" — the accurate lead I asked for.
+:1776-1778 now reads "the alias present only where the verb takes a *user-alias* name (`learn_plan`,
+`learn_handler`; `learn_where`/`learn_body` take none and `learn_method`'s `name` is never an
+alias)" — the accurate lead I asked for.
 
 ## 4. New findings (v1.15 deltas only)
 
 ### 1. MINOR — §6.1 :1145-1151 (echoed :1055-1057, :2051-2053, changelog :3707-3712): tuple `dim` fields swept under the position keyspace while dim identity is name-keyed
 
-Described in §1 above — "every field naming a source cell" + "tuple `from`/`dim`/`to` endpoints
-and record subjects alike" makes no name arm and no image-dim premise for `dim` fields, against
-§6.1's own dim-referent arm and the (e) fix it just landed. Latent orphan-split; no emitted tuple
-produces it today. One-clause scope fix as above.
+Described in §1 above — "every field naming a source cell" + "tuple `from`/`dim`/`to` endpoints and
+record subjects alike" makes no name arm and no image-dim premise for `dim` fields, against §6.1's
+own dim-referent arm and the (e) fix it just landed. Latent orphan-split; no emitted tuple produces
+it today. One-clause scope fix as above.
 
 ### Nits
 
@@ -105,10 +105,10 @@ class is still named (frame-bound by class, session handles by type, unnamed pro
 arm, smuggled non-op-graph edges as a stated §11-door limitation), and `closed`'s frontier stays
 enumerable through slot content + `masterOf` decode. The two r15 write-path residuals are both
 resolved; what remains is a one-clause scope on the `dim` subclass of tuple endpoints (Finding 1)
-and two wording nits. The mark-inventory machinery — marker per cell, record per marked cell —
-holds uniformly across `+d.refs` and `+d.recipe`.
+and two wording nits. The mark-inventory machinery — marker per cell, record per marked cell — holds
+uniformly across `+d.refs` and `+d.recipe`.
 
-VERDICT: CONVERGED — 0 blocking, 0 major, 1 minor (tuple `dim` fields need the image-dim premise
-or the `+d.name` arm stated — same orphan class as the fixed (e) bug, latent-only today), 2 nits
+VERDICT: CONVERGED — 0 blocking, 0 major, 1 minor (tuple `dim` fields need the image-dim premise or
+the `+d.name` arm stated — same orphan class as the fixed (e) bug, latent-only today), 2 nits
 ("program-side mark" leftover; `wingOf` cite lands on the caller at :373 not the `linked` call at
 :366).
