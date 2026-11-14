@@ -4,9 +4,12 @@
 namespace xanadu::vql {
 using zigzag::CellRef;
 
-void VQLCompiler::compileFieldWeave(const FieldWeave & /*weave*/,
-                                    const CellRef /*resultStream*/) {
-  throw std::invalid_argument("field weaving requires Vortex graph lowering");
+void VQLCompiler::compileFieldWeave(const FieldWeave &weave,
+                                    const CellRef resultStream) {
+  std::vector<CellRef> stream{resultStream};
+  stream = compileSteps(weave.steps, std::move(stream),
+                        ambientContext_.has_value() || !contextInputs_.empty());
+  emitAppendStream(resultStream, stream);
 }
 
 } // namespace xanadu::vql
