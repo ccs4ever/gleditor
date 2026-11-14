@@ -191,6 +191,10 @@ enum class OpcodeKind : std::uint8_t {
   // Cell identity: two cell inputs, one Bool output, true iff both resolve to
   // the same cell. Appended last for the persisted-kind reason.
   SameCell,
+
+  // Map run-time cell to its historical counterpart in an attached historical
+  // space fold.
+  PinHistorical,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.

@@ -4,6 +4,8 @@
 #include <limits>
 #include <stdexcept>
 
+#include "common/xanadu/store.hpp"
+
 namespace zigzag::vortex {
 namespace {
 
@@ -21,6 +23,7 @@ bool VortexVM::streamStateOpcode(const OpcodeKind kind) const noexcept {
   case OpcodeKind::StreamReverseBegin:
   case OpcodeKind::RankBegin:
   case OpcodeKind::IteratorNext:
+  case OpcodeKind::PinHistorical:
     return true;
   default:
     return false;
@@ -405,6 +408,95 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
     iteratorSlots_.erase(presentSlot);
     streams_.erase(presentSlot);
     iterators_.erase(presentSlot);
+    break;
+  }
+  case OpcodeKind::PinHistorical: {
+    if (inputs.size() < 2 || slots.size() != 1) {
+      return invalidStreamOperation(
+          "PinHistorical expects an input stream, a fold constant, and one "
+          "output register");
+    }
+    const CellRef target = slots.front();
+    const auto foldInput = inputValue(inputs.back());
+    std::optional<std::uint32_t> spaceId;
+    if (std::holds_alternative<std::int64_t>(foldInput)) {
+      const auto id = std::get<std::int64_t>(foldInput);
+      if (id > 0 &&
+          static_cast<std::uint64_t>(id) <= core_.arena().spaceCount()) {
+        spaceId = static_cast<std::uint32_t>(id);
+      }
+    } else if (std::holds_alternative<std::string>(foldInput)) {
+      const auto &label = std::get<std::string>(foldInput);
+      core_.arena().forEachSpace([&](const std::uint32_t id, const Space &sp) {
+        if (sp.label == label) spaceId = id;
+      });
+    }
+    if (!spaceId) {
+      return invalidStreamOperation(
+          "PinHistorical fold constant does not name a valid attached space");
+    }
+    const auto attached = core_.arena().spaceAt(*spaceId);
+    if (!attached || !attached->manifold) {
+      return invalidStreamOperation("PinHistorical space manifold is missing");
+    }
+
+    std::vector<CellRef> inputCells;
+    for (std::size_t i = 0; i + 1 < inputs.size(); ++i) {
+      const CellRef in = inputs[i];
+      if (iteratorSlots_.contains(in)) {
+        return invalidStreamOperation(
+            "an iterator register cannot be pinned as a stream");
+      }
+      if (const auto found = streams_.find(in); found != streams_.end()) {
+        if (found->second) {
+          inputCells.insert(inputCells.end(), found->second->begin(),
+                            found->second->end());
+        }
+      } else if (streamSlots_.contains(in)) {
+        // empty stream
+      } else if (const auto cell = resultCell(in)) {
+        inputCells.push_back(*cell);
+      }
+    }
+
+    std::vector<CellRef> pinned;
+    for (const CellRef cell : inputCells) {
+      core_.arena().consumeWork();
+      auto source = core_.arena().resolveSourceCell(cell);
+      if (!source) {
+        if (const auto master =
+                core_.arena().cloneMaster(cell, core_.dims().clone)) {
+          source = core_.arena().resolveSourceCell(*master);
+        }
+      }
+      if (source && source->first == attached->store) {
+        if (attached->manifold->contains(source->second)) {
+          pinned.push_back(core_.arena().proxyFor(*spaceId, source->second));
+        }
+      } else if (attached->store &&
+                 (attached->store->homeCell() == cell ||
+                  core_.arena().homeCell() == cell || core_.home() == cell)) {
+        if (const auto home = attached->manifold->home()) {
+          pinned.push_back(core_.arena().proxyFor(*spaceId, *home));
+        }
+      }
+    }
+
+    auto accumulated = streams_.find(target);
+    std::shared_ptr<std::vector<CellRef>> values =
+        accumulated == streams_.end() ? nullptr : accumulated->second;
+    const bool sharedWithOtherState = values && values.use_count() > 2;
+    if (!values) {
+      values = std::make_shared<std::vector<CellRef>>();
+    } else if (sharedWithOtherState) {
+      values = std::make_shared<std::vector<CellRef>>(*values);
+    }
+    values->insert(values->end(), pinned.begin(), pinned.end());
+    streamSlots_.insert(target);
+    iteratorSlots_.erase(target);
+    cellReferences_.erase(target);
+    iterators_.erase(target);
+    streams_[target] = std::move(values);
     break;
   }
   default:

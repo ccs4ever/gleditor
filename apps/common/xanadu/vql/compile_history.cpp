@@ -18,6 +18,7 @@
 
 namespace xanadu::vql {
 using zigzag::CellRef;
+using zigzag::vortex::OpcodeKind;
 
 namespace {
 
@@ -29,11 +30,6 @@ constexpr std::string_view pinnedAnchorBinding = "#pinned-anchor";
 [[noreturn]] void refuse(const std::string &message) {
   throw QueryRefusal(QueryErrorCategory::Unsupported, message);
 }
-
-constexpr std::string_view pathStepPinRefusal =
-    "version pins on a path step are not lowered: they must map each cell the "
-    "step finds at run time into a historical fold, and the Vortex VM has no "
-    "opcode for that; pin the anchor instead (##@(version)/...)";
 
 /// Text of a version variable, or nullopt when the variable is not a value the
 /// compiler can read (a runtime register holds no text at compile time).
@@ -260,24 +256,111 @@ struct ScopedStreamBinding {
 
 } // namespace
 
-std::vector<CellRef>
-VQLCompiler::compileVersionPinnedStep(const PathStep & /*step*/,
-                                      std::vector<CellRef> /*stream*/,
-                                      const bool /*hasContext*/) {
-  // A step's output is a set of run-time registers. Mapping one to its
-  // counterpart in a fold at another microversion needs the store, the fold
-  // and the cell's source index at run time, and no opcode in OpcodeKind
-  // reads them: Link, Find and Linked walk topology, they do not cross folds.
-  refuse(std::string(pathStepPinRefusal));
+std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
+    const PathStep &step, std::vector<CellRef> stream, const bool hasContext) {
+  if (!step.versionPin) {
+    PathStep unpinned = step;
+    return compileSteps(std::span{&unpinned, 1}, std::move(stream), hasContext);
+  }
+  if (!coordinator_) {
+    refuse("version pins need a store with history; this compiler has no "
+           "store coordinator, so there is no microversion to fold");
+  }
+  if (coordinator_->stores().empty()) {
+    refuse("version pins need a store with history; this query runs against "
+           "an arena with no store, so there is no microversion to fold");
+  }
+
+  PathStep unpinned   = step;
+  unpinned.versionPin = std::nullopt;
+  unpinned.predicates.clear();
+  unpinned.shapePredicates.clear();
+  unpinned.rangeClamp  = std::nullopt;
+  unpinned.derefMaster = false;
+  std::vector<CellRef> stepped =
+      compileSteps(std::span{&unpinned, 1}, std::move(stream), hasContext);
+
+  const auto variable = [this](const std::string &name) {
+    return versionVariable(core_, varBindings_, name);
+  };
+  const auto versions =
+      pinnedVersions(*step.versionPin, variable, core_.arena());
+
+  const CellRef resultStream = emitStreamClear();
+  for (const auto &version : versions) {
+    for (const auto &info : coordinator_->stores()) {
+      if (!info.store) continue;
+      const auto available = info.store->allVersions();
+      if (std::ranges::find(available, version) == available.end()) continue;
+      const auto space = historicalSpace(core_.arena(), info, version);
+      if (!space) continue;
+      const auto pinOp = emitOp(OpcodeKind::PinHistorical, "#PIN_HISTORICAL");
+      for (const auto s : stepped) {
+        emitInput(pinOp, s);
+      }
+      emitInputConstant(pinOp, static_cast<std::int64_t>(*space));
+      emitOutput(pinOp, resultStream);
+    }
+  }
+
+  if (step.yieldMode == YieldMode::Keep) {
+    return stream;
+  }
+
+  std::vector<CellRef> nextStream = {resultStream};
+
+  if (step.derefMaster) {
+    nextStream = emitMap(nextStream, [&](CellRef candidate) {
+      const auto master = emitDereference(candidate);
+      return std::vector<CellRef>{master};
+    });
+  }
+
+  for (const auto &predicate : step.predicates) {
+    nextStream = emitMap(nextStream, [&](CellRef candidate) {
+      const auto result = core_.arena().makeCell();
+      const auto clear  = emitOp(OpcodeKind::ClearCellRefs, "#FILTER_CLEAR");
+      emitOutput(clear, result);
+      auto condition = compileBooleanExpr(predicate, candidate);
+      if (!condition) condition = emitConstant(false);
+      const auto end    = mintOpcode(OpcodeKind::Nop, "#FILTER_END");
+      const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#FILTER_BRANCH");
+      emitInput(branch, *condition);
+      emitInput(branch, end);
+      const auto copy = emitOp(OpcodeKind::CopyCellRefs, "#FILTER_RESULT");
+      emitInput(copy, candidate);
+      emitOutput(copy, result);
+      appendOpcode(end);
+      return std::vector<CellRef>{result};
+    });
+  }
+
+  for (const auto &shape : step.shapePredicates) {
+    nextStream = emitMap(nextStream, [&](const CellRef candidate) {
+      const auto result = core_.arena().makeCell();
+      const auto clear  = emitOp(OpcodeKind::ClearCellRefs, "#SHAPE_CLEAR");
+      emitOutput(clear, result);
+      const auto condition = compileShapePredicate(shape, candidate);
+      const auto end       = mintOpcode(OpcodeKind::Nop, "#SHAPE_FILTER_END");
+      const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#SHAPE_FILTER");
+      emitInput(branch, condition);
+      emitInput(branch, end);
+      const auto copy = emitOp(OpcodeKind::CopyCellRefs, "#SHAPE_KEEP");
+      emitInput(copy, candidate);
+      emitOutput(copy, result);
+      appendOpcode(end);
+      return std::vector<CellRef>{result};
+    });
+  }
+
+  if (step.rangeClamp) nextStream = emitClamp(nextStream, *step.rangeClamp);
+
+  return nextStream;
 }
 
 std::optional<CellRef>
 VQLCompiler::compileVersionPinnedPath(const PathExpression &path,
                                       const CellRef ctxCell) {
-  if (std::ranges::any_of(path.steps, [](const PathStep &step) {
-        return step.versionPin.has_value();
-      }))
-    refuse(std::string(pathStepPinRefusal));
   if (!coordinator_)
     refuse("version pins need a store with history; this compiler has no "
            "store coordinator, so there is no microversion to fold");
