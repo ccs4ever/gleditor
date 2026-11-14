@@ -16,6 +16,7 @@
 
 #include "common/xanadu/vpl/lexer.hpp"
 #include "common/xanadu/vpl/lower_decls.hpp"
+#include "common/xanadu/vpl/lower_support.hpp"
 #include "common/xanadu/vpl/parser.hpp"
 
 namespace xanadu::vpl {
@@ -908,7 +909,10 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     default:
       break;
     }
-    if (expr.verb() != TokenKind::Plus && rankAxes_.contains(*rCell)) {
+    const bool isRank = rankAxes_.contains(*rCell);
+    const bool isSpecial =
+        dimensionValues_.contains(*rCell) || enclosedCells_.contains(*rCell);
+    if (expr.verb() != TokenKind::Plus && (isRank || isSpecial)) {
       switch (expr.verb()) {
       case TokenKind::Minus:
       case TokenKind::Magnitude:
@@ -1032,7 +1036,11 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
   default:
     break;
   }
-  if (rankAxes_.contains(*lCell) || rankAxes_.contains(*rCell)) {
+  const bool hasRank = rankAxes_.contains(*lCell) || rankAxes_.contains(*rCell);
+  const bool hasSpecial =
+      dimensionValues_.contains(*lCell) || dimensionValues_.contains(*rCell) ||
+      enclosedCells_.contains(*lCell) || enclosedCells_.contains(*rCell);
+  if (hasRank || hasSpecial) {
     switch (expr.verb()) {
     case TokenKind::Plus:
     case TokenKind::Minus:
@@ -1057,73 +1065,10 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
     }
   }
 
-  OpcodeKind kind;
-  std::string_view l;
-
-  switch (expr.verb()) {
-  case TokenKind::Plus:
-    kind = OpcodeKind::Add;
-    l    = "#ADD";
-    break;
-  case TokenKind::Minus:
-    kind = OpcodeKind::Sub;
-    l    = "#SUB";
-    break;
-  case TokenKind::Times:
-    kind = OpcodeKind::Mul;
-    l    = "#MUL";
-    break;
-  case TokenKind::Divide:
-    kind = OpcodeKind::Div;
-    l    = "#DIV";
-    break;
-  case TokenKind::Magnitude:
-    kind = OpcodeKind::Mod;
-    l    = "#MOD";
-    break;
-  case TokenKind::Ceiling:
-    kind = OpcodeKind::Max;
-    l    = "#MAX";
-    break;
-  case TokenKind::Floor:
-    kind = OpcodeKind::Min;
-    l    = "#MIN";
-    break;
-  case TokenKind::Equal:
-    kind = OpcodeKind::Eq;
-    l    = "#EQ";
-    break;
-  case TokenKind::NotEqual:
-    kind = OpcodeKind::Neq;
-    l    = "#NEQ";
-    break;
-  case TokenKind::LessThan:
-    kind = OpcodeKind::Lt;
-    l    = "#LT";
-    break;
-  case TokenKind::LessEqual:
-    kind = OpcodeKind::Lte;
-    l    = "#LTE";
-    break;
-  case TokenKind::GreaterThan:
-    kind = OpcodeKind::Gt;
-    l    = "#GT";
-    break;
-  case TokenKind::GreaterEqual:
-    kind = OpcodeKind::Gte;
-    l    = "#GTE";
-    break;
-  case TokenKind::And:
-    kind = OpcodeKind::And;
-    l    = "#AND";
-    break;
-  case TokenKind::Or:
-    kind = OpcodeKind::Or;
-    l    = "#OR";
-    break;
-  default:
-    lower::refuse(lower::msg::dyadicUnsupported);
-  }
+  const auto scalarVerb = lower::scalarDyadicVerb(expr.verb());
+  if (!scalarVerb) lower::refuse(lower::msg::dyadicUnsupported);
+  const OpcodeKind kind    = scalarVerb->opcode;
+  const std::string_view l = scalarVerb->label;
 
   CellRef op = emitOp(kind, l);
   if (lCell) emitInput(op, *lCell);

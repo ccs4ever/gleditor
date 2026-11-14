@@ -81,7 +81,7 @@ TEST(VPLEngineTest, DISABLED_CalculationsKeepOperandProvenanceAcrossBindings) {
   EXPECT_EQ(engine.evaluate("total").dependencies(), firstSource);
 }
 
-TEST(VPLEngineTest, DISABLED_ScalarArithmeticAndScalarExtension) {
+TEST(VPLEngineTest, ScalarArithmeticAndScalarExtension) {
   VPLEngine engine;
 
   // Basic scalar expressions

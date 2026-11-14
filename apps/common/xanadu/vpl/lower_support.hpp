@@ -61,6 +61,53 @@ inline void assertNotNegative(LowerContext &ctx, CellRef count,
   assertCell(ctx, valid, label, message);
 }
 
+/// The opcode and trace label of a scalar dyadic verb, as the scalar path of
+/// compileDyadic emits it. One table, so scalar arithmetic, element-wise
+/// arithmetic on ranks and fold cannot disagree about what a glyph means.
+struct ScalarVerb {
+  zigzag::vortex::OpcodeKind opcode;
+  std::string_view label;
+};
+
+[[nodiscard]] inline std::optional<ScalarVerb>
+scalarDyadicVerb(const TokenKind verb) {
+  using zigzag::vortex::OpcodeKind;
+  switch (verb) {
+  case TokenKind::Plus:
+    return ScalarVerb{OpcodeKind::Add, "#ADD"};
+  case TokenKind::Minus:
+    return ScalarVerb{OpcodeKind::Sub, "#SUB"};
+  case TokenKind::Times:
+    return ScalarVerb{OpcodeKind::Mul, "#MUL"};
+  case TokenKind::Divide:
+    return ScalarVerb{OpcodeKind::Div, "#DIV"};
+  case TokenKind::Magnitude:
+    return ScalarVerb{OpcodeKind::Mod, "#MOD"};
+  case TokenKind::Ceiling:
+    return ScalarVerb{OpcodeKind::Max, "#MAX"};
+  case TokenKind::Floor:
+    return ScalarVerb{OpcodeKind::Min, "#MIN"};
+  case TokenKind::Equal:
+    return ScalarVerb{OpcodeKind::Eq, "#EQ"};
+  case TokenKind::NotEqual:
+    return ScalarVerb{OpcodeKind::Neq, "#NEQ"};
+  case TokenKind::LessThan:
+    return ScalarVerb{OpcodeKind::Lt, "#LT"};
+  case TokenKind::LessEqual:
+    return ScalarVerb{OpcodeKind::Lte, "#LTE"};
+  case TokenKind::GreaterThan:
+    return ScalarVerb{OpcodeKind::Gt, "#GT"};
+  case TokenKind::GreaterEqual:
+    return ScalarVerb{OpcodeKind::Gte, "#GTE"};
+  case TokenKind::And:
+    return ScalarVerb{OpcodeKind::And, "#AND"};
+  case TokenKind::Or:
+    return ScalarVerb{OpcodeKind::Or, "#OR"};
+  default:
+    return std::nullopt;
+  }
+}
+
 } // namespace xanadu::vpl::lower
 
 #endif // COMMON_XANADU_VPL_LOWER_SUPPORT_HPP

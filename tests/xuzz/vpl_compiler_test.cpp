@@ -211,14 +211,30 @@ TEST_F(VPLCompilerTest, ScalarArithmeticExplicitlyRefusesRankOperands) {
   VPLCompiler compiler(*core, *vm);
 
   const auto dyadic = compiler.compile("1 2 3 + 4 5 6");
-  EXPECT_FALSE(dyadic.success);
-  EXPECT_NE(dyadic.errorMessage.find("scalar dyadic arithmetic on ranks"),
-            std::string::npos);
+  ASSERT_TRUE(dyadic.success) << dyadic.errorMessage;
+  ASSERT_EQ(dyadic.resultSlots.size(), 1u);
+  ASSERT_EQ(dyadic.resultAxes.size(), 1u);
+  EXPECT_EQ(dyadic.resultAxes.front(),
+            (zigzag::DirectedDim{core->dims().step, zigzag::DimVector::POS}));
 
   const auto monadic = compiler.compile("- 1 2 3");
-  EXPECT_FALSE(monadic.success);
-  EXPECT_NE(monadic.errorMessage.find("scalar monadic arithmetic on a rank"),
-            std::string::npos);
+  ASSERT_TRUE(monadic.success) << monadic.errorMessage;
+  ASSERT_EQ(monadic.resultSlots.size(), 1u);
+  ASSERT_EQ(monadic.resultAxes.size(), 1u);
+  EXPECT_EQ(monadic.resultAxes.front(),
+            (zigzag::DirectedDim{core->dims().step, zigzag::DimVector::POS}));
+
+  const auto dimLeft = compiler.compile("d.1 + 1 2 3");
+  EXPECT_FALSE(dimLeft.success);
+  EXPECT_NE(dimLeft.errorMessage.find("dimension value"), std::string::npos);
+
+  const auto dimRight = compiler.compile("1 2 3 + d.1");
+  EXPECT_FALSE(dimRight.success);
+  EXPECT_NE(dimRight.errorMessage.find("dimension value"), std::string::npos);
+
+  const auto dimMonadic = compiler.compile("- d.1");
+  EXPECT_FALSE(dimMonadic.success);
+  EXPECT_NE(dimMonadic.errorMessage.find("dimension value"), std::string::npos);
 }
 
 TEST_F(VPLCompilerTest, UnboundIdentifierIsRefused) {
