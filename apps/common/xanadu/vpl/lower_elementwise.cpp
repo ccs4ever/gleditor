@@ -46,14 +46,6 @@ constexpr std::string_view kDimension =
 constexpr std::string_view kLengthMismatch =
     "VPL length error: element-wise arithmetic needs ranks of the same length";
 
-std::int64_t asValue(DimRef dimension) {
-  return static_cast<std::int64_t>(dimension);
-}
-
-std::int64_t asValue(DimVector direction) {
-  return static_cast<std::int64_t>(zigzag::toSign(direction));
-}
-
 // A valence-1 rank operand: its origin register, its one axis, and whether
 // that axis is read in reverse.
 struct Side {
@@ -89,41 +81,6 @@ Walk walkOf(LowerContext &ctx, const Side &side) {
   return Walk{far, -side.axis.dir, side.origin};
 }
 
-// The result rank under construction: appended after a private anchor so
-// that this site owns its chain.
-struct Minting {
-  CellRef tail;
-  CellRef before;
-  DimRef dimension;
-};
-
-Minting beginResult(LowerContext &ctx, DimRef dimension) {
-  const auto anchor = ctx.core().arena().makeCell();
-  const auto tail =
-      emit::extreme(ctx, anchor, dimension, DimVector::POS, std::nullopt);
-  return Minting{tail, emit::aliasRegister(ctx, tail), dimension};
-}
-
-// An op result lands in a plain cell the op writes; copyValue moves it, typed,
-// into the freshly minted result cell.
-void mintValue(LowerContext &ctx, const Minting &result, CellRef number) {
-  const auto fresh =
-      emit::mintAfter(ctx, result.tail, result.dimension, DimVector::POS);
-  emit::copyValue(ctx, number, fresh);
-}
-
-// The first result cell, or an absent register when nothing was minted (the
-// executor reads that as a zero-length array that keeps its axis).
-CellRef endResult(LowerContext &ctx, const Minting &result) {
-  const auto read = ctx.emitOp(OpcodeKind::Link, "#ELEMENTWISE_FIRST");
-  ctx.emitInput(read, result.before);
-  ctx.emitInputConstant(read, asValue(result.dimension));
-  ctx.emitInputConstant(read, asValue(DimVector::POS));
-  const auto first = ctx.core().arena().makeCell();
-  ctx.emitOutput(read, first);
-  return first;
-}
-
 CellRef finishRank(LowerContext &ctx, CellRef first, DimRef dimension,
                    std::span<const CellRef> inputs) {
   ctx.rankAxes()[first] = {DirectedDim{dimension, DimVector::POS}};
@@ -152,7 +109,7 @@ CellRef emitUnary(LowerContext &ctx, TokenKind verb, CellRef item) {
     const auto op     = ctx.emitOp(negate   ? OpcodeKind::Neg
                                    : absval ? OpcodeKind::Abs
                                             : OpcodeKind::Not,
-                               negate   ? "#NEG"
+                                   negate   ? "#NEG"
                                    : absval ? "#ABS"
                                             : "#NOT");
     ctx.emitInput(op, item);

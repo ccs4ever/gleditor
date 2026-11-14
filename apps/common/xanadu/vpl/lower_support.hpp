@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 
+#include "common/xanadu/vpl/graph_emit.hpp"
 #include "common/xanadu/vpl/lower_decls.hpp"
 
 namespace xanadu::vpl::lower {
@@ -106,6 +107,43 @@ scalarDyadicVerb(const TokenKind verb) {
   default:
     return std::nullopt;
   }
+}
+
+} // namespace xanadu::vpl::lower
+
+namespace xanadu::vpl::lower {
+
+struct Minting {
+  zigzag::CellRef tail;
+  zigzag::CellRef before;
+  zigzag::DimRef dimension;
+};
+
+inline Minting beginResult(LowerContext &ctx, zigzag::DimRef dimension) {
+  const auto anchor = ctx.core().arena().makeCell();
+  const auto tail   = emit::extreme(ctx, anchor, dimension,
+                                    zigzag::DimVector::POS, std::nullopt);
+  return Minting{tail, emit::aliasRegister(ctx, tail), dimension};
+}
+
+inline zigzag::CellRef mintValue(LowerContext &ctx, const Minting &result,
+                                 zigzag::CellRef number) {
+  const auto fresh = emit::mintAfter(ctx, result.tail, result.dimension,
+                                     zigzag::DimVector::POS);
+  emit::copyValue(ctx, number, fresh);
+  return fresh;
+}
+
+inline zigzag::CellRef endResult(LowerContext &ctx, const Minting &result) {
+  using zigzag::vortex::OpcodeKind;
+  const auto read = ctx.emitOp(OpcodeKind::Link, "#RESULT_FIRST");
+  ctx.emitInput(read, result.before);
+  ctx.emitInputConstant(read, static_cast<std::int64_t>(result.dimension));
+  ctx.emitInputConstant(
+      read, static_cast<std::int64_t>(zigzag::toSign(zigzag::DimVector::POS)));
+  const auto first = ctx.core().arena().makeCell();
+  ctx.emitOutput(read, first);
+  return first;
 }
 
 } // namespace xanadu::vpl::lower
