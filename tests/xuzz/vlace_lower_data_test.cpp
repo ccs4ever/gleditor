@@ -844,8 +844,7 @@ TEST(VlaceLowerDataTest, DestructuringLetStillRefusesByName) {
 TEST(VlaceLowerDataTest, FormsOfLaterCardsRefuseByName) {
   const std::string refusal = "VM lowering is not implemented for VLace";
   Rig rig;
-  for (const std::string_view src :
-       {"putStrLn \"x\"", "pure 1", "makeText \"x\""}) {
+  for (const std::string_view src : {"makeText \"x\""}) {
     const auto err = rig.failure(src);
     ASSERT_TRUE(err.has_value()) << src;
     EXPECT_NE(err->detail.find(refusal), std::string::npos)

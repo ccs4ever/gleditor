@@ -158,6 +158,18 @@ TEST(LanguageExecutionCutoffTest, VlaceCompilerRefusesAstExecution) {
   const auto io = compiler.runIO({}, input, output);
   ASSERT_FALSE(io);
   EXPECT_TRUE(output.str().empty());
+
+  // A lowered IO action runs through the VM trampoline.
+  xanadu::vlace::Parser ioParser("putStr \"ran\"");
+  auto ioProg = ioParser.parseProgram();
+  ASSERT_TRUE(ioProg);
+  auto ioVal = compiler.evaluateProgram(*ioProg);
+  ASSERT_TRUE(ioVal);
+  std::istringstream ioIn;
+  std::ostringstream ioOut;
+  const auto ioRun = compiler.runIO(*ioVal, ioIn, ioOut);
+  ASSERT_TRUE(ioRun);
+  EXPECT_EQ(ioOut.str(), "ran");
 }
 
 TEST(LanguageExecutionCutoffTest,
@@ -175,12 +187,21 @@ TEST(LanguageExecutionCutoffTest,
   EXPECT_EQ(result->value, "3");
   EXPECT_EQ(result->type, "Int");
 
-  std::istringstream input;
-  std::ostringstream output;
-  auto ioResult = driver.runIO("putStr \"must not print\"", input, output);
-  ASSERT_FALSE(ioResult);
-  EXPECT_EQ(ioResult.error().phase, "compile");
-  EXPECT_TRUE(output.str().empty());
+  std::istringstream runInput;
+  std::ostringstream runOutput;
+  auto runResult = driver.runIO("putStr \"now prints\"", runInput, runOutput);
+  ASSERT_TRUE(runResult);
+  EXPECT_EQ(runResult->type, "IO Unit");
+  EXPECT_EQ(runOutput.str(), "now prints");
+
+  std::istringstream refusedInput;
+  std::ostringstream refusedOutput;
+  driver.withTypeChecking(false);
+  auto refusedResult =
+      driver.runIO("makeText \"unlowered\"", refusedInput, refusedOutput);
+  ASSERT_FALSE(refusedResult);
+  EXPECT_EQ(refusedResult.error().phase, "compile");
+  EXPECT_TRUE(refusedOutput.str().empty());
 }
 
 } // namespace
