@@ -270,13 +270,12 @@ TEST_F(VPLCompilerTest, CompileOptimizationConstantFolding) {
   EXPECT_EQ(resOpt.generatedOpcodes.size(), 1u); // Only Halt
 }
 
-TEST_F(VPLCompilerTest, RejectsUnsupportedEncloseAndDisclose) {
+TEST_F(VPLCompilerTest, EncloseAndDiscloseLowering) {
   VPLCompiler compiler(*core, *vm);
 
   const auto enclose = compiler.compile("⊂ 42");
-  EXPECT_FALSE(enclose.success);
-  EXPECT_NE(enclose.errorMessage.find("unsupported VPL monadic verb"),
-            std::string::npos);
+  EXPECT_TRUE(enclose.success) << enclose.errorMessage;
+  EXPECT_TRUE(enclose.resultEnclosed);
 
   EXPECT_FALSE(compiler.compile("⊃ C").success);
 }

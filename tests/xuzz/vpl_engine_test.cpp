@@ -259,7 +259,7 @@ TEST(VPLEngineTest, OuterProduct) {
   EXPECT_EQ(shAscii[1], 2u);
 }
 
-TEST(VPLEngineTest, DISABLED_EncloseAndDisclose) {
+TEST(VPLEngineTest, EncloseAndDisclose) {
   VPLEngine engine;
 
   // Enclose view into cell

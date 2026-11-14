@@ -68,8 +68,12 @@ VplView makeView(std::optional<zigzag::CellRef> cell, const ViewFacts &facts,
     const auto dimension = core.findOrMintDimension(enclosureDimensionName);
     const auto content = arena.linked(*cell, dimension, zigzag::DimVector::POS);
     VplView box{cell, facts.axes};
-    box.enclose(std::make_shared<VplView>(
-        makeRankView(content, facts.axes, {}, arena)));
+    if (facts.axes.empty()) {
+      box.enclose(std::make_shared<VplView>(makeView(content, {}, core)));
+    } else {
+      box.enclose(std::make_shared<VplView>(
+          makeRankView(content, facts.axes, {}, arena)));
+    }
     return box;
   }
   if (!facts.axes.empty()) {
