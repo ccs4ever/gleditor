@@ -128,13 +128,23 @@ QueryExecutor::execute(const QueryExpression &query,
         .message  = "VQL executor engines must share one VortexCore",
     });
   }
+  QueryExpression effectiveQuery = query;
+  if (session_ != nullptr) {
+    for (const auto &[name, def] : session_->userDefs()) {
+      if (std::ranges::none_of(
+              effectiveQuery.defs,
+              [&](const DefDeclaration &d) { return d.name == name; })) {
+        effectiveQuery.defs.push_back(def);
+      }
+    }
+  }
   try {
-    const auto eligibility = analyzeFrameEligibility(query);
+    const auto eligibility = analyzeFrameEligibility(effectiveQuery);
     if (!eligibility)
       return std::unexpected(QueryExecutionError{
           .category = QueryExecutionError::Category::Compile,
           .message  = eligibility.error().message});
-    validateSignatures(query);
+    validateSignatures(effectiveQuery);
   } catch (const TypeContractError &error) {
     return std::unexpected(QueryExecutionError{
         .category = QueryExecutionError::Category::TypeContract,
@@ -149,7 +159,7 @@ QueryExecutor::execute(const QueryExpression &query,
         .message =
             "direct execution was removed; VQL requires Vortex compilation",
     });
-  return executeVortex(query, contextCells);
+  return executeVortex(effectiveQuery, contextCells);
 }
 
 std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
@@ -252,6 +262,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       }
       session_->publishCompilerBindings(std::move(published),
                                         std::move(functors));
+      session_->publishUserDefs(query.defs);
     }
     return cells;
   } catch (const TypeContractError &error) {
