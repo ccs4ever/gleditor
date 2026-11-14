@@ -183,19 +183,10 @@ TEST(VPLEngineTest, TransposeAndReverse) {
   EXPECT_EQ(vTransAscii.axes()[0].dim, engine.resolveDimension("d.3"));
 }
 
-TEST(VPLEngineTest, DISABLED_TakeAndDrop) {
+TEST(VPLEngineTest, Drop) {
   VPLEngine engine;
 
   engine.evaluate("A ← 5⍳d.1");
-
-  // Take 3: 3 ↑ A
-  auto take3 = engine.evaluate("3 ↑ A");
-  EXPECT_EQ(take3.extents().size(), 1u);
-  EXPECT_EQ(take3.extents()[0], 3u);
-
-  // Take ASCII: 3 {. A
-  auto takeAscii = engine.evaluate("3 {. A");
-  EXPECT_EQ(takeAscii.extents()[0], 3u);
 
   // Drop 2: 2 ↓ A
   auto drop2 = engine.evaluate("2 ↓ A");
@@ -205,6 +196,37 @@ TEST(VPLEngineTest, DISABLED_TakeAndDrop) {
   // Drop ASCII: 2 }. A
   auto dropAscii = engine.evaluate("2 }. A");
   EXPECT_EQ(dropAscii.extents()[0], 3u);
+}
+
+TEST(VPLEngineTest, TakeRefused) {
+  VPLEngine engine;
+
+  engine.evaluate("A ← 5⍳d.1");
+
+  // Take 3: 3 ↑ A is refused until views can carry far-end bounds
+  EXPECT_THROW(
+      {
+        try {
+          engine.evaluate("3 ↑ A");
+        } catch (const VPLExecutionError &e) {
+          EXPECT_NE(std::string_view(e.what()).find("VPL take is unsupported"),
+                    std::string_view::npos);
+          throw;
+        }
+      },
+      VPLExecutionError);
+
+  EXPECT_THROW(
+      {
+        try {
+          engine.evaluate("3 {. A");
+        } catch (const VPLExecutionError &e) {
+          EXPECT_NE(std::string_view(e.what()).find("VPL take is unsupported"),
+                    std::string_view::npos);
+          throw;
+        }
+      },
+      VPLExecutionError);
 }
 
 TEST(VPLEngineTest, ReductionsAndScans) {
@@ -294,7 +316,7 @@ TEST(VPLEngineTest, IndexingAndSorting) {
   EXPECT_EQ(engine.arena().asInt64(gCells[2]).value_or(0), 0);
 }
 
-TEST(VPLEngineTest, DISABLED_HypertimeAndTransclusion) {
+TEST(VPLEngineTest, HypertimeAndTransclusion) {
   VPLEngine engine;
 
   auto ht = engine.evaluate("⍟ 5 ⍳ d.1");
