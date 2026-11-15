@@ -198,7 +198,7 @@ TEST(LanguageExecutionCutoffTest,
   std::ostringstream refusedOutput;
   driver.withTypeChecking(false);
   auto refusedResult =
-      driver.runIO("makeText \"unlowered\"", refusedInput, refusedOutput);
+      driver.runIO("unboundVariable", refusedInput, refusedOutput);
   ASSERT_FALSE(refusedResult);
   EXPECT_EQ(refusedResult.error().phase, "compile");
   EXPECT_TRUE(refusedOutput.str().empty());

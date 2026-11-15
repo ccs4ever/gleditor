@@ -160,6 +160,11 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
         res.insert(res.end(), stepRes.begin(), stepRes.end());
       }
       nextStream = res;
+    } else if (userCall && !hasContext) {
+      requirePositionalArguments(*function);
+      const auto fallback = compileCall(definitions_.at(function->name),
+                                        function->args, std::nullopt, true);
+      nextStream          = fallback;
     } else {
       nextStream = emitMap(stream, [&](CellRef current) {
         return compileSelector(step, current, hasContext);

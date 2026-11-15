@@ -45,11 +45,11 @@ void requirePositional(const FunctionInvocation &fn) {
 
 } // namespace
 
-std::vector<CellRef>
-VQLCompiler::compileSemanticQuantifierStep(const PathStep &step,
-                                           const CellRef /*current*/,
-                                           const bool /*hasContext*/) {
-  refuseSemanticBuiltin(std::get<FunctionInvocation>(step.selector).name);
+std::vector<CellRef> VQLCompiler::compileSemanticQuantifierStep(
+    const PathStep &step, const CellRef current, const bool hasContext) {
+  const auto &fn = std::get<FunctionInvocation>(step.selector);
+  return compileSemanticQuantifierCall(fn, hasContext ? std::optional{current}
+                                                      : std::nullopt);
 }
 
 std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
@@ -74,6 +74,70 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
     requireArity(fn, 1);
     requirePositional(fn);
     auto cells = compileArgument(fn.args[0], context);
+    if (cells.size() == 1 && dynamicStreams_.contains(cells.front())) {
+      const CellRef stream = cells.front();
+      if (fn.name == "first") {
+        const CellRef firstItem = emitFirstCell(stream);
+        return {firstItem};
+      }
+      const CellRef iterator = core_.arena().makeCell();
+      const CellRef begin =
+          emitOp(OpcodeKind::StreamBegin, "#QUANTIFIER_BEGIN");
+      emitInput(begin, stream);
+      emitOutput(begin, iterator);
+
+      const CellRef first        = core_.arena().makeCell();
+      const CellRef firstPresent = core_.arena().makeCell();
+      const CellRef firstNext =
+          emitOp(OpcodeKind::IteratorNext, "#QUANTIFIER_FIRST");
+      emitInput(firstNext, iterator);
+      emitOutput(firstNext, first);
+      emitOutput(firstNext, firstPresent);
+
+      if (fn.name == "one") {
+        const CellRef assertZero =
+            emitOp(OpcodeKind::Assert, "#ONE_CARDINALITY_ZERO");
+        emitInput(assertZero, firstPresent);
+        emitInput(assertZero, emitConstant(std::string(
+                                  "one cardinality violation: got 0 cells")));
+      }
+
+      const CellRef second        = core_.arena().makeCell();
+      const CellRef secondPresent = core_.arena().makeCell();
+      const CellRef secondNext =
+          emitOp(OpcodeKind::IteratorNext, "#QUANTIFIER_SECOND");
+      emitInput(secondNext, iterator);
+      emitOutput(secondNext, second);
+      emitOutput(secondNext, secondPresent);
+
+      const CellRef notSecond = core_.arena().makeCell();
+      const CellRef negate = emitOp(OpcodeKind::Not, "#QUANTIFIER_NOT_SECOND");
+      emitInput(negate, secondPresent);
+      emitOutput(negate, notSecond);
+
+      const CellRef assertMany =
+          emitOp(OpcodeKind::Assert, "#QUANTIFIER_CARDINALITY_MANY");
+      emitInput(assertMany, notSecond);
+      emitInput(assertMany,
+                emitConstant(fn.name +
+                             " cardinality violation: got more than 1 cell"));
+
+      const CellRef outStream = emitStreamClear();
+      const CellRef endLabel  = mintOpcode(OpcodeKind::Nop, "#QUANTIFIER_END");
+      if (fn.name == "optional_one") {
+        const CellRef branch =
+            emitOp(OpcodeKind::BranchFalseCell, "#OPTIONAL_ONE_BRANCH");
+        emitInput(branch, firstPresent);
+        emitInput(branch, endLabel);
+      }
+      emitAppendStream(outStream, std::span{&first, std::size_t{1}});
+      if (fn.name == "optional_one") {
+        appendOpcode(endLabel);
+      }
+      dynamicStreams_.insert(outStream);
+      return {outStream};
+    }
+
     if (fn.name == "one") {
       if (cells.size() != 1) {
         throw std::runtime_error("one cardinality violation: got " +
