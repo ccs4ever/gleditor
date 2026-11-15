@@ -1,4 +1,5 @@
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/dynamic_view_registry.hpp"
 #include "common/xanadu/vql/projection_syntax.hpp"
 
 #include <algorithm>
@@ -53,7 +54,7 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
       continue;
     }
     const auto *rule = std::get_if<DimensionShapeRule>(&entry.rule);
-    if (!rule->targetValue) continue;
+    if (!rule || !rule->targetValue) continue;
 
     const ValueExpr &target = *rule->targetValue;
     const auto rejectTarget = [&] {
@@ -255,6 +256,23 @@ void VQLCompiler::compileShapeProjection(const ShapeLiteral &shape,
     throw std::invalid_argument(
         "shape projection target cannot use attached pipelines");
 
+  if (isDynamicShape(shape)) {
+    auto &reg        = registryFor(core_.arena());
+    auto view        = std::make_shared<DynamicViewRecord>();
+    view->shape      = shape;
+    CellRef viewCell = zigzag::noCell;
+    if (const auto text = core_.render(owner);
+        text && std::holds_alternative<std::string>(*text)) {
+      viewCell = core_.arena().makeCell(std::get<std::string>(*text));
+    } else {
+      viewCell = core_.arena().makeCell();
+    }
+    view->handles[owner]    = viewCell;
+    reg.viewCells[viewCell] = ViewCellRecord{.source = owner, .view = view};
+    reg.ownerViews[owner]   = viewCell;
+    return;
+  }
+
   bool defaultKeep = false;
   std::map<DimRef, std::array<std::optional<bool>, 2>> masks;
   for (const auto &entry : shape.rules) {
@@ -263,14 +281,50 @@ void VQLCompiler::compileShapeProjection(const ShapeLiteral &shape,
       masks.clear();
       continue;
     }
-    const auto &rule = std::get<DimensionShapeRule>(entry.rule);
-    auto &mask       = masks[resolveDimension(rule.dimName)];
-    if (rule.negated)
+    if (const auto *name = std::get_if<std::string>(&entry.rule)) {
+      auto &reg = registryFor(core_.arena());
+      std::optional<CellRef> handle;
+      if (const auto it = varBindings_.find(*name);
+          it != varBindings_.end() && it->second) {
+        handle = it->second;
+      } else if (const auto it = streamBindings_.find(*name);
+                 it != streamBindings_.end() && !it->second.empty()) {
+        handle = it->second.front();
+      }
+      if (handle) {
+        CellRef targetHandle = *handle;
+        if (!reg.shapeHandles.contains(targetHandle)) {
+          if (const auto unboxed = core_.arena().asInt64(targetHandle)) {
+            targetHandle = static_cast<CellRef>(*unboxed);
+          }
+        }
+        if (const auto sIt = reg.shapeHandles.find(targetHandle);
+            sIt != reg.shapeHandles.end()) {
+          for (const auto &subEntry : sIt->second.rules) {
+            if (const auto *subRule =
+                    std::get_if<DimensionShapeRule>(&subEntry.rule)) {
+              auto &mask = masks[resolveDimension(subRule->dimName)];
+              if (subRule->negated)
+                mask = {false, false};
+              else if (subRule->isBidir)
+                mask = {true, true};
+              else
+                mask[subRule->direction == DimVector::POS ? 0 : 1] = true;
+            }
+          }
+        }
+      }
+      continue;
+    }
+    const auto *rule = std::get_if<DimensionShapeRule>(&entry.rule);
+    if (!rule) continue;
+    auto &mask = masks[resolveDimension(rule->dimName)];
+    if (rule->negated)
       mask = {false, false};
-    else if (rule.isBidir)
+    else if (rule->isBidir)
       mask = {true, true};
     else
-      mask[rule.direction == DimVector::POS ? 0 : 1] = true;
+      mask[rule->direction == DimVector::POS ? 0 : 1] = true;
   }
 
   const CellRef group = beginMutationGroup("#PROJECTION_GROUP");

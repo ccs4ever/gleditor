@@ -18,11 +18,6 @@ std::vector<CellRef> VQLCompiler::compilePathMorphismStep(
           morphism->subject.kind) ||
       std::get<std::shared_ptr<PathExpression>>(morphism->subject.kind) !=
           nullptr;
-  if (hasSubject && morphism->perspective.empty()) {
-    throw QueryRefusal(
-        QueryErrorCategory::Unsupported,
-        "this VQL path selector does not have Vortex graph lowering yet");
-  }
   if (morphism->op != PathMorphism::Op::Arrow) {
     throw QueryRefusal(
         QueryErrorCategory::Unsupported,

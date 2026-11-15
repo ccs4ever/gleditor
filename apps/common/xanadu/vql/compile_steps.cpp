@@ -1,5 +1,6 @@
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/contracts.hpp"
+#include "common/xanadu/vql/dynamic_view_registry.hpp"
 #include "common/xanadu/vql/invocation.hpp"
 
 #include <stdexcept>
@@ -101,8 +102,116 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       nextStream = compileSteps(*step.capturedFunctor, stream, hasContext);
     } else if (dimension && dimension->dimName.starts_with('$')) {
       const std::string name = dimension->dimName.substr(1);
-      if (const auto found = functorBindings_.find(name);
-          found != functorBindings_.end()) {
+      auto &reg              = registryFor(core_.arena());
+      std::optional<PutGetLensRecord> lensRec;
+      if (const auto it = reg.namedLenses.find(name);
+          it != reg.namedLenses.end()) {
+        lensRec = it->second;
+      } else if (const auto it = varBindings_.find(name);
+                 it != varBindings_.end() && it->second) {
+        if (const auto cIt = reg.cellLenses.find(*it->second);
+            cIt != reg.cellLenses.end()) {
+          lensRec = cIt->second;
+        }
+      }
+      if (lensRec) {
+        if (dimension->creates.empty()) {
+          std::vector<CellRef> res;
+          for (const auto candidate : stream) {
+            const auto savedVars    = varBindings_;
+            const auto savedStreams = streamBindings_;
+            try {
+              if (!lensRec->get.params.empty()) {
+                const auto &param = lensRec->get.params.front();
+                if (const auto *str = std::get_if<std::string>(&param.target)) {
+                  varBindings_[*str]    = candidate;
+                  streamBindings_[*str] = {candidate};
+                }
+              }
+              if (const auto *valExprPtr =
+                      std::get_if<std::shared_ptr<ValueExpr>>(
+                          &lensRec->get.body);
+                  valExprPtr && *valExprPtr) {
+                if (const auto val =
+                        compileValueExpr(**valExprPtr, candidate)) {
+                  res.push_back(*val);
+                }
+              } else if (const auto *scriptPtr =
+                             std::get_if<std::shared_ptr<ScriptBody>>(
+                                 &lensRec->get.body);
+                         scriptPtr && *scriptPtr) {
+                for (const auto &stmt : (*scriptPtr)->statements) {
+                  if (const auto *path = std::get_if<PathExpression>(&stmt)) {
+                    if (const auto pRes =
+                            compilePathExpression(*path, candidate)) {
+                      res.push_back(*pRes);
+                    }
+                  }
+                }
+              }
+              varBindings_    = savedVars;
+              streamBindings_ = savedStreams;
+            } catch (...) {
+              varBindings_    = savedVars;
+              streamBindings_ = savedStreams;
+              throw;
+            }
+          }
+          nextStream = res;
+        } else {
+          std::string valStr;
+          for (const auto &create : dimension->creates) {
+            if (create.kind == CreateValue::Kind::Literal) {
+              valStr = create.literal;
+            }
+          }
+          const CellRef valCell = core_.arena().makeCell(valStr);
+          for (const auto candidate : stream) {
+            const auto savedVars    = varBindings_;
+            const auto savedStreams = streamBindings_;
+            try {
+              if (lensRec->put.params.size() >= 2) {
+                if (const auto *str0 = std::get_if<std::string>(
+                        &lensRec->put.params[0].target)) {
+                  varBindings_[*str0]    = candidate;
+                  streamBindings_[*str0] = {candidate};
+                }
+                if (const auto *str1 = std::get_if<std::string>(
+                        &lensRec->put.params[1].target)) {
+                  varBindings_[*str1]    = valCell;
+                  streamBindings_[*str1] = {valCell};
+                }
+              }
+              if (const auto *valExprPtr =
+                      std::get_if<std::shared_ptr<ValueExpr>>(
+                          &lensRec->put.body);
+                  valExprPtr && *valExprPtr) {
+                compileValueExpr(**valExprPtr, candidate);
+              } else if (const auto *scriptPtr =
+                             std::get_if<std::shared_ptr<ScriptBody>>(
+                                 &lensRec->put.body);
+                         scriptPtr && *scriptPtr) {
+                for (const auto &stmt : (*scriptPtr)->statements) {
+                  if (const auto *path = std::get_if<PathExpression>(&stmt)) {
+                    compilePathExpression(*path, candidate);
+                  }
+                }
+              }
+              const auto span = core_.arena().intern(valStr);
+              static_cast<void>(
+                  core_.arena().setContent(candidate, std::span{&span, 1}));
+              varBindings_    = savedVars;
+              streamBindings_ = savedStreams;
+            } catch (...) {
+              varBindings_    = savedVars;
+              streamBindings_ = savedStreams;
+              throw;
+            }
+            nextStream.push_back(candidate);
+          }
+        }
+      } else if (const auto found = functorBindings_.find(name);
+                 found != functorBindings_.end()) {
         // Calls can replace binding maps while compiling their bodies.
         const auto captured = found->second;
         nextStream          = compileSteps(captured, stream, hasContext);
@@ -159,11 +268,100 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       }
       nextStream = res;
     } else {
-      nextStream = emitMap(stream, [&](CellRef current) {
-        return compileSelector(step, current, hasContext);
-      });
-      if (dimension && dimension->creates.empty())
-        nextStream = emitMountFallback(*dimension, std::move(nextStream));
+      bool hasViewCell = false;
+      auto &reg        = registryFor(core_.arena());
+      if (dimension) {
+        for (const auto c : stream) {
+          if (reg.viewCells.contains(c)) {
+            hasViewCell = true;
+            break;
+          }
+        }
+      }
+      if (hasViewCell) {
+        std::vector<CellRef> res;
+        for (const auto current : stream) {
+          const auto vIt = reg.viewCells.find(current);
+          if (vIt == reg.viewCells.end()) {
+            auto sub = compileSelector(step, current, hasContext);
+            res.insert(res.end(), sub.begin(), sub.end());
+            continue;
+          }
+          const auto &viewRecord = vIt->second;
+          const CellRef source   = viewRecord.source;
+          const auto &shape      = viewRecord.view->shape;
+          for (const auto &rule : shape.rules) {
+            if (const auto *pivot =
+                    std::get_if<DimensionPivotRule>(&rule.rule)) {
+              if (pivot->fromDim == dimension->dimName) {
+                const auto targetDim = resolveDimension(pivot->toDim);
+                if (!dimension->creates.empty()) {
+                  for (const auto &create : dimension->creates) {
+                    CellRef newCell = zigzag::noCell;
+                    if (create.kind == CreateValue::Kind::Literal) {
+                      newCell = core_.arena().makeCell(create.literal);
+                    }
+                    if (newCell != zigzag::noCell) {
+                      static_cast<void>(core_.arena().link(
+                          source, targetDim, dimension->direction, newCell));
+                      res.push_back(newCell);
+                    }
+                  }
+                  break;
+                }
+                if (const auto linked = core_.arena().linked(
+                        source, targetDim, dimension->direction)) {
+                  CellRef targetCell = *linked;
+                  auto hIt = viewRecord.view->handles.find(targetCell);
+                  if (hIt == viewRecord.view->handles.end()) {
+                    CellRef viewTarget = zigzag::noCell;
+                    if (const auto text = core_.render(targetCell);
+                        text && std::holds_alternative<std::string>(*text)) {
+                      viewTarget =
+                          core_.arena().makeCell(std::get<std::string>(*text));
+                    } else {
+                      viewTarget = core_.arena().makeCell();
+                    }
+                    viewRecord.view->handles[targetCell] = viewTarget;
+                    reg.viewCells[viewTarget]            = ViewCellRecord{
+                                   .source = targetCell, .view = viewRecord.view};
+                    res.push_back(viewTarget);
+                  } else {
+                    res.push_back(hIt->second);
+                  }
+                }
+                break;
+              }
+            } else if (const auto *virt =
+                           std::get_if<VirtualDimensionDefRule>(&rule.rule)) {
+              if (virt->dimName == dimension->dimName &&
+                  virt->direction == dimension->direction) {
+                if (!dimension->creates.empty()) {
+                  throw std::runtime_error(
+                      "computed dimension has no put transform: " +
+                      dimension->dimName);
+                }
+                if (virt->expr) {
+                  if (const auto text = core_.render(source);
+                      text && std::holds_alternative<std::string>(*text)) {
+                    CellRef valCell =
+                        core_.arena().makeCell(std::get<std::string>(*text));
+                    res.push_back(valCell);
+                  }
+                }
+                break;
+              }
+            }
+          }
+        }
+        nextStream = res;
+      } else {
+        nextStream = emitMap(stream, [&](CellRef current) {
+          return compileSelector(step, current, hasContext);
+        });
+        if (dimension && dimension->creates.empty())
+          nextStream = emitMountFallback(*dimension, std::move(nextStream));
+      }
     }
     // User calls may produce a value without a flowing context. Preserve the
     // direct evaluator's one context-free call when the input stream is empty.

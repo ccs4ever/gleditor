@@ -4,6 +4,7 @@
  */
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vortex/assembly_transaction.hpp"
+#include "common/xanadu/vql/dynamic_view_registry.hpp"
 #include "common/xanadu/vql/invocation.hpp"
 
 #include <algorithm>
@@ -785,6 +786,26 @@ std::vector<CellRef>
 VQLCompiler::applyShapeProjection(std::span<const CellRef> owners,
                                   const ShapeLiteral &shape) {
   validateShapeProjection(shape);
+  if (isDynamicShape(shape)) {
+    compileDynamicShapeProjection(shape);
+    auto &reg = registryFor(core_.arena());
+    std::vector<CellRef> viewCells;
+    for (const auto owner : owners) {
+      auto view        = std::make_shared<DynamicViewRecord>();
+      view->shape      = shape;
+      CellRef viewCell = zigzag::noCell;
+      if (const auto text = core_.render(owner);
+          text && std::holds_alternative<std::string>(*text)) {
+        viewCell = core_.arena().makeCell(std::get<std::string>(*text));
+      } else {
+        viewCell = core_.arena().makeCell();
+      }
+      view->handles[owner]    = viewCell;
+      reg.viewCells[viewCell] = ViewCellRecord{.source = owner, .view = view};
+      viewCells.push_back(viewCell);
+    }
+    return viewCells;
+  }
   return emitMap(owners, [&](const CellRef owner) {
     compileShapeProjection(shape, owner);
     return std::vector<CellRef>{owner};

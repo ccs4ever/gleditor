@@ -1,4 +1,5 @@
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/dynamic_view_registry.hpp"
 
 #include <functional>
 #include <memory>
@@ -74,6 +75,13 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
     const std::optional<CellRef> value =
         values.empty() ? std::nullopt : std::optional{values.front()};
     varBindings_[let.varName] = value;
+    if (value) {
+      auto &reg = registryFor(core_.arena());
+      if (const auto it = reg.cellLenses.find(*value);
+          it != reg.cellLenses.end()) {
+        reg.namedLenses[let.varName] = it->second;
+      }
+    }
     if (value && dynamicStreams_.contains(*value)) return values;
 
     if (!inLoop) {
