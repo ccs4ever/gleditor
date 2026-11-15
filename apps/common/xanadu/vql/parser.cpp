@@ -1523,7 +1523,7 @@ ValueExpr Parser::parseValueExpr() {
     auto addition   = std::make_shared<BinaryValueExpr>();
     addition->left  = std::make_shared<ValueExpr>(std::move(expression));
     addition->right = std::make_shared<ValueExpr>(std::move(right));
-    expression.kind = std::move(addition);
+    expression      = ValueExpr{.kind = std::move(addition)};
   }
   return expression;
 }

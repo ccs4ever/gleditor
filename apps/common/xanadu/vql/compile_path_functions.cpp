@@ -572,7 +572,7 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     appendOpcode(notSecond);
     const auto candidateKey   = keyOf(candidate);
     const auto candidateClass = classify(candidateKey);
-    for (const auto [mine, reference] :
+    for (const auto &[mine, reference] :
          {std::pair{candidateClass.text, firstClass.text},
           std::pair{candidateClass.integer, firstClass.integer},
           std::pair{candidateClass.decimal, firstClass.decimal}})
