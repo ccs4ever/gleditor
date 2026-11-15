@@ -1726,7 +1726,8 @@ TEST(ArenaManifoldTest, promoteStillWorksAfterAReleaseDetachedASpace) {
   const auto fresh = arena.makeCell("fresh");
   ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, fresh));
   zigzag::PromotionBudget budget{};
-  budget.commitShadowed = zigzag::commitStateSide(0);
+  const auto predicate  = zigzag::commitStateSide(0);
+  budget.commitShadowed = predicate;
   const auto promoted =
       zigzag::promote(doc.store, doc.at, arena, doc.first, budget);
   ASSERT_TRUE(promoted.has_value());
