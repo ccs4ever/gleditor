@@ -64,7 +64,10 @@ decodeValue(std::string_view bytes, ValueLimits limits = {});
 /// across restarts so prior permascroll segments remain available for seeding.
 /// Promotes the reachable answer locally, then seals and signs its full
 /// history. The supplied provenance must already be signed by the host's
-/// authoring path.
+/// authoring path. Persistent references in a based arena require its owning
+/// Store as the destination. Other destinations accept fresh results and
+/// explicit foreign identities; ambiguous raw base references refuse before
+/// promotion writes.
 [[nodiscard]] std::expected<ValueSeed, std::string>
 publishValue(xanadu::Store &store, const xanadu::MicroversionId &parent,
              const ArenaManifold &arena, CellRef root,

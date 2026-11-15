@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <stdexcept>
+
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 
 namespace zigzag::vortex::mesh {
 namespace {
@@ -13,9 +16,17 @@ CellRef along(const ArenaManifold &arena, CellRef root, std::string_view name) {
   return noCell;
 }
 CellRef firstValue(const EvaluatedValue &result) {
-  const auto &arena = result.context->arena;
-  auto record       = along(arena, result.root, "d.mesh.items");
-  return along(arena, record, "d.mesh.value");
+  const auto values = readResultCells(result);
+  if (!values) throw std::runtime_error(values.error());
+  return values->empty() ? noCell : values->front();
+}
+CellRef valueAlong(const ArenaManifold &arena, CellRef cell,
+                   std::string_view name) {
+  const auto wrapper = along(arena, cell, name);
+  if (wrapper == noCell) return noCell;
+  const auto value = readOccurrenceTarget(arena, wrapper);
+  if (!value) throw std::runtime_error(value.error());
+  return *value;
 }
 
 TEST(MeshEvaluatorTest, AllFrontendsUsePrivateOwnedContexts) {
@@ -63,21 +74,21 @@ TEST(MeshEvaluatorTest, PrologKeepsSolutionsAfterBacktracking) {
       evaluate(Frontend::Vprolog,
                "answer(pair(1, 2)). answer(pair(3, 4)). ?- answer(X).", budget);
   ASSERT_TRUE(result) << result.error();
-  const auto &arena = result->context->arena;
-  auto record       = along(arena, result->root, "d.mesh.items");
-  for (std::int64_t expected : {1, 3}) {
-    ASSERT_NE(record, noCell);
-    auto solution      = along(arena, record, "d.mesh.value");
-    auto bindingRecord = along(arena, solution, "d.mesh.items");
-    auto binding       = along(arena, bindingRecord, "d.mesh.value");
+  const auto &arena    = result->context->arena;
+  const auto solutions = readResultCells(*result);
+  ASSERT_TRUE(solutions) << solutions.error();
+  ASSERT_EQ(solutions->size(), 2U);
+  for (std::size_t i = 0; i < solutions->size(); ++i) {
+    const std::int64_t expected = i == 0 ? 1 : 3;
+    const auto solution         = (*solutions)[i];
+    auto bindingRecord          = along(arena, solution, "d.mesh.items");
+    auto binding = valueAlong(arena, bindingRecord, "d.mesh.value");
     EXPECT_EQ(arena.textOf(binding), "X");
-    auto pair = along(arena, binding, "d.mesh.value");
+    auto pair = valueAlong(arena, binding, "d.mesh.value");
     EXPECT_EQ(arena.textOf(pair), "pair");
     auto arg = along(arena, pair, "d.mesh.arguments");
-    EXPECT_EQ(arena.asInt64(along(arena, arg, "d.mesh.value")), expected);
-    record = along(arena, record, "d.mesh.items");
+    EXPECT_EQ(arena.asInt64(valueAlong(arena, arg, "d.mesh.value")), expected);
   }
-  EXPECT_EQ(record, noCell);
 }
 
 TEST(MeshEvaluatorTest, VlacePreservesConstructorFields) {
@@ -87,11 +98,11 @@ TEST(MeshEvaluatorTest, VlacePreservesConstructorFields) {
   auto tuple        = firstValue(*result);
   EXPECT_EQ(arena.textOf(tuple), "Tuple");
   auto arg = along(arena, tuple, "d.mesh.arguments");
-  EXPECT_EQ(arena.asInt64(along(arena, arg, "d.mesh.value")), 1);
+  EXPECT_EQ(arena.asInt64(valueAlong(arena, arg, "d.mesh.value")), 1);
   arg = along(arena, arg, "d.mesh.arguments");
-  EXPECT_EQ(arena.asBool(along(arena, arg, "d.mesh.value")), true);
+  EXPECT_EQ(arena.asBool(valueAlong(arena, arg, "d.mesh.value")), true);
   arg = along(arena, arg, "d.mesh.arguments");
-  EXPECT_EQ(arena.textOf(along(arena, arg, "d.mesh.value")), "three");
+  EXPECT_EQ(arena.textOf(valueAlong(arena, arg, "d.mesh.value")), "three");
 }
 
 TEST(MeshEvaluatorTest, SnapshotWritesStayPrivate) {
@@ -155,7 +166,7 @@ TEST(MeshEvaluatorTest, VplEnclosuresKeepTheNestedArrayTopology) {
   EXPECT_EQ(arena.textOf(box), "vpl:enclosed");
   auto nested = along(arena, box, "d.mesh.enclosed");
   ASSERT_NE(nested, noCell);
-  auto item = along(arena, nested, "d.mesh.value");
+  auto item = valueAlong(arena, nested, "d.mesh.value");
   EXPECT_EQ(arena.asInt64(item), 1);
   auto axis       = along(arena, nested, "d.mesh.axes");
   auto dim        = along(arena, axis, "d.mesh.axis");

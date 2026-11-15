@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <limits>
+#include <stdexcept>
 
 #include "common/xanadu/bencode.hpp"
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 
 namespace zigzag::vortex::mesh {
 namespace {
@@ -29,8 +31,9 @@ CellRef along(const ArenaManifold &arena, CellRef root,
   return noCell;
 }
 CellRef firstValue(const EvaluatedValue &value) {
-  auto &arena = value.context->arena;
-  return along(arena, along(arena, value.root, "d.mesh.items"), "d.mesh.value");
+  const auto cells = readResultCells(value);
+  if (!cells) throw std::runtime_error(cells.error());
+  return cells->empty() ? noCell : cells->front();
 }
 std::string replaceBody(const std::string &bytes, const Wire &body) {
   auto envelope      = xanadu::bencode::decode(bytes);
@@ -73,11 +76,19 @@ TEST(MeshVortexArtifactTest, ControlTargetsRelocateAndReturnTypedHandles) {
   ASSERT_EQ(arena.valueKindOf(handle), xanadu::ValueKind::OpHandle);
   ASSERT_TRUE(arena.handleTarget(handle));
   EXPECT_NE(*arena.handleTarget(handle), 0);
-  EXPECT_EQ(result->context->vm.getOpcodeKind(*arena.handleTarget(handle)),
-            OpcodeKind::Add);
   auto marker = along(arena, handle, "d.mesh.relocation");
   ASSERT_NE(marker, noCell);
   EXPECT_EQ(arena.textOf(marker), "cell");
+  const auto decoded = readOccurrenceTarget(arena, handle);
+  ASSERT_TRUE(decoded) << decoded.error();
+  ASSERT_EQ(arena.valueKindOf(*decoded), xanadu::ValueKind::OpHandle);
+  ASSERT_TRUE(arena.handleTarget(*decoded));
+  EXPECT_EQ(result->context->vm.getOpcodeKind(*arena.handleTarget(*decoded)),
+            OpcodeKind::Add);
+  const auto values = readResultCells(*result);
+  ASSERT_TRUE(values) << values.error();
+  ASSERT_EQ(values->size(), 2U);
+  EXPECT_EQ((*values)[1], *decoded);
 }
 
 TEST(MeshVortexArtifactTest, ResultGraphPreservesLiteralTypesAndLinks) {

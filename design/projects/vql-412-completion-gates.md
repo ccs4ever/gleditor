@@ -55,6 +55,13 @@ neither C4 nor the lifecycle/route gates. Its route tests also identify an exist
 repeated mesh result identities evict earlier value links. Native reload and host preserve those
 identities; distinct-output SOURCE mesh calls are covered separately.
 
+The [portable mesh result package](vql-mesh-result-identity-plan.md) resolves that C8 duplicate-link
+defect for the common producer, including nested shared data, signed publication/import and fresh
+Store reload. A shared counted v2 reader rejects malformed metadata. Publication preflight also
+refuses ambiguous raw references from another Store before effects. Its final full engine run has
+exactly the same 32 baseline failures and no new failing names. This closes the identified packaging
+slice, not the final C8 route/lifecycle matrix or §4.12.
+
 | Package | Remaining work                                                                                                                                                                                     | Acceptance evidence                                                                                                                                                                                                                                                                               |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | C1      | Implemented in iteration 52: runtime closure bindings, native initialization and successful session publication.                                                                                   | A closure created inside a native frame is returned, stored and applied after cursor inactivity and fresh-VM reload; absent/open and bound-empty remain distinct; metadata refusals write no Store operations. The real REPL retains values across queries.                                       |

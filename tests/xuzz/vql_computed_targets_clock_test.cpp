@@ -19,6 +19,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/parser.hpp"
@@ -563,24 +564,12 @@ TEST(VQLComputedTargetsClockTest,
                                       .maxSolutions   = 16,
                                       .maxOutputBytes = 1024 * 1024});
   ASSERT_TRUE(meshed) << meshed.error();
-  auto &meshArena = meshed->context->arena;
-  std::optional<CellRef> itemsDimension;
-  std::optional<CellRef> valueDimension;
-  for (const auto &cell : meshArena.cells()) {
-    if (meshArena.textOf(cell.birthOp) == "d.mesh.items")
-      itemsDimension = cell.birthOp;
-    if (meshArena.textOf(cell.birthOp) == "d.mesh.value")
-      valueDimension = cell.birthOp;
-  }
-  ASSERT_TRUE(itemsDimension);
-  ASSERT_TRUE(valueDimension);
-  const auto record =
-      meshArena.linked(meshed->root, *itemsDimension, DimVector::POS);
-  ASSERT_TRUE(record);
-  const auto result =
-      meshArena.linked(*record, *valueDimension, DimVector::POS);
-  ASSERT_TRUE(result);
-  EXPECT_TRUE(checkTimestamp(meshArena, meshed->context->core, *result));
+  auto &meshArena    = meshed->context->arena;
+  const auto results = mesh::readResultCells(*meshed);
+  ASSERT_TRUE(results) << results.error();
+  ASSERT_EQ(results->size(), 1U);
+  EXPECT_TRUE(
+      checkTimestamp(meshArena, meshed->context->core, results->front()));
 }
 
 TEST(VQLComputedTargetsClockTest, FailedArchiveAppendsNoSourceStoreOperations) {

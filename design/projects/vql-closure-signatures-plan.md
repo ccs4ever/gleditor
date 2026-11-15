@@ -204,3 +204,8 @@ Repository format-check with exact clang-format 19 passes. Library tests retain 
 failure (841 passes); slice tests retain their two baseline failures (266 passes). Lint retains only
 the two unrelated UI typography violations at `acme_presenter.hpp:28` and
 `slice_view_presenter.hpp:46`; none of those files changed.
+
+The subsequent [mesh identity package](vql-mesh-result-identity-plan.md) resolves the recorded
+occurrence-link defect and restores this route's duplicate assertions, retaining the distinct-value
+case separately. Its versioned graph decoder and publication-ownership checks are independently
+validated; the historical signature counts above remain scoped to this stage.

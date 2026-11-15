@@ -17,6 +17,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
@@ -149,20 +150,14 @@ TEST(VQLMutationGuardRoutesTest,
   const auto meshResult =
       mesh::evaluate(mesh::Frontend::Vquery, kUpdateSource, budget);
   ASSERT_TRUE(meshResult) << meshResult.error();
-  auto &meshArena = meshResult->context->arena;
-  std::optional<CellRef> items;
-  std::optional<CellRef> value;
-  for (const auto &cell : meshArena.cells()) {
-    if (meshArena.textOf(cell.birthOp) == "d.mesh.items") items = cell.birthOp;
-    if (meshArena.textOf(cell.birthOp) == "d.mesh.value") value = cell.birthOp;
-  }
-  ASSERT_TRUE(items);
-  ASSERT_TRUE(value);
-  const auto record =
-      meshArena.linked(meshResult->root, *items, DimVector::POS);
-  ASSERT_TRUE(record);
-  const auto output = meshArena.linked(*record, *value, DimVector::POS);
-  ASSERT_TRUE(output);
+  auto &meshArena    = meshResult->context->arena;
+  const auto decoded = zigzag::vortex::mesh::readResultCells(*meshResult);
+
+  ASSERT_TRUE(decoded) << decoded.error();
+
+  ASSERT_EQ(decoded->size(), 1U);
+
+  const auto output = std::optional<zigzag::CellRef>{decoded->front()};
   EXPECT_EQ(meshArena.asInt64(*output), 7);
 
   const auto meshRejected =
@@ -174,24 +169,11 @@ TEST(VQLMutationGuardRoutesTest,
   const auto meshRecovered =
       mesh::evaluate(mesh::Frontend::Vquery, kUpdateSource, budget);
   ASSERT_TRUE(meshRecovered) << meshRecovered.error();
-  auto &recoveredArena = meshRecovered->context->arena;
-  std::optional<CellRef> recoveredItems;
-  std::optional<CellRef> recoveredValue;
-  for (const auto &cell : recoveredArena.cells()) {
-    if (recoveredArena.textOf(cell.birthOp) == "d.mesh.items")
-      recoveredItems = cell.birthOp;
-    if (recoveredArena.textOf(cell.birthOp) == "d.mesh.value")
-      recoveredValue = cell.birthOp;
-  }
-  ASSERT_TRUE(recoveredItems);
-  ASSERT_TRUE(recoveredValue);
-  const auto recoveredRecord = recoveredArena.linked(
-      meshRecovered->root, *recoveredItems, DimVector::POS);
-  ASSERT_TRUE(recoveredRecord);
-  const auto recoveredOutput =
-      recoveredArena.linked(*recoveredRecord, *recoveredValue, DimVector::POS);
-  ASSERT_TRUE(recoveredOutput);
-  EXPECT_EQ(recoveredArena.asInt64(*recoveredOutput), 7);
+  auto &recoveredArena        = meshRecovered->context->arena;
+  const auto recoveredOutputs = mesh::readResultCells(*meshRecovered);
+  ASSERT_TRUE(recoveredOutputs) << recoveredOutputs.error();
+  ASSERT_EQ(recoveredOutputs->size(), 1U);
+  EXPECT_EQ(recoveredArena.asInt64(recoveredOutputs->front()), 7);
 }
 
 } // namespace

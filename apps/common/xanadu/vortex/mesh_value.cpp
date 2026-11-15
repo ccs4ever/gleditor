@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <unordered_set>
 
 #include <blake3.h>
 
@@ -80,6 +81,87 @@ std::expected<void, std::string> check(const PublishedValue &value,
           limits.payloadBytes - std::min(payload, limits.payloadBytes))
         return std::unexpected("mesh value: payload budget exceeded");
       payload += segment.length;
+    }
+  }
+  return {};
+}
+
+std::expected<void, std::string>
+checkCrossStoreBaseIdentity(const xanadu::Store &destination,
+                            const ArenaManifold &arena, const CellRef root,
+                            const ValueLimits limits) {
+  const auto *base = arena.base();
+  if (base == nullptr || base->store() == &destination ||
+      !arena.contains(root) || arena.isProvenanceCell(root)) {
+    return {};
+  }
+
+  std::vector<CellRef> frontier;
+  std::unordered_set<CellRef> seen;
+  const auto enqueue = [&](const CellRef ref) {
+    if (ref == zigzag::noCell || !arena.contains(ref) ||
+        arena.isProvenanceCell(ref) || seen.contains(ref)) {
+      return true;
+    }
+    if (seen.size() >= limits.operations) return false;
+    arena.consumeWork();
+    seen.insert(ref);
+    frontier.push_back(ref);
+    return true;
+  };
+  const auto hasDdimsLabel = [&](const CellRef ref) {
+    constexpr std::uint64_t labelBytes = 6;
+    std::uint64_t length               = 0;
+    for (const auto &span : arena.contentOf(ref)) {
+      arena.consumeWork(); // Charge the span header, including empty spans.
+      if (span.length > labelBytes - length) return false;
+      for (std::uint64_t i = 0; i < span.length; ++i) {
+        arena.consumeWork(); // textOf() below can read at most six bytes.
+      }
+      length += span.length;
+    }
+    return length == labelBytes && arena.textOf(ref) == "d.dims";
+  };
+
+  if (!enqueue(root)) {
+    return std::unexpected(
+        "mesh value: cross-store base identity preflight budget exceeded");
+  }
+  for (std::size_t i = 0; i < frontier.size(); ++i) {
+    const CellRef current = frontier[i];
+    // A proxy already carries an explicit foreign identity. Its store-ref
+    // filing edges are not part of the promoted answer graph.
+    if (arena.isProxy(current)) continue;
+    if (!zigzag::isEphemeral(current)) {
+      return std::unexpected(
+          "mesh value: cross-store publication cannot preserve persistent "
+          "base-cell identity");
+    }
+    if (arena.valueKindOf(current) == xanadu::ValueKind::OpHandle) {
+      if (const auto target = arena.handleTarget(current); target) {
+        // An unmarked OpHandle may name a raw operation index which is not a
+        // cell in the base manifold. Still refuse it here: the destination
+        // could have a different operation at that same numeric index.
+        if (!zigzag::isEphemeral(*target) && !arena.isProxy(*target)) {
+          return std::unexpected(
+              "mesh value: cross-store publication cannot preserve "
+              "persistent base-cell identity");
+        }
+        if (!enqueue(*target)) {
+          return std::unexpected(
+              "mesh value: cross-store base identity preflight budget "
+              "exceeded");
+        }
+      }
+    }
+    for (const auto &edge : arena.dimensionsOf(current)) {
+      arena.consumeWork();
+      // Match promote()'s exclusion without materializing an unbounded label.
+      if (hasDdimsLabel(edge.dim)) continue;
+      if (!enqueue(edge.dim) || !enqueue(edge.pos) || !enqueue(edge.neg)) {
+        return std::unexpected(
+            "mesh value: cross-store base identity preflight budget exceeded");
+      }
     }
   }
   return {};
@@ -165,6 +247,10 @@ static std::expected<ValueSeed, std::string> publishValueImpl(
     return std::unexpected(
         "mesh value: signed provenance and seed directory required");
   try {
+    if (auto identity = checkCrossStoreBaseIdentity(store, arena, root, limits);
+        !identity) {
+      return std::unexpected(identity.error());
+    }
     const auto promoted =
         promote(store, parent, arena, root, {limits.operations});
     if (!promoted || promoted->cells.empty())

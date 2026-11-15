@@ -16,6 +16,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/execution.hpp"
@@ -418,20 +419,11 @@ TEST(VQLRuntimeCallableFramesTest,
                                       .maxSolutions   = 16,
                                       .maxOutputBytes = 1024 * 1024});
   ASSERT_TRUE(meshed) << meshed.error();
-  auto &arena = meshed->context->arena;
-  std::optional<CellRef> items;
-  std::optional<CellRef> value;
-  for (const auto &cell : arena.cells()) {
-    if (arena.textOf(cell.birthOp) == "d.mesh.items") items = cell.birthOp;
-    if (arena.textOf(cell.birthOp) == "d.mesh.value") value = cell.birthOp;
-  }
-  ASSERT_TRUE(items);
-  ASSERT_TRUE(value);
-  const auto record = arena.linked(meshed->root, *items, DimVector::POS);
-  ASSERT_TRUE(record);
-  const auto output = arena.linked(*record, *value, DimVector::POS);
-  ASSERT_TRUE(output);
-  EXPECT_EQ(arena.asInt64(*output),
+  auto &arena        = meshed->context->arena;
+  const auto outputs = zigzag::vortex::mesh::readResultCells(*meshed);
+  ASSERT_TRUE(outputs) << outputs.error();
+  ASSERT_EQ(outputs->size(), 1U);
+  EXPECT_EQ(arena.asInt64(outputs->front()),
             std::optional<std::int64_t>{INT64_C(9007199254740994)});
 }
 

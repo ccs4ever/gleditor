@@ -20,6 +20,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
@@ -556,20 +557,11 @@ TEST(VQLAdditiveVMTest, HostMeshAndSealedVortexRoutesExecuteNativeAdd) {
        .maxSolutions   = 16,
        .maxOutputBytes = 1024 * 1024});
   ASSERT_TRUE(meshResult) << meshResult.error();
-  auto &arena = meshResult->context->arena;
-  std::optional<CellRef> items;
-  std::optional<CellRef> value;
-  for (const auto &cell : arena.cells()) {
-    if (arena.textOf(cell.birthOp) == "d.mesh.items") items = cell.birthOp;
-    if (arena.textOf(cell.birthOp) == "d.mesh.value") value = cell.birthOp;
-  }
-  ASSERT_TRUE(items);
-  ASSERT_TRUE(value);
-  const auto record = arena.linked(meshResult->root, *items, DimVector::POS);
-  ASSERT_TRUE(record);
-  const auto output = arena.linked(*record, *value, DimVector::POS);
-  ASSERT_TRUE(output);
-  EXPECT_EQ(arena.asInt64(*output), 42);
+  auto &arena        = meshResult->context->arena;
+  const auto outputs = zigzag::vortex::mesh::readResultCells(*meshResult);
+  ASSERT_TRUE(outputs) << outputs.error();
+  ASSERT_EQ(outputs->size(), 1U);
+  EXPECT_EQ(arena.asInt64(outputs->front()), 42);
 
   namespace mesh = zigzag::vortex::mesh;
   mesh::VortexProgram program{
@@ -590,24 +582,11 @@ TEST(VQLAdditiveVMTest, HostMeshAndSealedVortexRoutesExecuteNativeAdd) {
                                         .maxSolutions   = 16,
                                         .maxOutputBytes = 1024 * 1024});
   ASSERT_TRUE(artifact) << artifact.error();
-  auto &artifactArena = artifact->context->arena;
-  std::optional<CellRef> artifactItems;
-  std::optional<CellRef> artifactValue;
-  for (const auto &cell : artifactArena.cells()) {
-    if (artifactArena.textOf(cell.birthOp) == "d.mesh.items")
-      artifactItems = cell.birthOp;
-    if (artifactArena.textOf(cell.birthOp) == "d.mesh.value")
-      artifactValue = cell.birthOp;
-  }
-  ASSERT_TRUE(artifactItems);
-  ASSERT_TRUE(artifactValue);
-  const auto artifactRecord =
-      artifactArena.linked(artifact->root, *artifactItems, DimVector::POS);
-  ASSERT_TRUE(artifactRecord);
-  const auto artifactOutput =
-      artifactArena.linked(*artifactRecord, *artifactValue, DimVector::POS);
-  ASSERT_TRUE(artifactOutput);
-  EXPECT_EQ(artifactArena.asInt64(*artifactOutput), INT64_MAX);
+  auto &artifactArena        = artifact->context->arena;
+  const auto artifactOutputs = mesh::readResultCells(*artifact);
+  ASSERT_TRUE(artifactOutputs) << artifactOutputs.error();
+  ASSERT_EQ(artifactOutputs->size(), 1U);
+  EXPECT_EQ(artifactArena.asInt64(artifactOutputs->front()), INT64_MAX);
 }
 
 } // namespace

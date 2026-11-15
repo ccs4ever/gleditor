@@ -8,6 +8,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/mesh_host.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "identity_fixture.hpp"
 
 namespace zigzag::vortex::mesh {
@@ -568,16 +569,10 @@ TEST(MeshHostSocketTest,
   const auto graph =
       result.rebuildManifold(finished->merged.front().promoted.version);
   const auto rootCell = finished->merged.front().promoted.cells.front();
-  const auto along    = [&](CellRef from, std::string_view name) {
-    for (const auto &edge : graph.dimensionsOf(from))
-      if (graph.textOf(edge.dim, result) == name) return edge.pos;
-    return zigzag::noCell;
-  };
-  const auto record = along(rootCell, "d.mesh.items");
-  ASSERT_NE(record, zigzag::noCell);
-  const auto value = along(record, "d.mesh.value");
-  ASSERT_NE(value, zigzag::noCell);
-  EXPECT_EQ(graph.asInt64(value), 3);
+  const auto values   = readResultCells(graph, rootCell, result);
+  ASSERT_TRUE(values) << values.error();
+  ASSERT_EQ(values->size(), 1U);
+  EXPECT_EQ(graph.asInt64(values->front()), 3);
   EXPECT_EQ(finished->verifiedWorkers, 1U);
 }
 

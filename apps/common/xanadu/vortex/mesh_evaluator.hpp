@@ -79,8 +79,10 @@ struct EvaluatedValue {
 
 /// Evaluate immutable source in a private arena. The snapshot and its reader
 /// must outlive the returned context. This entry point never performs IO.
-/// Results use d.mesh.items for ordered records and d.mesh.value for each
-/// record's value. VPL axes retain dimension, direction and extent metadata.
+/// Results use mesh:result/v2: d.mesh.count is the Int64 item count and
+/// d.mesh.items orders the records. Each d.mesh.value link targets a fresh
+/// typed occurrence wrapper; readResultCells decodes the root. VPL axes retain
+/// dimension, direction and extent metadata.
 [[nodiscard]] std::expected<EvaluatedValue, std::string>
 evaluate(Frontend frontend, std::string_view source, EvaluationBudget budget,
          const Manifold *snapshot         = nullptr,

@@ -14,6 +14,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/execution.hpp"
@@ -213,19 +214,14 @@ TEST(VQLRecursiveFrameTest, MeshQueryRouteExecutesClosedFrames) {
        .maxSolutions   = 16,
        .maxOutputBytes = 1024 * 1024});
   ASSERT_TRUE(result) << result.error();
-  auto &arena = result->context->arena;
-  std::optional<zigzag::CellRef> items;
-  std::optional<zigzag::CellRef> value;
-  for (const auto &cell : arena.cells()) {
-    if (arena.textOf(cell.birthOp) == "d.mesh.items") items = cell.birthOp;
-    if (arena.textOf(cell.birthOp) == "d.mesh.value") value = cell.birthOp;
-  }
-  ASSERT_TRUE(items);
-  ASSERT_TRUE(value);
-  const auto record = arena.linked(result->root, *items, DimVector::POS);
-  ASSERT_TRUE(record);
-  const auto output = arena.linked(*record, *value, DimVector::POS);
-  ASSERT_TRUE(output);
+  auto &arena        = result->context->arena;
+  const auto decoded = zigzag::vortex::mesh::readResultCells(*result);
+
+  ASSERT_TRUE(decoded) << decoded.error();
+
+  ASSERT_EQ(decoded->size(), 1U);
+
+  const auto output = std::optional<zigzag::CellRef>{decoded->front()};
   EXPECT_EQ(arena.asInt64(*output), std::optional<std::int64_t>{7});
 }
 

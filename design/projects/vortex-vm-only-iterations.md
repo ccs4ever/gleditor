@@ -2207,3 +2207,13 @@ baseline failures. Independent Luna architecture, senior and resource gates acce
 This does not close §4.12. Static callable defaults/captures, decorated forms and lifecycle, route
 and measurement gates remain. Route checks expose an existing duplicate mesh-result reciprocal-link
 defect; the signature plan records it explicitly for the next route package.
+
+## Portable mesh result identity and ownership
+
+The [mesh identity package](vql-mesh-result-identity-plan.md) replaces reciprocal many-to-one value
+links with unique typed occurrence references and an explicit item count. It covers nested shared
+values, a bounded common decoder, signed publication/import/reload, and no-write ownership checks
+for ambiguous cross-Store base references. Fifty focused tests pass; the final engine run retains
+exactly the 32 baseline failures, with 4,408 passes and 28 skips (12 disabled). The broad language
+and mesh matrix retains 21 baseline failures, with 1,884 passes and two skips. No failing name is
+new. Architecture, senior and resource gates accept this bounded C8 slice; §4.12 remains incomplete.

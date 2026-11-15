@@ -23,6 +23,19 @@ The store belongs to the requester and uses the configured requester permascroll
 out requests exit nonzero with a reason. Polling and network preparation run on the host's owner
 thread; command-line waiting does not run on a graphical application's render thread.
 
+## Result graph schema
+
+Evaluator answers use `mesh:result/v2` roots with a typed `d.mesh.count` and an ordered
+`d.mesh.items` rank. Each semantic `d.mesh.value` field points to a unique typed occurrence wrapper;
+its marked cell relocation resolves the canonical value. Repeated values retain separate result
+positions and one shared target. The shared `mesh::readResultCells` API checks the version, count,
+reciprocal structure and metadata budgets; nested fields use the one-level occurrence reader.
+Generic publication and checkpoint envelopes remain unchanged because they carry arbitrary graphs.
+
+A based answer containing raw persistent references must be published into its owning Store.
+Cross-Store publication accepts fresh results and established explicit foreign identities, and
+refuses ambiguous local reference numbers before Store effects.
+
 ## Deployment configuration
 
 The configuration is a versioned bencode dictionary, limited to 64 KiB. File paths are relative to

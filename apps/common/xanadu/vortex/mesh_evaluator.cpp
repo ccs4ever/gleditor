@@ -588,18 +588,50 @@ CellRef scalar(ArenaManifold &arena, const CellValue &value) {
 
 struct ResultBuilder {
   ArenaManifold &arena;
+  CellRef root;
   DimRef items{arena.makeCell("d.mesh.items")};
   DimRef value{arena.makeCell("d.mesh.value")};
+  DimRef count{arena.makeCell("d.mesh.count")};
+  DimRef relocation{arena.makeCell("d.mesh.relocation")};
   DimRef arguments{arena.makeCell("d.mesh.arguments")};
   DimRef next{arena.makeCell("d.mesh.next")};
+  std::size_t itemCount{0};
 
   void link(CellRef from, DimRef dim, CellRef to) {
     expectWritten(arena.link(from, dim, DimVector::POS, to));
   }
+  void linkValue(CellRef from, CellRef target) {
+    if (!arena.contains(target))
+      throw std::runtime_error("Result value target is absent");
+    arena.consumeWork();
+    const auto wrapper = arena.makeCell();
+    arena.consumeWork();
+    const auto marker = arena.makeCell("cell");
+    arena.consumeWork();
+    expectWritten(
+        arena.setValueBits(wrapper, xanadu::ValueKind::OpHandle, target));
+    link(wrapper, relocation, marker);
+    link(from, value, wrapper);
+  }
   void append(CellRef &tail, CellRef cell) {
+    if (itemCount >=
+        static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+      throw std::runtime_error("Result item count is not representable");
+    appendToRank(tail, cell);
+    ++itemCount;
+  }
+  void appendNested(CellRef &tail, CellRef cell) { appendToRank(tail, cell); }
+  void finish() {
+    const auto countCell =
+        arena.makeScalarCell(static_cast<std::int64_t>(itemCount));
+    link(root, count, countCell);
+  }
+
+private:
+  void appendToRank(CellRef &tail, CellRef cell) {
     auto record = arena.makeCell();
     link(tail, items, record);
-    link(record, value, cell);
+    linkValue(record, cell);
     tail = record;
   }
 };
@@ -829,7 +861,7 @@ std::optional<CellRef> vplCell(ResultBuilder &builder, const vpl::VplView &view,
     auto nested   = arena.makeCell("vpl:view");
     builder.link(box, enclosed, nested);
     auto value = vplCell(builder, *view.enclosedView(), nested, depth + 1);
-    if (value) builder.link(nested, builder.value, *value);
+    if (value) builder.linkValue(nested, *value);
     return box;
   }
   // The wire carries an origin, directions and extents and no reversed flag,
@@ -913,7 +945,7 @@ CellRef materializeLogic(ResultBuilder &builder, const LogicValue &v) {
   for (const auto &arg : v.arguments) {
     auto record = builder.arena.makeCell();
     builder.link(tail, builder.arguments, record);
-    builder.link(record, builder.value, materializeLogic(builder, arg));
+    builder.linkValue(record, materializeLogic(builder, arg));
     tail = record;
   }
   return root;
@@ -955,15 +987,15 @@ CellRef materializeLace(ResultBuilder &builder, vlace::Compiler &compiler,
               std::numeric_limits<CellRef>::max() ||
           !builder.arena.contains(static_cast<CellRef>((*ref)->i)))
         throw std::runtime_error("Invalid Vlace cell capability in result");
-      builder.link(root, builder.value, static_cast<CellRef>((*ref)->i));
+      builder.linkValue(root, static_cast<CellRef>((*ref)->i));
       return root;
     }
     CellRef tail = root;
     for (const auto &arg : v->args) {
       auto record = builder.arena.makeCell();
       builder.link(tail, builder.arguments, record);
-      builder.link(record, builder.value,
-                   materializeLace(builder, compiler, arg, seen, depth + 1));
+      builder.linkValue(
+          record, materializeLace(builder, compiler, arg, seen, depth + 1));
       tail = record;
     }
     return root;
@@ -1011,8 +1043,8 @@ evaluate(Frontend frontend, std::string_view source, EvaluationBudget budget,
           "Evaluation cell budget is smaller than runtime genesis");
     arena.setExecutionLimits(static_cast<std::uint32_t>(budget.maxCells),
                              budget.maxCycles, budget.maxOutputBytes);
-    ResultBuilder builder{arena};
-    auto root    = arena.makeCell("mesh:result");
+    auto root = arena.makeCell("mesh:result/v2");
+    ResultBuilder builder{arena, root};
     CellRef tail = root;
     switch (frontend) {
     case Frontend::Vpl: {
@@ -1078,9 +1110,8 @@ evaluate(Frontend frontend, std::string_view source, EvaluationBudget budget,
         CellRef bindingTail = solution;
         for (const auto &binding : row) {
           auto record = arena.makeCell(binding.name);
-          builder.append(bindingTail, record);
-          builder.link(record, builder.value,
-                       materializeLogic(builder, binding.value));
+          builder.appendNested(bindingTail, record);
+          builder.linkValue(record, materializeLogic(builder, binding.value));
         }
         builder.append(tail, solution);
       }
@@ -1108,6 +1139,7 @@ evaluate(Frontend frontend, std::string_view source, EvaluationBudget budget,
       break;
     }
     }
+    builder.finish();
     // Count the complete graph, including base spans and dimension labels,
     // before exposing an answer. Scratch limits alone do not cover quotations.
     std::unordered_set<CellRef> visited;

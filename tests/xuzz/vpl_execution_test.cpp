@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
@@ -135,28 +136,21 @@ TEST(VPLExecutionTest, MeshRunsCompiledVectorAndRetainsItsRank) {
                                    .maxSolutions   = 16,
                                    .maxOutputBytes = 1024 * 1024});
   ASSERT_TRUE(result) << result.error();
-  auto &arena = result->context->arena;
-  const auto findDimension =
-      [&](std::string_view name) -> std::optional<zigzag::DimRef> {
-    for (const auto &cell : arena.cells())
-      if (arena.textOf(cell.birthOp) == name) return cell.birthOp;
-    return std::nullopt;
-  };
-  const auto items = findDimension("d.mesh.items");
-  const auto value = findDimension("d.mesh.value");
-  ASSERT_TRUE(items);
-  ASSERT_TRUE(value);
-  const auto record =
-      arena.linked(result->root, *items, zigzag::DimVector::POS);
-  ASSERT_TRUE(record);
-  auto head = arena.linked(*record, *value, zigzag::DimVector::POS);
+  auto &arena        = result->context->arena;
+  const auto outputs = mesh::readResultCells(*result);
+  ASSERT_TRUE(outputs) << outputs.error();
+  ASSERT_EQ(outputs->size(), 1U);
+  auto head = outputs->front();
   for (std::int64_t expected = 1; expected <= 3; ++expected) {
-    ASSERT_TRUE(head);
-    EXPECT_EQ(arena.asInt64(*head), expected);
-    head = arena.linked(*head, result->context->core.dims().step,
-                        zigzag::DimVector::POS);
+    EXPECT_EQ(arena.asInt64(head), expected);
+    const auto next = arena.linked(head, result->context->core.dims().step,
+                                   zigzag::DimVector::POS);
+    if (expected < 3)
+      ASSERT_TRUE(next);
+    else
+      EXPECT_FALSE(next);
+    if (next) head = *next;
   }
-  EXPECT_FALSE(head);
 }
 
 TEST(VPLExecutionTest, RejectsVmBudgetExhaustionAndAllowsRetry) {

@@ -27,9 +27,10 @@ formals through portable descriptor/frame graphs. The signature regressions cove
 actual preparation, declaration-order defaults, omission versus explicit empty groups, per-group
 contracts and capture isolation, preflight refusals, frozen mutation guards and retained Groups
 ownership. Repeated cell identities survive native export/reload and host execution. Vquery SOURCE
-mesh executes named/rest calls with distinct outputs; repeated result identities expose an existing
-reciprocal-link packaging defect, recorded as open C8 work in the
-[signature package](projects/vql-closure-signatures-plan.md).
+mesh now preserves repeated identities through the common versioned occurrence schema and shared
+bounded reader. The [mesh identity package](projects/vql-mesh-result-identity-plan.md) covers nested
+sharing, signed publication/import, Store reload and no-write refusal of ambiguous cross-Store raw
+references. Final route/lifecycle parity remains open.
 
 The [stream-call regressions](projects/vql-stream-call-semantics-plan.md) also cover a bare initial
 call inside an empty inherited frame context, empty explicit paths without downstream effects, and

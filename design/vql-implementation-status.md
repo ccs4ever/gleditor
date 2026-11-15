@@ -1129,3 +1129,20 @@ lifecycle/route/measurement acceptance keep §4.12 and the overall specification
 
 Repository formatting passes with clang-format 19. Library and slice gates retain their existing
 one/two failures (841/266 passes), and lint retains the same two unrelated UI typography violations.
+
+## Portable mesh result occurrences and publication ownership
+
+The [mesh identity package](projects/vql-mesh-result-identity-plan.md) resolves repeated-result link
+loss across the common mesh producer. Versioned result roots carry a typed item count; every
+semantic value edge, including nested data, uses its own portable typed occurrence reference. A
+shared bounded decoder returns canonical values exactly once, preserving order and duplicates.
+Publication/import/reload retain exact canonical scalar kinds/bits after the evaluator is destroyed.
+Raw base references published into a different Store now refuse before effects, preventing local
+cell-number collisions; normal owning-Store workers and fresh-only results remain supported.
+
+Full build and 50 focused tests pass. The final engine run has 4,408 passes, the same 32 baseline
+failures and 28 skips, with 12 disabled probes; no failing name is new. The broad language/mesh
+matrix has 1,884 passes, 21 baseline failures and two skips. Thirteen new tests pass. Independent
+Luna architecture, senior and resource reviews accepted the implementation and safeguard. This is
+not a full-suite pass or §4.12 completion. Static callable, lifecycle, route and measurement gates
+remain open.

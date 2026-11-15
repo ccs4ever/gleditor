@@ -20,6 +20,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/compiler.hpp"
@@ -376,24 +377,15 @@ TEST(VQLLambdaGraphTest, HostAndMeshSourcePreserveIdentityOrderAndDuplicates) {
                                           .maxSolutions   = 16,
                                           .maxOutputBytes = 1024 * 1024});
   ASSERT_TRUE(meshResult) << meshResult.error();
-  auto &arena = meshResult->context->arena;
-  std::optional<CellRef> items;
-  std::optional<CellRef> value;
-  for (const auto &cell : arena.cells()) {
-    if (arena.textOf(cell.birthOp) == "d.mesh.items") items = cell.birthOp;
-    if (arena.textOf(cell.birthOp) == "d.mesh.value") value = cell.birthOp;
-  }
-  ASSERT_TRUE(items);
-  ASSERT_TRUE(value);
+  auto &arena        = meshResult->context->arena;
+  const auto outputs = mesh::readResultCells(*meshResult);
+  ASSERT_TRUE(outputs) << outputs.error();
   std::vector<std::int64_t> meshValues;
-  auto record = arena.linked(meshResult->root, *items, DimVector::POS);
-  while (record) {
-    const auto output = arena.linked(*record, *value, DimVector::POS);
-    ASSERT_TRUE(output);
-    const auto integer = arena.asInt64(*output);
+  meshValues.reserve(outputs->size());
+  for (const CellRef output : *outputs) {
+    const auto integer = arena.asInt64(output);
     ASSERT_TRUE(integer);
     meshValues.push_back(*integer);
-    record = arena.linked(*record, *items, DimVector::POS);
   }
   EXPECT_EQ(meshValues, expected);
 }

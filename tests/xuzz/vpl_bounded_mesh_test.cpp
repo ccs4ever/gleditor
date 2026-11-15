@@ -5,10 +5,12 @@
  */
 #include <gtest/gtest.h>
 
+#include <stdexcept>
 #include <vector>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 
 namespace zigzag::vortex::mesh {
 namespace {
@@ -23,9 +25,11 @@ CellRef along(const ArenaManifold &arena, CellRef root, std::string_view name) {
 // What a receiver does with the wire shape: start at the exported origin and
 // take `extent` steps along the axis in its exported direction.
 std::vector<std::int64_t> readBack(const EvaluatedValue &result) {
-  const auto &arena     = result.context->arena;
-  const auto record     = along(arena, result.root, "d.mesh.items");
-  auto cell             = along(arena, record, "d.mesh.value");
+  const auto &arena = result.context->arena;
+  const auto values = readResultCells(result);
+  if (!values) throw std::runtime_error(values.error());
+  if (values->empty()) return {};
+  auto cell             = values->front();
   const auto axis       = along(arena, result.root, "d.mesh.axes");
   const auto dim        = along(arena, axis, "d.mesh.axis");
   const auto dirCell    = along(arena, axis, "d.mesh.direction");

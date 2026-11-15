@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
 namespace {
@@ -208,19 +209,10 @@ TEST(VortexProbeLinkTest, SealedMeshArtifactRelocatesTheProbeDimension) {
                                      {100'000, 100'000, 16, 1'000'000});
   ASSERT_TRUE(result) << result.error();
   const auto &arena = result->context->arena;
-  const auto along =
-      [&](const CellRef cell,
-          const std::string_view name) -> std::optional<CellRef> {
-    for (const auto &edge : arena.dimensionsOf(cell))
-      if (arena.textOf(edge.dim) == name)
-        return arena.linked(cell, edge.dim, DimVector::POS);
-    return std::nullopt;
-  };
-  const auto record = along(result->root, "d.mesh.items");
-  ASSERT_TRUE(record);
-  const auto value = along(*record, "d.mesh.value");
-  ASSERT_TRUE(value);
-  EXPECT_EQ(arena.textOf(*value), "neighbor");
+  const auto values = zigzag::vortex::mesh::readResultCells(*result);
+  ASSERT_TRUE(values) << values.error();
+  ASSERT_EQ(values->size(), 1U);
+  EXPECT_EQ(arena.textOf(values->front()), "neighbor");
 }
 
 } // namespace

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 
 namespace {
@@ -177,19 +178,9 @@ TEST(VQLHostParityTest, ForContractsRunThroughEveryHostAndMeshRoute) {
                                    .maxSolutions   = 16,
                                    .maxOutputBytes = 1024 * 1024});
   ASSERT_TRUE(remote) << remote.error();
-  auto &arena = remote->context->arena;
-  std::optional<zigzag::DimRef> items, value;
-  for (const auto &cell : arena.cells()) {
-    if (arena.textOf(cell.birthOp) == "d.mesh.items") items = cell.birthOp;
-    if (arena.textOf(cell.birthOp) == "d.mesh.value") value = cell.birthOp;
-  }
-  ASSERT_TRUE(items);
-  ASSERT_TRUE(value);
-  const auto record =
-      arena.linked(remote->root, *items, zigzag::DimVector::POS);
-  ASSERT_TRUE(record);
-  const auto result = arena.linked(*record, *value, zigzag::DimVector::POS);
-  ASSERT_TRUE(result);
-  EXPECT_EQ(arena.textOf(*result), "7");
-  EXPECT_FALSE(arena.linked(*record, *items, zigzag::DimVector::POS));
+  auto &arena        = remote->context->arena;
+  const auto results = zigzag::vortex::mesh::readResultCells(*remote);
+  ASSERT_TRUE(results) << results.error();
+  ASSERT_EQ(results->size(), 1U);
+  EXPECT_EQ(arena.textOf(results->front()), "7");
 }

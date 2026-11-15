@@ -19,6 +19,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/compiler.hpp"
@@ -89,26 +90,15 @@ std::vector<std::int64_t> integerValues(const zigzag::ArenaManifold &arena,
 std::vector<std::int64_t>
 meshIntegerValues(const zigzag::vortex::mesh::EvaluatedValue &result) {
   const auto &arena = result.context->arena;
-  std::optional<zigzag::DimRef> items;
-  std::optional<zigzag::DimRef> value;
-  for (const auto &cell : arena.cells()) {
-    if (arena.textOf(cell.birthOp) == "d.mesh.items") items = cell.birthOp;
-    if (arena.textOf(cell.birthOp) == "d.mesh.value") value = cell.birthOp;
-  }
-  EXPECT_TRUE(items);
-  EXPECT_TRUE(value);
-  if (!items || !value) return {};
-
+  const auto cells  = zigzag::vortex::mesh::readResultCells(result);
+  EXPECT_TRUE(cells) << (cells ? "" : cells.error());
+  if (!cells) return {};
   std::vector<std::int64_t> values;
-  auto record = arena.linked(result.root, *items, DimVector::POS);
-  while (record) {
-    const auto cell = arena.linked(*record, *value, DimVector::POS);
-    EXPECT_TRUE(cell);
-    if (!cell) break;
-    const auto integer = arena.asInt64(*cell);
+  values.reserve(cells->size());
+  for (const auto cell : *cells) {
+    const auto integer = arena.asInt64(cell);
     EXPECT_TRUE(integer);
     if (integer) values.push_back(*integer);
-    record = arena.linked(*record, *items, DimVector::POS);
   }
   return values;
 }
@@ -316,17 +306,41 @@ TEST(VQLClosureSignatureRoutesTest,
                                        INT64_C(9007199254740993),
                                        INT64_C(9007199254740993)}));
 
+  namespace mesh    = zigzag::vortex::mesh;
+  const auto meshed = mesh::evaluate(mesh::Frontend::Vquery, namedRestSource,
+                                     {.maxCycles      = 100'000,
+                                      .maxCells       = 100'000,
+                                      .maxSolutions   = 16,
+                                      .maxOutputBytes = 1024 * 1024});
+  ASSERT_TRUE(meshed) << meshed.error();
+  const auto meshCells = mesh::readResultCells(*meshed);
+  ASSERT_TRUE(meshCells) << meshCells.error();
+  ASSERT_EQ(meshCells->size(), 3U);
+  EXPECT_EQ((*meshCells)[0], (*meshCells)[1]);
+  EXPECT_EQ((*meshCells)[1], (*meshCells)[2]);
+  for (const CellRef cell : *meshCells) {
+    EXPECT_EQ(meshed->context->arena.valueKindOf(cell),
+              xanadu::ValueKind::Int64);
+    EXPECT_EQ(meshed->context->arena.asInt64(cell), INT64_C(9007199254740993));
+  }
+  EXPECT_EQ(meshIntegerValues(*meshed),
+            (std::vector<std::int64_t>{INT64_C(9007199254740993),
+                                       INT64_C(9007199254740993),
+                                       INT64_C(9007199254740993)}));
+}
+
+TEST(VQLClosureSignatureRoutesTest, DistinctNamedRestMeshValuesKeepTheirOrder) {
   namespace mesh = zigzag::vortex::mesh;
-  const auto meshed =
+  const auto result =
       mesh::evaluate(mesh::Frontend::Vquery,
                      R"(let $f := \($head: Int, ...$rest: Int) $rest;
-                                        return $f(1, 9007199254740993, 8, rest: 9))",
+         return $f(1, 9007199254740993, 8, rest: 9))",
                      {.maxCycles      = 100'000,
                       .maxCells       = 100'000,
                       .maxSolutions   = 16,
                       .maxOutputBytes = 1024 * 1024});
-  ASSERT_TRUE(meshed) << meshed.error();
-  EXPECT_EQ(meshIntegerValues(*meshed),
+  ASSERT_TRUE(result) << result.error();
+  EXPECT_EQ(meshIntegerValues(*result),
             (std::vector<std::int64_t>{INT64_C(9007199254740993), 8, 9}));
 }
 
