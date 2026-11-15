@@ -130,10 +130,6 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
       if (fn.args.size() > 3) {
         throw std::invalid_argument("value() takes at most 3 arguments");
       }
-      if (!fn.isSliceRead && fn.args.empty()) {
-        throw std::invalid_argument(
-            "value() replacement requires at least 1 argument");
-      }
       auto validateIntArg = [](const ValueExpr &arg, const char *paramName) {
         if (const auto *lit = std::get_if<ScalarLiteral>(&arg.kind)) {
           if (std::holds_alternative<std::int64_t>(lit->value)) {

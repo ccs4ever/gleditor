@@ -25,9 +25,9 @@ std::vector<CellRef> VQLCompiler::compilePathMorphismStep(
         "this VQL path selector does not have Vortex graph lowering yet");
   }
 
-  const auto subjectCell = hasContext ? current : core_.home();
-  std::string dimName    = "d.content";
-  auto direction         = zigzag::DimVector::POS;
+  const auto subjectCell  = hasContext ? current : core_.home();
+  std::string dimName     = "d.content";
+  auto direction          = zigzag::DimVector::POS;
   const auto parseDimText = [&](std::string_view raw) {
     if (raw.starts_with('+')) {
       direction = zigzag::DimVector::POS;
@@ -49,9 +49,8 @@ std::vector<CellRef> VQLCompiler::compilePathMorphismStep(
     } else if (const auto *str =
                    std::get_if<std::string>(&morphism->subject.kind)) {
       parseDimText(*str);
-    } else if (const auto *p =
-                   std::get_if<std::shared_ptr<PathExpression>>(
-                       &morphism->subject.kind);
+    } else if (const auto *p = std::get_if<std::shared_ptr<PathExpression>>(
+                   &morphism->subject.kind);
                p && *p && !(*p)->steps.empty() &&
                std::holds_alternative<SignedDimensionStep>(
                    (*p)->steps[0].selector)) {

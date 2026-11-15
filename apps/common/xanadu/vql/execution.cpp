@@ -266,8 +266,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       vm_.abortScopedChoices(id);
       vm_.setCursorOpcode(id, std::nullopt);
     }};
-    const auto preRunTrailSize = coordinator_.arena().trailSize();
-    const auto execution       = vm_.run(cursor, options_.maxCycles);
+    const auto execution = vm_.run(cursor, options_.maxCycles);
     if (!execution.success) {
       const auto category =
           execution.contractViolation ==
@@ -301,7 +300,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
         }
       }
     }
-    const bool hasMutations = arena.trailSize() > preRunTrailSize ||
+    const bool hasMutations = arena.trailSize() > programMark.trailSize ||
                               arena.spaceCount() != programMark.spaceCount;
 
     if (hasMutations) {
@@ -663,13 +662,13 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       std::unordered_map<zigzag::CellRef, ViewCellRecord> nextViewCells;
       for (auto &[k, v] : dv.viewCells) {
         const auto newK = remap.contains(k) ? remap.at(k) : k;
-        auto newV        = v;
+        auto newV       = v;
         if (remap.contains(newV.source)) newV.source = remap.at(newV.source);
         if (newV.view) {
           std::unordered_map<zigzag::CellRef, zigzag::CellRef> newHandles;
           for (auto &[hk, hv] : newV.view->handles) {
-            const auto nhk   = remap.contains(hk) ? remap.at(hk) : hk;
-            const auto nhv   = remap.contains(hv) ? remap.at(hv) : hv;
+            const auto nhk  = remap.contains(hk) ? remap.at(hk) : hk;
+            const auto nhv  = remap.contains(hv) ? remap.at(hv) : hv;
             newHandles[nhk] = nhv;
           }
           newV.view->handles = std::move(newHandles);
@@ -680,22 +679,22 @@ QueryExecutor::executeVortex(const QueryExpression &query,
 
       std::unordered_map<zigzag::CellRef, zigzag::CellRef> nextOwnerViews;
       for (auto &[k, v] : dv.ownerViews) {
-        const auto newK = remap.contains(k) ? remap.at(k) : k;
-        const auto newV = remap.contains(v) ? remap.at(v) : v;
+        const auto newK      = remap.contains(k) ? remap.at(k) : k;
+        const auto newV      = remap.contains(v) ? remap.at(v) : v;
         nextOwnerViews[newK] = newV;
       }
       dv.ownerViews = std::move(nextOwnerViews);
 
       std::unordered_map<zigzag::CellRef, PutGetLensRecord> nextCellLenses;
       for (auto &[k, v] : dv.cellLenses) {
-        const auto newK = remap.contains(k) ? remap.at(k) : k;
+        const auto newK      = remap.contains(k) ? remap.at(k) : k;
         nextCellLenses[newK] = std::move(v);
       }
       dv.cellLenses = std::move(nextCellLenses);
 
       std::unordered_map<zigzag::CellRef, ShapeLiteral> nextShapeHandles;
       for (auto &[k, v] : dv.shapeHandles) {
-        const auto newK = remap.contains(k) ? remap.at(k) : k;
+        const auto newK        = remap.contains(k) ? remap.at(k) : k;
         nextShapeHandles[newK] = std::move(v);
       }
       dv.shapeHandles = std::move(nextShapeHandles);
