@@ -689,6 +689,15 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
                std::holds_alternative<FunctionInvocation>(
                    path.steps.front().selector))
         stream.push_back(ctxCell);
+      else if (!path.steps.empty() &&
+               std::holds_alternative<SignedDimensionStep>(
+                   path.steps.front().selector) &&
+               std::get<SignedDimensionStep>(path.steps.front().selector)
+                   .dimName.starts_with('$')) {
+        // Variable-led path (e.g. /$slice/## or /$p/@alice:+d.comment)
+      } else
+        throw std::invalid_argument(
+            "context-relative path requires a bound context");
     } else if (const auto start = compileAnchor(path.anchor)) {
       stream.push_back(*start);
     }
@@ -730,13 +739,15 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
   if (path.cloneTail && !stream.empty()) {
     stream = emitMap(stream, [&](CellRef master) {
       const CellRef group = beginMutationGroup("#CLONE_TAIL_GROUP");
+      CellRef prev        = master;
+      std::unordered_set<CellRef> seenClones{master};
       for (const auto &op : path.cloneTail->operands) {
         std::optional<CellRef> opCell;
         if (op.path) {
           opCell = compilePathExpression(*op.path, core_.home());
         } else if (op.bareCreate) {
           CellRef newOp = emitOp(OpcodeKind::New, "#CLONE_TAIL_NEW");
-          emitInput(newOp, master);
+          emitInput(newOp, prev);
           emitInputConstant(newOp,
                             static_cast<std::int64_t>(core_.dims().clone));
           emitInputConstant(newOp, static_cast<std::int64_t>(1));
@@ -763,12 +774,32 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
         }
 
         if (opCell) {
+          if (prev == *opCell) {
+            throw std::runtime_error("clone chain cannot link cell to itself");
+          }
+          if (!seenClones.insert(*opCell).second) {
+            throw std::runtime_error("clone chain cycle collision");
+          }
+          if (core_.arena().linked(*opCell, core_.dims().clone,
+                                   zigzag::DimVector::NEG) ||
+              core_.arena().linked(*opCell, core_.dims().clone,
+                                   zigzag::DimVector::POS)) {
+            throw std::runtime_error(
+                "clone rank collision: cell is already part of a clone rank");
+          }
+          if (core_.arena().linked(prev, core_.dims().clone,
+                                   zigzag::DimVector::POS)) {
+            throw std::runtime_error(
+                "clone rank collision: authority cell already has a clone "
+                "link");
+          }
           CellRef linkOp = emitOp(OpcodeKind::Link, "#CLONE_JOIN");
-          emitInput(linkOp, master);
+          emitInput(linkOp, prev);
           emitInputConstant(linkOp,
                             static_cast<std::int64_t>(core_.dims().clone));
           emitInputConstant(linkOp, static_cast<std::int64_t>(1));
           emitInput(linkOp, *opCell);
+          prev = *opCell;
         }
       }
       endMutationGroup(group, "#CLONE_TAIL_GROUP_END");
@@ -838,7 +869,9 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
       throw std::invalid_argument("literal cell anchor is invalid");
     }
     res = static_cast<CellRef>(anchor.cellId);
-    if (!core_.arena().contains(res)) return std::nullopt;
+    if (!core_.arena().contains(res)) {
+      throw std::invalid_argument("literal cell anchor is not in arena");
+    }
     break;
   case AnchorKind::Context:
     res = core_.home();
@@ -984,11 +1017,23 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
 
 std::optional<CellRef>
 VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef ctxCell) {
-  const auto lhs = comp.left ? compileValueExpr(*comp.left, ctxCell)
-                             : std::optional<CellRef>{core_.home()};
-  const auto rhs = comp.right ? compileValueExpr(*comp.right, ctxCell)
-                              : std::optional<CellRef>{core_.home()};
-  if (!lhs || !rhs) return std::nullopt;
+  std::vector<CellRef> leftCells;
+  if (comp.left) {
+    leftCells = compileArgument(*comp.left, ctxCell);
+  } else {
+    leftCells = {core_.home()};
+  }
+
+  std::vector<CellRef> rightCells;
+  if (comp.right) {
+    rightCells = compileArgument(*comp.right, ctxCell);
+  } else {
+    rightCells = {core_.home()};
+  }
+
+  if (leftCells.empty() || rightCells.empty()) {
+    return emitConstant(CellValue(false));
+  }
 
   // Versions form a tree, so text or numeric order would answer where history
   // cannot ("10" is after "9"; siblings "2a1" and "2b1" are unordered).
@@ -1018,30 +1063,34 @@ VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef ctxCell) {
     if (known == versionVars_.end()) return std::nullopt;
     return known->second;
   };
-  const auto leftVersion  = versionOf(comp.left.get(), *lhs);
-  const auto rightVersion = versionOf(comp.right.get(), *rhs);
-  if (leftVersion && rightVersion)
-    return emitConstant(CellValue(
-        compareVersionsCausally(comp.op, *leftVersion, *rightVersion)));
-  if (leftVersion || rightVersion) {
-    // The other side is neither a known version nor a compile-time constant
-    // (a run-time string, a function's result, a path): its text may or may
-    // not be a version, and comparing it as text would order versions wrongly.
-    // Refuse by name rather than answer in text order.
-    const auto *other = leftVersion ? comp.right.get() : comp.left.get();
-    const CellRef compiledOther = leftVersion ? *rhs : *lhs;
-    const CellRef otherCell =
-        boundCell(other, compiledOther).value_or(compiledOther);
-    if (other && !constantCells_.contains(otherCell)) {
-      constexpr std::array<std::string_view, 6> opNames{"=", "!=", "<",
-                                                        ">", "<=", ">="};
-      const auto opName = opNames[static_cast<std::size_t>(comp.op)];
-      throw QueryRefusal(
-          QueryErrorCategory::Unsupported,
-          "version comparison '" + std::string(opName) +
-              "' against a run-time " + valueFormName(*other) +
-              " is not lowered; compare against a version literal or a "
-              "constant");
+
+  if (leftCells.size() == 1 && rightCells.size() == 1) {
+    const auto leftVersion  = versionOf(comp.left.get(), leftCells.front());
+    const auto rightVersion = versionOf(comp.right.get(), rightCells.front());
+    if (leftVersion && rightVersion)
+      return emitConstant(CellValue(
+          compareVersionsCausally(comp.op, *leftVersion, *rightVersion)));
+    if (leftVersion || rightVersion) {
+      // The other side is neither a known version nor a compile-time constant
+      // (a run-time string, a function's result, a path): its text may or may
+      // not be a version, and comparing it as text would order versions
+      // wrongly. Refuse by name rather than answer in text order.
+      const auto *other = leftVersion ? comp.right.get() : comp.left.get();
+      const CellRef compiledOther =
+          leftVersion ? rightCells.front() : leftCells.front();
+      const CellRef otherCell =
+          boundCell(other, compiledOther).value_or(compiledOther);
+      if (other && !constantCells_.contains(otherCell)) {
+        constexpr std::array<std::string_view, 6> opNames{"=", "!=", "<",
+                                                          ">", "<=", ">="};
+        const auto opName = opNames[static_cast<std::size_t>(comp.op)];
+        throw QueryRefusal(
+            QueryErrorCategory::Unsupported,
+            "version comparison '" + std::string(opName) +
+                "' against a run-time " + valueFormName(*other) +
+                " is not lowered; compare against a version literal or a "
+                "constant");
+      }
     }
   }
 
@@ -1068,14 +1117,68 @@ VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef ctxCell) {
     break;
   }
 
-  CellRef op = emitOp(OpcodeKind::VqlCompare, "#VQL_COMPARE");
-  emitInput(op, emitConstant(CellValue(static_cast<std::int64_t>(comparison))));
-  emitInput(op, *lhs);
-  emitInput(op, *rhs);
+  if (leftCells.size() == 1 && rightCells.size() == 1 &&
+      !dynamicStreams_.contains(leftCells.front()) &&
+      !dynamicStreams_.contains(rightCells.front())) {
+    CellRef op = emitOp(OpcodeKind::VqlCompare, "#VQL_COMPARE");
+    emitInput(op,
+              emitConstant(CellValue(static_cast<std::int64_t>(comparison))));
+    emitInput(op, leftCells.front());
+    emitInput(op, rightCells.front());
 
-  CellRef outCell = core_.arena().makeCell();
-  emitOutput(op, outCell);
-  return outCell;
+    CellRef outCell = core_.arena().makeCell();
+    emitOutput(op, outCell);
+    return outCell;
+  }
+
+  const auto resultCell = core_.arena().makeCell();
+  const auto init       = emitOp(OpcodeKind::CopyCellRefs, "#COMPARE_INIT");
+  emitInput(init, emitConstant(CellValue(false)));
+  emitOutput(init, resultCell);
+
+  const auto matchEnd = mintOpcode(OpcodeKind::Nop, "#COMPARE_MATCH_END");
+
+  const auto beginLeft = emitOp(OpcodeKind::StreamBegin, "#LEFT_STREAM_BEGIN");
+  for (const auto input : leftCells) emitInput(beginLeft, input);
+  const auto leftIter = core_.arena().makeCell();
+  emitOutput(beginLeft, leftIter);
+
+  emitIteratorLoop(leftIter, [&](CellRef leftItem) {
+    const auto beginRight =
+        emitOp(OpcodeKind::StreamBegin, "#RIGHT_STREAM_BEGIN");
+    for (const auto input : rightCells) emitInput(beginRight, input);
+    const auto rightIter = core_.arena().makeCell();
+    emitOutput(beginRight, rightIter);
+
+    emitIteratorLoop(rightIter, [&](CellRef rightItem) {
+      CellRef cmpOp = emitOp(OpcodeKind::VqlCompare, "#VQL_COMPARE");
+      emitInput(cmpOp,
+                emitConstant(CellValue(static_cast<std::int64_t>(comparison))));
+      emitInput(cmpOp, leftItem);
+      emitInput(cmpOp, rightItem);
+      CellRef cmpOut = core_.arena().makeCell();
+      emitOutput(cmpOp, cmpOut);
+
+      const auto nextRight = mintOpcode(OpcodeKind::Nop, "#NEXT_RIGHT");
+      const auto branchNotMatched =
+          emitOp(OpcodeKind::BranchFalseCell, "#NOT_MATCHED");
+      emitInput(branchNotMatched, cmpOut);
+      emitInput(branchNotMatched, nextRight);
+
+      const auto copyTrue = emitOp(OpcodeKind::CopyCellRefs, "#COMPARE_TRUE");
+      emitInput(copyTrue, emitConstant(CellValue(true)));
+      emitOutput(copyTrue, resultCell);
+
+      const auto jumpEnd = emitOp(OpcodeKind::BranchFalseCell, "#JUMP_END");
+      emitInputConstant(jumpEnd, false);
+      emitInput(jumpEnd, matchEnd);
+
+      appendOpcode(nextRight);
+    });
+  });
+
+  appendOpcode(matchEnd);
+  return resultCell;
 }
 
 std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
@@ -1123,7 +1226,9 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
             throw QueryRefusal(isKnownUnloweredFunction(val->name)
                                    ? QueryErrorCategory::Unsupported
                                    : QueryErrorCategory::Unknown,
-                               "unknown compiled function: " + val->name);
+                               "unknown compiled function: " + val->name +
+                                   " with " + std::to_string(val->args.size()) +
+                                   " argument(s)");
           }
           requirePositionalArguments(*val);
           const auto results =

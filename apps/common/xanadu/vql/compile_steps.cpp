@@ -89,8 +89,6 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
         ((dimension && !dimension->dimName.starts_with('$') &&
           !dimension->creates.empty()) ||
          (function && function->name == "link" && function->args.size() >= 2));
-    const auto present =
-        userCall ? std::optional{emitStreamPresence(stream)} : std::nullopt;
     if (const auto *lambda =
             std::get_if<std::shared_ptr<PathLambda>>(&step.selector)) {
       if (!*lambda)
@@ -122,18 +120,22 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
           aliases.push_back(*bound->second);
         }
         const CellRef closureHandle = normalizeFrameStream(aliases);
-        nextStream = emitMap(stream, [&](const CellRef candidate) {
-          const CellRef applied =
-              normalizeFrameStream(std::span{&candidate, std::size_t{1}});
-          const CellRef apply =
-              emitOp(OpcodeKind::ApplyClosure, "#APPLY_CLOSURE " + name);
-          emitInput(apply, closureHandle);
-          emitInput(apply, applied);
-          const CellRef result = core_.arena().makeCell();
-          emitOutput(apply, result);
-          dynamicStreams_.insert(result);
-          return std::vector<CellRef>{result};
-        });
+        if (stream.empty()) {
+          nextStream = aliases;
+        } else {
+          nextStream = emitMap(stream, [&](const CellRef candidate) {
+            const CellRef applied =
+                normalizeFrameStream(std::span{&candidate, std::size_t{1}});
+            const CellRef apply =
+                emitOp(OpcodeKind::ApplyClosure, "#APPLY_CLOSURE " + name);
+            emitInput(apply, closureHandle);
+            emitInput(apply, applied);
+            const CellRef result = core_.arena().makeCell();
+            emitOutput(apply, result);
+            dynamicStreams_.insert(result);
+            return std::vector<CellRef>{result};
+          });
+        }
       } else {
         throw std::invalid_argument("unbound point-free functor '" +
                                     dimension->dimName + "'");
@@ -151,25 +153,6 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       });
       if (dimension && dimension->creates.empty())
         nextStream = emitMountFallback(*dimension, std::move(nextStream));
-    }
-    // User calls may produce a value without a flowing context. Preserve the
-    // direct evaluator's one context-free call when the input stream is empty.
-    if (userCall) {
-      const auto empty = mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL");
-      const auto end   = mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL_END");
-      const auto choose =
-          emitOp(OpcodeKind::BranchFalseCell, "#EMPTY_CALL_TEST");
-      emitInput(choose, *present);
-      emitInput(choose, empty);
-      const auto done = emitOp(OpcodeKind::BranchFalseCell, "#EMPTY_CALL_SKIP");
-      emitInputConstant(done, false);
-      emitInput(done, end);
-      appendOpcode(empty);
-      requirePositionalArguments(*function);
-      const auto fallback = compileCall(definitions_.at(function->name),
-                                        function->args, std::nullopt, true);
-      emitAppendStream(nextStream.front(), fallback);
-      appendOpcode(end);
     }
 
     if (step.derefMaster) {

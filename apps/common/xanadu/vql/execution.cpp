@@ -19,6 +19,7 @@
 #include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu::vql {
 namespace {
@@ -176,6 +177,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       [this, priorContractCoordinator] {
         vm_.setContractCoordinator(priorContractCoordinator);
       }};
+  const auto preCompileMark = coordinator_.core().arena().mark();
   try {
     // PROSE-HITS REGISTRATION SITE: the card that lowers `find` with
     // RelationNext registers a provider here that calls proseHits()
@@ -197,11 +199,15 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       // them would mint cells in the arena for nothing.
       const auto events = compiler.declareMounts(query, compilation);
       publishMounts(session_, events);
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().release(preCompileMark));
       return std::vector<zigzag::CellRef>{};
     }
     const auto result = compiler.compile(query, compilation);
     disassembly_      = result.disassembly;
     if (!result.success) {
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().release(preCompileMark));
       return std::unexpected(QueryExecutionError{
           .category = result.category.value_or(QueryErrorCategory::Unsupported),
           .message  = result.errorMessage,
@@ -209,6 +215,8 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     }
 
     if (!result.cursor || !result.terminalOpcode) {
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().release(preCompileMark));
       return std::unexpected(QueryExecutionError{
           .category = QueryExecutionError::Category::Compile,
           .message  = "compiled VQL has no executable activation metadata",
@@ -222,8 +230,17 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       vm_.abortScopedChoices(id);
       vm_.setCursorOpcode(id, std::nullopt);
     }};
+    const auto preRunTrailSize  = coordinator_.core().arena().trailSize();
+    const auto preRunCellCount  = coordinator_.core().arena().cellCount();
+    const auto preRunSpaceCount = coordinator_.core().arena().spaceCount();
+
     const auto execution = vm_.run(cursor, options_.maxCycles);
     if (!execution.success) {
+      vm_.abortScopedChoices(cursor);
+      vm_.setCursorOpcode(cursor, std::nullopt);
+      vm_.clearChoicePoints();
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().release(preCompileMark));
       const auto category =
           execution.contractViolation ==
                   zigzag::vortex::ContractViolationKind::Postcondition
@@ -264,13 +281,45 @@ QueryExecutor::executeVortex(const QueryExpression &query,
                                         std::move(functors));
       session_->publishUserDefs(query.defs);
     }
+    vm_.abortScopedChoices(cursor);
+    vm_.setCursorOpcode(cursor, std::nullopt);
+    vm_.clearChoicePoints();
+
+    const auto &arena = coordinator_.core().arena();
+    const bool noMutations =
+        arena.trailSize() == preRunTrailSize &&
+        arena.cellCount() == preRunCellCount &&
+        arena.spaceCount() == preRunSpaceCount &&
+        std::ranges::none_of(result.sessionBindings, [](const auto &binding) {
+          return binding.kind ==
+                 CompilationResult::SessionBinding::Kind::Stream;
+        });
+    const bool noNewResultCells =
+        std::ranges::all_of(cells, [&](zigzag::CellRef c) {
+          const auto dense = arena.denseOf(c);
+          return !dense.has_value() || *dense < preCompileMark.cellCount;
+        });
+
+    if (noMutations && noNewResultCells) {
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().release(preCompileMark));
+    } else {
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().discard(preCompileMark));
+    }
     return cells;
   } catch (const TypeContractError &error) {
+    vm_.clearChoicePoints();
+    zigzag::expectMarkOrder(
+        coordinator_.core().arena().release(preCompileMark));
     return std::unexpected(QueryExecutionError{
         .category = QueryExecutionError::Category::TypeContract,
         .message  = error.what(),
     });
   } catch (const std::exception &error) {
+    vm_.clearChoicePoints();
+    zigzag::expectMarkOrder(
+        coordinator_.core().arena().release(preCompileMark));
     return std::unexpected(runtimeError(error));
   }
 }

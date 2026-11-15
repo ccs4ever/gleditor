@@ -233,7 +233,9 @@ VQLCompiler::compileArgument(const ValueExpr &argument,
       throw QueryRefusal(isKnownUnloweredFunction(invocation.name)
                              ? QueryErrorCategory::Unsupported
                              : QueryErrorCategory::Unknown,
-                         "unknown compiled function: " + invocation.name);
+                         "unknown compiled function: " + invocation.name +
+                             " with " + std::to_string(invocation.args.size()) +
+                             " argument(s)");
     }
     requirePositionalArguments(**function);
     return compileCall(found->second, (*function)->args, context, false);
@@ -247,6 +249,13 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
                          const std::vector<ValueExpr> &arguments,
                          std::optional<CellRef> context, bool ufcs,
                          const bool entersActiveCallStack) {
+  const bool hasVariadic =
+      !definition.params.empty() && definition.params.back().isVariadic;
+  if (!hasVariadic && arguments.size() > definition.params.size()) {
+    throw std::invalid_argument("excess positional arguments for function: " +
+                                definition.name);
+  }
+
   std::vector<ClosedFunctorFormalKey> functorTemplates;
   std::vector<StaticFunctorProgram> staticFunctorPrograms;
   std::unordered_set<std::string> staticProgramCaptureNames;
@@ -606,6 +615,9 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
         cells = compileArgument(*parameter.defaultValue,
                                 ambientContext_.has_value() ? ambientContext_
                                                             : context);
+      }
+      if (cells.size() == 1 && dynamicStreams_.contains(cells.front())) {
+        cells = {emitFirstCell(cells.front())};
       }
     }
     std::optional<PreparedContractValidator> typePrepared;
