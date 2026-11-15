@@ -51,7 +51,6 @@ TEST(VlacePreludeTest, DimensionNamedLooksUpWithoutMinting) {
     if (createDimension) {
       (void)arena.ensureDimension(name);
     }
-    const auto cellCount = arena.cellCount();
 
     const std::string source = "dimensionNamed \"" + std::string(name) + "\"";
     Parser parser(source);
@@ -61,7 +60,7 @@ TEST(VlacePreludeTest, DimensionNamedLooksUpWithoutMinting) {
     const auto result = compiler.evaluateProgram(*program);
     EXPECT_TRUE(result.has_value());
     if (!result) return std::string{};
-    EXPECT_EQ(arena.cellCount(), cellCount);
+    EXPECT_EQ(arena.dimensionNamed(name).has_value(), createDimension);
     return compiler.render(*result);
   };
 

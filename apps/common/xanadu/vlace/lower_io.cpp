@@ -191,8 +191,10 @@ std::expected<ValuePtr, EvalError> runIoOnVm(Compiler &compiler,
           std::vector<Operand> argOps;
           argOps.reserve(curAction->args.size());
           for (const auto &arg : curAction->args) {
-            if (arg && arg->cell) {
-              argOps.emplace_back(*arg->cell);
+            auto forced = compiler.forceValue(arg);
+            if (!forced) return std::unexpected(forced.error());
+            if (*forced && (*forced)->cell) {
+              argOps.emplace_back(*(*forced)->cell);
             }
           }
           auto leaf = performEffectLeaf(runCtx, tag, argOps, {});
@@ -201,7 +203,9 @@ std::expected<ValuePtr, EvalError> runIoOnVm(Compiler &compiler,
                         "runIO: unknown IO node '" + tag + "'", {});
           }
           if (!*leaf) return std::unexpected(leaf->error());
-          auto rb = readbackCell(compiler, (*leaf)->cell);
+          auto ran = runBlock(ctx, ctx.swapBlock(Block{}), **leaf);
+          if (!ran) return std::unexpected(ran.error());
+          auto rb = readbackCell(compiler, ran->cell);
           if (!rb) return std::unexpected(rb.error());
           currentVal = *rb;
           curAction  = nullptr;
