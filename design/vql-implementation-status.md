@@ -1106,3 +1106,26 @@ returns `different`, `0` and recursive result `third`; AST-free Store reload, ho
 mesh routes passed. Independent Luna architecture, senior and resource gates accepted the bounded
 implementation and its root-marker/history refinements. Slice/library and lint retain their existing
 failures. §4.12 and the overall specification remain incomplete.
+
+## Runtime closure named and variadic signatures
+
+The [signature package](projects/vql-closure-signatures-plan.md) combines named actuals, final
+value-lambda rest formals, declaration-order lazy defaults and per-original-group contracts. A
+single portable closure frame uses private Groups ports and a constant-size graph loop rather than
+per-arity body variants. Required contract aliases are captured at creation; matching retains
+pre-match scope and excludes per-group captures. Check/Apply preflight names before actual effects
+and revalidate mutable metadata before entry. Int64/Double remain distinct.
+
+All 82 focused tests pass, including 28 added cases and two updated supported-syntax cases. Full
+build, real CLI, AST-free native reload, host and distinct-output Vquery SOURCE mesh pass. The full
+engine run retains the same 32 baseline failures and records one additional headless UI selection
+failure that passed alone; 4,394 tests passed and 28 skipped, with 12 disabled. The affected subset
+has 1,619 passes, 21 baseline failures and one opt-in skip. Independent Luna architecture, senior
+and resource gates accepted the bounded package. No full-suite or speedup claim follows.
+
+Repeated mesh result identities expose an unchanged reciprocal-link packaging defect, explicitly
+recorded as C8 work. Static AST-functor defaults/captures, decorated static forms and remaining
+lifecycle/route/measurement acceptance keep §4.12 and the overall specification incomplete.
+
+Repository formatting passes with clang-format 19. Library and slice gates retain their existing
+one/two failures (841/266 passes), and lint retains the same two unrelated UI typography violations.

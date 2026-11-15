@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/arena_savepoint.hpp"
 
 namespace zigzag::vortex {
 namespace {
@@ -23,6 +24,8 @@ bool VortexVM::streamStateOpcode(const OpcodeKind kind) const noexcept {
   case OpcodeKind::StreamReverseBegin:
   case OpcodeKind::RankBegin:
   case OpcodeKind::IteratorNext:
+  case OpcodeKind::GroupBegin:
+  case OpcodeKind::GroupNext:
   case OpcodeKind::PinHistorical:
     return true;
   default:
@@ -33,8 +36,10 @@ bool VortexVM::streamStateOpcode(const OpcodeKind kind) const noexcept {
 void VortexVM::clearTypedRegister(const CellRef slot) {
   streamSlots_.erase(slot);
   iteratorSlots_.erase(slot);
+  groupIteratorSlots_.erase(slot);
   streams_.erase(slot);
   iterators_.erase(slot);
+  groupIterators_.erase(slot);
 }
 
 void VortexVM::requireStreamCursor(const CellRef cursor) {
@@ -51,6 +56,8 @@ void VortexVM::requireStreamCursor(const CellRef cursor) {
     }
     streams_.clear();
     iterators_.clear();
+    groupIterators_.clear();
+    groupIteratorSlots_.clear();
   } else if (!owner && !choiceStack_.empty()) {
     const bool scopedOwner =
         hasScopedChoices() &&
@@ -79,6 +86,8 @@ std::vector<CellRef> VortexVM::resultCells(const CellRef slot) const {
 void VortexVM::forEachResultCell(
     const CellRef slot,
     gleditor::cpp26::function_ref<void(CellRef)> visitor) const {
+  if (isGroupsPort(slot))
+    throw std::runtime_error("private Groups port cannot be read as a cell");
   if (iteratorSlots_.contains(slot)) return;
   if (const auto found = streams_.find(slot); found != streams_.end()) {
     if (found->second)
@@ -100,11 +109,25 @@ ExecutionResult VortexVM::executeCellRefCopy(const OpcodeKind kind,
                                              std::vector<CellValue> &outputs) {
   const auto sourceSlots = inputsOf(opcode);
   const auto targetSlots = outputsOf(opcode);
+  const auto refuse      = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                                .failingClause = opcode,
+                                .errorMessage  = std::move(message)};
+  };
+  for (const CellRef target : targetSlots)
+    if (isGroupsPort(target))
+      return refuse("generic copy output cannot target a private Groups port");
   struct SourceSnapshot {
-    enum class Kind { Scalar, Stream, Iterator } kind{Kind::Scalar};
+    enum class Kind {
+      Scalar,
+      Stream,
+      Iterator,
+      GroupIterator
+    } kind{Kind::Scalar};
     std::optional<CellRef> scalar;
     std::shared_ptr<std::vector<CellRef>> stream;
     std::shared_ptr<IteratorState> iterator;
+    std::shared_ptr<GroupIteratorState> groupIterator;
   };
   std::vector<SourceSnapshot> sources;
   if (kind == OpcodeKind::CopyCellRefs) {
@@ -112,7 +135,15 @@ ExecutionResult VortexVM::executeCellRefCopy(const OpcodeKind kind,
     for (std::size_t index = 0; index < targetSlots.size(); ++index) {
       const CellRef source =
           index < sourceSlots.size() ? sourceSlots[index] : noCell;
-      if (streamSlots_.contains(source)) {
+      if (isGroupsPort(source))
+        return refuse("generic copy cannot read a private Groups port");
+      if (groupIteratorSlots_.contains(source)) {
+        const auto found = groupIterators_.find(source);
+        sources.push_back({.kind          = SourceSnapshot::Kind::GroupIterator,
+                           .groupIterator = found != groupIterators_.end()
+                                                ? found->second
+                                                : nullptr});
+      } else if (streamSlots_.contains(source)) {
         const auto found = streams_.find(source);
         sources.push_back(
             {.kind   = SourceSnapshot::Kind::Stream,
@@ -128,6 +159,10 @@ ExecutionResult VortexVM::executeCellRefCopy(const OpcodeKind kind,
         sources.push_back({.scalar = resultCell(source)});
       }
     }
+  } else {
+    for (const CellRef source : sourceSlots)
+      if (isGroupsPort(source))
+        return refuse("generic clear cannot read a private Groups port");
   }
   outputs.reserve(targetSlots.size());
   for (std::size_t index = 0; index < targetSlots.size(); ++index) {
@@ -137,6 +172,8 @@ ExecutionResult VortexVM::executeCellRefCopy(const OpcodeKind kind,
       if (streamSlots_.contains(target))
         streams_[target] = std::make_shared<std::vector<CellRef>>();
       if (iteratorSlots_.contains(target)) iterators_.erase(target);
+      if (groupIteratorSlots_.contains(target)) groupIterators_.erase(target);
+      groupIteratorSlots_.erase(target);
       outputs.emplace_back(static_cast<std::int64_t>(noCell));
       continue;
     }
@@ -145,18 +182,33 @@ ExecutionResult VortexVM::executeCellRefCopy(const OpcodeKind kind,
     if (source.kind == SourceSnapshot::Kind::Stream) {
       streamSlots_.insert(target);
       iteratorSlots_.erase(target);
+      groupIteratorSlots_.erase(target);
+      groupIterators_.erase(target);
       cellReferences_.erase(target);
       streams_.insert_or_assign(target, source.stream);
       iterators_.erase(target);
       outputs.emplace_back(static_cast<std::int64_t>(noCell));
+    } else if (source.kind == SourceSnapshot::Kind::GroupIterator) {
+      iteratorSlots_.insert(target);
+      groupIteratorSlots_.insert(target);
+      groupIterators_.erase(target);
+      if (source.groupIterator)
+        groupIterators_.insert_or_assign(target, source.groupIterator);
+      cellReferences_.erase(target);
+      streamSlots_.erase(target);
+      streams_.erase(target);
+      iterators_.erase(target);
+      outputs.emplace_back(static_cast<std::int64_t>(noCell));
     } else if (source.kind == SourceSnapshot::Kind::Iterator) {
       iteratorSlots_.insert(target);
-      streamSlots_.erase(target);
+      groupIteratorSlots_.erase(target);
+      groupIterators_.erase(target);
       cellReferences_.erase(target);
       if (source.iterator)
         iterators_.insert_or_assign(target, source.iterator);
       else
         iterators_.erase(target);
+      streamSlots_.erase(target);
       streams_.erase(target);
       outputs.emplace_back(static_cast<std::int64_t>(noCell));
     } else {
@@ -176,7 +228,8 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
     return invalidStreamOperation(
         "stream and iterator opcodes require a VM cursor");
   }
-  requireStreamCursor(*cursor);
+  if (kind != OpcodeKind::GroupBegin && kind != OpcodeKind::GroupNext)
+    requireStreamCursor(*cursor);
   const auto inputs = inputsOf(opcode);
   const auto slots  = outputsOf(opcode);
   if (slots.empty())
@@ -411,6 +464,148 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
     iteratorSlots_.erase(presentSlot);
     streams_.erase(presentSlot);
     iterators_.erase(presentSlot);
+    break;
+  }
+  case OpcodeKind::GroupBegin: {
+    if (inputs.size() != 1 || slots.size() != 1)
+      return invalidStreamOperation(
+          "GroupBegin expects one Groups port and one iterator output");
+    const CellRef source = inputs.front();
+    const CellRef target = slots.front();
+    if (target == source || isGroupsPort(target) ||
+        !core_.arena().contains(target) || getOpcodeKind(target))
+      return invalidStreamOperation(
+          "GroupBegin output must be a distinct public iterator slot");
+    const auto ownerFound = groupOwners_.find(source);
+    if (ownerFound == groupOwners_.end())
+      return invalidStreamOperation("GroupBegin input is not a Groups port");
+    const auto owner  = ownerFound->second.lock();
+    const auto frames = activationFrames_.find(*cursor);
+    if (!owner || frames == activationFrames_.end() || frames->second.empty() ||
+        frames->second.back() != owner)
+      return invalidStreamOperation(
+          "GroupBegin requires the Groups port of the top activation");
+    const auto payload = owner->groupsByBacking.find(source);
+    if (payload == owner->groupsByBacking.end() || !payload->second)
+      return invalidStreamOperation("GroupBegin Groups payload is unavailable");
+    try {
+      requireStreamCursor(*cursor);
+    } catch (const std::exception &error) {
+      return invalidStreamOperation(error.what());
+    }
+    auto state = std::make_shared<GroupIteratorState>(
+        owner, payload->second, owner->activationId, *cursor, source);
+    auto nextGroupIteratorSlots = groupIteratorSlots_;
+    auto nextIteratorSlots      = iteratorSlots_;
+    auto nextGroupIterators     = groupIterators_;
+    auto nextIterators          = iterators_;
+    auto nextStreamSlots        = streamSlots_;
+    auto nextStreams            = streams_;
+    auto nextReferences         = cellReferences_;
+    nextGroupIteratorSlots.insert(target);
+    nextIteratorSlots.insert(target);
+    nextGroupIterators[target] = std::move(state);
+    nextIterators.erase(target);
+    nextStreamSlots.erase(target);
+    nextStreams.erase(target);
+    nextReferences.erase(target);
+    groupIteratorSlots_.swap(nextGroupIteratorSlots);
+    iteratorSlots_.swap(nextIteratorSlots);
+    groupIterators_.swap(nextGroupIterators);
+    iterators_.swap(nextIterators);
+    streamSlots_.swap(nextStreamSlots);
+    streams_.swap(nextStreams);
+    cellReferences_.swap(nextReferences);
+    break;
+  }
+  case OpcodeKind::GroupNext: {
+    if (inputs.size() != 1 || slots.size() != 2)
+      return invalidStreamOperation(
+          "GroupNext expects one group iterator and stream/presence outputs");
+    const CellRef source         = inputs.front();
+    const CellRef streamOutput   = slots[0];
+    const CellRef presenceOutput = slots[1];
+    if (!groupIteratorSlots_.contains(source))
+      return invalidStreamOperation("GroupNext input is not a group iterator");
+    if (source == streamOutput || source == presenceOutput ||
+        streamOutput == presenceOutput || groupOwners_.contains(streamOutput) ||
+        groupOwners_.contains(presenceOutput))
+      return invalidStreamOperation(
+          "GroupNext requires distinct public output slots");
+    const auto iteratorFound = groupIterators_.find(source);
+    if (iteratorFound == groupIterators_.end() || !iteratorFound->second)
+      return invalidStreamOperation("GroupNext iterator is unavailable");
+    const auto &current = *iteratorFound->second;
+    const auto owner    = current.owner.lock();
+    const auto payload  = current.payload.lock();
+    const auto frames   = activationFrames_.find(*cursor);
+    if (!owner || !payload || current.cursor != *cursor ||
+        current.activationId != owner->activationId ||
+        frames == activationFrames_.end() || frames->second.empty() ||
+        frames->second.back() != owner)
+      return invalidStreamOperation(
+          "GroupNext iterator does not belong to the top activation");
+    const auto backing = owner->groupsByBacking.find(current.backingSlot);
+    if (backing == owner->groupsByBacking.end() || backing->second != payload)
+      return invalidStreamOperation("GroupNext Groups payload is unavailable");
+
+    auto nextState     = std::make_shared<GroupIteratorState>(current);
+    const bool present = nextState->index < payload->groups.size();
+    std::vector<CellRef> selected;
+    if (present) {
+      const auto &group = payload->groups[nextState->index];
+      for (const CellRef cell : group) {
+        core_.arena().consumeWork();
+        if (!core_.arena().contains(cell))
+          return invalidStreamOperation(
+              "GroupNext group contains a missing cell");
+      }
+      selected.reserve(group.size());
+      selected.insert(selected.end(), group.begin(), group.end());
+      ++nextState->index;
+    }
+    core_.arena().consumeWork();
+    if (!core_.arena().contains(streamOutput) ||
+        !core_.arena().contains(presenceOutput) ||
+        getOpcodeKind(streamOutput) || getOpcodeKind(presenceOutput))
+      return invalidStreamOperation("GroupNext output slot is invalid");
+
+    auto nextStreams            = streams_;
+    auto nextReferences         = cellReferences_;
+    auto nextIterators          = groupIterators_;
+    auto nextIteratorSlots      = iteratorSlots_;
+    auto nextGroupIteratorSlots = groupIteratorSlots_;
+    auto nextStreamSlots        = streamSlots_;
+    auto nextOrdinaryIterators  = iterators_;
+    try {
+      requireStreamCursor(*cursor);
+    } catch (const std::exception &error) {
+      return invalidStreamOperation(error.what());
+    }
+    nextIterators[source] = std::move(nextState);
+    nextStreams[streamOutput] =
+        std::make_shared<std::vector<CellRef>>(std::move(selected));
+    nextReferences.erase(streamOutput);
+    nextIteratorSlots.erase(streamOutput);
+    nextGroupIteratorSlots.erase(streamOutput);
+    nextOrdinaryIterators.erase(streamOutput);
+    nextStreamSlots.insert(streamOutput);
+    nextReferences.erase(presenceOutput);
+    nextStreams.erase(presenceOutput);
+    nextIteratorSlots.erase(presenceOutput);
+    nextGroupIteratorSlots.erase(presenceOutput);
+    nextOrdinaryIterators.erase(presenceOutput);
+    nextStreamSlots.erase(presenceOutput);
+    zigzag::ArenaSavepoint savepoint(core_.arena());
+    core_.writeValue(presenceOutput, 0, std::nullopt, CellValue{present});
+    streams_.swap(nextStreams);
+    cellReferences_.swap(nextReferences);
+    groupIterators_.swap(nextIterators);
+    iteratorSlots_.swap(nextIteratorSlots);
+    groupIteratorSlots_.swap(nextGroupIteratorSlots);
+    streamSlots_.swap(nextStreamSlots);
+    iterators_.swap(nextOrdinaryIterators);
+    savepoint.commit();
     break;
   }
   case OpcodeKind::PinHistorical: {

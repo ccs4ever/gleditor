@@ -2216,34 +2216,42 @@ explicit refusals. The rulings below describe the intended semantics.
   compiled inline graphs. Anonymous path-step lambdas with zero or one nonvariadic formal use the
   same inline call graphs for types, destructuring and expression/block bodies. Their lexical scope
   preserves native recursion of an enclosing eligible function; signatures validate before mapping
-  even on empty inputs. Lambda values with multiple fixed formals and lazy whole-formal defaults
-  compile to native closure frames. Named, explicit-dot and destructured formals support the
-  existing primitive, union/optional, Stream and structural contracts. Compatible scalar/path/call
-  and block bodies can create nested closures, including staged currying. Explicit `$f(a, b)` calls
-  keep caller context separate from positional actuals. Contextual `/$f` supplies the candidate as
-  hidden context and, when a formal exists, actual zero; remaining formals are omitted. Predicate
-  traversal retains its own candidate context. Supplied empty streams suppress defaults; omitted
-  formals run defaults lazily after earlier parameter matches and before binding the current formal.
-  Callee identity and excess arity are checked before actual-argument effects, then Apply
-  revalidates graph metadata. Free alias streams snapshot membership at creation, including order,
-  duplicates and empty streams; referenced contents stay shared. Scoped named-helper dependencies
-  are captured too, except aliases supplied by a formal or prior body-local binding. Field defaults
-  retain pre-match lexical scope, lazy owner-context graph execution and filtering. Unknown formal
-  types are refused by name after bounded cycle/depth analysis and before application. Applying a
-  stored value as `/$f` requires exactly one structural function handle, without numeric pointer or
-  scalar coercion. Runtime handles can be applied inside reusable named and value-lambda bodies,
-  including typed formals, local bindings, captured value-lambda aliases and recursive forwarding.
-  Static templates retain separate graph variants. Static predicate aliases resolve in
-  callee/application scope; named-definition capture timing and static functor lowering retain their
-  earlier rules. Named closure arguments, variadic value-lambda formals, static AST-functor
-  whole-formal defaults, captured static functor ABI and remaining decorated recursive static
-  functors remain deferred. AST visits are bounded across the query. A separate 1,000,000-unit
-  post-analysis capture expansion budget counts callsites and callee/capture-name bytes; it does not
-  cap the initial scope walk, repeated nested analysis or total compile CPU/heap use. Runtime
-  Cell/Stream bindings export through a versioned graph descriptor and native initialization,
-  including literal aliases, duplicate/empty streams and closed iterator type markers. Live
-  continuations remain outside that transport boundary. Session query publication and the CLI REPL
-  retain successful top-level bindings for subsequent VM compilations. See
+  even on empty inputs. Lambda values with multiple fixed formals, a final variadic formal, and lazy
+  whole-formal defaults compile to native closure frames. Named, explicit-dot and destructured
+  formals support the existing primitive, union/optional, Stream and structural contracts.
+  Compatible scalar/path/call and block bodies can create nested closures, including staged
+  currying. Explicit `$f(a, b)` calls keep caller context separate from actuals. Named actuals
+  address string-named formals; unknown names, duplicate labels, positional/named collisions and
+  positional-after-named refuse before argument effects. A named rest actual contributes one
+  original group after any positional rest groups. Actuals prepare once in source order, then
+  matching/defaults run in declaration order. Typed/destructured rest checks each original group
+  before concatenation and publishes no per-group captures. A failed group filters the invocation.
+  An omitted rest default runs once as one group; an explicit empty group suppresses it. Contextual
+  `/$f` supplies the candidate as hidden context and fixed formal zero, leaving later formals
+  omitted; a variadic-only signature instead receives one present rest group. Predicate traversal
+  retains its own candidate context. Supplied empty streams suppress defaults; omitted formals run
+  defaults lazily after earlier parameter matches and before binding the current formal. Callee
+  identity and excess arity are checked before actual-argument effects, then Apply revalidates graph
+  metadata. Free alias streams snapshot membership at creation, including order, duplicates and
+  empty streams; referenced contents stay shared. Scoped named-helper dependencies are captured too,
+  except aliases supplied by a formal or prior body-local binding. Required aliases in conditional
+  rest contracts and omitted-rest defaults are validated at closure creation, even when a later call
+  supplies no group; bound-empty remains distinct from missing. Field defaults retain pre-match
+  lexical scope, lazy owner-context graph execution and filtering. Unknown formal types are refused
+  by name after bounded cycle/depth analysis and before application. Applying a stored value as
+  `/$f` requires exactly one structural function handle, without numeric pointer or scalar coercion.
+  Runtime handles can be applied inside reusable named and value-lambda bodies, including typed
+  formals, local bindings, captured value-lambda aliases and recursive forwarding. Static templates
+  retain separate graph variants. Static predicate aliases resolve in callee/application scope;
+  named-definition capture timing and static functor lowering retain their earlier rules. Static
+  AST-functor whole-formal defaults, captured static functor ABI and remaining decorated recursive
+  static functors remain deferred. AST visits are bounded across the query. A separate
+  1,000,000-unit post-analysis capture expansion budget counts callsites and callee/capture-name
+  bytes; it does not cap the initial scope walk, repeated nested analysis or total compile CPU/heap
+  use. Runtime Cell/Stream bindings export through a versioned graph descriptor and native
+  initialization, including literal aliases, duplicate/empty streams and closed iterator type
+  markers. Live continuations remain outside that transport boundary. Session query publication and
+  the CLI REPL retain successful top-level bindings for subsequent VM compilations. See
   [iterations 42 and 50–53](projects/vortex-vm-only-iterations.md). Omitted parameter expressions
   compile after earlier parameter guards; explicit arguments capture caller bindings, including
   untyped functor step vectors. Decorated functor captures freeze their body across rebinding;

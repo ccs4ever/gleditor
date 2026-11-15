@@ -435,15 +435,14 @@ TEST(VQLRuntimeCallableFramesTest,
             std::optional<std::int64_t>{INT64_C(9007199254740994)});
 }
 
-TEST(VQLRuntimeCallableFramesTest,
-     VariadicValueLambdaSignaturesStillRefuseBeforeWriting) {
-  for (const auto source : {R"(return (\(...$xs) $xs))"}) {
-    Harness h;
-    const auto before   = h.arena.cellCount();
-    const auto compiled = h.compile(source);
-    EXPECT_FALSE(compiled.success) << source;
-    EXPECT_EQ(h.arena.cellCount(), before) << source;
-  }
+TEST(VQLRuntimeCallableFramesTest, VariadicValueLambdasExecuteOnVm) {
+  Harness h;
+  const auto result =
+      h.run(R"(let $f := \(...$xs: Int) $xs; return $f(1000, 2000))");
+  ASSERT_TRUE(result) << result.error().message;
+  ASSERT_EQ(result->size(), 2U);
+  EXPECT_EQ(h.arena.asInt64(result->at(0)), 1000);
+  EXPECT_EQ(h.arena.asInt64(result->at(1)), 2000);
 }
 
 TEST(VQLRuntimeCallableFramesTest, FixedAndDefaultedValueLambdasExecuteOnVm) {

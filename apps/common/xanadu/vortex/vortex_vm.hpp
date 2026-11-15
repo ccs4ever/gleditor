@@ -10,12 +10,15 @@
 #ifndef COMMON_XANADU_VORTEX_VM_HPP
 #define COMMON_XANADU_VORTEX_VM_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -199,6 +202,14 @@ enum class OpcodeKind : std::uint8_t {
   // Validate a dynamic closure and its arity before argument graphs run.
   // Appended to preserve persisted opcode-kind integers.
   CheckClosureCall,
+
+  // Begin iteration over the ordered member groups of a private variadic
+  // frame port. Appended to preserve persisted opcode-kind integers.
+  GroupBegin,
+
+  // Read one member group from a GroupBegin iterator. Appended to preserve
+  // persisted opcode-kind integers.
+  GroupNext,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.
@@ -253,7 +264,7 @@ struct FrameDescriptorError {
   std::string message;
 };
 
-enum class FramePortKind : std::uint8_t { Cell, Stream };
+enum class FramePortKind : std::uint8_t { Cell, Stream, Groups };
 
 struct FramePort {
   CellRef slot;
@@ -283,6 +294,7 @@ struct FrameLimits {
   std::size_t maxLocalsPerFrame{4096};
   std::size_t maxDescriptorRecords{8192};
   std::size_t maxBackingCells{1'048'576};
+  std::size_t maxRetainedGroupsReferences{1'048'576};
 };
 
 /// How ApplyClosure obtains positional actuals independently of context.
@@ -294,7 +306,9 @@ enum class ClosureInputSource : std::uint8_t {
   Capture,
   Applied,
   Context,
-  AppliedPresence
+  AppliedPresence,
+  AppliedRest,
+  AppliedRestGroups
 };
 
 struct ClosureFrameInput {
@@ -310,6 +324,8 @@ struct ClosureDescriptorSpec {
   std::optional<std::size_t> minFormalCount;
   std::size_t maxFormalCount{};
   std::vector<ClosureFrameInput> frameInputs;
+  std::optional<std::size_t> variadicFormalIndex;
+  std::optional<std::vector<std::optional<std::string>>> formalNames;
 };
 
 struct ClosureDescriptorError {
@@ -325,6 +341,16 @@ struct ParsedClosureDescriptor {
   std::optional<CellRef> presenceFalse;
   std::vector<ClosureFrameInput> frameInputs;
   std::vector<std::pair<CellRef, CellRef>> referenceCells;
+  std::optional<std::size_t> variadicFormalIndex;
+  std::optional<std::vector<std::optional<std::string>>> formalNames;
+};
+
+/// Owned, typed argument data prepared before an activation frame is entered.
+/// `cells` carries Cell or Stream values; `groups` carries ordered Groups.
+struct PreparedFrameArgument {
+  FramePortKind kind{FramePortKind::Cell};
+  std::vector<CellRef> cells;
+  std::vector<std::span<const CellRef>> groups;
 };
 
 struct ClosureValue {
@@ -466,10 +492,71 @@ struct SequenceIteratorState {
   bool reverse{false};
 };
 
+struct ActivationFrame;
+
+struct RetainedGroupsAccounting {
+  explicit RetainedGroupsAccounting(std::size_t limit) : maximum(limit) {}
+  std::atomic<std::size_t> maximum;
+  std::atomic<std::size_t> retained{};
+};
+
+struct RetainedGroupsLease {
+  RetainedGroupsLease(std::shared_ptr<RetainedGroupsAccounting> accounting,
+                      std::size_t units)
+      : owner(std::move(accounting)), amount(units) {
+    if (!owner) throw std::invalid_argument("Groups lease requires accounting");
+    auto current = owner->retained.load(std::memory_order_relaxed);
+    while (true) {
+      const auto limit = owner->maximum.load(std::memory_order_relaxed);
+      if (current > limit ||
+          amount > std::numeric_limits<std::size_t>::max() - current ||
+          amount > limit - current)
+        throw std::length_error("retained Groups reference budget exceeded");
+      if (owner->retained.compare_exchange_weak(current, current + amount,
+                                                std::memory_order_acq_rel,
+                                                std::memory_order_relaxed))
+        break;
+    }
+  }
+  ~RetainedGroupsLease() {
+    if (owner) owner->retained.fetch_sub(amount, std::memory_order_acq_rel);
+  }
+  RetainedGroupsLease(const RetainedGroupsLease &)            = delete;
+  RetainedGroupsLease &operator=(const RetainedGroupsLease &) = delete;
+  std::shared_ptr<RetainedGroupsAccounting> owner;
+  std::size_t amount;
+};
+
+struct RetainedGroupsPayload {
+  std::vector<std::vector<CellRef>> groups;
+  std::shared_ptr<const RetainedGroupsLease> lease;
+};
+
+struct GroupIteratorState {
+  GroupIteratorState(std::shared_ptr<const ActivationFrame> activationOwner,
+                     std::shared_ptr<const RetainedGroupsPayload> groups,
+                     std::uint64_t activationIdentity, CellRef cursorIdentity,
+                     CellRef backing)
+      : owner(activationOwner), payload(groups),
+        activationId(activationIdentity), cursor(cursorIdentity),
+        backingSlot(backing) {}
+
+  std::weak_ptr<const ActivationFrame> owner;
+  std::weak_ptr<const RetainedGroupsPayload> payload;
+  const std::uint64_t activationId;
+  const CellRef cursor;
+  const CellRef backingSlot;
+  std::size_t index{};
+};
+
 using IteratorState = std::variant<RankIteratorState, SequenceIteratorState>;
 using StreamMap =
     std::unordered_map<CellRef, std::shared_ptr<std::vector<CellRef>>>;
 using IteratorMap = std::unordered_map<CellRef, std::shared_ptr<IteratorState>>;
+using GroupIteratorMap =
+    std::unordered_map<CellRef, std::shared_ptr<GroupIteratorState>>;
+using GroupOwnerMap =
+    std::unordered_map<CellRef, std::weak_ptr<const ActivationFrame>>;
 
 enum class ClosedIteratorState : std::uint8_t { Unavailable, Exhausted };
 
@@ -513,6 +600,8 @@ struct ActivationFrame {
   std::vector<CellRef> parentResultSlots;
   std::unordered_map<CellRef, CellRef> localBacking;
   std::vector<FramePort> resultPorts;
+  std::unordered_map<CellRef, std::shared_ptr<const RetainedGroupsPayload>>
+      groupsByBacking;
 };
 
 using ActivationStack = std::vector<std::shared_ptr<const ActivationFrame>>;
@@ -529,8 +618,11 @@ struct ChoicePoint {
   CellReferenceMap cellReferences;
   StreamMap streams;
   IteratorMap iterators;
+  GroupIteratorMap groupIterators;
+  GroupOwnerMap groupOwners;
   std::unordered_set<CellRef> streamSlots;
   std::unordered_set<CellRef> iteratorSlots;
+  std::unordered_set<CellRef> groupIteratorSlots;
   std::optional<CellRef> streamCursor;
   std::unordered_map<CellRef, ActivationStack> activationFrames;
   GuardStackMap guardStacks;
@@ -687,6 +779,7 @@ public:
   [[nodiscard]] std::expected<FrameDescriptor, FrameDescriptorError>
   frameDescriptor(CellRef descriptor) const;
   VortexVM *setFrameLimits(FrameLimits limits);
+  [[nodiscard]] std::size_t retainedGroupsReferences() const noexcept;
 
   /// Registers the provider RelationNext asks for `relation`; an empty
   /// function removes it. Providers are per relation name so the stdlib
@@ -728,6 +821,7 @@ public:
                                            std::uint64_t activationId) const;
   [[nodiscard]] std::size_t activationDepth(CellRef cursor) const noexcept;
   [[nodiscard]] bool hasActiveFrames() const noexcept;
+  [[nodiscard]] bool hasLiveGroupsState() const noexcept;
   [[nodiscard]] std::optional<CellRef> resultCell(CellRef cursor,
                                                   CellRef slot) const;
   [[nodiscard]] std::vector<CellRef> resultCells(CellRef cursor,
@@ -769,6 +863,10 @@ private:
                                      CellRef cursor);
   ExecutionResult stepImpl(CellRef cursor);
   ExecutionResult invokeFramePrepared(
+      CellRef descriptorCell, std::span<const PreparedFrameArgument> arguments,
+      std::span<const CellRef> resultSlots, CellRef cursor,
+      std::optional<CellRef> continuation, std::optional<CellRef> failureOp);
+  ExecutionResult invokeFramePrepared(
       CellRef descriptorCell, std::span<const std::vector<CellRef>> arguments,
       std::span<const CellRef> resultSlots, CellRef cursor,
       std::optional<CellRef> continuation, std::optional<CellRef> failureOp);
@@ -789,6 +887,7 @@ private:
   [[nodiscard]] std::optional<std::uint64_t>
   currentActivationId(CellRef cursor) const;
   [[nodiscard]] CellRef runtimeSlot(CellRef slot) const;
+  [[nodiscard]] bool isGroupsPort(CellRef slot) const;
   [[nodiscard]] std::vector<CellRef> inputsOf(CellRef opcode) const;
   [[nodiscard]] std::vector<CellRef> outputsOf(CellRef opcode) const;
   ExecutionResult prepareTypeContract(OpcodeKind kind, CellRef opcode);
@@ -873,8 +972,11 @@ private:
   CellReferenceMap cellReferences_;
   StreamMap streams_;
   IteratorMap iterators_;
+  GroupIteratorMap groupIterators_;
+  GroupOwnerMap groupOwners_;
   std::unordered_set<CellRef> streamSlots_;
   std::unordered_set<CellRef> iteratorSlots_;
+  std::unordered_set<CellRef> groupIteratorSlots_;
   std::optional<CellRef> streamCursor_;
   std::unordered_map<CellRef, std::string> memoizedOps_;
   std::unordered_map<CellRef, std::optional<CellRef>> cursorPC_;
@@ -889,6 +991,9 @@ private:
   std::uint64_t nextMutationGroupId_{1};
   std::uint64_t nextChoiceId_{1};
   FrameLimits frameLimits_;
+  std::shared_ptr<RetainedGroupsAccounting> retainedGroupsAccounting_{
+      std::make_shared<RetainedGroupsAccounting>(
+          frameLimits_.maxRetainedGroupsReferences)};
   bool relationProviderActive_{false};
   std::unordered_map<std::string, RelationProvider> relationProviders_;
   LogicalClosureLimits closureLimits_;

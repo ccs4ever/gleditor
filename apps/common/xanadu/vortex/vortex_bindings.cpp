@@ -238,6 +238,9 @@ ExecutionResult VortexVM::executeRestoreBindings(const CellRef opcode,
   auto oldCellReferences       = cellReferences_;
   auto oldStreams              = streams_;
   auto oldIterators            = iterators_;
+  auto oldGroupIterators       = groupIterators_;
+  auto oldGroupOwners          = groupOwners_;
+  auto oldGroupIteratorSlots   = groupIteratorSlots_;
   auto oldStreamSlots          = streamSlots_;
   auto oldIteratorSlots        = iteratorSlots_;
   const auto oldStreamCursor   = streamCursor_;
@@ -258,6 +261,9 @@ ExecutionResult VortexVM::executeRestoreBindings(const CellRef opcode,
     cellReferences_.swap(oldCellReferences);
     streams_.swap(oldStreams);
     iterators_.swap(oldIterators);
+    groupIterators_.swap(oldGroupIterators);
+    groupOwners_.swap(oldGroupOwners);
+    groupIteratorSlots_.swap(oldGroupIteratorSlots);
     streamSlots_.swap(oldStreamSlots);
     iteratorSlots_.swap(oldIteratorSlots);
     streamCursor_              = oldStreamCursor;
@@ -388,8 +394,18 @@ RuntimeBindingSnapshot VortexVM::snapshotBindings(
     if (!core_.arena().contains(slot) || streamSlots_.contains(slot) ||
         cellReferences_.contains(slot))
       fail("iterator slot has an invalid or overlapping runtime type");
-    const auto found          = iterators_.find(slot);
     ClosedIteratorState state = ClosedIteratorState::Unavailable;
+    if (groupIteratorSlots_.contains(slot)) {
+      const auto group = groupIterators_.find(slot);
+      if (group != groupIterators_.end() && group->second &&
+          (!group->second->owner.expired() ||
+           !group->second->payload.expired()))
+        fail("cannot snapshot a live or restorable group iterator");
+      addRef();
+      snapshot.iterators.emplace(slot, state);
+      continue;
+    }
+    const auto found = iterators_.find(slot);
     if (found != iterators_.end() && found->second) {
       if (const auto *rank =
               std::get_if<RankIteratorState>(found->second.get())) {
@@ -734,6 +750,9 @@ void VortexVM::restoreBindings(const RuntimeBindingSnapshot &snapshot) {
   iterators_.swap(iterators);
   streamSlots_.swap(streamSlots);
   iteratorSlots_.swap(iteratorSlots);
+  groupIterators_.clear();
+  groupIteratorSlots_.clear();
+  groupOwners_.clear();
   if (!activeCursor_) streamCursor_.reset();
   ++bindingRestores_;
   bindingSlotsRestored_ += slots;

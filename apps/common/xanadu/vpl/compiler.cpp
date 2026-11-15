@@ -355,6 +355,10 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "PINHISTORICAL";
   case OpcodeKind::CheckClosureCall:
     return "CHECK_CLOSURE_CALL";
+  case OpcodeKind::GroupBegin:
+    return "GROUP_BEGIN";
+  case OpcodeKind::GroupNext:
+    return "GROUP_NEXT";
   default:
     return "UNKNOWN";
   }

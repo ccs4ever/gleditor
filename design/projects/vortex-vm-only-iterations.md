@@ -2186,3 +2186,24 @@ Logs: `/tmp/vql-static-functor-build.log`, `/tmp/vql-static-functor-focused.log`
 `/tmp/vql-static-functor-tests.log`, `/tmp/vql-static-functor-cli.log`,
 `/tmp/vql-static-functor-callables.log`, `/tmp/vql-static-functor-overlay.log`,
 `/tmp/vql-static-functor-format.log`.
+
+## Runtime callable parity consolidation after iteration 55
+
+The [integrity restoration](vql-vm-integrity-restoration.md),
+[explicit calls/defaults](vql-closure-calls-defaults-plan.md),
+[stream-call semantics](vql-stream-call-semantics-plan.md), and
+[runtime closure signatures](vql-closure-signatures-plan.md) packages continue the implementation in
+larger combined deliverables. The signature package adds named actuals and final variadic
+value-lambda formals, native Groups ports and constant-size contract loops, strict preflight and
+portable descriptor/frame versions. No AST evaluator or per-runtime-arity expansion is introduced.
+
+All 82 signature-focused cases pass. The complete engine run has 4,394 passes, the 32 unchanged
+baseline failures, one additional UI selection failure that passed in isolation, and 28 skips; 12
+probes are disabled. All 28 added tests pass, and the 1,641-active affected subset retains only its
+21 baseline failures plus one opt-in skip. Full build, formatting, exact-integer CLI, AST-free
+reload, host and distinct-result SOURCE mesh routes pass. Library/slice/lint retain their documented
+baseline failures. Independent Luna architecture, senior and resource gates accepted the stage.
+
+This does not close §4.12. Static callable defaults/captures, decorated forms and lifecycle, route
+and measurement gates remain. Route checks expose an existing duplicate mesh-result reciprocal-link
+defect; the signature plan records it explicitly for the next route package.

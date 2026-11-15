@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
@@ -88,6 +89,8 @@ struct Harness {
     core.bindInput(apply, handleSlot);
     core.bindInput(apply, mode);
     core.bindInput(apply, context);
+    core.bindInput(apply, arena.makeScalarCell(std::int64_t{1}));
+    core.bindInput(apply, arena.makeCell(""));
     core.bindInput(apply, appliedSlot);
     core.bindOutput(apply, firstOutput);
     core.bindOutput(apply, secondOutput);
@@ -103,7 +106,12 @@ struct Harness {
     core.bindInput(apply, handleSlot);
     core.bindInput(apply, mode);
     core.bindInput(apply, contextSlot);
-    for (const auto actual : actuals) core.bindInput(apply, actual);
+    core.bindInput(
+        apply, arena.makeScalarCell(static_cast<std::int64_t>(actuals.size())));
+    for (const auto actual : actuals) {
+      core.bindInput(apply, arena.makeCell(""));
+      core.bindInput(apply, actual);
+    }
     for (const auto output : outputs) core.bindOutput(apply, output);
     return apply;
   }
@@ -116,6 +124,8 @@ struct Harness {
     core.bindInput(check,
                    arena.makeScalarCell(static_cast<std::int64_t>(mode)));
     core.bindInput(check, arena.makeScalarCell(rawArgumentCount));
+    for (std::int64_t index = 0; index < rawArgumentCount; ++index)
+      core.bindInput(check, arena.makeCell(""));
     core.bindOutput(check, output);
     return check;
   }
@@ -179,6 +189,503 @@ TEST(VortexClosureTest, DescriptorRoundTripsAndRejectsMalformedPortMaps) {
       .frameInputs        = {{ClosureInputSource::Context, 0}},
   }));
   EXPECT_FALSE(h.vm.closureDescriptor(ordinary));
+}
+
+TEST(VortexClosureTest, DescriptorThreeKeepsNamesAndFinalRestGroupMapping) {
+  Harness h;
+  const auto fixed = h.arena.makeCell("fixed formal");
+  const auto rest  = h.arena.makeCell("rest formal");
+  const auto ret   = h.op(OpcodeKind::ReturnFrame);
+  const auto frame = h.vm.makeFrameDescriptor(FrameDescriptorSpec{
+      .entry         = ret,
+      .locals        = {fixed, rest},
+      .argumentPorts = {{fixed, FramePortKind::Stream},
+                        {rest, FramePortKind::Groups}},
+  });
+  ASSERT_TRUE(frame);
+  h.core.bindInput(ret, *frame);
+  const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+      .frameDescriptor     = *frame,
+      .minFormalCount      = 0,
+      .maxFormalCount      = 2,
+      .frameInputs         = {{ClosureInputSource::Applied, 0},
+                              {ClosureInputSource::AppliedRestGroups, 1}},
+      .variadicFormalIndex = 1,
+      .formalNames = std::vector<std::optional<std::string>>{"fixed", "rest"},
+  });
+  ASSERT_TRUE(descriptor);
+
+  const auto parsed = h.vm.closureDescriptor(*descriptor);
+  ASSERT_TRUE(parsed);
+  EXPECT_EQ(parsed->maxFormalCount, 2u);
+  EXPECT_EQ(parsed->minFormalCount, 0u);
+  EXPECT_EQ(parsed->variadicFormalIndex, 1u);
+  ASSERT_TRUE(parsed->formalNames);
+  ASSERT_EQ(parsed->formalNames->size(), 2u);
+  EXPECT_EQ((*parsed->formalNames)[0], "fixed");
+  EXPECT_EQ((*parsed->formalNames)[1], "rest");
+  EXPECT_EQ(parsed->frameInputs[1].source,
+            ClosureInputSource::AppliedRestGroups);
+
+  EXPECT_FALSE(h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+      .frameDescriptor     = *frame,
+      .minFormalCount      = 0,
+      .maxFormalCount      = 2,
+      .frameInputs         = {{ClosureInputSource::Applied, 0},
+                              {ClosureInputSource::AppliedRestGroups, 1}},
+      .variadicFormalIndex = 0,
+  }));
+  EXPECT_FALSE(h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+      .frameDescriptor     = *frame,
+      .minFormalCount      = 0,
+      .maxFormalCount      = 2,
+      .frameInputs         = {{ClosureInputSource::Applied, 0},
+                              {ClosureInputSource::AppliedRestGroups, 1}},
+      .variadicFormalIndex = 1,
+      .formalNames = std::vector<std::optional<std::string>>{"same", "same"},
+  }));
+  EXPECT_FALSE(h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+      .frameDescriptor     = *frame,
+      .minFormalCount      = 0,
+      .maxFormalCount      = 2,
+      .frameInputs         = {{ClosureInputSource::Applied, 0},
+                              {ClosureInputSource::AppliedRest, 1}},
+      .variadicFormalIndex = 1,
+  }));
+}
+
+TEST(VortexClosureTest, CheckClosureCallPreflightsNamedBindingFailures) {
+  const auto attempt = [](const std::vector<std::pair<std::string, bool>>
+                              &names,
+                          const bool expectedSuccess) {
+    Harness h;
+    const auto fixed = h.arena.makeCell("fixed formal");
+    const auto rest  = h.arena.makeCell("rest formal");
+    const auto ret   = h.op(OpcodeKind::ReturnFrame);
+    const auto frame = h.vm.makeFrameDescriptor(FrameDescriptorSpec{
+        .entry         = ret,
+        .locals        = {fixed, rest},
+        .argumentPorts = {{fixed, FramePortKind::Stream},
+                          {rest, FramePortKind::Groups}},
+    });
+    ASSERT_TRUE(frame);
+    h.core.bindInput(ret, *frame);
+    const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+        .frameDescriptor     = *frame,
+        .minFormalCount      = 0,
+        .maxFormalCount      = 2,
+        .frameInputs         = {{ClosureInputSource::Applied, 0},
+                                {ClosureInputSource::AppliedRestGroups, 1}},
+        .variadicFormalIndex = 1,
+        .formalNames = std::vector<std::optional<std::string>>{"fixed", "rest"},
+    });
+    ASSERT_TRUE(descriptor);
+    const auto handle = h.arena.makeCell("closure handle");
+    const auto create = h.op(OpcodeKind::CreateClosure);
+    h.core.bindInput(create, *descriptor);
+    h.core.bindOutput(create, handle);
+    const auto output = h.arena.makeCell("checked handle");
+    const auto check  = h.op(OpcodeKind::CheckClosureCall);
+    h.core.bindInput(check, handle);
+    h.core.bindInput(check, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                ClosureCallMode::Explicit)));
+    h.core.bindInput(
+        check, h.arena.makeScalarCell(static_cast<std::int64_t>(names.size())));
+    for (const auto &[name, numeric] : names)
+      h.core.bindInput(check, numeric ? h.arena.makeScalarCell(std::int64_t{1})
+                                      : h.arena.makeCell(name));
+    h.core.bindOutput(check, output);
+    h.next(create, check);
+    const auto cursor    = h.cursor(create);
+    const auto execution = h.vm.run(cursor, 20);
+    EXPECT_EQ(execution.success, expectedSuccess) << execution.errorMessage;
+    if (expectedSuccess)
+      EXPECT_EQ(h.vm.cellReferenceOf(output), h.vm.cellReferenceOf(handle));
+    else {
+      EXPECT_FALSE(h.vm.cellReferenceOf(output));
+      EXPECT_EQ(h.vm.getCursorOpcode(cursor), check);
+    }
+  };
+
+  attempt({{"rest", false}, {"fixed", false}}, true);
+  attempt({{"unknown", false}}, false);
+  attempt({{"fixed", false}, {"fixed", false}}, false);
+  attempt({{"", false}, {"fixed", false}}, false);
+  attempt({{"fixed", false}, {"", false}}, false);
+  attempt({{"", true}}, false);
+}
+
+TEST(VortexClosureTest, RuntimeObjectsAreNotPlainClosureNameStrings) {
+  {
+    Harness h;
+    const auto formal = h.arena.makeCell("runtime-object formal");
+    const auto ret    = h.op(OpcodeKind::ReturnFrame);
+    const auto frame  = h.vm.makeFrameDescriptor(FrameDescriptorSpec{
+         .entry         = ret,
+         .locals        = {formal},
+         .argumentPorts = {{formal, FramePortKind::Stream}},
+    });
+    ASSERT_TRUE(frame);
+    h.core.bindInput(ret, *frame);
+    const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+        .frameDescriptor = *frame,
+        .maxFormalCount  = 1,
+        .frameInputs     = {{ClosureInputSource::Applied, 0}},
+        .formalNames     = std::vector<std::optional<std::string>>{std::string(
+            zigzag::runtimeObjectProbeText)},
+    });
+    ASSERT_TRUE(descriptor);
+    const auto handle = h.arena.makeCell("closure handle");
+    const auto create = h.op(OpcodeKind::CreateClosure);
+    h.core.bindInput(create, *descriptor);
+    h.core.bindOutput(create, handle);
+    const auto structuralName =
+        h.vm.makeClosureValue(*descriptor, std::vector<std::vector<CellRef>>{});
+    ASSERT_TRUE(structuralName);
+    const auto output = h.arena.makeScalarCell(std::int64_t{123});
+    const auto check  = h.op(OpcodeKind::CheckClosureCall);
+    h.core.bindInput(check, handle);
+    h.core.bindInput(check, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                ClosureCallMode::Explicit)));
+    h.core.bindInput(check, h.arena.makeScalarCell(std::int64_t{1}));
+    h.core.bindInput(check, *structuralName);
+    h.core.bindOutput(check, output);
+    h.next(create, check);
+    const auto cursor = h.cursor(create);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+
+    const auto execution = h.vm.step(cursor);
+    EXPECT_FALSE(execution.success);
+    EXPECT_NE(execution.errorMessage.find("unclaimed plain String"),
+              std::string::npos);
+    EXPECT_EQ(h.vm.getCursorOpcode(cursor), check);
+    EXPECT_EQ(h.arena.asInt64(output), std::optional{std::int64_t{123}});
+    EXPECT_FALSE(h.vm.cellReferenceOf(output));
+  }
+
+  {
+    Harness h;
+    const auto formal = h.arena.makeCell("runtime-object formal");
+    const auto result = h.arena.makeScalarCell(std::int64_t{456});
+    const auto marker = h.arena.makeCell("frame body untouched");
+    const auto write  = h.op(OpcodeKind::Value);
+    h.core.bindInput(write, marker);
+    h.core.bindInput(write, h.arena.makeScalarCell(std::int64_t{0}));
+    h.core.bindInput(write, h.arena.makeScalarCell(std::int64_t{-1}));
+    h.core.bindInput(write, h.arena.makeCell("frame body ran"));
+    const auto ret = h.op(OpcodeKind::ReturnFrame);
+    h.next(write, ret);
+    const auto frame = h.vm.makeFrameDescriptor(FrameDescriptorSpec{
+        .entry         = write,
+        .locals        = {formal, result},
+        .argumentPorts = {{formal, FramePortKind::Stream}},
+        .resultPorts   = {result},
+    });
+    ASSERT_TRUE(frame);
+    h.core.bindInput(ret, *frame);
+    const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+        .frameDescriptor = *frame,
+        .maxFormalCount  = 1,
+        .frameInputs     = {{ClosureInputSource::Applied, 0}},
+        .formalNames     = std::vector<std::optional<std::string>>{std::string(
+            zigzag::runtimeObjectProbeText)},
+    });
+    ASSERT_TRUE(descriptor);
+    const auto handle = h.arena.makeCell("closure handle");
+    const auto create = h.op(OpcodeKind::CreateClosure);
+    h.core.bindInput(create, *descriptor);
+    h.core.bindOutput(create, handle);
+    const auto checked = h.arena.makeCell("checked closure handle");
+    const auto check   = h.op(OpcodeKind::CheckClosureCall);
+    const auto name    = h.arena.makeCell(zigzag::runtimeObjectProbeText);
+    h.core.bindInput(check, handle);
+    h.core.bindInput(check, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                ClosureCallMode::Explicit)));
+    h.core.bindInput(check, h.arena.makeScalarCell(std::int64_t{1}));
+    h.core.bindInput(check, name);
+    h.core.bindOutput(check, checked);
+
+    const auto context      = h.arena.makeCell("empty context");
+    const auto clearContext = h.op(OpcodeKind::StreamClear);
+    h.core.bindOutput(clearContext, context);
+    const auto actual      = h.arena.makeCell("empty actual");
+    const auto clearActual = h.op(OpcodeKind::StreamClear);
+    h.core.bindOutput(clearActual, actual);
+    const auto applyOutput = h.arena.makeScalarCell(std::int64_t{789});
+    const auto apply       = h.op(OpcodeKind::ApplyClosure);
+    h.core.bindInput(apply, checked);
+    h.core.bindInput(apply, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                ClosureCallMode::Explicit)));
+    h.core.bindInput(apply, context);
+    h.core.bindInput(apply, h.arena.makeScalarCell(std::int64_t{1}));
+    h.core.bindInput(apply, name);
+    h.core.bindInput(apply, actual);
+    h.core.bindOutput(apply, applyOutput);
+    h.next(create, check);
+    h.next(check, clearContext);
+    h.next(clearContext, clearActual);
+    h.next(clearActual, apply);
+    const auto cursor = h.cursor(create);
+
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    ASSERT_TRUE(h.core.dims().runtimeObjectClaim);
+    const auto claimDimension = *h.core.dims().runtimeObjectClaim;
+    const auto objectTag      = h.arena.makeCell("VORTEX_CLOSURE_VALUE/1");
+    ASSERT_TRUE(h.arena.link(name, claimDimension, DimVector::POS, objectTag));
+    ASSERT_TRUE(h.arena.link(objectTag, claimDimension, DimVector::NEG, name));
+    EXPECT_EQ(classifyRuntimeObjectRoot(h.arena, name, claimDimension),
+              RuntimeObjectClaimResult::Claimed);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+
+    const auto execution = h.vm.step(cursor);
+    EXPECT_FALSE(execution.success);
+    EXPECT_NE(execution.errorMessage.find("unclaimed plain String"),
+              std::string::npos);
+    EXPECT_EQ(h.vm.getCursorOpcode(cursor), apply);
+    EXPECT_EQ(h.arena.textOf(marker), "frame body untouched");
+    EXPECT_EQ(h.arena.asInt64(applyOutput), std::optional{std::int64_t{789}});
+    EXPECT_FALSE(h.vm.hasActiveFrames());
+  }
+}
+
+TEST(VortexClosureTest,
+     CheckAndApplyRejectAggregateActualNameBytesBeforeBinding) {
+  constexpr std::size_t metadataByteLimit = 80;
+  const std::string longName(41, 'x');
+
+  {
+    Harness h;
+    auto limits             = h.vm.closureLimits();
+    limits.maxMetadataBytes = metadataByteLimit;
+    h.vm.setClosureLimits(limits);
+    const auto fixed = h.arena.makeCell("fixed formal");
+    const auto rest  = h.arena.makeCell("rest formal");
+    const auto ret   = h.op(OpcodeKind::ReturnFrame);
+    const auto frame = h.vm.makeFrameDescriptor(FrameDescriptorSpec{
+        .entry         = ret,
+        .locals        = {fixed, rest},
+        .argumentPorts = {{fixed, FramePortKind::Stream},
+                          {rest, FramePortKind::Stream}},
+    });
+    ASSERT_TRUE(frame);
+    h.core.bindInput(ret, *frame);
+    const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+        .frameDescriptor     = *frame,
+        .minFormalCount      = 0,
+        .maxFormalCount      = 2,
+        .frameInputs         = {{ClosureInputSource::Applied, 0},
+                                {ClosureInputSource::AppliedRest, 1}},
+        .variadicFormalIndex = 1,
+        .formalNames = std::vector<std::optional<std::string>>{"fixed", "rest"},
+    });
+    ASSERT_TRUE(descriptor);
+    const auto handle = h.arena.makeCell("closure handle");
+    const auto create = h.op(OpcodeKind::CreateClosure);
+    h.core.bindInput(create, *descriptor);
+    h.core.bindOutput(create, handle);
+    const auto output = h.arena.makeScalarCell(std::int64_t{123});
+    const auto check  = h.op(OpcodeKind::CheckClosureCall);
+    h.core.bindInput(check, handle);
+    h.core.bindInput(check, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                ClosureCallMode::Explicit)));
+    h.core.bindInput(check, h.arena.makeScalarCell(std::int64_t{2}));
+    h.core.bindInput(check, h.arena.makeCell(longName));
+    h.core.bindInput(check, h.arena.makeCell(longName));
+    h.core.bindOutput(check, output);
+    h.next(create, check);
+    const auto cursor = h.cursor(create);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+
+    const auto before    = h.arena.cellCount();
+    const auto execution = h.vm.step(cursor);
+    EXPECT_FALSE(execution.success);
+    EXPECT_NE(execution.errorMessage.find("aggregate byte limit"),
+              std::string::npos);
+    EXPECT_EQ(h.vm.getCursorOpcode(cursor), check);
+    EXPECT_EQ(h.arena.asInt64(output), std::optional{std::int64_t{123}});
+    EXPECT_FALSE(h.vm.cellReferenceOf(output));
+    EXPECT_EQ(h.arena.cellCount(), before);
+  }
+
+  {
+    Harness h;
+    auto limits             = h.vm.closureLimits();
+    limits.maxMetadataBytes = metadataByteLimit;
+    h.vm.setClosureLimits(limits);
+    const auto fixed  = h.arena.makeCell("fixed formal");
+    const auto rest   = h.arena.makeCell("rest formal");
+    const auto result = h.arena.makeScalarCell(std::int64_t{456});
+    const auto marker = h.arena.makeCell("frame body untouched");
+    const auto write  = h.op(OpcodeKind::Value);
+    h.core.bindInput(write, marker);
+    h.core.bindInput(write, h.arena.makeScalarCell(std::int64_t{0}));
+    h.core.bindInput(write, h.arena.makeScalarCell(std::int64_t{-1}));
+    h.core.bindInput(write, h.arena.makeCell("frame body ran"));
+    const auto ret = h.op(OpcodeKind::ReturnFrame);
+    h.next(write, ret);
+    const auto frame = h.vm.makeFrameDescriptor(FrameDescriptorSpec{
+        .entry         = write,
+        .locals        = {fixed, rest, result},
+        .argumentPorts = {{fixed, FramePortKind::Stream},
+                          {rest, FramePortKind::Stream}},
+        .resultPorts   = {result},
+    });
+    ASSERT_TRUE(frame);
+    h.core.bindInput(ret, *frame);
+    const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+        .frameDescriptor     = *frame,
+        .minFormalCount      = 0,
+        .maxFormalCount      = 2,
+        .frameInputs         = {{ClosureInputSource::Applied, 0},
+                                {ClosureInputSource::AppliedRest, 1}},
+        .variadicFormalIndex = 1,
+        .formalNames = std::vector<std::optional<std::string>>{"fixed", "rest"},
+    });
+    ASSERT_TRUE(descriptor);
+    const auto handle = h.arena.makeCell("closure handle");
+    const auto create = h.op(OpcodeKind::CreateClosure);
+    h.core.bindInput(create, *descriptor);
+    h.core.bindOutput(create, handle);
+    const auto checked = h.arena.makeCell("checked closure handle");
+    const auto check   = h.op(OpcodeKind::CheckClosureCall);
+    h.core.bindInput(check, handle);
+    h.core.bindInput(check, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                ClosureCallMode::Explicit)));
+    h.core.bindInput(check, h.arena.makeScalarCell(std::int64_t{2}));
+    const auto firstName  = h.arena.makeCell("");
+    const auto secondName = h.arena.makeCell("");
+    h.core.bindInput(check, firstName);
+    h.core.bindInput(check, secondName);
+    h.core.bindOutput(check, checked);
+
+    const auto context      = h.arena.makeCell("empty context");
+    const auto clearContext = h.op(OpcodeKind::StreamClear);
+    h.core.bindOutput(clearContext, context);
+    const auto actual      = h.arena.makeCell("empty actual");
+    const auto clearActual = h.op(OpcodeKind::StreamClear);
+    h.core.bindOutput(clearActual, actual);
+    const auto applyOutput = h.arena.makeScalarCell(std::int64_t{789});
+    const auto apply       = h.op(OpcodeKind::ApplyClosure);
+    h.core.bindInput(apply, checked);
+    h.core.bindInput(apply, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                ClosureCallMode::Explicit)));
+    h.core.bindInput(apply, context);
+    h.core.bindInput(apply, h.arena.makeScalarCell(std::int64_t{2}));
+    h.core.bindInput(apply, firstName);
+    h.core.bindInput(apply, actual);
+    h.core.bindInput(apply, secondName);
+    h.core.bindInput(apply, actual);
+    h.core.bindOutput(apply, applyOutput);
+    h.next(create, check);
+    h.next(check, clearContext);
+    h.next(clearContext, clearActual);
+    h.next(clearActual, apply);
+    const auto cursor = h.cursor(create);
+
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    const auto nameSpan = h.arena.intern(longName);
+    const std::vector<xanadu::PrimediaSpan> nameContent{nameSpan};
+    ASSERT_TRUE(h.arena.setContent(firstName, nameContent));
+    ASSERT_TRUE(h.arena.setContent(secondName, nameContent));
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+
+    const auto execution = h.vm.step(cursor);
+    EXPECT_FALSE(execution.success);
+    EXPECT_NE(execution.errorMessage.find("aggregate byte limit"),
+              std::string::npos);
+    EXPECT_EQ(h.vm.getCursorOpcode(cursor), apply);
+    EXPECT_EQ(h.arena.textOf(marker), "frame body untouched");
+    EXPECT_EQ(h.arena.asInt64(applyOutput), std::optional{std::int64_t{789}});
+    EXPECT_FALSE(h.vm.hasActiveFrames());
+  }
+}
+
+TEST(VortexClosureTest, ApplyClosurePreflightsAndPassesEmptyRestGroups) {
+  const auto attempt = [](const std::size_t retainedLimit,
+                          const std::size_t invocationLimit,
+                          const bool expectedSuccess) {
+    Harness h;
+    const auto fixed = h.arena.makeCell("fixed formal");
+    const auto rest  = h.arena.makeCell("rest formal");
+    const auto ret   = h.op(OpcodeKind::ReturnFrame);
+    const auto frame = h.vm.makeFrameDescriptor(FrameDescriptorSpec{
+        .entry         = ret,
+        .locals        = {fixed, rest},
+        .argumentPorts = {{fixed, FramePortKind::Stream},
+                          {rest, FramePortKind::Groups}},
+    });
+    ASSERT_TRUE(frame);
+    h.core.bindInput(ret, *frame);
+    const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+        .frameDescriptor     = *frame,
+        .minFormalCount      = 0,
+        .maxFormalCount      = 2,
+        .frameInputs         = {{ClosureInputSource::Applied, 0},
+                                {ClosureInputSource::AppliedRestGroups, 1}},
+        .variadicFormalIndex = 1,
+        .formalNames = std::vector<std::optional<std::string>>{"fixed", "rest"},
+    });
+    ASSERT_TRUE(descriptor);
+    auto frameLimits                        = h.vm.frameLimits();
+    frameLimits.maxRetainedGroupsReferences = retainedLimit;
+    h.vm.setFrameLimits(frameLimits);
+
+    const auto handle = h.arena.makeCell("closure handle");
+    const auto create = h.op(OpcodeKind::CreateClosure);
+    h.core.bindInput(create, *descriptor);
+    h.core.bindOutput(create, handle);
+    const auto checked = h.arena.makeCell("checked handle");
+    const auto check   = h.op(OpcodeKind::CheckClosureCall);
+    h.core.bindInput(check, handle);
+    h.core.bindInput(check, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                ClosureCallMode::Explicit)));
+    h.core.bindInput(check, h.arena.makeScalarCell(std::int64_t{1}));
+    const auto restName = h.arena.makeCell("rest");
+    h.core.bindInput(check, restName);
+    h.core.bindOutput(check, checked);
+
+    const auto context      = h.arena.makeCell("empty context stream");
+    const auto clearContext = h.op(OpcodeKind::StreamClear);
+    h.core.bindOutput(clearContext, context);
+    const auto actual      = h.arena.makeCell("empty rest actual");
+    const auto clearActual = h.op(OpcodeKind::StreamClear);
+    h.core.bindOutput(clearActual, actual);
+    const auto apply = h.op(OpcodeKind::ApplyClosure);
+    h.core.bindInput(apply, checked);
+    h.core.bindInput(apply, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                                ClosureCallMode::Explicit)));
+    h.core.bindInput(apply, context);
+    h.core.bindInput(apply, h.arena.makeScalarCell(std::int64_t{1}));
+    h.core.bindInput(apply, restName);
+    h.core.bindInput(apply, actual);
+    h.next(create, check);
+    h.next(check, clearContext);
+    h.next(clearContext, clearActual);
+    h.next(clearActual, apply);
+    const auto cursor = h.cursor(create);
+
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    auto closureLimits              = h.vm.closureLimits();
+    closureLimits.maxInvocationRefs = invocationLimit;
+    h.vm.setClosureLimits(closureLimits);
+
+    const auto execution = h.vm.run(cursor, 50);
+    EXPECT_EQ(execution.success, expectedSuccess) << execution.errorMessage;
+    EXPECT_EQ(h.vm.activationDepth(cursor), 0u);
+    EXPECT_FALSE(h.vm.hasLiveGroupsState());
+    if (!expectedSuccess) EXPECT_EQ(h.vm.getCursorOpcode(cursor), apply);
+  };
+
+  attempt(0, 100, false);
+  attempt(1, 1, false);
+  attempt(1, 100, true);
 }
 
 TEST(VortexClosureTest, ApplyRevalidatesDescriptorAfterArgumentEffects) {
@@ -261,6 +768,7 @@ TEST(VortexClosureTest,
   h.core.bindInput(check, handle);
   h.core.bindInput(check, mode);
   h.core.bindInput(check, count);
+  h.core.bindInput(check, h.arena.makeCell(""));
   h.core.bindOutput(check, checked);
   const auto contextualOutput = h.arena.makeCell("contextual checked handle");
   const auto contextualCheck  = h.checkClosureCall(
@@ -279,6 +787,13 @@ TEST(VortexClosureTest,
   EXPECT_FALSE(h.vm.cellReferenceOf(checked));
 
   ASSERT_TRUE(h.arena.setValueBits(count, xanadu::ValueKind::Int64, 0));
+  auto countSlot = h.arena.linked(check, h.core.dims().grab, DimVector::POS);
+  ASSERT_TRUE(countSlot);
+  for (int index = 0; index < 2; ++index) {
+    countSlot = h.arena.linked(*countSlot, h.core.dims().step, DimVector::POS);
+    ASSERT_TRUE(countSlot);
+  }
+  ASSERT_TRUE(h.arena.unlink(*countSlot, h.core.dims().step, DimVector::POS));
   const auto retried = h.vm.step(cursor);
   EXPECT_TRUE(retried.success) << retried.errorMessage;
   const auto afterRetry = h.vm.getCursorOpcode(cursor);
@@ -512,6 +1027,7 @@ TEST(VortexClosureTest, ContextualApplyUsesCandidateAsContextAndFirstFormal) {
   h.core.bindInput(apply, h.arena.makeScalarCell(static_cast<std::int64_t>(
                               ClosureCallMode::Contextual)));
   h.core.bindInput(apply, candidateStream);
+  h.core.bindInput(apply, h.arena.makeScalarCell(std::int64_t{0}));
   for (const auto output : outputs) h.core.bindOutput(apply, output);
   h.next(create, appendCandidate);
   h.next(appendCandidate, check);
@@ -983,6 +1499,7 @@ TEST(VortexClosureTest, MappedFanoutRefusesBeforeAllocatingFrameBacking) {
   h.core.bindInput(apply, h.arena.makeScalarCell(static_cast<std::int64_t>(
                               ClosureCallMode::Explicit)));
   h.core.bindInput(apply, h.arena.makeCell("empty hidden context"));
+  h.core.bindInput(apply, h.arena.makeScalarCell(std::int64_t{0}));
   h.core.bindOutput(apply, firstOutput);
   h.core.bindOutput(apply, secondOutput);
   auto limits              = h.vm.closureLimits();
@@ -1102,6 +1619,7 @@ TEST(VortexClosureProfileTest,
             apply, h.arena.makeScalarCell(
                        static_cast<std::int64_t>(ClosureCallMode::Explicit)));
         h.core.bindInput(apply, h.arena.makeCell("empty hidden context"));
+        h.core.bindInput(apply, h.arena.makeScalarCell(std::int64_t{0}));
         for (std::size_t stream = 0; stream < captureStreams; ++stream)
           h.core.bindOutput(apply, h.arena.makeCell("profile output"));
         if (previous)
@@ -1333,7 +1851,7 @@ TEST(VortexClosureTest,
     const auto tag        = h.arena.linked(
         descriptor, *h.core.dims().runtimeObjectClaim, DimVector::POS);
     ASSERT_TRUE(tag);
-    ASSERT_TRUE(restateText(h, *tag, "VORTEX_CLOSURE_DESCRIPTOR/99"));
+    ASSERT_TRUE(restateText(h, *tag, "VORTEX_CLOSURE_DESCRIPTOR/2"));
     EXPECT_FALSE(h.vm.closureDescriptor(descriptor));
   }
 

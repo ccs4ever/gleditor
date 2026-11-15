@@ -15,15 +15,16 @@
 namespace zigzag::vortex {
 namespace {
 
-constexpr std::string_view descriptorTag         = "VORTEX_FRAME/1";
-constexpr std::string_view reservedDescriptorTag = "VORTEX_FRAME/RESERVED/1";
+constexpr std::string_view descriptorTag         = "VORTEX_FRAME/2";
+constexpr std::string_view reservedDescriptorTag = "VORTEX_FRAME/RESERVED/2";
 
 FrameDescriptorError descriptorError(std::string message) {
   return {.message = std::move(message)};
 }
 
 bool validPortKind(const FramePortKind kind) {
-  return kind == FramePortKind::Cell || kind == FramePortKind::Stream;
+  return kind == FramePortKind::Cell || kind == FramePortKind::Stream ||
+         kind == FramePortKind::Groups;
 }
 
 std::expected<void, FrameDescriptorError>
@@ -67,6 +68,17 @@ validateFrameSpec(const VortexVM &vm, const FrameDescriptorSpec &spec) {
     return fail("frame argument ports must uniquely name local slots");
   if (!validPorts(spec.resultPorts))
     return fail("frame result ports must uniquely name local slots");
+  for (const auto &argument : spec.argumentPorts)
+    if (argument.kind == FramePortKind::Groups &&
+        std::ranges::any_of(spec.resultPorts,
+                            [&argument](const FramePort &port) {
+                              return port.slot == argument.slot;
+                            }))
+      return fail("Groups argument slots cannot also be frame result ports");
+  if (std::ranges::any_of(spec.resultPorts, [](const FramePort &port) {
+        return port.kind == FramePortKind::Groups;
+      }))
+    return fail("frame result ports cannot use the private Groups kind");
   return {};
 }
 
@@ -90,8 +102,9 @@ void appendDescriptorRecords(VortexCore &core, const CellRef descriptor,
   for (const auto local : spec.locals)
     addRecord("ref.local", local, tail, first);
   for (const auto &port : spec.argumentPorts)
-    addRecord(port.kind == FramePortKind::Cell ? "ref.argument-cell"
-                                               : "ref.argument-stream",
+    addRecord(port.kind == FramePortKind::Cell     ? "ref.argument-cell"
+              : port.kind == FramePortKind::Stream ? "ref.argument-stream"
+                                                   : "ref.argument-groups",
               port.slot, tail, first);
   for (const auto &port : spec.resultPorts)
     addRecord(port.kind == FramePortKind::Cell ? "ref.result-cell"
@@ -119,7 +132,13 @@ std::optional<std::string> boundedCellText(const zigzag::ArenaManifold &arena,
 
 VortexVM *VortexVM::setFrameLimits(const FrameLimits limits) {
   frameLimits_ = limits;
+  retainedGroupsAccounting_->maximum.store(limits.maxRetainedGroupsReferences,
+                                           std::memory_order_relaxed);
   return this;
+}
+
+std::size_t VortexVM::retainedGroupsReferences() const noexcept {
+  return retainedGroupsAccounting_->retained.load(std::memory_order_relaxed);
 }
 
 std::expected<CellRef, FrameDescriptorError>
@@ -227,7 +246,7 @@ VortexVM::frameDescriptor(const CellRef descriptor) const {
       return fail("frame descriptor record has no valid target");
     const CellRef target = static_cast<CellRef>(*targetValue);
     const auto label     = boundedCellText(
-        arena, *record, std::string_view("ref.argument-stream").size());
+        arena, *record, std::string_view("ref.argument-groups").size());
     if (!label)
       return fail("frame descriptor record label exceeds its byte limit");
     const auto &role = *label;
@@ -241,12 +260,14 @@ VortexVM::frameDescriptor(const CellRef descriptor) const {
         return fail("frame descriptor local record is invalid or duplicated");
       result.locals.push_back(target);
       result.referenceCells.emplace_back(*record, target);
-    } else if (role == "ref.argument-cell" || role == "ref.argument-stream") {
+    } else if (role == "ref.argument-cell" || role == "ref.argument-stream" ||
+               role == "ref.argument-groups") {
       if (!argumentSlots.insert(target).second)
         return fail("frame descriptor argument slot is duplicated");
-      result.argumentPorts.emplace_back(target, role == "ref.argument-cell"
-                                                    ? FramePortKind::Cell
-                                                    : FramePortKind::Stream);
+      result.argumentPorts.emplace_back(
+          target, role == "ref.argument-cell"     ? FramePortKind::Cell
+                  : role == "ref.argument-stream" ? FramePortKind::Stream
+                                                  : FramePortKind::Groups);
       result.referenceCells.emplace_back(*record, target);
     } else if (role == "ref.result-cell" || role == "ref.result-stream") {
       if (!resultSlots.insert(target).second)
@@ -255,6 +276,8 @@ VortexVM::frameDescriptor(const CellRef descriptor) const {
                                                   ? FramePortKind::Cell
                                                   : FramePortKind::Stream);
       result.referenceCells.emplace_back(*record, target);
+    } else if (role == "ref.result-groups") {
+      return fail("frame result ports cannot use the private Groups kind");
     } else {
       return fail("frame descriptor contains an unknown record role");
     }
@@ -272,6 +295,13 @@ VortexVM::frameDescriptor(const CellRef descriptor) const {
   };
   if (!portLocals(result.argumentPorts) || !portLocals(result.resultPorts))
     return fail("frame descriptor port does not refer to a local slot");
+  for (const auto &argument : result.argumentPorts)
+    if (argument.kind == FramePortKind::Groups &&
+        std::ranges::any_of(result.resultPorts,
+                            [&argument](const FramePort &port) {
+                              return port.slot == argument.slot;
+                            }))
+      return fail("Groups argument slots cannot also be frame result ports");
   return result;
 }
 
@@ -284,6 +314,16 @@ bool VortexVM::hasActiveFrames() const noexcept {
   return std::ranges::any_of(activationFrames_, [](const auto &entry) {
     return !entry.second.empty();
   });
+}
+
+bool VortexVM::hasLiveGroupsState() const noexcept {
+  return std::ranges::any_of(
+             groupOwners_,
+             [](const auto &entry) { return !entry.second.expired(); }) ||
+         std::ranges::any_of(groupIterators_, [](const auto &entry) {
+           return entry.second && !entry.second->owner.expired() &&
+                  !entry.second->payload.expired();
+         });
 }
 
 std::optional<CellRef> VortexVM::resultCell(const CellRef cursor,
@@ -323,6 +363,12 @@ CellRef VortexVM::runtimeSlot(const CellRef slot) const {
                                                             : found->second;
 }
 
+bool VortexVM::isGroupsPort(const CellRef slot) const {
+  if (groupOwners_.contains(slot)) return true;
+  const auto master = core_.arena().cloneMaster(slot, core_.dims().clone);
+  return master && groupOwners_.contains(*master);
+}
+
 std::vector<CellRef> VortexVM::inputsOf(const CellRef opcode) const {
   auto slots = core_.inputsOf(opcode);
   for (auto &slot : slots) slot = runtimeSlot(slot);
@@ -337,7 +383,7 @@ std::vector<CellRef> VortexVM::outputsOf(const CellRef opcode) const {
 
 ExecutionResult VortexVM::invokeFramePrepared(
     const CellRef descriptorCell,
-    const std::span<const std::vector<CellRef>> arguments,
+    const std::span<const PreparedFrameArgument> arguments,
     const std::span<const CellRef> resultSlots, const CellRef cursor,
     const std::optional<CellRef> continuation,
     const std::optional<CellRef> failureOp) {
@@ -364,7 +410,7 @@ ExecutionResult VortexVM::invokeFramePrepared(
     return fail("InvokeFrame port arity does not match its descriptor");
   std::unordered_set<CellRef> uniqueDestinations;
   for (const auto slot : resultSlots)
-    if (!arena.contains(slot) || getOpcodeKind(slot) ||
+    if (!arena.contains(slot) || isGroupsPort(slot) || getOpcodeKind(slot) ||
         !uniqueDestinations.insert(slot).second || slot == descriptorCell)
       return fail("InvokeFrame result destinations must be caller slots");
   for (const auto local : descriptor.locals)
@@ -374,11 +420,37 @@ ExecutionResult VortexVM::invokeFramePrepared(
     return fail("nested InvokeFrame requires a caller continuation");
   if (nextActivationId_ == std::numeric_limits<std::uint64_t>::max())
     return fail("activation identity limit exceeded");
+  std::size_t retainedUnits = 0;
   for (std::size_t index = 0; index < arguments.size(); ++index) {
-    if (descriptor.argumentPorts[index].kind == FramePortKind::Cell &&
-        arguments[index].size() > 1)
+    const auto &argument = arguments[index];
+    if (argument.kind != descriptor.argumentPorts[index].kind)
+      return fail("prepared frame argument kind does not match its port");
+    if (argument.kind == FramePortKind::Cell && argument.cells.size() > 1)
       return fail("InvokeFrame cell argument resolved to multiple cells");
+    if (argument.kind != FramePortKind::Groups && !argument.groups.empty())
+      return fail("non-Groups frame argument contains group data");
+    if (argument.kind == FramePortKind::Groups && !argument.cells.empty())
+      return fail("Groups frame argument contains ordinary cells");
+    if (argument.kind != FramePortKind::Groups) continue;
+    for (const auto group : argument.groups) {
+      if (retainedUnits == std::numeric_limits<std::size_t>::max())
+        return fail("retained Groups reference budget arithmetic overflow");
+      ++retainedUnits;
+      if (group.size() >
+          std::numeric_limits<std::size_t>::max() - retainedUnits)
+        return fail("retained Groups reference budget arithmetic overflow");
+      retainedUnits += group.size();
+      for (const CellRef cell : group)
+        if (!arena.contains(cell) || isGroupsPort(cell))
+          return fail("Groups argument contains a missing or private cell");
+    }
   }
+  const auto retained =
+      retainedGroupsAccounting_->retained.load(std::memory_order_relaxed);
+  const auto retainedMaximum =
+      retainedGroupsAccounting_->maximum.load(std::memory_order_relaxed);
+  if (retained > retainedMaximum || retainedUnits > retainedMaximum - retained)
+    return fail("retained Groups reference budget exceeded");
   const auto guards = guardStacks_.find(cursor);
   const std::size_t guardBaseline =
       guards == guardStacks_.end() || !guards->second ? 0
@@ -401,14 +473,17 @@ ExecutionResult VortexVM::invokeFramePrepared(
   auto previousReferences         = cellReferences_;
   auto previousStreams            = streams_;
   auto previousIterators          = iterators_;
+  auto previousGroupIterators     = groupIterators_;
+  auto previousGroupOwners        = groupOwners_;
   auto previousStreamSlots        = streamSlots_;
   auto previousIteratorSlots      = iteratorSlots_;
+  auto previousGroupIteratorSlots = groupIteratorSlots_;
   auto previousFrames             = activationFrames_;
   auto previousCursorPC           = cursorPC_;
   const auto previousStreamCursor = streamCursor_;
   if (std::ranges::any_of(descriptor.argumentPorts,
                           [](const FramePort &port) {
-                            return port.kind == FramePortKind::Stream;
+                            return port.kind != FramePortKind::Cell;
                           }) ||
       std::ranges::any_of(descriptor.resultPorts, [](const FramePort &port) {
         return port.kind == FramePortKind::Stream;
@@ -426,8 +501,11 @@ ExecutionResult VortexVM::invokeFramePrepared(
     cellReferences_.swap(previousReferences);
     streams_.swap(previousStreams);
     iterators_.swap(previousIterators);
+    groupIterators_.swap(previousGroupIterators);
+    groupOwners_.swap(previousGroupOwners);
     streamSlots_.swap(previousStreamSlots);
     iteratorSlots_.swap(previousIteratorSlots);
+    groupIteratorSlots_.swap(previousGroupIteratorSlots);
     activationFrames_.swap(previousFrames);
     cursorPC_.swap(previousCursorPC);
     streamCursor_ = previousStreamCursor;
@@ -445,9 +523,34 @@ ExecutionResult VortexVM::invokeFramePrepared(
          ++index) {
       const CellRef target =
           frame.localBacking.at(descriptor.argumentPorts[index].slot);
+      const auto &argument = arguments[index];
+      if (argument.kind == FramePortKind::Groups) {
+        std::size_t portUnits = 0;
+        for (const auto group : argument.groups) {
+          ++portUnits;
+          portUnits += group.size();
+          for (const CellRef cell : group) {
+            arena.consumeWork();
+            if (!arena.contains(cell))
+              throw std::runtime_error(
+                  "InvokeFrame Groups argument contains a missing cell");
+          }
+        }
+        auto lease     = portUnits == 0
+                             ? std::shared_ptr<const RetainedGroupsLease>{}
+                             : std::make_shared<const RetainedGroupsLease>(
+                               retainedGroupsAccounting_, portUnits);
+        auto payload   = std::make_shared<RetainedGroupsPayload>();
+        payload->lease = std::move(lease);
+        payload->groups.reserve(argument.groups.size());
+        for (const auto group : argument.groups)
+          payload->groups.emplace_back(group.begin(), group.end());
+        frame.groupsByBacking.emplace(target, std::move(payload));
+        continue;
+      }
       auto values = std::make_shared<std::vector<CellRef>>();
-      values->reserve(arguments[index].size());
-      for (const CellRef cell : arguments[index]) {
+      values->reserve(argument.cells.size());
+      for (const CellRef cell : argument.cells) {
         arena.consumeWork();
         if (!arena.contains(cell))
           throw std::runtime_error(
@@ -465,8 +568,12 @@ ExecutionResult VortexVM::invokeFramePrepared(
             values->empty() ? std::nullopt : std::optional{values->front()};
       }
     }
-    activationFrames_[cursor].push_back(
-        std::make_shared<const ActivationFrame>(std::move(frame)));
+    auto frameOwner = std::make_shared<const ActivationFrame>(std::move(frame));
+    for (const auto &[backing, payload] : frameOwner->groupsByBacking) {
+      (void)payload;
+      groupOwners_[backing] = frameOwner;
+    }
+    activationFrames_[cursor].push_back(std::move(frameOwner));
     setCursorOpcode(cursor, descriptor.entry.value());
     zigzag::expectMarkOrder(arena.discard(mark));
     frameBackingCellsAllocated_ += descriptor.locals.size();
@@ -478,8 +585,11 @@ ExecutionResult VortexVM::invokeFramePrepared(
       cellReferences_.swap(previousReferences);
       streams_.swap(previousStreams);
       iterators_.swap(previousIterators);
+      groupIterators_.swap(previousGroupIterators);
+      groupOwners_.swap(previousGroupOwners);
       streamSlots_.swap(previousStreamSlots);
       iteratorSlots_.swap(previousIteratorSlots);
+      groupIteratorSlots_.swap(previousGroupIteratorSlots);
       activationFrames_.swap(previousFrames);
       cursorPC_.swap(previousCursorPC);
       streamCursor_ = previousStreamCursor;
@@ -488,6 +598,34 @@ ExecutionResult VortexVM::invokeFramePrepared(
     }
     return fail(error.what());
   }
+}
+
+ExecutionResult VortexVM::invokeFramePrepared(
+    const CellRef descriptorCell,
+    const std::span<const std::vector<CellRef>> arguments,
+    const std::span<const CellRef> resultSlots, const CellRef cursor,
+    const std::optional<CellRef> continuation,
+    const std::optional<CellRef> failureOp) {
+  const auto fail = [failureOp](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = failureOp,
+                           .errorMessage  = std::move(message)};
+  };
+  const auto descriptor = frameDescriptor(descriptorCell);
+  if (!descriptor) return fail(descriptor.error().message);
+  if (std::ranges::any_of(descriptor->argumentPorts, [](const FramePort &port) {
+        return port.kind == FramePortKind::Groups;
+      }))
+    return fail("Groups ports require typed ApplyClosure entry");
+  if (arguments.size() != descriptor->argumentPorts.size())
+    return fail("InvokeFrame port arity does not match its descriptor");
+  std::vector<PreparedFrameArgument> prepared;
+  prepared.reserve(arguments.size());
+  for (std::size_t index = 0; index < arguments.size(); ++index)
+    prepared.push_back({.kind  = descriptor->argumentPorts[index].kind,
+                        .cells = arguments[index]});
+  return invokeFramePrepared(descriptorCell, prepared, resultSlots, cursor,
+                             continuation, failureOp);
 }
 
 ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
@@ -618,8 +756,11 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
   auto previousReferences         = cellReferences_;
   auto previousStreams            = streams_;
   auto previousIterators          = iterators_;
+  auto previousGroupIterators     = groupIterators_;
+  auto previousGroupOwners        = groupOwners_;
   auto previousStreamSlots        = streamSlots_;
   auto previousIteratorSlots      = iteratorSlots_;
+  auto previousGroupIteratorSlots = groupIteratorSlots_;
   auto previousFrames             = activationFrames_;
   auto previousCursorPC           = cursorPC_;
   const auto previousStreamCursor = streamCursor_;
@@ -637,6 +778,8 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
         streams_[destination] = std::move(stream);
         streamSlots_.insert(destination);
         iteratorSlots_.erase(destination);
+        groupIteratorSlots_.erase(destination);
+        groupIterators_.erase(destination);
         iterators_.erase(destination);
         cellReferences_.erase(destination);
       } else {
@@ -662,8 +805,11 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
       cellReferences_.erase(backing);
       streams_.erase(backing);
       iterators_.erase(backing);
+      groupIterators_.erase(backing);
+      groupOwners_.erase(backing);
       streamSlots_.erase(backing);
       iteratorSlots_.erase(backing);
+      groupIteratorSlots_.erase(backing);
     }
     if (frames.empty()) activationFrames_.erase(cursor);
     cursorPC_[cursor] = returnOpcode;
@@ -685,8 +831,11 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
     cellReferences_.swap(previousReferences);
     streams_.swap(previousStreams);
     iterators_.swap(previousIterators);
+    groupIterators_.swap(previousGroupIterators);
+    groupOwners_.swap(previousGroupOwners);
     streamSlots_.swap(previousStreamSlots);
     iteratorSlots_.swap(previousIteratorSlots);
+    groupIteratorSlots_.swap(previousGroupIteratorSlots);
     activationFrames_.swap(previousFrames);
     cursorPC_.swap(previousCursorPC);
     streamCursor_ = previousStreamCursor;

@@ -254,10 +254,9 @@ TEST(VQLClosureValueFramesTest, CapturedNumericKindsAndExactBitsStayDistinct) {
   EXPECT_EQ(h.arena.asInt64(integer), std::optional{INT64_C(9007199254740993)});
 }
 
-TEST(VQLClosureValueFramesTest, UnsupportedVariadicsAndLimitsRollbackAndRetry) {
+TEST(VQLClosureValueFramesTest, UnsupportedFormsAndLimitsRollbackAndRetry) {
   for (const auto source :
-       {R"(let $f := \(...$xs) $xs; return $f)",
-        R"(let $f := \($x) %"fresh"; return $f)",
+       {R"(let $f := \($x) %"fresh"; return $f)",
         R"(let $route := /+d.next; let $f := \($x) $route; return $f)"}) {
     Harness h;
     const auto before = h.arena.cellCount();

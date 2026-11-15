@@ -636,8 +636,8 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
   if (const auto kind = vm_.getOpcodeKind(fnOp);
       kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
       kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
-      kind == OpcodeKind::CheckClosureCall ||
-      kind == OpcodeKind::RestoreBindings) {
+      kind == OpcodeKind::CheckClosureCall || kind == OpcodeKind::GroupBegin ||
+      kind == OpcodeKind::GroupNext || kind == OpcodeKind::RestoreBindings) {
     throw std::invalid_argument(
         "stdlib raw calls do not support frame or closure opcodes");
   }

@@ -277,6 +277,8 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::CreateClosure:
   case OpcodeKind::ApplyClosure:
   case OpcodeKind::CheckClosureCall:
+  case OpcodeKind::GroupBegin:
+  case OpcodeKind::GroupNext:
   case OpcodeKind::RestoreBindings:
   case OpcodeKind::CurrentTimestamp:
   // RelationNext asks a host-registered provider that a shipped artifact
@@ -331,7 +333,9 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
       throw std::runtime_error(
           "Vortex mesh does not support runtime contract guards/groups");
     if (instruction.opcode == OpcodeKind::InvokeFrame ||
-        instruction.opcode == OpcodeKind::ReturnFrame)
+        instruction.opcode == OpcodeKind::ReturnFrame ||
+        instruction.opcode == OpcodeKind::GroupBegin ||
+        instruction.opcode == OpcodeKind::GroupNext)
       throw std::runtime_error(
           "Vortex mesh does not support activation-frame descriptors");
     if (instruction.opcode == OpcodeKind::CreateClosure ||
@@ -545,8 +549,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 ||
-        opcode > static_cast<std::int64_t>(OpcodeKind::CheckClosureCall))
+    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::GroupNext))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

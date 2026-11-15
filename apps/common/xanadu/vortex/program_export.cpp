@@ -63,7 +63,7 @@ void collectClosureReferences(const VortexCore &core, const VortexVM &vm,
                            : std::nullopt;
   if (!tag)
     throw std::runtime_error("export found an unreadable runtime-object tag");
-  if (*tag == "VORTEX_CLOSURE_DESCRIPTOR/2") {
+  if (*tag == "VORTEX_CLOSURE_DESCRIPTOR/3") {
     const auto parsed = vm.closureDescriptor(root);
     if (!parsed) throw std::runtime_error(parsed.error().message);
     for (const auto &[record, target] : parsed->referenceCells)
@@ -110,7 +110,7 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
   if (arena.base())
     throw std::runtime_error(
         "export of a base-backed query requires a source binding");
-  if (vm.hasActiveGuards() ||
+  if (vm.hasActiveGuards() || vm.hasLiveGroupsState() ||
       std::ranges::any_of(vm.choiceStack(), [](const auto &choice) {
         return !choice.guardStacks.empty() ||
                !choice.pendingGuardChecks.empty() ||

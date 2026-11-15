@@ -19,7 +19,6 @@ analyzeClosureLambdaSyntax(const PathLambda &lambda,
   result.hasFormal   = !lambda.params.empty();
   for (std::size_t index = 0; index < lambda.params.size(); ++index) {
     const auto &formal = lambda.params[index];
-    if (formal.isVariadic) return std::optional<ClosureLambdaSyntax>{};
     if (formal.defaultValue) result.defaultParameterIndices.push_back(index);
     if (index == 0) {
       if (const auto *name = std::get_if<std::string>(&formal.target)) {

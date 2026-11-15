@@ -120,7 +120,12 @@ CellRef emitApplyClosure(LowerContext &ctx, const std::string_view label,
   ctx.emitInput(op, intConstant(ctx, static_cast<std::int64_t>(
                                          ClosureCallMode::Explicit)));
   ctx.emitInput(op, context.cell);
-  if (explicitArgument) ctx.emitInput(op, *explicitArgument);
+  ctx.emitInput(op, intConstant(ctx, explicitArgument ? 1 : 0));
+  if (explicitArgument) {
+    const auto positional = ctx.emitConstant(CellValue{std::string{}});
+    ctx.emitInput(op, positional.cell);
+    ctx.emitInput(op, *explicitArgument);
+  }
   ctx.emitOutput(op, output);
   return op;
 }

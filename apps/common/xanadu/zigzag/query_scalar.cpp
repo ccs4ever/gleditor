@@ -11,7 +11,7 @@
 namespace zigzag {
 namespace {
 
-constexpr std::string_view closureDescriptorTag = "VORTEX_CLOSURE_DESCRIPTOR/2";
+constexpr std::string_view closureDescriptorTag = "VORTEX_CLOSURE_DESCRIPTOR/3";
 constexpr std::string_view closureValueTag      = "VORTEX_CLOSURE_VALUE/1";
 
 struct RuntimeObjectSource {

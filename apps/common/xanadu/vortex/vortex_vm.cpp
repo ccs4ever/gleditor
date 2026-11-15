@@ -47,8 +47,11 @@ struct ChoiceSnapshotView {
   const CellReferenceMap &cellReferences;
   const StreamMap &streams;
   const IteratorMap &iterators;
+  const GroupIteratorMap &groupIterators;
+  const GroupOwnerMap &groupOwners;
   const std::unordered_set<CellRef> &streamSlots;
   const std::unordered_set<CellRef> &iteratorSlots;
+  const std::unordered_set<CellRef> &groupIteratorSlots;
   const std::unordered_map<CellRef, ActivationStack> &activationFrames;
   const GuardStackMap &guardStacks;
   const PendingGuardMap &pendingGuardChecks;
@@ -94,6 +97,9 @@ std::size_t countSnapshotEntries(const Snapshot &snapshot, ArenaManifold &arena,
   }
   add(snapshot.streamSlots.size());
   add(snapshot.iteratorSlots.size());
+  add(snapshot.groupIterators.size());
+  add(snapshot.groupOwners.size());
+  add(snapshot.groupIteratorSlots.size());
   add(snapshot.activationFrames.size());
   for (const auto &[cursor, stack] : snapshot.activationFrames) {
     (void)cursor;
@@ -103,6 +109,13 @@ std::size_t countSnapshotEntries(const Snapshot &snapshot, ArenaManifold &arena,
       add(frame->parentResultSlots.size());
       add(frame->localBacking.size());
       add(frame->resultPorts.size());
+      add(frame->groupsByBacking.size());
+      for (const auto &[backing, payload] : frame->groupsByBacking) {
+        (void)backing;
+        if (!payload) continue;
+        add(payload->groups.size());
+        for (const auto &group : payload->groups) add(group.size());
+      }
     }
   }
   add(snapshot.guardStacks.size());
@@ -289,8 +302,9 @@ VortexVM *VortexVM::installWriteGuard() {
   // registered op is unregistered yet writes the registered master's
   // bits. Fresh cells are never claimed: an unregistered cell's
   // content is its kind and cannot desync the map.
-  core_.setWriteGuard(
-      [this](const CellRef master) { return hasOpcodeKind(master); });
+  core_.setWriteGuard([this](const CellRef master) {
+    return hasOpcodeKind(master) || groupOwners_.contains(master);
+  });
   guardInstalled_ = true;
   return this;
 }
@@ -312,7 +326,7 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // ceiling with the generated-vocabulary bound in meta.cpp.
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::CheckClosureCall)) {
+            static_cast<std::uint64_t>(OpcodeKind::GroupNext)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -496,8 +510,11 @@ void VortexVM::abortOwnedMutationGroups(
   cellReferences_.swap(saved.cellReferences);
   streams_.swap(saved.streams);
   iterators_.swap(saved.iterators);
+  groupIterators_.swap(saved.groupIterators);
+  groupOwners_.swap(saved.groupOwners);
   streamSlots_.swap(saved.streamSlots);
   iteratorSlots_.swap(saved.iteratorSlots);
+  groupIteratorSlots_.swap(saved.groupIteratorSlots);
   activationFrames_.swap(saved.activationFrames);
   guardStacks_.swap(saved.guardStacks);
   pendingGuardChecks_.swap(saved.pendingGuardChecks);
@@ -558,7 +575,7 @@ void VortexVM::setOpcodeKind(CellRef opCell, OpcodeKind op) {
 
 std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   if (cellReferences_.contains(opCell) || streamSlots_.contains(opCell) ||
-      iteratorSlots_.contains(opCell))
+      iteratorSlots_.contains(opCell) || groupOwners_.contains(opCell))
     return std::nullopt;
   auto it = opcodeMap_.find(opCell);
   if (it != opcodeMap_.end()) {
@@ -567,7 +584,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::CheckClosureCall)) {
+          static_cast<std::uint64_t>(OpcodeKind::GroupNext)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -590,12 +607,17 @@ std::optional<CellRef> VortexVM::getCursorOpcode(CellRef cursor) const {
 
 std::optional<CellRef>
 VortexVM::cellReferenceOf(const CellRef outputSlot) const {
+  if (isGroupsPort(outputSlot))
+    throw std::invalid_argument(
+        "private Groups port has no public cell reference");
   const auto found = cellReferences_.find(outputSlot);
   if (found == cellReferences_.end()) return std::nullopt;
   return found->second;
 }
 
 std::optional<CellRef> VortexVM::resultCell(const CellRef slot) const {
+  if (isGroupsPort(slot))
+    throw std::invalid_argument("private Groups port cannot be read as a cell");
   if (streamSlots_.contains(slot) || iteratorSlots_.contains(slot))
     return std::nullopt;
   const auto found = cellReferences_.find(slot);
@@ -629,8 +651,11 @@ void VortexVM::setCursorOpcode(CellRef cursor, std::optional<CellRef> op) {
           cellReferences_.erase(backing);
           streams_.erase(backing);
           iterators_.erase(backing);
+          groupIterators_.erase(backing);
+          groupOwners_.erase(backing);
           streamSlots_.erase(backing);
           iteratorSlots_.erase(backing);
+          groupIteratorSlots_.erase(backing);
         }
       }
       activationFrames_.erase(found);
@@ -696,6 +721,10 @@ void VortexVM::enableMemoization(CellRef opcode, std::string_view memoKey) {
 void VortexVM::writeCellReferences(const std::span<const CellRef> outputSlots,
                                    const std::vector<CellValue> &values,
                                    const bool preserveTypedRegisters) {
+  for (const CellRef slot : outputSlots)
+    if (isGroupsPort(slot))
+      throw std::invalid_argument(
+          "generic output cannot target a private Groups port");
   for (std::size_t i = 0; i < outputSlots.size(); ++i) {
     const CellRef slot = outputSlots[i];
     if (preserveTypedRegisters &&
@@ -722,6 +751,9 @@ void VortexVM::writeCellReferences(const std::span<const CellRef> outputSlots,
 }
 
 CellValue VortexVM::inputValue(const CellRef input) const {
+  if (isGroupsPort(input))
+    throw std::invalid_argument(
+        "private Groups port cannot be read as a scalar");
   if (streamSlots_.contains(input))
     throw std::invalid_argument("a stream register is not a scalar input");
   if (iteratorSlots_.contains(input))
@@ -1318,9 +1350,10 @@ void VortexVM::enforceScopedChoiceBudget(const bool addScoped) {
     throw std::length_error("scoped choice total depth limit exceeded");
   }
   const ChoiceSnapshotView current{
-      currentDeweyPath_,   cellReferences_, streams_,          iterators_,
-      streamSlots_,        iteratorSlots_,  activationFrames_, guardStacks_,
-      pendingGuardChecks_, guardScopes_,    mutationGroups_};
+      currentDeweyPath_,   cellReferences_,   streams_,     iterators_,
+      groupIterators_,     groupOwners_,      streamSlots_, iteratorSlots_,
+      groupIteratorSlots_, activationFrames_, guardStacks_, pendingGuardChecks_,
+      guardScopes_,        mutationGroups_};
   // The current view is the prospective snapshot, not an additional copy.
   std::size_t total = countSnapshotEntries(
       current, core_.arena(), scopedChoiceLimits_.maxSnapshotEntries);
@@ -1395,8 +1428,11 @@ void VortexVM::pushChoicePointImpl(const std::optional<CellRef> cursor,
       .cellReferences     = cellReferences_,
       .streams            = streams_,
       .iterators          = iterators_,
+      .groupIterators     = groupIterators_,
+      .groupOwners        = groupOwners_,
       .streamSlots        = streamSlots_,
       .iteratorSlots      = iteratorSlots_,
+      .groupIteratorSlots = groupIteratorSlots_,
       .streamCursor       = streamCursor_,
       .activationFrames   = activationFrames_,
       .guardStacks        = guardStacks_,
@@ -1448,8 +1484,11 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
       cellReferences_     = std::move(cp.cellReferences);
       streams_            = std::move(cp.streams);
       iterators_          = std::move(cp.iterators);
+      groupIterators_     = std::move(cp.groupIterators);
+      groupOwners_        = std::move(cp.groupOwners);
       streamSlots_        = std::move(cp.streamSlots);
       iteratorSlots_      = std::move(cp.iteratorSlots);
+      groupIteratorSlots_ = std::move(cp.groupIteratorSlots);
       streamCursor_       = cp.streamCursor;
       activationFrames_   = std::move(cp.activationFrames);
       guardStacks_        = std::move(cp.guardStacks);
@@ -1548,8 +1587,11 @@ VortexVM *VortexVM::abortScopedChoices(const CellRef cursor) noexcept {
   cellReferences_.swap(saved.cellReferences);
   streams_.swap(saved.streams);
   iterators_.swap(saved.iterators);
+  groupIterators_.swap(saved.groupIterators);
+  groupOwners_.swap(saved.groupOwners);
   streamSlots_.swap(saved.streamSlots);
   iteratorSlots_.swap(saved.iteratorSlots);
+  groupIteratorSlots_.swap(saved.groupIteratorSlots);
   activationFrames_.swap(saved.activationFrames);
   guardStacks_.swap(saved.guardStacks);
   pendingGuardChecks_.swap(saved.pendingGuardChecks);
@@ -1948,6 +1990,11 @@ ExecutionResult VortexVM::executeGuardOpcode(const OpcodeKind kind,
     if (descriptor->argumentPorts.size() != inputs.size() - 2)
       return fail(
           "PushGuard capture arity does not match its frame descriptor");
+    if (std::ranges::any_of(descriptor->argumentPorts,
+                            [](const FramePort &port) {
+                              return port.kind == FramePortKind::Groups;
+                            }))
+      return fail("PushGuard cannot capture private Groups ports");
     if (isMemoized(opcode) || !core_.preconditionsOf(opcode).empty() ||
         !core_.postconditionsOf(opcode).empty())
       return fail("guard opcodes do not support conditions or memoization");
@@ -3459,6 +3506,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
   case OpcodeKind::StreamReverseBegin:
   case OpcodeKind::RankBegin:
   case OpcodeKind::IteratorNext:
+  case OpcodeKind::GroupBegin:
+  case OpcodeKind::GroupNext:
   case OpcodeKind::PinHistorical:
     return executeStreamOpcode(kind, opcode, outputs, cursor);
   case OpcodeKind::Jump: {
@@ -4026,6 +4075,18 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind == OpcodeKind::CheckClosureCall) {
     ++totalCycles_;
     try {
+      const auto closureInputs  = inputsOf(*op);
+      const auto closureOutputs = outputsOf(*op);
+      if (std::ranges::any_of(
+              closureInputs,
+              [this](const CellRef slot) { return isGroupsPort(slot); }) ||
+          std::ranges::any_of(closureOutputs, [this](const CellRef slot) {
+            return isGroupsPort(slot);
+          }))
+        return {.success       = false,
+                .failingClause = *op,
+                .errorMessage =
+                    "closure opcodes cannot access private Groups ports"};
       core_.arena().consumeWork();
       return executeClosureOpcode(kind, *op, cursor);
     } catch (const std::exception &error) {
@@ -4051,6 +4112,18 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind == OpcodeKind::EndMutationGroup) {
     ++totalCycles_;
     try {
+      const auto guardInputs  = inputsOf(*op);
+      const auto guardOutputs = outputsOf(*op);
+      if (std::ranges::any_of(
+              guardInputs,
+              [this](const CellRef slot) { return isGroupsPort(slot); }) ||
+          std::ranges::any_of(guardOutputs, [this](const CellRef slot) {
+            return isGroupsPort(slot);
+          }))
+        return {.success       = false,
+                .failingClause = *op,
+                .errorMessage =
+                    "guard opcodes cannot access private Groups ports"};
       core_.arena().consumeWork();
       if (kind == OpcodeKind::OpenGuardScope ||
           kind == OpcodeKind::CloseGuardScope ||
@@ -4081,6 +4154,19 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
 
   const auto inputCells = inputsOf(*op);
   const auto outCells   = outputsOf(*op);
+  if (kind != OpcodeKind::GroupBegin &&
+      std::ranges::any_of(inputCells, [this](const CellRef slot) {
+        return isGroupsPort(slot);
+      }))
+    return {.success       = false,
+            .failingClause = *op,
+            .errorMessage = "generic opcode cannot read a private Groups port"};
+  if (std::ranges::any_of(
+          outCells, [this](const CellRef slot) { return isGroupsPort(slot); }))
+    return {.success       = false,
+            .failingClause = *op,
+            .errorMessage =
+                "generic opcode cannot write a private Groups port"};
   if (kind == OpcodeKind::VqlMaskLinks) {
     if (inputCells.size() < 2 || (inputCells.size() - 2) % 2 != 0 ||
         !outCells.empty())
@@ -4258,7 +4344,9 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
                                  .value_or(clause);
       const auto conditionKind = getOpcodeKind(actual);
       return conditionKind == OpcodeKind::InvokeFrame ||
-             conditionKind == OpcodeKind::ReturnFrame;
+             conditionKind == OpcodeKind::ReturnFrame ||
+             conditionKind == OpcodeKind::GroupBegin ||
+             conditionKind == OpcodeKind::GroupNext;
     });
   };
   const auto hasClosureCondition = [this](const auto &clauses) {

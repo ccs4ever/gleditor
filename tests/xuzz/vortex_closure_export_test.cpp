@@ -95,6 +95,7 @@ TEST(VortexClosureExportTest,
             .maxFormalCount     = 1,
             .frameInputs        = {{ClosureInputSource::Capture, 0},
                                    {ClosureInputSource::Applied, 0}},
+            .formalNames = std::vector<std::optional<std::string>>{"payload"},
         });
     ASSERT_TRUE(closureDescriptor);
 
@@ -139,6 +140,8 @@ TEST(VortexClosureExportTest,
     h.core.bindInput(apply, closureHandle);
     h.core.bindInput(apply, h.explicitMode());
     h.core.bindInput(apply, contextStream);
+    h.core.bindInput(apply, h.arena.makeScalarCell(std::int64_t{1}));
+    h.core.bindInput(apply, h.arena.makeCell(""));
     h.core.bindInput(apply, appliedStream);
     h.core.bindOutput(apply, outputCapture);
     h.core.bindOutput(apply, outputApplied);
@@ -208,6 +211,9 @@ TEST(VortexClosureExportTest,
   ASSERT_TRUE(closure->descriptor);
   const auto parsedDescriptor = vm.closureDescriptor(*closure->descriptor);
   ASSERT_TRUE(parsedDescriptor);
+  ASSERT_TRUE(parsedDescriptor->formalNames);
+  ASSERT_EQ(parsedDescriptor->formalNames->size(), 1u);
+  EXPECT_EQ((*parsedDescriptor->formalNames)[0], "payload");
   ASSERT_TRUE(parsedDescriptor->presenceTrue);
   ASSERT_TRUE(parsedDescriptor->presenceFalse);
   EXPECT_EQ(arena.asBool(*parsedDescriptor->presenceTrue), true);
@@ -278,6 +284,7 @@ TEST(VortexClosureExportTest,
     h.core.bindInput(apply, returnedHandle);
     h.core.bindInput(apply, h.explicitMode());
     h.core.bindInput(apply, contextStream);
+    h.core.bindInput(apply, h.arena.makeScalarCell(std::int64_t{0}));
     h.core.bindOutput(apply, applyOutput);
     const auto halt = h.op(OpcodeKind::Halt);
     h.next(invoke, clearContext);
@@ -312,6 +319,7 @@ TEST(VortexClosureExportTest,
     h.core.bindInput(portableApply, *originalClosure);
     h.core.bindInput(portableApply, h.explicitMode());
     h.core.bindInput(portableApply, portableContext);
+    h.core.bindInput(portableApply, h.arena.makeScalarCell(std::int64_t{0}));
     h.core.bindOutput(portableApply, portableOutput);
     const auto portableHalt = h.op(OpcodeKind::Halt);
     h.next(clearPortableContext, portableApply);
@@ -409,6 +417,7 @@ TEST(VortexClosureExportTest,
   h.core.bindInput(apply, *value);
   h.core.bindInput(apply, h.explicitMode());
   h.core.bindInput(apply, contextStream);
+  h.core.bindInput(apply, h.arena.makeScalarCell(std::int64_t{0}));
   h.next(clearContext, apply);
   h.next(h.core.home(), clearContext);
   const std::vector<CellRef> program{clearContext, apply};
@@ -445,6 +454,7 @@ TEST(VortexClosureExportTest,
   h.core.bindInput(apply, handleStream);
   h.core.bindInput(apply, h.explicitMode());
   h.core.bindInput(apply, contextStream);
+  h.core.bindInput(apply, h.arena.makeScalarCell(std::int64_t{0}));
   const auto halt = h.op(OpcodeKind::Halt);
   h.next(append, clearContext);
   h.next(clearContext, apply);

@@ -257,16 +257,25 @@ std::vector<CellRef> VQLCompiler::compileClosureInvocation(
     const RuntimeClosureInvocation &invocation,
     const std::optional<CellRef> context,
     const zigzag::vortex::ClosureCallMode mode) {
-  if (std::ranges::any_of(invocation.argNames, [](const std::string &name) {
-        return !name.empty();
-      }))
-    throw QueryRefusal(QueryErrorCategory::Unsupported,
-                       "named runtime closure arguments are unsupported");
+  if (invocation.argNames.size() != invocation.args.size())
+    throw QueryRefusal(QueryErrorCategory::Malformed,
+                       "runtime closure argument-name count is inconsistent");
   if (mode == zigzag::vortex::ClosureCallMode::Contextual &&
       !invocation.args.empty())
     throw std::invalid_argument(
         "contextual closure application cannot have explicit arguments");
-  const auto limits = vm_.closureLimits();
+  const auto limits         = vm_.closureLimits();
+  std::size_t metadataBytes = 0;
+  for (const auto &name : invocation.argNames) {
+    if (name.size() > limits.maxMetadataBytes - metadataBytes)
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          "runtime closure argument names exceed their text limit");
+    metadataBytes += name.size();
+  }
+  if (invocation.argNames.size() > limits.maxMetadataRelations)
+    throw QueryRefusal(QueryErrorCategory::Unsupported,
+                       "runtime closure call exceeds its metadata limit");
   if (invocation.args.size() > limits.maxAppliedStreams ||
       invocation.args.size() >
           static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
@@ -286,6 +295,13 @@ std::vector<CellRef> VQLCompiler::compileClosureInvocation(
   emitInput(check, calleeStream);
   emitInputConstant(check, static_cast<std::int64_t>(mode));
   emitInputConstant(check, static_cast<std::int64_t>(invocation.args.size()));
+  std::vector<CellRef> nameCells;
+  nameCells.reserve(invocation.argNames.size());
+  for (const auto &name : invocation.argNames) {
+    const CellRef nameCell = emitConstant(CellValue(std::string{name}));
+    nameCells.push_back(nameCell);
+    emitInput(check, nameCell);
+  }
   const CellRef checkedHandle = core_.arena().makeCell();
   emitOutput(check, checkedHandle);
 
@@ -300,7 +316,11 @@ std::vector<CellRef> VQLCompiler::compileClosureInvocation(
   emitInput(apply, checkedHandle);
   emitInputConstant(apply, static_cast<std::int64_t>(mode));
   emitInput(apply, contextStream);
-  for (const CellRef actual : actualStreams) emitInput(apply, actual);
+  emitInputConstant(apply, static_cast<std::int64_t>(actualStreams.size()));
+  for (std::size_t index = 0; index < actualStreams.size(); ++index) {
+    emitInput(apply, nameCells[index]);
+    emitInput(apply, actualStreams[index]);
+  }
   const CellRef result = core_.arena().makeCell();
   emitOutput(apply, result);
   dynamicStreams_.insert(result);
@@ -1528,8 +1548,10 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
   compilingFrameDefinitionName_ = definition.name;
   activeCalls_.push_back(definition.name);
 
-  const bool groupedRest           = key.restGroupCount.has_value();
-  const std::size_t restGroupCount = key.restGroupCount.value_or(0);
+  const bool groupedRest =
+      key.restGroupCount.has_value() || key.runtimeRestGroups;
+  const std::size_t restGroupCount =
+      key.runtimeRestGroups ? std::size_t{1} : key.restGroupCount.value_or(0);
   const std::size_t fixedParameterCount =
       definition.params.size() -
       static_cast<std::size_t>(!definition.params.empty() &&
@@ -1596,8 +1618,14 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
     parameterSlots.push_back(slot);
     presenceSlots.push_back(std::nullopt);
     spec.locals.push_back(slot);
-    if (!(groupedRest && index == definition.params.size() - 1))
+    if (key.runtimeRestGroups && index + 1 == definition.params.size()) {
+      const CellRef groupsSlot = core_.arena().makeCell();
+      restGroupSlots.push_back(groupsSlot);
+      spec.locals.push_back(groupsSlot);
+      spec.argumentPorts.emplace_back(groupsSlot, FramePortKind::Groups);
+    } else if (!(groupedRest && index == definition.params.size() - 1)) {
       spec.argumentPorts.emplace_back(slot, FramePortKind::Stream);
+    }
     if (parameter.defaultValue) {
       const CellRef present = core_.arena().makeCell();
       presenceSlots.back()  = present;
@@ -1605,7 +1633,8 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
       spec.argumentPorts.emplace_back(present, FramePortKind::Cell);
     }
   }
-  for (std::size_t index = 0; index < restGroupCount; ++index) {
+  for (std::size_t index = 0; index < restGroupCount && !key.runtimeRestGroups;
+       ++index) {
     const CellRef slot = core_.arena().makeCell();
     restGroupSlots.push_back(slot);
     spec.locals.push_back(slot);
@@ -1628,7 +1657,8 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
   for (const auto slot : parameterSlots) {
     dynamicStreams_.insert(slot);
   }
-  for (const auto slot : restGroupSlots) dynamicStreams_.insert(slot);
+  if (!key.runtimeRestGroups)
+    for (const auto slot : restGroupSlots) dynamicStreams_.insert(slot);
   dynamicStreams_.insert(resultSlot);
 
   const std::string suffix =
@@ -1788,10 +1818,39 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
         emitInput(branch, returnOpcode);
         pushContractGuard(prepared, diagnostic, "#FRAME_REST_PARAM_GUARD");
       };
-      for (const CellRef group : restGroupSlots) {
-        if (parameter.type) emitRestMatch(*parameter.type, group);
-        if (restShape) emitRestMatch(*restShape, group);
-        emitAppendStream(slot, std::span{&group, std::size_t{1}});
+      if (key.runtimeRestGroups) {
+        const CellRef iterator = core_.arena().makeCell();
+        const CellRef begin =
+            emitOp(OpcodeKind::GroupBegin, "#FRAME_GROUPS_BEGIN");
+        emitInput(begin, restGroupSlots.front());
+        emitOutput(begin, iterator);
+        const CellRef groupStream = core_.arena().makeCell();
+        const CellRef present     = core_.arena().makeCell();
+        const CellRef next =
+            emitOp(OpcodeKind::GroupNext, "#FRAME_GROUPS_NEXT");
+        emitInput(next, iterator);
+        emitOutput(next, groupStream);
+        emitOutput(next, present);
+        dynamicStreams_.insert(groupStream);
+        const CellRef end = mintOpcode(OpcodeKind::Nop, "#FRAME_GROUPS_END");
+        const CellRef exhausted =
+            emitOp(OpcodeKind::BranchFalseCell, "#FRAME_GROUPS_EXHAUSTED");
+        emitInput(exhausted, present);
+        emitInput(exhausted, end);
+        if (parameter.type) emitRestMatch(*parameter.type, groupStream);
+        if (restShape) emitRestMatch(*restShape, groupStream);
+        emitAppendStream(slot, std::span{&groupStream, std::size_t{1}});
+        const CellRef repeat =
+            emitOp(OpcodeKind::BranchFalseCell, "#FRAME_GROUPS_REPEAT");
+        emitInputConstant(repeat, false);
+        emitInput(repeat, next);
+        appendOpcode(end);
+      } else {
+        for (const CellRef group : restGroupSlots) {
+          if (parameter.type) emitRestMatch(*parameter.type, group);
+          if (restShape) emitRestMatch(*restShape, group);
+          emitAppendStream(slot, std::span{&group, std::size_t{1}});
+        }
       }
       if (parameter.defaultValue) {
         const CellRef notPresent = core_.arena().makeCell();
@@ -1936,6 +1995,12 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
     throw std::invalid_argument(
         "VQL lambda value is outside the supported closure syntax");
   const auto &syntax = **analyzed;
+  const bool hasVariadic =
+      !lambda.params.empty() && lambda.params.back().isVariadic;
+  const bool groupedVariadic =
+      hasVariadic &&
+      (lambda.params.back().type != nullptr ||
+       std::holds_alternative<DestructurePattern>(lambda.params.back().target));
 
   const auto closureLimits = vm_.closureLimits();
   if (syntax.freeCaptureNames.size() > closureLimits.maxCaptureStreams ||
@@ -1972,6 +2037,11 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
     chargeCaptureWork(std::max(alias.size(), std::size_t{1}));
     addCapture(alias);
     conditionalDefaultNames.insert(alias);
+  }
+  for (const auto &alias : syntax.omittedRestRequiredDefaultCaptureBindings) {
+    chargeCaptureWork(std::max(alias.size(), std::size_t{1}));
+    addCapture(alias);
+    requiredDefaultNames.insert(alias);
   }
   for (const auto &site : syntax.callSites) {
     chargeCaptureWork(1);
@@ -2048,11 +2118,15 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
       !addFrameCount(localCount, lambda.params.size(),
                      frameLimits.maxLocalsPerFrame) ||
       !addFrameCount(localCount, defaultCount, frameLimits.maxLocalsPerFrame) ||
+      !addFrameCount(localCount, groupedVariadic ? 1 : 0,
+                     frameLimits.maxLocalsPerFrame) ||
       !addFrameCount(argumentPortCount, captures.size(),
                      frameLimits.maxDescriptorRecords) ||
       !addFrameCount(argumentPortCount, lambda.params.size(),
                      frameLimits.maxDescriptorRecords) ||
       !addFrameCount(argumentPortCount, defaultCount,
+                     frameLimits.maxDescriptorRecords) ||
+      !addFrameCount(argumentPortCount, groupedVariadic ? 1 : 0,
                      frameLimits.maxDescriptorRecords) ||
       !frameDescriptorCountsFit(frameLimits, localCount, argumentPortCount, 1))
     throw std::invalid_argument("native closure frame exceeds configured local "
@@ -2092,6 +2166,10 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
   std::vector<std::string> requiredAliases = requiredDefaults;
   requiredAliases.insert(requiredAliases.end(), conditionalDefaults.begin(),
                          conditionalDefaults.end());
+  requiredAliases.insert(
+      requiredAliases.end(),
+      syntax.omittedRestRequiredDefaultCaptureBindings.begin(),
+      syntax.omittedRestRequiredDefaultCaptureBindings.end());
   std::ranges::sort(requiredAliases);
   requiredAliases.erase(
       std::unique(requiredAliases.begin(), requiredAliases.end()),
@@ -2128,7 +2206,8 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
   frameConditionalRequiredDefaultCaptureBindings_.emplace(name,
                                                           conditionalDefaults);
 
-  const FrameDefinitionKey key{.name = name};
+  const FrameDefinitionKey key{.name              = name,
+                               .runtimeRestGroups = groupedVariadic};
   const auto reserved = vm_.reserveFrameDescriptor();
   if (!reserved) throw std::invalid_argument(reserved.error().message);
   FrameDefinitionState frameState{.descriptor = *reserved, .queued = true};
@@ -2161,9 +2240,13 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
          .index  = index});
   std::size_t defaultIndex = 0;
   for (std::size_t index = 0; index < lambda.params.size(); ++index) {
-    frameInputs.push_back(
-        {.source = zigzag::vortex::ClosureInputSource::Applied,
-         .index  = index});
+    const bool variadic = hasVariadic && index + 1 == lambda.params.size();
+    const auto source =
+        variadic ? (groupedVariadic
+                        ? zigzag::vortex::ClosureInputSource::AppliedRestGroups
+                        : zigzag::vortex::ClosureInputSource::AppliedRest)
+                 : zigzag::vortex::ClosureInputSource::Applied;
+    frameInputs.push_back({.source = source, .index = index});
     if (defaultIndex < syntax.defaultParameterIndices.size() &&
         syntax.defaultParameterIndices[defaultIndex] == index) {
       frameInputs.push_back(
@@ -2173,12 +2256,24 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
     }
   }
 
-  const auto closureDescriptor =
-      vm_.makeClosureDescriptor({.frameDescriptor    = *reserved,
-                                 .captureStreamCount = captureSources.size(),
-                                 .minFormalCount     = 0,
-                                 .maxFormalCount     = lambda.params.size(),
-                                 .frameInputs        = std::move(frameInputs)});
+  std::vector<std::optional<std::string>> formalNames;
+  formalNames.reserve(lambda.params.size());
+  for (const auto &parameter : lambda.params) {
+    if (const auto *name = std::get_if<std::string>(&parameter.target);
+        name && !name->empty())
+      formalNames.emplace_back(*name);
+    else
+      formalNames.emplace_back(std::nullopt);
+  }
+  const auto closureDescriptor = vm_.makeClosureDescriptor(
+      {.frameDescriptor    = *reserved,
+       .captureStreamCount = captureSources.size(),
+       .minFormalCount     = 0,
+       .maxFormalCount     = lambda.params.size(),
+       .frameInputs        = std::move(frameInputs),
+       .variadicFormalIndex =
+           hasVariadic ? std::optional{lambda.params.size() - 1} : std::nullopt,
+       .formalNames = std::move(formalNames)});
   if (!closureDescriptor)
     throw std::invalid_argument(closureDescriptor.error().message);
 

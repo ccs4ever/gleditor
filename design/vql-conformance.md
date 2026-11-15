@@ -22,7 +22,14 @@ Explicit `$f(a, b)` calls and fixed-formal lambda defaults also execute as nativ
 The closure-call parser/default tests exercise lazy omission, supplied empty streams, lexical and
 explicit-dot scope, preflight before argument effects, return failure cleanup, graph reload, host
 and Vquery SOURCE mesh execution. Real CLI and separate REPL queries cover exact integers and
-retained capture membership. Variadic value lambdas and named closure arguments remain unsupported.
+retained capture membership. Runtime value closures now support named actuals and final variadic
+formals through portable descriptor/frame graphs. The signature regressions cover source-order
+actual preparation, declaration-order defaults, omission versus explicit empty groups, per-group
+contracts and capture isolation, preflight refusals, frozen mutation guards and retained Groups
+ownership. Repeated cell identities survive native export/reload and host execution. Vquery SOURCE
+mesh executes named/rest calls with distinct outputs; repeated result identities expose an existing
+reciprocal-link packaging defect, recorded as open C8 work in the
+[signature package](projects/vql-closure-signatures-plan.md).
 
 The [stream-call regressions](projects/vql-stream-call-semantics-plan.md) also cover a bare initial
 call inside an empty inherited frame context, empty explicit paths without downstream effects, and

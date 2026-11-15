@@ -204,14 +204,14 @@ public:
         scanningParameterDefault_   = prior;
         scanningOmittedRestDefault_ = priorOmittedDefault;
       }
+      const Scope prematchScope = scope;
       if (parameter.type) {
-        const Scope priorScope       = scope;
         const bool savedConditional  = scanningConditionalRestType_;
         const bool savedOmitted      = scanningOmittedRestDefault_;
         scanningConditionalRestType_ = parameter.isVariadic;
         scanningOmittedRestDefault_ =
             parameter.isVariadic && parameter.defaultValue != nullptr;
-        auto captures                = type(*parameter.type, priorScope, 2);
+        auto captures                = type(*parameter.type, prematchScope, 2);
         scanningConditionalRestType_ = savedConditional;
         scanningOmittedRestDefault_  = savedOmitted;
         if (!parameter.isVariadic)
@@ -237,7 +237,8 @@ public:
           scanningConditionalRestType_ = true;
           scanningOmittedRestDefault_  = parameter.defaultValue != nullptr;
         }
-        auto captures                = contractPattern(pattern, scope, 2);
+        auto captures = contractPattern(
+            pattern, parameter.isVariadic ? prematchScope : scope, 2);
         scanningConditionalRestType_ = priorConditional;
         scanningOmittedRestDefault_  = priorOmitted;
         if (!parameter.isVariadic)
@@ -737,10 +738,6 @@ private:
     if (malformedNames)
       throw ScanFailure(
           "runtime closure invocation argument-name count is inconsistent");
-    if (std::ranges::any_of(call.argNames, [](const std::string &name) {
-          return !name.empty();
-        }))
-      refuse("named runtime closure arguments are not supported");
   }
 
   void versionExpr(const VersionExpr &expr, const Scope &scope,
@@ -1416,9 +1413,12 @@ private:
                 [&](const TypeExpr &typeExpr, const std::size_t nestedDepth) {
                   typeCaptures = type(typeExpr, prematchScope, nestedDepth);
                 });
-      for (const auto &name : typeCaptures)
-        shadowFunctorFormal(name, shadowedByLambda);
-      scope.insert(typeCaptures.begin(), typeCaptures.end());
+      const bool groupedRest = param.isVariadic && valueLambdaBody;
+      if (!groupedRest) {
+        for (const auto &name : typeCaptures)
+          shadowFunctorFormal(name, shadowedByLambda);
+        scope.insert(typeCaptures.begin(), typeCaptures.end());
+      }
 
       if (const auto *name = std::get_if<std::string>(&param.target)) {
         if (name->empty()) refuse("path lambda parameter name is empty");
@@ -1427,13 +1427,16 @@ private:
       } else if (std::holds_alternative<bool>(param.target)) {
         scope.insert(".");
       } else {
-        const auto captures = contractPattern(
-            std::get<DestructurePattern>(param.target), scope, childDepth);
-        for (const auto &name : captures)
-          shadowFunctorFormal(name, shadowedByLambda);
-        scope.insert(captures.begin(), captures.end());
+        const auto captures =
+            contractPattern(std::get<DestructurePattern>(param.target),
+                            groupedRest ? prematchScope : scope, childDepth);
+        if (!groupedRest) {
+          for (const auto &name : captures)
+            shadowFunctorFormal(name, shadowedByLambda);
+          scope.insert(captures.begin(), captures.end());
+        }
       }
-      if (param.isVariadic)
+      if (param.isVariadic && !valueLambdaBody)
         refuse("variadic path lambdas are not frame eligible");
     }
     const bool priorValueLambdaBody = inValueLambdaBody_;

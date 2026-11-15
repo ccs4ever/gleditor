@@ -217,9 +217,10 @@ private:
   };
   struct FrameDefinitionKey {
     std::string name;
-    // Present only for typed variadic frames. Zero means no rest actual groups;
-    // nullopt identifies an ordinary or untyped-rest frame.
+    // Named static frames specialize typed rest by supplied group count.
     std::optional<std::size_t> restGroupCount;
+    // Runtime closures keep one Groups port and loop over any tail length.
+    bool runtimeRestGroups{false};
     std::vector<ClosedFunctorFormalKey> functorTemplates;
     std::vector<StaticFunctorProgramKey> staticFunctorPrograms;
 
@@ -231,6 +232,8 @@ private:
       const auto countHash =
           std::hash<std::optional<std::size_t>>{}(key.restGroupCount);
       std::size_t result = nameHash ^ countHash;
+      result ^= std::hash<bool>{}(key.runtimeRestGroups) +
+                std::size_t{0x9e3779b9} + (result << 6) + (result >> 2);
       const auto combine = [&result](const std::size_t value) {
         result ^=
             value + std::size_t{0x9e3779b9} + (result << 6) + (result >> 2);
