@@ -282,7 +282,7 @@ Lowered<CellRef> forwarderDescriptor(LowerContext &ctx) {
   const auto closure = ctx.vm().makeClosureDescriptor(ClosureDescriptorSpec{
       .frameDescriptor    = *reserved,
       .captureStreamCount = 1,
-      .appliedStreamCount = 0,
+      .maxFormalCount     = 0,
       .frameInputs = {{.source = ClosureInputSource::Capture, .index = 0}}});
   if (!closure)
     return internalError("closure descriptor: " + closure.error().message);

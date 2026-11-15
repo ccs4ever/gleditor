@@ -6,6 +6,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <vector>
+
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -129,22 +131,20 @@ TEST_F(VQLWatchVmTest, WatchInsideAPerspectiveBlockIsRefusedByName) {
       HasSubstr("watch statement inside a perspective block"));
 }
 
-// Until the perspective selector card lands, a read inside a block is
-// qualified into a perspective step and refused by the selector lowering,
-// where an unqualified canonical read would have returned empty. Replace this
-// with the read assertions when that card lands.
 TEST_F(VQLWatchVmTest, PerspectiveBlockReadsAreQualifiedNotCanonical) {
   const auto subject = arena.makeCell("subject");
   engine.setVariable("p", subject);
   EXPECT_TRUE(engine.execute("$p/+d.comment").empty());
-  engine.execute(
-      "with perspective(\"alice\") { $p/+d.comment => [ \"alice\" ] }");
-  EXPECT_TRUE(engine.execute("$p/+d.comment").empty());
-  const auto scoped =
-      engine.execute("with perspective(\"alice\") { $p/+d.comment }");
-  ASSERT_EQ(scoped.size(), 1U);
-  EXPECT_EQ(arena.textOf(scoped.front()), "alice");
-  EXPECT_TRUE(engine.execute("$p/+d.comment").empty());
+  const auto canonical   = arena.makeCell("canonical");
+  const auto privateNote = arena.makeCell("Alice note");
+  ASSERT_TRUE(arena.link(subject, engine.resolveDimension("d.comment"),
+                         zigzag::DimVector::POS, canonical));
+  ASSERT_TRUE(arena.link(subject, engine.resolveDimension("d.comment@alice"),
+                         zigzag::DimVector::POS, privateNote));
+  EXPECT_EQ(engine.execute("with perspective(\"alice\") { $p/+d.comment }"),
+            (std::vector<zigzag::CellRef>{privateNote}));
+  EXPECT_EQ(engine.execute("$p/+d.comment"),
+            (std::vector<zigzag::CellRef>{canonical}));
 }
 
 TEST_F(VQLWatchVmTest, PerspectiveBlockRefusesStepsItCannotQualify) {
@@ -162,14 +162,17 @@ TEST_F(VQLWatchVmTest, PerspectiveBlockRefusesStepsItCannotQualify) {
 TEST_F(VQLWatchVmTest, InnerPerspectiveBlockOverridesTheOuterName) {
   const auto subject = arena.makeCell("subject");
   engine.setVariable("p", subject);
-  engine.execute("with perspective(\"bob\") { $p/+d.comment => [ \"bob\" ] }");
-  engine.execute(
-      "with perspective(\"alice\") { $p/+d.comment => [ \"alice\" ] }");
-  const auto res =
-      engine.execute("with perspective(\"bob\") { "
-                     "with perspective(\"alice\") { $p/+d.comment } }");
-  ASSERT_EQ(res.size(), 1U);
-  EXPECT_EQ(arena.textOf(res.front()), "alice");
+  const auto alice = arena.makeCell("Alice note");
+  const auto bob   = arena.makeCell("Bob note");
+  ASSERT_TRUE(arena.link(subject, engine.resolveDimension("d.comment@alice"),
+                         zigzag::DimVector::POS, alice));
+  ASSERT_TRUE(arena.link(subject, engine.resolveDimension("d.comment@bob"),
+                         zigzag::DimVector::POS, bob));
+  EXPECT_EQ(engine.execute("with perspective(\"bob\") { "
+                           "with perspective(\"alice\") { $p/+d.comment } }"),
+            (std::vector<zigzag::CellRef>{alice}));
+  EXPECT_EQ(engine.execute("with perspective(\"bob\") { $p/+d.comment }"),
+            (std::vector<zigzag::CellRef>{bob}));
 }
 
 } // namespace

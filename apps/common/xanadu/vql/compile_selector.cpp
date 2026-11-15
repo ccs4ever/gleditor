@@ -47,6 +47,15 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         .body   = (*lambda)->body,
     };
     nextStream = compileCall(inlineLambda, {}, current, true, false);
+  } else if (const auto *invocation =
+                 std::get_if<std::shared_ptr<RuntimeClosureInvocation>>(
+                     &step.selector)) {
+    if (!*invocation)
+      throw std::invalid_argument("null runtime closure path invocation");
+    nextStream = compileClosureInvocation(
+        **invocation,
+        hasContext ? std::optional<CellRef>{current} : std::nullopt,
+        zigzag::vortex::ClosureCallMode::Explicit);
   } else if (std::holds_alternative<SignedDimensionStep>(step.selector)) {
     const auto &sd = std::get<SignedDimensionStep>(step.selector);
     DimRef dim     = resolveDimension(sd.dimName);

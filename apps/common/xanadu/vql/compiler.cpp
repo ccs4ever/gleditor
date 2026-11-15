@@ -67,6 +67,8 @@ std::string valueFormName(const ValueExpr &expr) {
   if (std::holds_alternative<std::string>(kind)) return "variable";
   if (std::holds_alternative<std::shared_ptr<FunctionInvocation>>(kind))
     return "function result";
+  if (std::holds_alternative<std::shared_ptr<RuntimeClosureInvocation>>(kind))
+    return "runtime closure call";
   if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(kind))
     return "shape";
   if (std::holds_alternative<std::shared_ptr<VersionExpr>>(kind))
@@ -220,6 +222,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "CREATE_CLOSURE";
   case OpcodeKind::ApplyClosure:
     return "APPLY_CLOSURE";
+  case OpcodeKind::CheckClosureCall:
+    return "CHECK_CLOSURE_CALL";
   case OpcodeKind::ScopedChoice:
     return "SCOPED_CHOICE";
   case OpcodeKind::VqlFieldProbe:
@@ -688,8 +692,11 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       else if (activeCalls_.empty() && !contextInputs_.empty())
         stream = contextInputs_;
       else if (!path.steps.empty() &&
-               std::holds_alternative<FunctionInvocation>(
-                   path.steps.front().selector))
+               (std::holds_alternative<FunctionInvocation>(
+                    path.steps.front().selector) ||
+                std::holds_alternative<
+                    std::shared_ptr<RuntimeClosureInvocation>>(
+                    path.steps.front().selector)))
         stream.push_back(ctxCell);
       else if (!path.steps.empty() &&
                std::holds_alternative<SignedDimensionStep>(
@@ -709,7 +716,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       const CellRef result = core_.arena().makeCell();
       const auto clear     = emitOp(OpcodeKind::ClearCellRefs, "#ANCHOR_CLEAR");
       emitOutput(clear, result);
-      auto condition = compileBooleanExpr(predicate, candidate);
+      auto condition = compileCandidatePredicate(predicate, candidate);
       if (!condition) condition = emitConstant(false);
       const auto end    = mintOpcode(OpcodeKind::Nop, "#ANCHOR_FILTER_END");
       const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#ANCHOR_FILTER");
@@ -940,6 +947,20 @@ std::optional<CellRef> VQLCompiler::compilePathStep(const PathStep &step,
   dummy.anchor.kind = AnchorKind::Context;
   dummy.steps.push_back(step);
   return compilePathExpression(dummy, inStreamCell);
+}
+
+std::optional<CellRef>
+VQLCompiler::compileCandidatePredicate(const BooleanExpr &expr,
+                                       const CellRef candidate) {
+  struct RestoreContext {
+    std::optional<CellRef> &target;
+    std::optional<CellRef> previous;
+    ~RestoreContext() { target = previous; }
+  } restore{ambientContext_, ambientContext_};
+  // Scalar evaluation may use home as a placeholder. Only an actual
+  // predicate candidate establishes semantic context for nested calls.
+  ambientContext_ = candidate;
+  return compileBooleanExpr(expr, candidate);
 }
 
 std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
@@ -1255,6 +1276,17 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           requirePositionalArguments(*val);
           const auto results =
               compileCall(definition->second, val->args, ctxCell, false);
+          return results.empty()
+                     ? std::nullopt
+                     : std::optional{emitFirstCell(results.front())};
+        } else if constexpr (std::is_same_v<T, std::shared_ptr<
+                                                   RuntimeClosureInvocation>>) {
+          if (!val)
+            throw std::invalid_argument("null runtime closure invocation");
+          // `ctxCell` is sometimes a home-cell fallback for scalar
+          // expressions; only the ambient optional carries caller context.
+          const auto results = compileClosureInvocation(
+              *val, ambientContext_, zigzag::vortex::ClosureCallMode::Explicit);
           return results.empty()
                      ? std::nullopt
                      : std::optional{emitFirstCell(results.front())};

@@ -170,6 +170,14 @@ Statement Parser::parseStatement() {
       check(TokenKind::KwIf) || check(TokenKind::KwReturn)) {
     return parseExecutionBlock();
   }
+  if (check(TokenKind::Variable) && peekToken().is(TokenKind::OpenParen)) {
+    ValueExpr expression = parseValueOrComparisonExpr();
+    ReturnClause returned;
+    returned.items.push_back(
+        ReturnItem{.item = ReturnValue{.expression = std::move(expression)}});
+    return ExecutionBlock{.action =
+                              ActionClause{.clause = std::move(returned)}};
+  }
   return parsePathExpression();
 }
 
@@ -968,6 +976,9 @@ StepSelector Parser::parseStepSelector() {
         MacroDimensionGroup{.steps = std::move(macroSteps), .repetition = rep});
   }
 
+  if (check(TokenKind::Variable) && peekToken().is(TokenKind::OpenParen))
+    return parseRuntimeClosureInvocation();
+
   // Function invocation: func(args...) or find(args...)
   if ((check(TokenKind::Identifier) || check(TokenKind::KwFind)) &&
       peekToken().is(TokenKind::OpenParen)) {
@@ -1304,6 +1315,11 @@ ReturnClause Parser::parseReturnClause() {
       }
       items.push_back(
           ReturnItem{.item = ReturnValue{.expression = std::move(expression)}});
+    } else if (check(TokenKind::Variable) &&
+               peekToken().is(TokenKind::OpenParen)) {
+      ValueExpr expression = parseValueOrComparisonExpr();
+      items.push_back(
+          ReturnItem{.item = ReturnValue{.expression = std::move(expression)}});
     } else if (check(TokenKind::Slash)) {
       // FieldWeave: sequence of PathSteps rooted at result cell
       std::vector<PathStep> steps;
@@ -1554,6 +1570,7 @@ ValueExpr Parser::parseValueAtom() {
     return ValueExpr{.kind = ScalarLiteral{.value = false}};
   }
   if (check(TokenKind::Variable)) {
+    if (peekToken().is(TokenKind::OpenParen)) return parseRuntimeClosureValue();
     if (peekToken().is(TokenKind::Slash) || peekToken().is(TokenKind::Dot) ||
         peekToken().is(TokenKind::OpenBrace) ||
         peekToken().is(TokenKind::GreaterThan) ||
@@ -1652,6 +1669,98 @@ FunctionInvocation Parser::parseFunctionInvocation() {
   return FunctionInvocation{.name     = std::string(nameTok.text),
                             .args     = std::move(args),
                             .argNames = std::move(names)};
+}
+
+std::shared_ptr<RuntimeClosureInvocation>
+Parser::parseRuntimeClosureInvocation() {
+  Token calleeToken =
+      consume(TokenKind::Variable, "Expected variable closure callee");
+  consume(TokenKind::OpenParen, "Expected '(' after closure callee");
+  std::vector<ValueExpr> args;
+  std::vector<std::string> names;
+  if (!check(TokenKind::CloseParen)) {
+    while (true) {
+      std::string name;
+      if (check(TokenKind::Identifier) && peekToken().is(TokenKind::Colon)) {
+        name = std::string(advance().text);
+        advance();
+      }
+      names.push_back(std::move(name));
+      args.push_back(parseValueOrComparisonExpr());
+      if (!match(TokenKind::Comma)) break;
+    }
+  }
+  consume(TokenKind::CloseParen, "Expected ')' after closure arguments");
+  return std::make_shared<RuntimeClosureInvocation>(RuntimeClosureInvocation{
+      .callee   = ValueExpr{.kind = std::move(calleeToken.stringValue)},
+      .args     = std::move(args),
+      .argNames = std::move(names),
+  });
+}
+
+ValueExpr Parser::parseRuntimeClosureValue() {
+  auto invocation            = parseRuntimeClosureInvocation();
+  const auto pathStepStarter = [](const TokenKind kind) {
+    switch (kind) {
+    case TokenKind::Home:
+    case TokenKind::Root:
+    case TokenKind::Cursor:
+    case TokenKind::NamedCursor:
+    case TokenKind::AllCursors:
+    case TokenKind::AllNamedCursors:
+    case TokenKind::Variable:
+    case TokenKind::Dot:
+    case TokenKind::Slash:
+    case TokenKind::At:
+    case TokenKind::Tilde:
+    case TokenKind::Backslash:
+    case TokenKind::OpenParen:
+    case TokenKind::Plus:
+    case TokenKind::Minus:
+    case TokenKind::KwSlices:
+    case TokenKind::KwDocs:
+    case TokenKind::KwCurrent:
+    case TokenKind::KwLocal:
+    case TokenKind::KwTopic:
+    case TokenKind::KwBtpk:
+    case TokenKind::KwCiting:
+    case TokenKind::KwBacklinks:
+    case TokenKind::KwSystem:
+    case TokenKind::KwBtih:
+    case TokenKind::KwLedger:
+    case TokenKind::KwFind:
+    case TokenKind::Identifier:
+      return true;
+    default:
+      return false;
+    }
+  };
+
+  if (check(TokenKind::Slash)) {
+    const Token next = peekToken();
+    if (!pathStepStarter(next.kind)) {
+      if (next.is(TokenKind::IntegerLiteral) ||
+          next.is(TokenKind::FloatLiteral))
+        throw ParseError(
+            "numeric division after a runtime closure call is not supported "
+            "by the VQL value grammar",
+            current_.loc);
+      return ValueExpr{.kind = std::move(invocation)};
+    }
+  } else if (!check(TokenKind::Arrow) && !check(TokenKind::Transclude)) {
+    return ValueExpr{.kind = std::move(invocation)};
+  }
+
+  PathExpression path{.anchor = AnchorNode{.kind = AnchorKind::Context}};
+  path.steps.push_back(PathStep{.selector = std::move(invocation)});
+  while (check(TokenKind::Slash) || check(TokenKind::Arrow) ||
+         check(TokenKind::Transclude)) {
+    if (check(TokenKind::Slash))
+      path.steps.push_back(parsePathStep(true));
+    else
+      path.steps.push_back(parsePathStep(false));
+  }
+  return ValueExpr{.kind = std::make_shared<PathExpression>(std::move(path))};
 }
 
 DestructurePattern Parser::parseDestructurePattern() {

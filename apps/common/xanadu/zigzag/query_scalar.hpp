@@ -38,6 +38,7 @@ enum class RuntimeObjectClaimResult {
   NoClaim,
   Claimed,
   ProbeLimitExceeded,
+  FuelExhausted,
   Unreadable,
 };
 

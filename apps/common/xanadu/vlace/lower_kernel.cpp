@@ -33,6 +33,7 @@ namespace {
 using zigzag::CellRef;
 using zigzag::DimVector;
 using zigzag::vortex::CellValue;
+using zigzag::vortex::ClosureCallMode;
 using zigzag::vortex::ClosureDescriptorSpec;
 using zigzag::vortex::ClosureFrameInput;
 using zigzag::vortex::ClosureInputSource;
@@ -105,6 +106,23 @@ CellRef emit(LowerContext &ctx, OpcodeKind kind, std::string_view label,
 
 CellRef intConstant(LowerContext &ctx, std::int64_t value) {
   return ctx.emitConstant(CellValue{value}).cell;
+}
+
+CellRef emitApplyClosure(LowerContext &ctx, const std::string_view label,
+                         const CellRef handle,
+                         const std::optional<CellRef> explicitArgument,
+                         const CellRef output) {
+  const auto context = ctx.newRegister();
+  emit(ctx, OpcodeKind::StreamClear, "#vlace_empty_closure_context", {},
+       {context.cell});
+  const auto op = ctx.emitOp(OpcodeKind::ApplyClosure, label);
+  ctx.emitInput(op, handle);
+  ctx.emitInput(op, intConstant(ctx, static_cast<std::int64_t>(
+                                         ClosureCallMode::Explicit)));
+  ctx.emitInput(op, context.cell);
+  if (explicitArgument) ctx.emitInput(op, *explicitArgument);
+  ctx.emitOutput(op, output);
+  return op;
 }
 
 /// `out := Link(subject, dim, +1)`: the cell @p subject links to posward on
@@ -322,7 +340,7 @@ Lowered<CellRef> makeClosureDescriptor(LowerContext &ctx, CellRef frame,
   const auto made = ctx.vm().makeClosureDescriptor(
       ClosureDescriptorSpec{.frameDescriptor    = frame,
                             .captureStreamCount = captureStreams,
-                            .appliedStreamCount = appliedStreams,
+                            .maxFormalCount     = appliedStreams,
                             .frameInputs        = std::move(inputs)});
   if (!made)
     return internalError("closure descriptor: " + made.error().message);
@@ -408,8 +426,8 @@ Lowered<CellRef> forceFrameDescriptor(LowerContext &ctx) {
   emit(ctx, OpcodeKind::Eq, "#vlace_is_done", {state.cell, two}, {isDone.cell});
   ctx.branchIfFalse(isDone, notRun);
   const auto remembered = ctx.newRegister();
-  emit(ctx, OpcodeKind::ApplyClosure, "#vlace_memo_apply", {code.cell},
-       {remembered.cell});
+  emitApplyClosure(ctx, "#vlace_memo_apply", code.cell, std::nullopt,
+                   remembered.cell);
   emitCopyReference(ctx, remembered, result);
   ctx.jumpTo(ret);
 
@@ -427,8 +445,8 @@ Lowered<CellRef> forceFrameDescriptor(LowerContext &ctx) {
   ctx.placeLabel(compute);
   emitStateWrite(ctx, subject.cell, epoch);
   const auto value = ctx.newRegister();
-  emit(ctx, OpcodeKind::ApplyClosure, "#vlace_thunk_run", {code.cell},
-       {value.cell});
+  emitApplyClosure(ctx, "#vlace_thunk_run", code.cell, std::nullopt,
+                   value.cell);
   const auto stream = ctx.newRegister();
   emit(ctx, OpcodeKind::StreamAppend, "#vlace_box_capture", {value.cell},
        {stream.cell});
@@ -1000,8 +1018,7 @@ Lowered<Operand> applyOperand(LowerContext &ctx, Operand fn, Operand arg,
   auto function = toWhnf(ctx, fn, loc);
   if (!function) return function;
   const auto out = ctx.newRegister();
-  emit(ctx, OpcodeKind::ApplyClosure, "#vlace_apply",
-       {function->cell, arg.cell}, {out.cell});
+  emitApplyClosure(ctx, "#vlace_apply", function->cell, arg.cell, out.cell);
   return Operand(out.cell, Evaluation::Whnf);
 }
 

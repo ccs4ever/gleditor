@@ -5,8 +5,10 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <stop_token>
+#include <string>
 
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -120,6 +122,37 @@ struct Harness {
     return vm.spawnCursor(entry, "mutation-group-test");
   }
 };
+
+TEST(VortexMutationGroupsTest, InvalidSpliceIndexRefusesWithoutChangingSource) {
+  Harness h;
+  const auto subject = h.arena.makeCell("untouched");
+  const auto splice  = h.op(OpcodeKind::Splice);
+  h.core.bindInput(splice, subject);
+  h.core.bindInput(splice, h.arena.makeCell("invalid"));
+  h.core.bindInput(splice, h.arena.makeScalarCell(std::int64_t{1}));
+  h.core.bindInput(splice, h.arena.makeCell("changed"));
+  h.next(splice, h.op(OpcodeKind::Halt));
+  const auto execution = h.vm.run(h.cursorAt(splice), 100);
+  EXPECT_FALSE(execution.success);
+  EXPECT_NE(execution.errorMessage.find("Splice offset"), std::string::npos);
+  EXPECT_EQ(h.arena.textOf(subject), "untouched");
+  EXPECT_EQ(h.arena.outstandingMarks(), 0u);
+}
+
+TEST(VortexMutationGroupsTest, MaximalSpliceLengthClampsWithoutOverflow) {
+  Harness h;
+  const auto subject = h.arena.makeCell("untouched");
+  const auto splice  = h.op(OpcodeKind::Splice);
+  h.core.bindInput(splice, subject);
+  h.core.bindInput(splice, h.arena.makeScalarCell(std::int64_t{1}));
+  h.core.bindInput(
+      splice, h.arena.makeScalarCell(std::numeric_limits<std::int64_t>::max()));
+  h.core.bindInput(splice, h.arena.makeCell("X"));
+  h.next(splice, h.op(OpcodeKind::Halt));
+  const auto execution = h.vm.run(h.cursorAt(splice), 100);
+  ASSERT_TRUE(execution.success) << execution.errorMessage;
+  EXPECT_EQ(h.arena.textOf(subject), "uX");
+}
 
 TEST(VortexMutationGroupsTest,
      SuccessfulGroupCommitsAndKeepsCallerChoiceForItsOwnRollback) {

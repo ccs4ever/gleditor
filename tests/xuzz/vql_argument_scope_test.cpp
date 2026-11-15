@@ -23,7 +23,7 @@ TEST(VQLArgumentScopeTest, ExplicitArgumentsUseTheCallerScope) {
   EXPECT_EQ(arena.asInt64(result.front()), 9);
 }
 
-TEST(VQLArgumentScopeTest, ExtraExplicitArgumentsAreEvaluatedBeforeMatching) {
+TEST(VQLArgumentScopeTest, ExplicitArgumentsAreEvaluatedBeforeMatching) {
   zigzag::ArenaManifold arena;
   zigzag::vortex::VortexCore core(arena);
   xanadu::vql::VQLEngine engine(core);
@@ -31,10 +31,10 @@ TEST(VQLArgumentScopeTest, ExtraExplicitArgumentsAreEvaluatedBeforeMatching) {
   try {
     (void)engine.execute(R"(
       def broken(): Int := "not an integer";
-      def one($value: Int): Int := $value;
-      one("also not an integer", broken())
+      def pair($value: Int, $other: Int): Int := $value;
+      pair("also not an integer", broken())
     )");
-    FAIL() << "the extra explicit argument was not evaluated";
+    FAIL() << "the later explicit argument was not evaluated";
   } catch (const std::exception &error) {
     EXPECT_STREQ(error.what(),
                  "broken() returned a value outside its declared type");

@@ -1,10 +1,35 @@
 # VQL engine conformance and executable examples
 
-This is the implemented execution contract for VQL 16.1. The
-[language specification](vql-query-language.md) also retains explicitly proposed syntax and runtime
-designs. Parser acceptance alone promises neither direct execution nor compiler support.
+VQL execution compiles supported queries into real Vortex graphs and runs them on the VM. Unlowered
+forms refuse explicitly. The [language specification](vql-query-language.md) retains proposed syntax
+and runtime designs; parser acceptance does not establish execution support. See
+[the implementation status](vql-implementation-status.md) and
+[the restoration plan](projects/vm-restoration-coordinator-plan.md) for the remaining work.
 
-## Engine matrix
+## Runtime restoration checks
+
+The current graph lowering includes runtime rank quantifiers and cardinality checks, cursor rank and
+name selection, and reusable dimension morphisms. Morphism compilation leaves source topology
+unchanged; execution performs the allocation and linking. Named dimension perspectives use the
+existing qualified-axis representation and runtime canonical fallback, including target filters and
+clamps. Full perspective clone-map transport and general root metacell enumeration remain open.
+
+The regression files `vql_quantifiers_vm_regression_test.cpp`,
+`vql_root_selectors_vm_regression_test.cpp` and `vql_path_morphism_vm_regression_test.cpp` exercise
+these boundaries, including AST-free export/reload and host/mesh source routes for morphisms.
+
+Explicit `$f(a, b)` calls and fixed-formal lambda defaults also execute as native closure frames.
+The closure-call parser/default tests exercise lazy omission, supplied empty streams, lexical and
+explicit-dot scope, preflight before argument effects, return failure cleanup, graph reload, host
+and Vquery SOURCE mesh execution. Real CLI and separate REPL queries cover exact integers and
+retained capture membership. Variadic value lambdas and named closure arguments remain unsupported.
+
+## Historical engine matrix
+
+The matrix and restricted-compiler discussion below record the earlier compiler cutoff and the
+origin of the executable corpus. They describe the pre-restoration engines, including the retired
+direct evaluator, rather than the current support boundary. In particular, the old perspective
+refusal row does not describe the qualified-axis runtime lowering above.
 
 | Feature                                                             | Parser                                | Direct evaluator                                           | Vortex compiler                                          | Persistence/service integration            |
 | ------------------------------------------------------------------- | ------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------ |

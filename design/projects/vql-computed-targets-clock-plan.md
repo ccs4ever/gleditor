@@ -1,8 +1,10 @@
 # Runtime timestamps and computed VQL projection targets
 
 Iteration 55 is committed as `588277f2`. Iteration 56 combines the remaining fourth §4.12 example
-with graph-native timestamps and pure computed projection targets. Implementation and validation are
-in progress; this document does not establish completion.
+with graph-native timestamps and pure computed projection targets. Clock and target lowering landed
+in `f065d339` and `fd4436fe`. The sixteen clock/target regressions pass in the current VM
+restoration gate, including AST-free graph reload and host/mesh source routes. This document does
+not establish completion of §4.12.
 
 ## Owner decisions and example audit
 
@@ -12,13 +14,14 @@ Timestamp cell with signed epoch-nanosecond bits and canonical UTC ISO8601 text.
 MicroversionId literals and historical pin semantics keep their separate meaning. Ordinary `now()`
 is an additional callable form; the reserved literal cannot be hijacked by a user function.
 
-The committed CLI executes the first three §4.12 example definitions verbatim: `score_paper` returns
-`95`, `format_title` returns `[note] Example`, and `process_video` returns `av1 @ 60fps`. The fourth
-example fails to parse `@now`. A second issue is independent of the clock: the example's exclusive
-projection drops the priority/owner fields required by its own parameter contract. Replacing only
-the clock with a literal demonstrates the correct named contract refusal; adding `*` preserves the
-fields and archives successfully. Preserve the explicit §4.8.3 masking rules. Retain the original
-body as an atomic-refusal regression and correct the example with `*` before its success check.
+The initial iteration-55 CLI audit executed the first three §4.12 example definitions verbatim:
+`score_paper` returns `95`, `format_title` returns `[note] Example`, and `process_video` returns
+`av1 @ 60fps`. The fourth example then failed to parse `@now`. A second issue was independent of the
+clock: its exclusive projection drops the priority/owner fields required by its own parameter
+contract. Replacing only the clock with a literal demonstrates the correct named contract refusal;
+adding `*` preserves the fields and archives successfully. Preserve the explicit §4.8.3 masking
+rules. Retain the original body as an atomic-refusal regression and correct the example with `*`
+before its success check.
 
 ## Graph implementation
 

@@ -124,7 +124,7 @@ TEST(MeshEvaluatorTest, RecursiveEvaluationConsumesFuel) {
   limited.maxCycles = 50'000;
   auto result = evaluate(Frontend::Vlace, "loop x = loop x ; loop 0", limited);
   ASSERT_FALSE(result);
-  EXPECT_NE(result.error().find("budget"), std::string::npos);
+  EXPECT_NE(result.error().find("budget"), std::string::npos) << result.error();
 }
 
 TEST(MeshEvaluatorTest, OutputAndSolutionsAreBounded) {

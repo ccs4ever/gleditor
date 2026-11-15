@@ -2,13 +2,14 @@
  * @file vql_hooks_test.cpp
  * @brief Shared-file hooks of the second VQL integrator: whole-walk steps,
  * causal version comparison, session mounts, variable perspective names,
- * the PathMorphism stub and the prose-hits provider.
+ * PathMorphism lowering and the prose-hits provider.
  */
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <tuple>
+#include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -173,11 +174,14 @@ TEST(VQLHooksParserTest, PerspectiveNameRecordsWhetherItWasAVariable) {
 
 TEST_F(VQLHooksTest, VariablePerspectiveNameResolvesWhenConstant) {
   engine.setVariable("who", arena.makeCell("alice"));
-  engine.setVariable("subject", arena.makeCell("subject"));
-  // Resolved to "alice" it reaches the selector lowering, as a literal does.
-  EXPECT_THAT(
-      refusalOf("with perspective($who) { $subject/+d.comment }"),
-      testing::Not(HasSubstr("perspective($who) needs a variable bound")));
+  const auto subject = arena.makeCell("subject");
+  const auto note    = arena.makeCell("Alice note");
+  engine.setVariable("subject", subject);
+  ASSERT_TRUE(arena.link(subject, engine.resolveDimension("d.comment@alice"),
+                         zigzag::DimVector::POS, note));
+  EXPECT_EQ(engine.execute("with perspective($who) { $subject/+d.comment }"),
+            (std::vector<zigzag::CellRef>{note}));
+  EXPECT_TRUE(engine.execute("$subject/+d.comment").empty());
 }
 
 TEST_F(VQLHooksTest, VariablePerspectiveNameWithoutAConstantRefusesByName) {
@@ -190,11 +194,15 @@ TEST_F(VQLHooksTest, VariablePerspectiveNameWithoutAConstantRefusesByName) {
 }
 
 // H5
-TEST_F(VQLHooksTest, PathMorphismRefusesThroughItsOwnStub) {
-  engine.setVariable("p", arena.makeCell("subject"));
-  const auto spawned = engine.execute(R"($p/+d.comment => [ "note" ])");
-  ASSERT_EQ(spawned.size(), 1U);
-  EXPECT_EQ(arena.textOf(spawned.front()), "note");
+TEST_F(VQLHooksTest, PathMorphismExecutesItsGeneratedGraph) {
+  const auto subject = arena.makeCell("subject");
+  engine.setVariable("p", subject);
+  const auto result = engine.execute(R"($p/+d.comment => [ "note" ])");
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(arena.textOf(result.front()), "note");
+  EXPECT_EQ(arena.linked(subject, engine.resolveDimension("d.comment"),
+                         zigzag::DimVector::POS),
+            result.front());
 }
 
 // H7

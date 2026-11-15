@@ -436,15 +436,24 @@ TEST(VQLRuntimeCallableFramesTest,
 }
 
 TEST(VQLRuntimeCallableFramesTest,
-     UnsupportedValueLambdaSignaturesStillRefuseBeforeWriting) {
-  for (const auto source :
-       {R"(return (\($x, $y) $x))", R"(return (\($x := 1) $x))",
-        R"(return (\(...$xs) $xs))"}) {
+     VariadicValueLambdaSignaturesStillRefuseBeforeWriting) {
+  for (const auto source : {R"(return (\(...$xs) $xs))"}) {
     Harness h;
     const auto before   = h.arena.cellCount();
     const auto compiled = h.compile(source);
     EXPECT_FALSE(compiled.success) << source;
     EXPECT_EQ(h.arena.cellCount(), before) << source;
+  }
+}
+
+TEST(VQLRuntimeCallableFramesTest, FixedAndDefaultedValueLambdasExecuteOnVm) {
+  for (const auto source : {R"(let $f := \($x, $y) $x; return $f(1, 2))",
+                            R"(let $f := \($x := 1) $x; return $f())"}) {
+    Harness h;
+    const auto result = h.run(source);
+    ASSERT_TRUE(result) << result.error().message;
+    ASSERT_EQ(result->size(), 1u);
+    EXPECT_EQ(h.arena.asInt64(result->front()), 1);
   }
 }
 

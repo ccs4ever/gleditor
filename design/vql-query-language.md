@@ -1979,9 +1979,9 @@ VQL rejects nominal inheritance hierarchies ("class taxonomies") that shatter as
 Instead, VQL adopts **Gradual Structural Typing**:
 
 - Typing is completely optional: prototype queries omit types without ceremony.
-- The direct evaluator checks parameter matching and declared returns at runtime. A return check
-  occurs after the body and is not mutation preflight. The compiler refuses unchecked typed
-  definitions; a future static pass must prove checks redundant before erasing them.
+- Compiled VM graphs check parameter matching and declared returns at runtime. A return check occurs
+  after the body. Supported mutation groups also restore their changes when a guarded contract
+  fails. A static pass must prove checks redundant before erasing them.
 
 The atomic types are:
 
@@ -2033,12 +2033,20 @@ Binds the parent cell handle to `$task` while destructuring its internal dimensi
 ```vql
 def weave archive_task($task: Cell { +d.priority: $p: String, +d.owner: $o: Cell }): Cell := {
   weave $task {
+    *,
     +d.status => "archived",
     +d.archived_at => @now
   };
   return $task;
 };
 ```
+
+The wildcard retains the priority and owner fields required by the parameter contract. Without it,
+the exclusive projection removes those fields and the guarded mutation refuses atomically. `@now`
+samples the current UTC wall clock during VM execution and creates a fresh Timestamp cell with
+signed epoch-nanosecond bits and canonical UTC ISO8601 text. It is separate from logical
+microversions. `now()` is the callable builtin form; a user definition may shadow that name, while
+the reserved literal retains its clock meaning. Wall-clock samples need not be monotonic.
 
 #### 4.12.3 Point-Free Topological Traversal Functors & Currying
 
@@ -2206,41 +2214,46 @@ explicit refusals. The rulings below describe the intended semantics.
   compiled inline graphs. Anonymous path-step lambdas with zero or one nonvariadic formal use the
   same inline call graphs for types, destructuring and expression/block bodies. Their lexical scope
   preserves native recursion of an enclosing eligible function; signatures validate before mapping
-  even on empty inputs. Lambda values with zero or one nonvariadic formal now compile to native
-  closure frames. Named, explicit-dot and destructured formals support the existing primitive,
-  union/optional, Stream and structural contracts. Compatible scalar/path/call and block bodies can
-  create nested closures, including staged currying. The invocation candidate supplies both hidden
-  context and the optional formal; predicate traversal still has its own candidate context. Free
-  alias streams snapshot membership at creation, including order, duplicates and empty streams;
-  referenced contents stay shared. Scoped named-helper dependencies are captured too, except aliases
-  supplied by a formal or prior body-local binding. Field defaults retain pre-match lexical scope,
-  lazy owner-context graph execution and filtering. Unknown formal types are refused by name after
-  bounded cycle/depth analysis and before application. Applying a stored value as `/$f` requires
-  exactly one structural function handle, without numeric pointer or scalar coercion. Runtime
-  handles can be applied inside reusable named and value-lambda bodies, including typed formals,
-  local bindings, captured value-lambda aliases and recursive forwarding. Static templates retain
-  separate graph variants. Static predicate aliases resolve in callee/application scope;
-  named-definition capture timing and static functor lowering retain their earlier rules.
-  Whole-formal defaults, multiple/variadic value-lambda formals, captured static functor ABI and
-  remaining decorated recursive static functors remain deferred. AST visits are bounded across the
-  query. A separate 1,000,000-unit post-analysis capture expansion budget counts callsites and
-  callee/capture-name bytes; it does not cap the initial scope walk, repeated nested analysis or
-  total compile CPU/heap use. Runtime Cell/Stream bindings export through a versioned graph
-  descriptor and native initialization, including literal aliases, duplicate/empty streams and
-  closed iterator type markers. Live continuations remain outside that transport boundary. Session
-  query publication and the CLI REPL retain successful top-level bindings for subsequent VM
-  compilations. See [iterations 42 and 50–53](projects/vortex-vm-only-iterations.md). Omitted
-  parameter expressions compile after earlier parameter guards; explicit arguments capture caller
-  bindings, including untyped functor step vectors. Decorated functor captures freeze their body
-  across rebinding; application runs that body before applying the outer predicates/clamp to the
-  combined result. Query-time master dereference resolves foreign proxies, charges each probe and
-  returns the original cell on a cycle. Contract subject collection charges members before copying
-  them into its matcher buffer, and matching charges recursive type visits and field probes. Failed
-  shape and union attempts roll back arena defaults and minted dimensions; captures are staged until
-  the full match succeeds. Return validation releases its temporary defaults on both outcomes.
-  Computed return promises use reusable capture-free validator frames with Boolean results and
-  referenced lexical input ports; attached pipelines retain compiled inline matching. Validators
-  re-read the current owner instead of caching default results, while noncomputed promises retain
+  even on empty inputs. Lambda values with multiple fixed formals and lazy whole-formal defaults
+  compile to native closure frames. Named, explicit-dot and destructured formals support the
+  existing primitive, union/optional, Stream and structural contracts. Compatible scalar/path/call
+  and block bodies can create nested closures, including staged currying. Explicit `$f(a, b)` calls
+  keep caller context separate from positional actuals. Contextual `/$f` supplies the candidate as
+  hidden context and, when a formal exists, actual zero; remaining formals are omitted. Predicate
+  traversal retains its own candidate context. Supplied empty streams suppress defaults; omitted
+  formals run defaults lazily after earlier parameter matches and before binding the current formal.
+  Callee identity and excess arity are checked before actual-argument effects, then Apply
+  revalidates graph metadata. Free alias streams snapshot membership at creation, including order,
+  duplicates and empty streams; referenced contents stay shared. Scoped named-helper dependencies
+  are captured too, except aliases supplied by a formal or prior body-local binding. Field defaults
+  retain pre-match lexical scope, lazy owner-context graph execution and filtering. Unknown formal
+  types are refused by name after bounded cycle/depth analysis and before application. Applying a
+  stored value as `/$f` requires exactly one structural function handle, without numeric pointer or
+  scalar coercion. Runtime handles can be applied inside reusable named and value-lambda bodies,
+  including typed formals, local bindings, captured value-lambda aliases and recursive forwarding.
+  Static templates retain separate graph variants. Static predicate aliases resolve in
+  callee/application scope; named-definition capture timing and static functor lowering retain their
+  earlier rules. Named closure arguments, variadic value-lambda formals, static AST-functor
+  whole-formal defaults, captured static functor ABI and remaining decorated recursive static
+  functors remain deferred. AST visits are bounded across the query. A separate 1,000,000-unit
+  post-analysis capture expansion budget counts callsites and callee/capture-name bytes; it does not
+  cap the initial scope walk, repeated nested analysis or total compile CPU/heap use. Runtime
+  Cell/Stream bindings export through a versioned graph descriptor and native initialization,
+  including literal aliases, duplicate/empty streams and closed iterator type markers. Live
+  continuations remain outside that transport boundary. Session query publication and the CLI REPL
+  retain successful top-level bindings for subsequent VM compilations. See
+  [iterations 42 and 50–53](projects/vortex-vm-only-iterations.md). Omitted parameter expressions
+  compile after earlier parameter guards; explicit arguments capture caller bindings, including
+  untyped functor step vectors. Decorated functor captures freeze their body across rebinding;
+  application runs that body before applying the outer predicates/clamp to the combined result.
+  Query-time master dereference resolves foreign proxies, charges each probe and returns the
+  original cell on a cycle. Contract subject collection charges members before copying them into its
+  matcher buffer, and matching charges recursive type visits and field probes. Failed shape and
+  union attempts roll back arena defaults and minted dimensions; captures are staged until the full
+  match succeeds. Return validation releases its temporary defaults on both outcomes. Computed
+  return promises use reusable capture-free validator frames with Boolean results and referenced
+  lexical input ports; attached pipelines retain compiled inline matching. Validators re-read the
+  current owner instead of caching default results, while noncomputed promises retain
   `RequireContract`. See [iteration 28](projects/vortex-vm-only-iterations.md). Failed matching
   spends fuel even when its graph changes are rolled back. Explicit graph-level
   PushGuard/CheckGuards/PopGuard instructions now retain activation-owned frozen inputs and dispatch

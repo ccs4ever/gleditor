@@ -833,6 +833,16 @@ static void dumpPathExpression(std::ostringstream &oss,
     } else if (std::holds_alternative<FunctionInvocation>(step.selector)) {
       const auto &fn = std::get<FunctionInvocation>(step.selector);
       oss << fn.name << "(...)";
+    } else if (const auto *call =
+                   std::get_if<std::shared_ptr<RuntimeClosureInvocation>>(
+                       &step.selector);
+               call && *call) {
+      oss << '$';
+      if (const auto *name = std::get_if<std::string>(&(*call)->callee.kind))
+        oss << *name;
+      else
+        oss << "<value>";
+      oss << "(...)";
     }
     if (step.derefMaster) {
       oss << ">";

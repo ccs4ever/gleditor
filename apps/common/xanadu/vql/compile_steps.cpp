@@ -234,21 +234,15 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
           stream     = nextStream;
           continue;
         }
-        const CellRef closureHandle = normalizeFrameStream(aliases);
         if (stream.empty()) {
           nextStream = aliases;
         } else {
           nextStream = emitMap(stream, [&](const CellRef candidate) {
-            const CellRef applied =
-                normalizeFrameStream(std::span{&candidate, std::size_t{1}});
-            const CellRef apply =
-                emitOp(OpcodeKind::ApplyClosure, "#APPLY_CLOSURE " + name);
-            emitInput(apply, closureHandle);
-            emitInput(apply, applied);
-            const CellRef result = core_.arena().makeCell();
-            emitOutput(apply, result);
-            dynamicStreams_.insert(result);
-            return std::vector<CellRef>{result};
+            RuntimeClosureInvocation invocation{
+                .callee = ValueExpr{.kind = name}, .args = {}, .argNames = {}};
+            return compileClosureInvocation(
+                invocation, candidate,
+                zigzag::vortex::ClosureCallMode::Contextual);
           });
         }
       } else {
@@ -382,7 +376,7 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
         const auto result = core_.arena().makeCell();
         const auto clear  = emitOp(OpcodeKind::ClearCellRefs, "#FILTER_CLEAR");
         emitOutput(clear, result);
-        auto condition = compileBooleanExpr(predicate, candidate);
+        auto condition = compileCandidatePredicate(predicate, candidate);
         if (!condition) condition = emitConstant(false);
         const auto end = mintOpcode(OpcodeKind::Nop, "#FILTER_END");
         const auto branch =

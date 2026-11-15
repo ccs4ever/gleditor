@@ -240,8 +240,73 @@ VQLCompiler::compileArgument(const ValueExpr &argument,
     requirePositionalArguments(**function);
     return compileCall(found->second, (*function)->args, context, false);
   }
+  if (const auto *closure =
+          std::get_if<std::shared_ptr<RuntimeClosureInvocation>>(
+              &argument.kind)) {
+    if (!*closure)
+      throw std::invalid_argument("null runtime closure invocation");
+    return compileClosureInvocation(**closure, context,
+                                    zigzag::vortex::ClosureCallMode::Explicit);
+  }
+  const auto previousContext = ambientContext_;
+  ambientContext_            = context;
+  const RestoreScope restore{[&] { ambientContext_ = previousContext; }};
   const auto value = compileValueExpr(argument, context.value_or(core_.home()));
   return value ? std::vector<CellRef>{*value} : std::vector<CellRef>{};
+}
+
+std::vector<CellRef> VQLCompiler::compileClosureInvocation(
+    const RuntimeClosureInvocation &invocation,
+    const std::optional<CellRef> context,
+    const zigzag::vortex::ClosureCallMode mode) {
+  if (std::ranges::any_of(invocation.argNames, [](const std::string &name) {
+        return !name.empty();
+      }))
+    throw QueryRefusal(QueryErrorCategory::Unsupported,
+                       "named runtime closure arguments are unsupported");
+  if (mode == zigzag::vortex::ClosureCallMode::Contextual &&
+      !invocation.args.empty())
+    throw std::invalid_argument(
+        "contextual closure application cannot have explicit arguments");
+  const auto limits = vm_.closureLimits();
+  if (invocation.args.size() > limits.maxAppliedStreams ||
+      invocation.args.size() >
+          static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+    throw QueryRefusal(QueryErrorCategory::Unsupported,
+                       "runtime closure call exceeds its argument limit");
+
+  // Snapshot both values before the callee check and before any argument
+  // expression is appended to the graph. Each argument group is normalized
+  // immediately after its own evaluation so later arguments cannot rebind it.
+  const auto calleeValues    = compileArgument(invocation.callee, context);
+  const CellRef calleeStream = normalizeFrameStream(calleeValues);
+  const std::vector<CellRef> contextValues =
+      context ? std::vector{*context} : std::vector<CellRef>{};
+  const CellRef contextStream = normalizeFrameStream(contextValues);
+  const CellRef check =
+      emitOp(OpcodeKind::CheckClosureCall, "#CHECK_CLOSURE_CALL");
+  emitInput(check, calleeStream);
+  emitInputConstant(check, static_cast<std::int64_t>(mode));
+  emitInputConstant(check, static_cast<std::int64_t>(invocation.args.size()));
+  const CellRef checkedHandle = core_.arena().makeCell();
+  emitOutput(check, checkedHandle);
+
+  std::vector<CellRef> actualStreams;
+  actualStreams.reserve(invocation.args.size());
+  for (const auto &argument : invocation.args) {
+    const auto values = compileArgument(argument, context);
+    actualStreams.push_back(normalizeFrameStream(values));
+  }
+
+  const CellRef apply = emitOp(OpcodeKind::ApplyClosure, "#APPLY_CLOSURE_CALL");
+  emitInput(apply, checkedHandle);
+  emitInputConstant(apply, static_cast<std::int64_t>(mode));
+  emitInput(apply, contextStream);
+  for (const CellRef actual : actualStreams) emitInput(apply, actual);
+  const CellRef result = core_.arena().makeCell();
+  emitOutput(apply, result);
+  dynamicStreams_.insert(result);
+  return {result};
 }
 
 std::vector<CellRef>
@@ -255,7 +320,6 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
     throw std::invalid_argument("excess positional arguments for function: " +
                                 definition.name);
   }
-
   std::vector<ClosedFunctorFormalKey> functorTemplates;
   std::vector<StaticFunctorProgram> staticFunctorPrograms;
   std::unordered_set<std::string> staticProgramCaptureNames;
@@ -1880,9 +1944,9 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
 
   const auto closureLimits = vm_.closureLimits();
   if (syntax.freeCaptureNames.size() > closureLimits.maxCaptureStreams ||
-      closureLimits.maxAppliedStreams == 0)
+      lambda.params.size() > closureLimits.maxAppliedStreams)
     throw std::invalid_argument(
-        "VQL lambda exceeds configured closure stream limits");
+        "VQL lambda exceeds configured capture or formal limits");
   const auto chargeCaptureWork = [this](const std::size_t amount) {
     if (amount > remainingClosureCaptureWork_)
       throw std::invalid_argument(
@@ -2093,21 +2157,32 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
   }
 
   std::vector<zigzag::vortex::ClosureFrameInput> frameInputs;
-  frameInputs.reserve(captures.size() + lambda.params.size() + 1);
+  frameInputs.reserve(argumentPortCount);
   frameInputs.push_back(
-      {.source = zigzag::vortex::ClosureInputSource::Applied, .index = 0});
+      {.source = zigzag::vortex::ClosureInputSource::Context, .index = 0});
   for (std::size_t index = 0; index < captures.size(); ++index)
     frameInputs.push_back(
         {.source = zigzag::vortex::ClosureInputSource::Capture,
          .index  = index});
-  if (!lambda.params.empty())
+  std::size_t defaultIndex = 0;
+  for (std::size_t index = 0; index < lambda.params.size(); ++index) {
     frameInputs.push_back(
-        {.source = zigzag::vortex::ClosureInputSource::Applied, .index = 0});
+        {.source = zigzag::vortex::ClosureInputSource::Applied,
+         .index  = index});
+    if (defaultIndex < syntax.defaultParameterIndices.size() &&
+        syntax.defaultParameterIndices[defaultIndex] == index) {
+      frameInputs.push_back(
+          {.source = zigzag::vortex::ClosureInputSource::AppliedPresence,
+           .index  = index});
+      ++defaultIndex;
+    }
+  }
 
   const auto closureDescriptor =
       vm_.makeClosureDescriptor({.frameDescriptor    = *reserved,
                                  .captureStreamCount = captureSources.size(),
-                                 .appliedStreamCount = 1,
+                                 .minFormalCount     = 0,
+                                 .maxFormalCount     = lambda.params.size(),
                                  .frameInputs        = std::move(frameInputs)});
   if (!closureDescriptor)
     throw std::invalid_argument(closureDescriptor.error().message);

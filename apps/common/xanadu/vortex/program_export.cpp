@@ -53,6 +53,8 @@ void collectClosureReferences(const VortexCore &core, const VortexVM &vm,
                .maxMappingWork   = metadataBytes > SIZE_MAX / 4
                                        ? SIZE_MAX
                                        : std::max<std::size_t>(4096, metadataBytes * 4)});
+  if (claim == zigzag::RuntimeObjectClaimResult::FuelExhausted)
+    throw std::runtime_error("Vortex evaluation work budget exhausted");
   if (claim != zigzag::RuntimeObjectClaimResult::Claimed)
     throw std::runtime_error("export found a malformed claimed runtime object");
   const auto tagCell = core.arena().linked(root, *dimension, DimVector::POS);
@@ -61,7 +63,7 @@ void collectClosureReferences(const VortexCore &core, const VortexVM &vm,
                            : std::nullopt;
   if (!tag)
     throw std::runtime_error("export found an unreadable runtime-object tag");
-  if (*tag == "VORTEX_CLOSURE_DESCRIPTOR/1") {
+  if (*tag == "VORTEX_CLOSURE_DESCRIPTOR/2") {
     const auto parsed = vm.closureDescriptor(root);
     if (!parsed) throw std::runtime_error(parsed.error().message);
     for (const auto &[record, target] : parsed->referenceCells)

@@ -121,9 +121,10 @@ and link identities, publishing and reader layers, system configuration, and lan
 its [disposable-store and backup steps](docs/xanadu.md#create-and-back-up-a-disposable-store) to
 seed, reopen, and back up a scratch store with its permascroll.
 
-VQL has a direct evaluator and a restricted Vortex compiler. The
-[VQL conformance matrix](design/vql-conformance.md) lists supported engine subsets and links the
-executable corpus. Unsupported compiled semantics fail explicitly. The
+VQL compiles supported queries into Vortex graphs and executes them on the VM. Unsupported forms
+fail explicitly. The [VM restoration plan](design/projects/vm-restoration-coordinator-plan.md)
+tracks the remaining language work; the [VQL conformance matrix](design/vql-conformance.md) links
+the executable corpus and historical engine comparisons. The
 [VQL performance spike](design/vql-performance-spike.md), built with
 `make -j$(nproc) vql-spike vql-spike-abi`, measures real traversal/allocation costs and records ABI
 evidence separately from proposed runtime layouts.

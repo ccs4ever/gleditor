@@ -61,7 +61,7 @@ struct Harness {
     const auto closure = vm.makeClosureDescriptor(ClosureDescriptorSpec{
         .frameDescriptor    = *descriptor,
         .captureStreamCount = 1,
-        .appliedStreamCount = 1,
+        .maxFormalCount     = 1,
         .frameInputs        = {{ClosureInputSource::Capture, 0},
                                {ClosureInputSource::Applied, 0}},
     });
@@ -82,11 +82,42 @@ struct Harness {
   CellRef applyClosure(const CellRef handleSlot, const CellRef appliedSlot,
                        const CellRef firstOutput, const CellRef secondOutput) {
     const auto apply = op(OpcodeKind::ApplyClosure);
+    const auto mode  = arena.makeScalarCell(
+        static_cast<std::int64_t>(ClosureCallMode::Explicit));
+    const auto context = arena.makeCell("hidden context");
     core.bindInput(apply, handleSlot);
+    core.bindInput(apply, mode);
+    core.bindInput(apply, context);
     core.bindInput(apply, appliedSlot);
     core.bindOutput(apply, firstOutput);
     core.bindOutput(apply, secondOutput);
     return apply;
+  }
+
+  CellRef applyClosure(const CellRef handleSlot, const CellRef contextSlot,
+                       const std::vector<CellRef> &actuals,
+                       const std::vector<CellRef> &outputs) {
+    const auto apply = op(OpcodeKind::ApplyClosure);
+    const auto mode  = arena.makeScalarCell(
+        static_cast<std::int64_t>(ClosureCallMode::Explicit));
+    core.bindInput(apply, handleSlot);
+    core.bindInput(apply, mode);
+    core.bindInput(apply, contextSlot);
+    for (const auto actual : actuals) core.bindInput(apply, actual);
+    for (const auto output : outputs) core.bindOutput(apply, output);
+    return apply;
+  }
+
+  CellRef checkClosureCall(const CellRef calleeSlot, const ClosureCallMode mode,
+                           const std::int64_t rawArgumentCount,
+                           const CellRef output) {
+    const auto check = op(OpcodeKind::CheckClosureCall);
+    core.bindInput(check, calleeSlot);
+    core.bindInput(check,
+                   arena.makeScalarCell(static_cast<std::int64_t>(mode)));
+    core.bindInput(check, arena.makeScalarCell(rawArgumentCount));
+    core.bindOutput(check, output);
+    return check;
   }
 };
 
@@ -98,7 +129,13 @@ TEST(VortexClosureTest, DescriptorRoundTripsAndRejectsMalformedPortMaps) {
   EXPECT_EQ(parsed->frameDescriptor,
             h.vm.closureDescriptor(frame)->frameDescriptor);
   EXPECT_EQ(parsed->captureStreamCount, 1u);
-  EXPECT_EQ(parsed->appliedStreamCount, 1u);
+  EXPECT_EQ(parsed->minFormalCount, 1u);
+  EXPECT_EQ(parsed->maxFormalCount, 1u);
+  ASSERT_TRUE(parsed->presenceTrue);
+  ASSERT_TRUE(parsed->presenceFalse);
+  EXPECT_EQ(h.arena.asBool(*parsed->presenceTrue), true);
+  EXPECT_EQ(h.arena.asBool(*parsed->presenceFalse), false);
+  EXPECT_NE(parsed->presenceTrue, parsed->presenceFalse);
   ASSERT_EQ(parsed->frameInputs.size(), 2u);
   EXPECT_EQ(parsed->frameInputs[0].source, ClosureInputSource::Capture);
   EXPECT_EQ(parsed->frameInputs[1].source, ClosureInputSource::Applied);
@@ -108,14 +145,14 @@ TEST(VortexClosureTest, DescriptorRoundTripsAndRejectsMalformedPortMaps) {
   EXPECT_FALSE(h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
       .frameDescriptor    = parsed->frameDescriptor,
       .captureStreamCount = 1,
-      .appliedStreamCount = 1,
+      .maxFormalCount     = 1,
       .frameInputs        = {{ClosureInputSource::Capture, 0},
                              {ClosureInputSource::Applied, 1}},
   }));
   EXPECT_FALSE(h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
       .frameDescriptor    = parsed->frameDescriptor,
       .captureStreamCount = 1,
-      .appliedStreamCount = 1,
+      .maxFormalCount     = 1,
       .frameInputs        = {{ClosureInputSource::Capture, 0}},
   }));
   EXPECT_EQ(h.arena.cellCount(), before);
@@ -129,13 +166,364 @@ TEST(VortexClosureTest, DescriptorRoundTripsAndRejectsMalformedPortMaps) {
        .resultPorts   = {resultSlot},
   });
   ASSERT_TRUE(cellFrame);
+  EXPECT_TRUE(h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+      .frameDescriptor    = *cellFrame,
+      .captureStreamCount = 1,
+      .maxFormalCount     = 0,
+      .frameInputs        = {{ClosureInputSource::Capture, 0}},
+  }));
   EXPECT_FALSE(h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
       .frameDescriptor    = *cellFrame,
       .captureStreamCount = 1,
-      .appliedStreamCount = 0,
-      .frameInputs        = {{ClosureInputSource::Capture, 0}},
+      .maxFormalCount     = 0,
+      .frameInputs        = {{ClosureInputSource::Context, 0}},
   }));
   EXPECT_FALSE(h.vm.closureDescriptor(ordinary));
+}
+
+TEST(VortexClosureTest, ApplyRevalidatesDescriptorAfterArgumentEffects) {
+  Harness h;
+  const auto argumentEffect = h.arena.makeCell("original");
+  const auto bodyEffect     = h.arena.makeCell("pristine");
+  const auto write          = [&](const CellRef subject, const char *text) {
+    const auto op = h.op(OpcodeKind::Value);
+    h.core.bindInput(op, subject);
+    h.core.bindInput(op, h.arena.makeScalarCell(std::int64_t{0}));
+    h.core.bindInput(op, h.arena.makeScalarCell(std::int64_t{-1}));
+    h.core.bindInput(op, h.arena.makeCell(text));
+    return op;
+  };
+  const auto body = write(bodyEffect, "ran");
+  const auto ret  = h.op(OpcodeKind::ReturnFrame);
+  h.next(body, ret);
+  const auto frame =
+      h.vm.makeFrameDescriptor(FrameDescriptorSpec{.entry = body});
+  ASSERT_TRUE(frame);
+  h.core.bindInput(ret, *frame);
+  const auto descriptor = h.vm.makeClosureDescriptor(
+      ClosureDescriptorSpec{.frameDescriptor = *frame});
+  ASSERT_TRUE(descriptor);
+  const auto parsed = h.vm.closureDescriptor(*descriptor);
+  ASSERT_TRUE(parsed);
+  ASSERT_TRUE(parsed->presenceTrue);
+  const auto handle = h.arena.makeCell("handle");
+  const auto create = h.op(OpcodeKind::CreateClosure);
+  h.core.bindInput(create, *descriptor);
+  h.core.bindOutput(create, handle);
+  const auto checked = h.arena.makeCell("checked");
+  const auto check =
+      h.checkClosureCall(handle, ClosureCallMode::Explicit, 0, checked);
+  const auto argument = write(argumentEffect, "touched");
+  const auto context  = h.arena.makeCell("empty context stream");
+  const auto clear    = h.op(OpcodeKind::StreamClear);
+  h.core.bindOutput(clear, context);
+  const auto apply = h.applyClosure(checked, context, std::vector<CellRef>{},
+                                    std::vector<CellRef>{});
+  h.next(create, check);
+  h.next(check, argument);
+  h.next(argument, clear);
+  h.next(clear, apply);
+  const auto cursor = h.cursor(create);
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  ASSERT_EQ(h.arena.textOf(argumentEffect), "touched");
+  ASSERT_TRUE(
+      h.arena.setValueBits(*parsed->presenceTrue, xanadu::ValueKind::Int64, 0));
+  const auto execution = h.vm.run(cursor, 1000);
+  EXPECT_FALSE(execution.success);
+  EXPECT_EQ(h.arena.textOf(bodyEffect), "pristine");
+  EXPECT_FALSE(h.vm.hasActiveFrames());
+  EXPECT_EQ(h.arena.outstandingMarks(), 0u);
+}
+
+TEST(VortexClosureTest,
+     CheckClosureCallRefusesExcessArityWithoutPublishingAndCanRetry) {
+  Harness h;
+  const auto ret = h.op(OpcodeKind::ReturnFrame);
+  const auto frame =
+      h.vm.makeFrameDescriptor(FrameDescriptorSpec{.entry = ret});
+  ASSERT_TRUE(frame);
+  h.core.bindInput(ret, *frame);
+  const auto descriptor = h.vm.makeClosureDescriptor(
+      ClosureDescriptorSpec{.frameDescriptor = *frame});
+  ASSERT_TRUE(descriptor);
+  const auto handle = h.arena.makeCell("closure handle");
+  const auto create = h.op(OpcodeKind::CreateClosure);
+  h.core.bindInput(create, *descriptor);
+  h.core.bindOutput(create, handle);
+  const auto count = h.arena.makeScalarCell(std::int64_t{1});
+  const auto mode  = h.arena.makeScalarCell(
+      static_cast<std::int64_t>(ClosureCallMode::Explicit));
+  const auto checked =
+      h.arena.makeScalarCell(std::numeric_limits<std::int64_t>::max());
+  const auto check = h.op(OpcodeKind::CheckClosureCall);
+  h.core.bindInput(check, handle);
+  h.core.bindInput(check, mode);
+  h.core.bindInput(check, count);
+  h.core.bindOutput(check, checked);
+  const auto contextualOutput = h.arena.makeCell("contextual checked handle");
+  const auto contextualCheck  = h.checkClosureCall(
+      handle, ClosureCallMode::Contextual, 0, contextualOutput);
+  h.next(create, check);
+  h.next(check, contextualCheck);
+  const auto cursor = h.cursor(create);
+
+  ASSERT_TRUE(h.vm.step(cursor).success);
+  const auto before  = h.arena.cellCount();
+  const auto refused = h.vm.step(cursor);
+  EXPECT_FALSE(refused.success);
+  EXPECT_EQ(h.arena.cellCount(), before);
+  EXPECT_EQ(h.vm.getCursorOpcode(cursor), check);
+  EXPECT_EQ(h.arena.asInt64(checked), std::numeric_limits<std::int64_t>::max());
+  EXPECT_FALSE(h.vm.cellReferenceOf(checked));
+
+  ASSERT_TRUE(h.arena.setValueBits(count, xanadu::ValueKind::Int64, 0));
+  const auto retried = h.vm.step(cursor);
+  EXPECT_TRUE(retried.success) << retried.errorMessage;
+  const auto afterRetry = h.vm.getCursorOpcode(cursor);
+  ASSERT_TRUE(afterRetry);
+  EXPECT_EQ(*afterRetry, contextualCheck);
+  EXPECT_EQ(h.vm.cellReferenceOf(checked), h.vm.cellReferenceOf(handle));
+  const auto contextual = h.vm.step(cursor);
+  EXPECT_TRUE(contextual.success) << contextual.errorMessage;
+  EXPECT_EQ(h.vm.cellReferenceOf(contextualOutput),
+            h.vm.cellReferenceOf(handle));
+}
+
+TEST(VortexClosureTest, CheckClosureCallRejectsInvalidModeAndInvalidHandle) {
+  const auto runInvalid = [](const int invalidCase) {
+    Harness h;
+    const auto ret = h.op(OpcodeKind::ReturnFrame);
+    const auto frame =
+        h.vm.makeFrameDescriptor(FrameDescriptorSpec{.entry = ret});
+    ASSERT_TRUE(frame);
+    h.core.bindInput(ret, *frame);
+    const auto descriptor = h.vm.makeClosureDescriptor(
+        ClosureDescriptorSpec{.frameDescriptor = *frame});
+    ASSERT_TRUE(descriptor);
+    const auto handle = h.arena.makeCell("closure handle");
+    const auto create = h.op(OpcodeKind::CreateClosure);
+    h.core.bindInput(create, *descriptor);
+    h.core.bindOutput(create, handle);
+    const auto malformed = h.arena.makeCell("not a closure");
+    const auto mode =
+        invalidCase == 1
+            ? h.arena.makeScalarCell(0.0)
+            : h.arena.makeScalarCell(std::int64_t{invalidCase == 0 ? 99 : 0});
+    const auto count  = invalidCase == 2
+                            ? h.arena.makeScalarCell(0.0)
+                            : h.arena.makeScalarCell(std::int64_t{0});
+    const auto output = h.arena.makeScalarCell(std::int64_t{123});
+    const auto check  = h.op(OpcodeKind::CheckClosureCall);
+    h.core.bindInput(check, invalidCase == 3 ? malformed : handle);
+    h.core.bindInput(check, mode);
+    h.core.bindInput(check, count);
+    h.core.bindOutput(check, output);
+    h.next(create, check);
+    const auto cursor = h.cursor(create);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    const auto refused = h.vm.step(cursor);
+    EXPECT_FALSE(refused.success);
+    EXPECT_EQ(h.vm.getCursorOpcode(cursor), check);
+    EXPECT_EQ(h.arena.asInt64(output), 123);
+    EXPECT_FALSE(h.vm.cellReferenceOf(output));
+  };
+  runInvalid(0);
+  runInvalid(1);
+  runInvalid(2);
+  runInvalid(3);
+}
+
+TEST(VortexClosureTest,
+     AppliedPresenceDistinguishesOmittedFromExplicitEmptyStream) {
+  Harness h;
+  const auto context = h.arena.makeCell("context frame port");
+  const auto formal  = h.arena.makeCell("formal frame port");
+  const auto present = h.arena.makeCell("presence frame port");
+  const auto ret     = h.op(OpcodeKind::ReturnFrame);
+  const auto frame   = h.vm.makeFrameDescriptor(FrameDescriptorSpec{
+        .entry         = ret,
+        .locals        = {context, formal, present},
+        .argumentPorts = {{context, FramePortKind::Stream},
+                          {formal, FramePortKind::Stream},
+                          {present, FramePortKind::Cell}},
+        .resultPorts   = {{present, FramePortKind::Cell}},
+  });
+  ASSERT_TRUE(frame);
+  h.core.bindInput(ret, *frame);
+  const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+      .frameDescriptor    = *frame,
+      .captureStreamCount = 0,
+      .minFormalCount     = 0,
+      .maxFormalCount     = 1,
+      .frameInputs        = {{ClosureInputSource::Context, 0},
+                             {ClosureInputSource::Applied, 0},
+                             {ClosureInputSource::AppliedPresence, 0}},
+  });
+  ASSERT_TRUE(descriptor);
+
+  const auto handle = h.arena.makeCell("closure handle");
+  const auto create = h.op(OpcodeKind::CreateClosure);
+  h.core.bindInput(create, *descriptor);
+  h.core.bindOutput(create, handle);
+  const auto clearContext  = h.op(OpcodeKind::StreamClear);
+  const auto contextStream = h.arena.makeCell("empty context stream");
+  h.core.bindOutput(clearContext, contextStream);
+  const auto clearActual  = h.op(OpcodeKind::StreamClear);
+  const auto actualStream = h.arena.makeCell("explicit empty actual stream");
+  h.core.bindOutput(clearActual, actualStream);
+  const auto missingResult = h.arena.makeCell("omitted presence result");
+  const auto omitted =
+      h.applyClosure(handle, contextStream, std::vector<CellRef>{},
+                     std::vector<CellRef>{missingResult});
+  const auto suppliedResult = h.arena.makeCell("supplied presence result");
+  const auto supplied =
+      h.applyClosure(handle, contextStream, std::vector<CellRef>{actualStream},
+                     std::vector<CellRef>{suppliedResult});
+  h.next(create, clearContext);
+  h.next(clearContext, clearActual);
+  h.next(clearActual, omitted);
+  h.next(omitted, supplied);
+  const auto cursor = h.cursor(create);
+
+  const auto execution = h.vm.run(cursor, 100);
+  ASSERT_TRUE(execution.success) << execution.errorMessage;
+  const auto missingCell  = h.vm.resultCell(cursor, missingResult);
+  const auto suppliedCell = h.vm.resultCell(cursor, suppliedResult);
+  ASSERT_TRUE(missingCell);
+  ASSERT_TRUE(suppliedCell);
+  EXPECT_EQ(h.arena.asBool(*missingCell), false);
+  EXPECT_EQ(h.arena.asBool(*suppliedCell), true);
+}
+
+TEST(VortexClosureTest, CheckClosureCallFreezesHandleBeforeSourceStreamRebind) {
+  Harness h;
+  const auto captured = h.arena.makeCell("captured stream");
+  const auto ret      = h.op(OpcodeKind::ReturnFrame);
+  const auto frame    = h.vm.makeFrameDescriptor(FrameDescriptorSpec{
+         .entry         = ret,
+         .locals        = {captured},
+         .argumentPorts = {{captured, FramePortKind::Stream}},
+         .resultPorts   = {{captured, FramePortKind::Stream}},
+  });
+  ASSERT_TRUE(frame);
+  h.core.bindInput(ret, *frame);
+  const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+      .frameDescriptor    = *frame,
+      .captureStreamCount = 1,
+      .maxFormalCount     = 0,
+      .frameInputs        = {{ClosureInputSource::Capture, 0}},
+  });
+  ASSERT_TRUE(descriptor);
+
+  const auto markerF      = h.arena.makeCell("closure F result");
+  const auto markerG      = h.arena.makeCell("closure G result");
+  const auto captureF     = h.arena.makeCell("capture F");
+  const auto captureG     = h.arena.makeCell("capture G");
+  const auto makeCaptureF = h.op(OpcodeKind::StreamAppend);
+  h.core.bindInput(makeCaptureF, markerF);
+  h.core.bindOutput(makeCaptureF, captureF);
+  const auto makeCaptureG = h.op(OpcodeKind::StreamAppend);
+  h.core.bindInput(makeCaptureG, markerG);
+  h.core.bindOutput(makeCaptureG, captureG);
+
+  const auto handleF = h.arena.makeCell("closure F handle");
+  const auto createF = h.makeClosure(*descriptor, captureF, handleF);
+  const auto source  = h.arena.makeCell("mutable callee stream");
+  const auto appendF = h.op(OpcodeKind::StreamAppend);
+  h.core.bindInput(appendF, handleF);
+  h.core.bindOutput(appendF, source);
+  const auto checked = h.arena.makeCell("frozen closure reference");
+  const auto check =
+      h.checkClosureCall(source, ClosureCallMode::Explicit, 0, checked);
+
+  const auto handleG     = h.arena.makeCell("closure G handle");
+  const auto createG     = h.makeClosure(*descriptor, captureG, handleG);
+  const auto clearSource = h.op(OpcodeKind::StreamClear);
+  h.core.bindOutput(clearSource, source);
+  const auto appendG = h.op(OpcodeKind::StreamAppend);
+  h.core.bindInput(appendG, handleG);
+  h.core.bindOutput(appendG, source);
+  const auto clearContext = h.op(OpcodeKind::StreamClear);
+  const auto context      = h.arena.makeCell("empty hidden context");
+  h.core.bindOutput(clearContext, context);
+  const auto result = h.arena.makeCell("closure apply result");
+  const auto apply  = h.applyClosure(checked, context, std::vector<CellRef>{},
+                                     std::vector<CellRef>{result});
+
+  h.next(makeCaptureF, makeCaptureG);
+  h.next(makeCaptureG, createF);
+  h.next(createF, appendF);
+  h.next(appendF, check);
+  h.next(check, createG);
+  h.next(createG, clearSource);
+  h.next(clearSource, appendG);
+  h.next(appendG, clearContext);
+  h.next(clearContext, apply);
+  const auto cursor = h.cursor(makeCaptureF);
+
+  const auto execution = h.vm.run(cursor, 100);
+  ASSERT_TRUE(execution.success) << execution.errorMessage;
+  EXPECT_EQ(h.vm.resultCells(cursor, result), (std::vector<CellRef>{markerF}));
+  EXPECT_EQ(h.vm.cellReferenceOf(checked), h.vm.cellReferenceOf(handleF));
+}
+
+TEST(VortexClosureTest, ContextualApplyUsesCandidateAsContextAndFirstFormal) {
+  Harness h;
+  const auto contextPort = h.arena.makeCell("hidden context port");
+  const auto formalPort  = h.arena.makeCell("first formal port");
+  const auto ret         = h.op(OpcodeKind::ReturnFrame);
+  const auto frame       = h.vm.makeFrameDescriptor(FrameDescriptorSpec{
+            .entry         = ret,
+            .locals        = {contextPort, formalPort},
+            .argumentPorts = {{contextPort, FramePortKind::Stream},
+                              {formalPort, FramePortKind::Stream}},
+            .resultPorts   = {{contextPort, FramePortKind::Stream},
+                              {formalPort, FramePortKind::Stream}},
+  });
+  ASSERT_TRUE(frame);
+  h.core.bindInput(ret, *frame);
+  const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+      .frameDescriptor    = *frame,
+      .captureStreamCount = 0,
+      .minFormalCount     = 0,
+      .maxFormalCount     = 1,
+      .frameInputs        = {{ClosureInputSource::Context, 0},
+                             {ClosureInputSource::Applied, 0}},
+  });
+  ASSERT_TRUE(descriptor);
+  const auto handle = h.arena.makeCell("contextual closure handle");
+  const auto create = h.op(OpcodeKind::CreateClosure);
+  h.core.bindInput(create, *descriptor);
+  h.core.bindOutput(create, handle);
+  const auto candidate       = h.arena.makeCell("path candidate");
+  const auto candidateStream = h.arena.makeCell("candidate stream");
+  const auto appendCandidate = h.op(OpcodeKind::StreamAppend);
+  h.core.bindInput(appendCandidate, candidate);
+  h.core.bindOutput(appendCandidate, candidateStream);
+  const auto checked = h.arena.makeCell("checked closure handle");
+  const auto check =
+      h.checkClosureCall(handle, ClosureCallMode::Contextual, 0, checked);
+  const auto outputs = std::vector<CellRef>{h.arena.makeCell("context result"),
+                                            h.arena.makeCell("formal result")};
+  const auto apply   = h.op(OpcodeKind::ApplyClosure);
+  h.core.bindInput(apply, checked);
+  h.core.bindInput(apply, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                              ClosureCallMode::Contextual)));
+  h.core.bindInput(apply, candidateStream);
+  for (const auto output : outputs) h.core.bindOutput(apply, output);
+  h.next(create, appendCandidate);
+  h.next(appendCandidate, check);
+  h.next(check, apply);
+  const auto cursor = h.cursor(create);
+
+  const auto execution = h.vm.run(cursor, 100);
+  ASSERT_TRUE(execution.success) << execution.errorMessage;
+  EXPECT_EQ(h.vm.resultCells(cursor, outputs[0]),
+            (std::vector<CellRef>{candidate}));
+  EXPECT_EQ(h.vm.resultCells(cursor, outputs[1]),
+            (std::vector<CellRef>{candidate}));
 }
 
 TEST(VortexClosureTest,
@@ -524,7 +912,7 @@ TEST(VortexClosureTest,
   EXPECT_FALSE(h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
       .frameDescriptor    = parsedFrame->frameDescriptor,
       .captureStreamCount = 1,
-      .appliedStreamCount = 1,
+      .maxFormalCount     = 1,
       .frameInputs        = {{ClosureInputSource::Capture, 0},
                              {ClosureInputSource::Applied, 0}},
   }));
@@ -578,7 +966,7 @@ TEST(VortexClosureTest, MappedFanoutRefusesBeforeAllocatingFrameBacking) {
   const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
       .frameDescriptor    = *frame,
       .captureStreamCount = 1,
-      .appliedStreamCount = 0,
+      .maxFormalCount     = 0,
       .frameInputs        = {{ClosureInputSource::Capture, 0},
                              {ClosureInputSource::Capture, 0}},
   });
@@ -592,6 +980,9 @@ TEST(VortexClosureTest, MappedFanoutRefusesBeforeAllocatingFrameBacking) {
   const auto secondOutput = h.arena.makeCell("second output");
   const auto apply        = h.op(OpcodeKind::ApplyClosure);
   h.core.bindInput(apply, *closure);
+  h.core.bindInput(apply, h.arena.makeScalarCell(static_cast<std::int64_t>(
+                              ClosureCallMode::Explicit)));
+  h.core.bindInput(apply, h.arena.makeCell("empty hidden context"));
   h.core.bindOutput(apply, firstOutput);
   h.core.bindOutput(apply, secondOutput);
   auto limits              = h.vm.closureLimits();
@@ -691,7 +1082,7 @@ TEST(VortexClosureProfileTest,
       const auto descriptor = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
           .frameDescriptor    = *frame,
           .captureStreamCount = captureStreams,
-          .appliedStreamCount = 0,
+          .maxFormalCount     = 0,
           .frameInputs        = std::move(frameInputs),
       });
       ASSERT_TRUE(descriptor);
@@ -707,6 +1098,10 @@ TEST(VortexClosureProfileTest,
       for (std::size_t repetition = 0; repetition < 32; ++repetition) {
         const auto apply = h.op(OpcodeKind::ApplyClosure);
         h.core.bindInput(apply, *closure);
+        h.core.bindInput(
+            apply, h.arena.makeScalarCell(
+                       static_cast<std::int64_t>(ClosureCallMode::Explicit)));
+        h.core.bindInput(apply, h.arena.makeCell("empty hidden context"));
         for (std::size_t stream = 0; stream < captureStreams; ++stream)
           h.core.bindOutput(apply, h.arena.makeCell("profile output"));
         if (previous)
@@ -776,6 +1171,37 @@ TEST(VortexClosureTest,
   ASSERT_TRUE(h.arena.link(plainProbe, claimDim, DimVector::NEG, *marker));
   EXPECT_EQ(classifyRuntimeObjectRoot(h.arena, plainProbe, claimDim),
             RuntimeObjectClaimResult::NoClaim);
+}
+
+TEST(VortexClosureTest,
+     RuntimeObjectProbeSeparatesLocalWorkLimitFromGlobalFuel) {
+  {
+    Harness h;
+    const auto descriptor = h.streamFrame();
+    ASSERT_TRUE(h.core.dims().runtimeObjectClaim);
+    const auto claimDim = *h.core.dims().runtimeObjectClaim;
+    EXPECT_EQ(classifyRuntimeObjectRoot(
+                  h.arena, descriptor, claimDim,
+                  {.maxRootRelations = 0, .maxMappingWork = 4096}),
+              RuntimeObjectClaimResult::ProbeLimitExceeded);
+
+    h.arena.setExecutionLimits(4096, 0, 1'048'576);
+    EXPECT_EQ(classifyRuntimeObjectRoot(h.arena, descriptor, claimDim),
+              RuntimeObjectClaimResult::FuelExhausted);
+  }
+
+  {
+    Harness h;
+    const auto descriptor = h.streamFrame();
+    const auto spans      = h.arena.contentOf(descriptor);
+    h.arena.setExecutionLimits(4096, spans.size(), 1'048'576);
+
+    const auto parsed = h.vm.closureDescriptor(descriptor);
+    ASSERT_FALSE(parsed);
+    EXPECT_NE(
+        parsed.error().message.find("Vortex evaluation work budget exhausted"),
+        std::string::npos);
+  }
 }
 
 TEST(VortexClosureTest,

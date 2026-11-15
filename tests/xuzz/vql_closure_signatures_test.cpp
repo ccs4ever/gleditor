@@ -404,28 +404,31 @@ TEST(VQLClosureSignaturesTest, NamedHelperReturnPromiseViolationIsNotFiltered) {
 }
 
 TEST(VQLClosureSignaturesTest,
-     WholeFormalDefaultsRemainAnExplicitCompileError) {
+     WholeFormalDefaultsCompileAndFieldDefaultsStayScoped) {
   Harness h;
-  const std::size_t before = h.arena.cellCount();
-  VQLCompiler compiler(h.coordinator, h.vm);
-  const auto refused = compiler.compile(R"(
+  const auto defaulted = h.run(R"(
       let $f := \($value := 7) $value;
-      return $f
+      return $f()
     )");
-  EXPECT_FALSE(refused.success);
-  EXPECT_EQ(h.arena.cellCount(), before);
+  ASSERT_TRUE(defaulted) << defaulted.error();
+  ASSERT_EQ(defaulted->size(), 1u);
+  EXPECT_EQ(h.arena.asInt64(defaulted->front()),
+            std::optional<std::int64_t>{7});
+
+  Harness fieldDefaults;
+  VQLCompiler compiler(fieldDefaults.coordinator, fieldDefaults.vm);
   const auto unresolvedDefault = compiler.compile(R"(
       let $f := \($item: Cell { +d.value: Int := $missing }) $item;
       return $f
     )");
   EXPECT_FALSE(unresolvedDefault.success);
-  EXPECT_EQ(h.arena.cellCount(), before);
-  const CellRef withoutValue = h.cell("without value");
-  const auto emptyDefault    = h.run(R"(
+  const CellRef withoutValue = fieldDefaults.cell("without value");
+  const auto emptyDefault =
+      fieldDefaults.run(R"(
       let $f := \($item: Cell { +d.value: Int := $missing }) $item;
       return $input / $f
     )",
-                                     {{"input", {withoutValue}}, {"missing", {}}});
+                        {{"input", {withoutValue}}, {"missing", {}}});
   ASSERT_TRUE(emptyDefault) << emptyDefault.error();
   EXPECT_TRUE(emptyDefault->empty());
   const auto retry = h.run(R"(
@@ -516,9 +519,17 @@ TEST(VQLClosureSignaturesTest,
   ASSERT_EQ(hosted->size(), 1u);
   EXPECT_EQ(host.core().arena().textOf(hosted->front()), "9007199254740994");
 
-  namespace mesh    = zigzag::vortex::mesh;
+  namespace mesh       = zigzag::vortex::mesh;
+  const auto exhausted = mesh::evaluate(mesh::Frontend::Vquery, source,
+                                        {.maxCycles      = 1,
+                                         .maxCells       = 10'000,
+                                         .maxSolutions   = 16,
+                                         .maxOutputBytes = 1024 * 1024});
+  ASSERT_FALSE(exhausted);
+  EXPECT_NE(exhausted.error().find("budget"), std::string::npos);
+  // Work fuel also pays for descriptor preflight and Apply revalidation.
   const auto meshed = mesh::evaluate(mesh::Frontend::Vquery, source,
-                                     {.maxCycles      = 10'000,
+                                     {.maxCycles      = 100'000,
                                       .maxCells       = 10'000,
                                       .maxSolutions   = 16,
                                       .maxOutputBytes = 1024 * 1024});

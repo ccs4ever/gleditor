@@ -2,7 +2,10 @@
 #include "common/xanadu/vql/compiler.hpp"
 
 #include <array>
-#include <stdexcept>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace xanadu::vql {
 using zigzag::CellRef;
@@ -19,90 +22,151 @@ std::vector<CellRef> VQLCompiler::compileRootSelectorStep(
     case RootSelectorStep::Kind::Genesis:
       return {current};
 
-    case RootSelectorStep::Kind::ActiveCursor: {
-      const auto rank =
-          emitRank(current, core_.dims().cursors, zigzag::DimVector::POS);
-      const std::array<CellRef, 1> rankInputs{rank};
-      return emitClamp(rankInputs, RangeClamp{.start = 1, .end = 1});
-    }
+    case RootSelectorStep::Kind::RootMetacells:
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          "root metacell enumeration has no graph-visible root registry");
 
-    case RootSelectorStep::Kind::AllCursors:
+    case RootSelectorStep::Kind::ActiveCursor:
       return {emitRank(current, core_.dims().cursors, zigzag::DimVector::POS)};
 
-    case RootSelectorStep::Kind::NamedCursor: {
-      const auto rank =
+    case RootSelectorStep::Kind::AllCursors:
+    case RootSelectorStep::Kind::NamedCursor:
+    case RootSelectorStep::Kind::AllNamedCursors: {
+      const bool includePinned =
+          root->kind == RootSelectorStep::Kind::AllCursors ||
+          root->kind == RootSelectorStep::Kind::AllNamedCursors;
+      const bool filterName =
+          root->kind == RootSelectorStep::Kind::NamedCursor ||
+          root->kind == RootSelectorStep::Kind::AllNamedCursors;
+
+      CellRef cursors =
           emitRank(current, core_.dims().cursors, zigzag::DimVector::POS);
-      const auto expectedName = emitConstant(root->name);
-      const std::array<CellRef, 1> rankInputs{rank};
-      return emitMap(rankInputs, [&](CellRef candidate) {
-        const auto result = core_.arena().makeCell();
-        const auto clear =
-            emitOp(OpcodeKind::ClearCellRefs, "#CURSOR_NAME_CLEAR");
-        emitOutput(clear, result);
+      if (includePinned) {
+        const CellRef pinned   = emitRank(current, core_.dims().pinningCursors,
+                                          zigzag::DimVector::POS);
+        const CellRef combined = emitStreamClear();
+        emitAppendStream(combined, std::span{&cursors, std::size_t{1}});
+        emitAppendStream(combined, std::span{&pinned, std::size_t{1}});
+        cursors = combined;
+      }
 
-        const auto eq = emitOp(OpcodeKind::Eq, "#CURSOR_NAME_EQ");
-        emitInput(eq, candidate);
-        emitInput(eq, expectedName);
-        const auto match = core_.arena().makeCell();
-        emitOutput(eq, match);
+      if (!filterName) return {cursors};
 
-        const auto end = mintOpcode(OpcodeKind::Nop, "#CURSOR_FILTER_END");
-        const auto branch =
-            emitOp(OpcodeKind::BranchFalseCell, "#CURSOR_FILTER_BRANCH");
-        emitInput(branch, match);
-        emitInput(branch, end);
+      const CellRef expectedName = emitConstant(root->name);
+      return emitMap(
+          std::span{&cursors, std::size_t{1}}, [&](const CellRef candidate) {
+            // A cursor may carry multiple names; return it once if
+            // any member of its d.name rank matches.
+            const CellRef matched = core_.arena().makeCell();
+            const CellRef clear =
+                emitOp(OpcodeKind::ClearCellRefs, "#CURSOR_NAME_MATCH_CLEAR");
+            emitOutput(clear, matched);
 
-        const auto copy =
-            emitOp(OpcodeKind::CopyCellRefs, "#CURSOR_FILTER_COPY");
-        emitInput(copy, candidate);
-        emitOutput(copy, result);
-        appendOpcode(end);
+            const CellRef names =
+                emitRank(candidate, core_.dims().name, zigzag::DimVector::POS);
+            const auto nameWalk = emitMap(
+                std::span{&names, std::size_t{1}}, [&](const CellRef nameCell) {
+                  const CellRef equal =
+                      emitOp(OpcodeKind::Eq, "#CURSOR_NAME_EQ");
+                  emitInput(equal, nameCell);
+                  emitInput(equal, expectedName);
+                  const CellRef matches = core_.arena().makeCell();
+                  emitOutput(equal, matches);
 
-        return std::vector<CellRef>{result};
-      });
+                  const CellRef end =
+                      mintOpcode(OpcodeKind::Nop, "#CURSOR_NAME_MATCH_END");
+                  const CellRef branch = emitOp(OpcodeKind::BranchFalseCell,
+                                                "#CURSOR_NAME_MATCH_BRANCH");
+                  emitInput(branch, matches);
+                  emitInput(branch, end);
+                  const CellRef copy = emitOp(OpcodeKind::CopyCellRefs,
+                                              "#CURSOR_NAME_MATCH_COPY");
+                  emitInput(copy, candidate);
+                  emitOutput(copy, matched);
+                  appendOpcode(end);
+                  return std::vector<CellRef>{};
+                });
+            static_cast<void>(nameWalk);
+
+            const CellRef present = emitCellPresence(matched);
+            const CellRef result  = core_.arena().makeCell();
+            const CellRef clearResult =
+                emitOp(OpcodeKind::ClearCellRefs, "#CURSOR_FILTER_CLEAR");
+            emitOutput(clearResult, result);
+            const CellRef end =
+                mintOpcode(OpcodeKind::Nop, "#CURSOR_FILTER_END");
+            const CellRef branch =
+                emitOp(OpcodeKind::BranchFalseCell, "#CURSOR_FILTER_BRANCH");
+            emitInput(branch, present);
+            emitInput(branch, end);
+            const CellRef copy =
+                emitOp(OpcodeKind::CopyCellRefs, "#CURSOR_FILTER_COPY");
+            emitInput(copy, candidate);
+            emitOutput(copy, result);
+            appendOpcode(end);
+            return std::vector<CellRef>{result};
+          });
     }
-
-    case RootSelectorStep::Kind::RootMetacells:
-    case RootSelectorStep::Kind::AllNamedCursors:
-      return {current};
     }
   }
 
-  if (const auto *persp = std::get_if<PerspectiveStep>(&step.selector)) {
-    if (persp->targetStep) {
-      if (const auto *sd =
-              std::get_if<SignedDimensionStep>(&persp->targetStep->selector)) {
-        std::string perspDimName = sd->dimName;
-        if (!persp->perspective.empty()) {
-          std::string normPersp = persp->perspective;
-          if (normPersp.starts_with('@')) normPersp = normPersp.substr(1);
-          if (normPersp.ends_with(':'))
-            normPersp = normPersp.substr(0, normPersp.size() - 1);
-          perspDimName += "@" + normPersp;
-        }
-        const auto perspDim = resolveDimension(perspDimName);
-        if (const auto linked =
-                core_.arena().linked(current, perspDim, sd->direction)) {
-          return {*linked};
-        }
-        const auto canonDim = resolveDimension(sd->dimName);
-        if (const auto fallback =
-                core_.arena().linked(current, canonDim, sd->direction)) {
-          return {*fallback};
-        }
-        throw QueryRefusal(
-            QueryErrorCategory::Unsupported,
-            "this VQL path selector does not have Vortex graph lowering yet");
-      }
-      auto res = compileSelector(*persp->targetStep, current, hasContext);
-      if (res.empty()) {
-        throw QueryRefusal(
-            QueryErrorCategory::Unsupported,
-            "this VQL path selector does not have Vortex graph lowering yet");
-      }
-      return res;
+  if (const auto *perspective = std::get_if<PerspectiveStep>(&step.selector)) {
+    if (!perspective->targetStep) {
+      throw QueryRefusal(QueryErrorCategory::Unsupported,
+                         "perspective traversal has no target step");
     }
-    return {current};
+
+    const auto *dimension =
+        std::get_if<SignedDimensionStep>(&perspective->targetStep->selector);
+    if (dimension == nullptr || !dimension->creates.empty()) {
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          "perspective traversal supports only read-only dimension steps");
+    }
+
+    std::string name = perspective->perspective;
+    if (name.starts_with('@')) name.erase(0, 1);
+    if (name.ends_with(':')) name.pop_back();
+    if (name.empty()) {
+      throw QueryRefusal(QueryErrorCategory::Unsupported,
+                         "perspective traversal requires a named axis");
+    }
+
+    // Qualified dimensions are the graph-visible representation currently
+    // used by perspective writes. The full clone-map perspective semantics
+    // remain unavailable to the VM compiler.
+    PathStep qualifiedStep  = *perspective->targetStep;
+    auto qualifiedDimension = *dimension;
+    qualifiedDimension.dimName += "@" + name;
+    qualifiedStep.selector = std::move(qualifiedDimension);
+
+    const std::vector<CellRef> input{current};
+    const std::array<PathStep, 1> qualifiedSteps{std::move(qualifiedStep)};
+    const auto qualified = compileSteps(qualifiedSteps, input, hasContext);
+    const auto qualifiedPresent = emitStreamPresence(qualified);
+
+    const CellRef result = emitStreamClear();
+    const CellRef useCanonical =
+        mintOpcode(OpcodeKind::Nop, "#PERSPECTIVE_CANONICAL");
+    const CellRef done = mintOpcode(OpcodeKind::Nop, "#PERSPECTIVE_DONE");
+    const CellRef choose =
+        emitOp(OpcodeKind::BranchFalseCell, "#PERSPECTIVE_FALLBACK");
+    emitInput(choose, qualifiedPresent);
+    emitInput(choose, useCanonical);
+    emitAppendStream(result, qualified);
+
+    const CellRef skipFallback =
+        emitOp(OpcodeKind::BranchFalseCell, "#PERSPECTIVE_SKIP_FALLBACK");
+    emitInputConstant(skipFallback, false);
+    emitInput(skipFallback, done);
+
+    appendOpcode(useCanonical);
+    const std::array<PathStep, 1> canonicalSteps{*perspective->targetStep};
+    const auto canonical = compileSteps(canonicalSteps, input, hasContext);
+    emitAppendStream(result, canonical);
+    appendOpcode(done);
+    return {result};
   }
 
   if (const auto *group =
@@ -133,8 +197,9 @@ std::vector<CellRef> VQLCompiler::compileRootSelectorStep(
     return walked;
   }
 
-  throw std::invalid_argument(
-      "this VQL path selector does not have Vortex graph lowering yet");
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "this VQL path selector does not have Vortex graph "
+                     "lowering yet");
 }
 
 } // namespace xanadu::vql

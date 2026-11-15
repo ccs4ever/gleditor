@@ -13,13 +13,18 @@
 namespace zigzag::vortex {
 namespace {
 
-constexpr std::string_view closureDescriptorTag = "VORTEX_CLOSURE_DESCRIPTOR/1";
+constexpr std::string_view closureDescriptorTag = "VORTEX_CLOSURE_DESCRIPTOR/2";
 constexpr std::string_view closureValueTag      = "VORTEX_CLOSURE_VALUE/1";
 constexpr std::string_view frameReferenceRole   = "ref.frame-descriptor";
 constexpr std::string_view captureCountRole     = "count.capture-streams";
-constexpr std::string_view appliedCountRole     = "count.applied-streams";
+constexpr std::string_view minFormalRole        = "count.min-formals";
+constexpr std::string_view maxFormalRole        = "count.max-formals";
+constexpr std::string_view presenceTrueRole     = "ref.presence-true";
+constexpr std::string_view presenceFalseRole    = "ref.presence-false";
 constexpr std::string_view captureInputRole     = "input.capture";
 constexpr std::string_view appliedInputRole     = "input.applied";
+constexpr std::string_view contextInputRole     = "input.context";
+constexpr std::string_view presenceInputRole    = "input.applied-presence";
 constexpr std::string_view valueDescriptorRole  = "ref.descriptor";
 constexpr std::string_view environmentStreamRole = "env.stream";
 constexpr std::string_view environmentMemberRole = "ref.environment-member";
@@ -86,6 +91,8 @@ std::optional<std::string> claimedTag(const VortexCore &core,
        .maxMappingWork   = byteLimit > SIZE_MAX / 4
                                ? SIZE_MAX
                                : std::max<std::size_t>(4096, byteLimit * 4)});
+  if (claim == zigzag::RuntimeObjectClaimResult::FuelExhausted)
+    throw std::runtime_error("Vortex evaluation work budget exhausted");
   if (claim != zigzag::RuntimeObjectClaimResult::Claimed) return std::nullopt;
   const auto kindCell = arena.linked(root, *dimension, DimVector::POS);
   if (!kindCell) return std::nullopt;
@@ -181,8 +188,11 @@ validateClosureSpec(const VortexVM &vm, const ClosureDescriptorSpec &spec) {
       limits.maxAppliedStreams > closureStreamCapacity ||
       limits.maxMetadataRelations > closureMetadataRelationCapacity)
     return fail("closure limits exceed their fixed capacities");
+  const std::size_t minFormalCount =
+      spec.minFormalCount.value_or(spec.maxFormalCount);
   if (spec.captureStreamCount > limits.maxCaptureStreams ||
-      spec.appliedStreamCount > limits.maxAppliedStreams)
+      spec.maxFormalCount > limits.maxAppliedStreams ||
+      minFormalCount > spec.maxFormalCount)
     return fail("closure descriptor exceeds its stream-count limit");
   std::optional<FrameDescriptor> frame;
   if (spec.frameDescriptor) {
@@ -196,32 +206,54 @@ validateClosureSpec(const VortexVM &vm, const ClosureDescriptorSpec &spec) {
   const std::size_t framePorts = frame ? frame->argumentPorts.size() : 0;
   if (spec.frameInputs.size() != framePorts)
     return fail("closure source map must cover every frame argument port");
-  if (frame &&
-      std::ranges::any_of(frame->argumentPorts, [](const FramePort &port) {
-        return port.kind != FramePortKind::Stream;
-      }))
-    return fail("closure frame arguments must all be Stream ports");
-  const std::size_t fixedRecords = 2 + (spec.frameDescriptor ? 1 : 0);
+  const std::size_t fixedRecords = 5 + (spec.frameDescriptor ? 1 : 0);
   if (limits.maxDescriptorRecords < fixedRecords ||
       spec.frameInputs.size() > limits.maxDescriptorRecords - fixedRecords)
     return fail("closure descriptor exceeds the descriptor-record limit");
 
   std::vector<bool> captureUsed(spec.captureStreamCount, false);
-  std::vector<bool> appliedUsed(spec.appliedStreamCount, false);
-  for (const auto &input : spec.frameInputs) {
-    auto *used =
-        input.source == ClosureInputSource::Capture
-            ? (input.index < captureUsed.size() ? &captureUsed : nullptr)
-        : input.source == ClosureInputSource::Applied
-            ? (input.index < appliedUsed.size() ? &appliedUsed : nullptr)
-            : nullptr;
+  std::vector<bool> appliedUsed(spec.maxFormalCount, false);
+  std::vector<bool> presenceUsed(spec.maxFormalCount, false);
+  for (std::size_t portIndex = 0; portIndex < spec.frameInputs.size();
+       ++portIndex) {
+    const auto &input       = spec.frameInputs[portIndex];
+    const auto portKind     = frame->argumentPorts[portIndex].kind;
+    std::vector<bool> *used = nullptr;
+    switch (input.source) {
+    case ClosureInputSource::Capture:
+      if (input.index < captureUsed.size()) used = &captureUsed;
+      break;
+    case ClosureInputSource::Applied:
+      if (input.index < appliedUsed.size()) used = &appliedUsed;
+      break;
+    case ClosureInputSource::Context:
+      if (input.index != 0 || portKind != FramePortKind::Stream)
+        return fail("closure context source must map to a Stream port");
+      continue;
+    case ClosureInputSource::AppliedPresence:
+      if (input.index < presenceUsed.size()) used = &presenceUsed;
+      break;
+    }
     if (used == nullptr)
       return fail("closure source map contains an out-of-range source");
+    if ((input.source == ClosureInputSource::AppliedPresence &&
+         portKind != FramePortKind::Cell) ||
+        (input.source == ClosureInputSource::Context &&
+         portKind != FramePortKind::Stream))
+      return fail("closure source kind does not match its frame port kind");
     (*used)[input.index] = true;
   }
   if (std::ranges::any_of(captureUsed, [](bool used) { return !used; }) ||
       std::ranges::any_of(appliedUsed, [](bool used) { return !used; }))
     return fail("every closure source stream must be used by the frame");
+  for (std::size_t index = 0; index < presenceUsed.size(); ++index) {
+    if (presenceUsed[index] &&
+        std::ranges::count_if(spec.frameInputs, [index](const auto &input) {
+          return input.source == ClosureInputSource::AppliedPresence &&
+                 input.index == index;
+        }) != 1)
+      return fail("closure presence source is mapped more than once");
+  }
   return {};
 }
 
@@ -249,14 +281,18 @@ VortexVM::makeClosureDescriptor(const ClosureDescriptorSpec &spec) try {
   if (const auto valid = validateClosureSpec(*this, spec); !valid)
     return std::unexpected(valid.error());
   const auto limits = closureLimits_;
+  const std::size_t minFormalCount =
+      spec.minFormalCount.value_or(spec.maxFormalCount);
   const auto recordCount =
-      2 + (spec.frameDescriptor ? 1 : 0) + spec.frameInputs.size();
+      5 + (spec.frameDescriptor ? 1 : 0) + spec.frameInputs.size();
   const auto roleTooLong = [&](const std::string_view role) {
     return role.size() > limits.maxMetadataBytes;
   };
   if (roleTooLong(frameReferenceRole) || roleTooLong(captureCountRole) ||
-      roleTooLong(appliedCountRole) || roleTooLong(captureInputRole) ||
-      roleTooLong(appliedInputRole) ||
+      roleTooLong(minFormalRole) || roleTooLong(maxFormalRole) ||
+      roleTooLong(presenceTrueRole) || roleTooLong(presenceFalseRole) ||
+      roleTooLong(captureInputRole) || roleTooLong(appliedInputRole) ||
+      roleTooLong(contextInputRole) || roleTooLong(presenceInputRole) ||
       zigzag::runtimeObjectProbeText.size() > limits.maxMetadataBytes ||
       closureDescriptorTag.size() > limits.maxMetadataBytes)
     return std::unexpected(
@@ -267,8 +303,18 @@ VortexVM::makeClosureDescriptor(const ClosureDescriptorSpec &spec) try {
     return std::unexpected(closureError(
         "closure frame descriptor reference is not representable"));
   for (std::size_t index = 0; index < recordCount; ++index) arena.consumeWork();
+  arena.consumeWork();
+  arena.consumeWork();
   try {
     zigzag::ArenaSavepoint savepoint(arena);
+    const CellRef trueCell  = arena.makeScalarCell(true);
+    const CellRef falseCell = arena.makeScalarCell(false);
+    if (trueCell >
+            static_cast<CellRef>(std::numeric_limits<std::int64_t>::max()) ||
+        falseCell >
+            static_cast<CellRef>(std::numeric_limits<std::int64_t>::max()))
+      return std::unexpected(
+          closureError("closure presence reference is not representable"));
     const CellRef root =
         makeClaimedRoot(core_, closureDescriptorTag, limits.maxMetadataBytes);
     std::optional<CellRef> tail;
@@ -276,13 +322,31 @@ VortexVM::makeClosureDescriptor(const ClosureDescriptorSpec &spec) try {
       addRecord(core_, root, frameReferenceRole, *spec.frameDescriptor, tail);
     addRecord(core_, root, captureCountRole,
               static_cast<std::uint64_t>(spec.captureStreamCount), tail);
-    addRecord(core_, root, appliedCountRole,
-              static_cast<std::uint64_t>(spec.appliedStreamCount), tail);
-    for (const auto &input : spec.frameInputs)
-      addRecord(core_, root,
-                input.source == ClosureInputSource::Capture ? captureInputRole
-                                                            : appliedInputRole,
-                static_cast<std::uint64_t>(input.index), tail);
+    addRecord(core_, root, minFormalRole,
+              static_cast<std::uint64_t>(minFormalCount), tail);
+    addRecord(core_, root, maxFormalRole,
+              static_cast<std::uint64_t>(spec.maxFormalCount), tail);
+    addRecord(core_, root, presenceTrueRole, trueCell, tail);
+    addRecord(core_, root, presenceFalseRole, falseCell, tail);
+    for (const auto &input : spec.frameInputs) {
+      std::string_view role;
+      switch (input.source) {
+      case ClosureInputSource::Capture:
+        role = captureInputRole;
+        break;
+      case ClosureInputSource::Applied:
+        role = appliedInputRole;
+        break;
+      case ClosureInputSource::Context:
+        role = contextInputRole;
+        break;
+      case ClosureInputSource::AppliedPresence:
+        role = presenceInputRole;
+        break;
+      }
+      addRecord(core_, root, role, static_cast<std::uint64_t>(input.index),
+                tail);
+    }
     savepoint.commit();
     return root;
   } catch (const std::exception &error) {
@@ -306,7 +370,10 @@ VortexVM::closureDescriptor(const CellRef root) const try {
 
   ParsedClosureDescriptor parsed;
   std::optional<std::size_t> captureCount;
-  std::optional<std::size_t> appliedCount;
+  std::optional<std::size_t> minFormalCount;
+  std::optional<std::size_t> maxFormalCount;
+  std::optional<CellRef> presenceTrue;
+  std::optional<CellRef> presenceFalse;
   std::vector<std::pair<ClosureInputSource, std::size_t>> mappedInputs;
   std::unordered_set<CellRef> visited;
   auto firstRecord =
@@ -342,17 +409,33 @@ VortexVM::closureDescriptor(const CellRef root) const try {
       if (captureCount || static_cast<std::uint64_t>(*value) > SIZE_MAX)
         return fail("closure capture stream count is duplicated or invalid");
       captureCount = static_cast<std::size_t>(*value);
-    } else if (*role == appliedCountRole) {
-      if (appliedCount || static_cast<std::uint64_t>(*value) > SIZE_MAX)
-        return fail("closure applied stream count is duplicated or invalid");
-      appliedCount = static_cast<std::size_t>(*value);
-    } else if (*role == captureInputRole || *role == appliedInputRole) {
+    } else if (*role == minFormalRole || *role == maxFormalRole) {
+      auto &count = *role == minFormalRole ? minFormalCount : maxFormalCount;
+      if (count || static_cast<std::uint64_t>(*value) > SIZE_MAX)
+        return fail("closure formal count is duplicated or invalid");
+      count = static_cast<std::size_t>(*value);
+    } else if (*role == presenceTrueRole || *role == presenceFalseRole) {
+      auto &reference =
+          *role == presenceTrueRole ? presenceTrue : presenceFalse;
+      if (reference || static_cast<std::uint64_t>(*value) >
+                           std::numeric_limits<CellRef>::max())
+        return fail("closure presence reference is duplicated or invalid");
+      const CellRef target = static_cast<CellRef>(*value);
+      const auto boolean   = arena.asBool(target);
+      if (!boolean || *boolean != (*role == presenceTrueRole))
+        return fail("closure presence reference has an invalid Bool value");
+      reference = target;
+      parsed.referenceCells.emplace_back(*record, target);
+    } else if (*role == captureInputRole || *role == appliedInputRole ||
+               *role == contextInputRole || *role == presenceInputRole) {
       if (static_cast<std::uint64_t>(*value) > SIZE_MAX)
         return fail("closure source index is not representable");
-      mappedInputs.emplace_back(*role == captureInputRole
-                                    ? ClosureInputSource::Capture
-                                    : ClosureInputSource::Applied,
-                                static_cast<std::size_t>(*value));
+      const auto source =
+          *role == captureInputRole   ? ClosureInputSource::Capture
+          : *role == appliedInputRole ? ClosureInputSource::Applied
+          : *role == contextInputRole ? ClosureInputSource::Context
+                                      : ClosureInputSource::AppliedPresence;
+      mappedInputs.emplace_back(source, static_cast<std::size_t>(*value));
     } else {
       return fail("closure descriptor contains an unknown record role");
     }
@@ -362,20 +445,26 @@ VortexVM::closureDescriptor(const CellRef root) const try {
     if (!next) return fail(next.error().message);
     record = *next;
   }
-  if (!captureCount || !appliedCount)
-    return fail("closure descriptor is missing stream counts");
+  if (!captureCount || !minFormalCount || !maxFormalCount || !presenceTrue ||
+      !presenceFalse)
+    return fail("closure descriptor is missing required counts or references");
   if (*captureCount > closureLimits_.maxCaptureStreams ||
-      *appliedCount > closureLimits_.maxAppliedStreams)
+      *maxFormalCount > closureLimits_.maxAppliedStreams ||
+      *minFormalCount > *maxFormalCount)
     return fail("closure descriptor exceeds its stream-count limit");
   parsed.captureStreamCount = *captureCount;
-  parsed.appliedStreamCount = *appliedCount;
+  parsed.minFormalCount     = *minFormalCount;
+  parsed.maxFormalCount     = *maxFormalCount;
+  parsed.presenceTrue       = *presenceTrue;
+  parsed.presenceFalse      = *presenceFalse;
   parsed.frameInputs.reserve(mappedInputs.size());
   for (const auto &[source, index] : mappedInputs)
     parsed.frameInputs.push_back({.source = source, .index = index});
 
   ClosureDescriptorSpec spec{.frameDescriptor    = parsed.frameDescriptor,
                              .captureStreamCount = parsed.captureStreamCount,
-                             .appliedStreamCount = parsed.appliedStreamCount,
+                             .minFormalCount     = parsed.minFormalCount,
+                             .maxFormalCount     = parsed.maxFormalCount,
                              .frameInputs        = parsed.frameInputs};
   if (const auto valid = validateClosureSpec(*this, spec); !valid)
     return fail(valid.error().message);
@@ -584,17 +673,21 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
                            .failingClause = opcode,
                            .errorMessage  = std::move(message)};
   };
-  auto &arena = core_.arena();
+  auto &arena                  = core_.arena();
+  const std::size_t inputLimit = kind == OpcodeKind::CreateClosure
+                                     ? 1 + closureLimits_.maxCaptureStreams
+                                 : kind == OpcodeKind::CheckClosureCall
+                                     ? 3
+                                     : 3 + closureLimits_.maxAppliedStreams;
   const auto rawInputWing =
-      closureWing(core_, opcode, DimVector::POS,
-                  1 + (kind == OpcodeKind::CreateClosure
-                           ? closureLimits_.maxCaptureStreams
-                           : closureLimits_.maxAppliedStreams),
+      closureWing(core_, opcode, DimVector::POS, inputLimit,
                   closureLimits_.maxMetadataRelations);
   if (!rawInputWing) return fail(rawInputWing.error().message);
   const auto rawOutputWing = closureWing(
       core_, opcode, DimVector::NEG,
-      kind == OpcodeKind::CreateClosure ? 1 : frameLimits_.maxDescriptorRecords,
+      kind == OpcodeKind::CreateClosure || kind == OpcodeKind::CheckClosureCall
+          ? 1
+          : frameLimits_.maxDescriptorRecords,
       closureLimits_.maxMetadataRelations);
   if (!rawOutputWing) return fail(rawOutputWing.error().message);
   const auto &rawInputs = *rawInputWing;
@@ -683,7 +776,116 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
     }
   }
 
-  if (inputs.empty()) return fail("ApplyClosure requires a closure handle");
+  if (kind == OpcodeKind::CheckClosureCall) {
+    if (inputs.size() != 3 || outputs.size() != 1)
+      return fail(
+          "CheckClosureCall requires callee, mode, count and one output");
+    const CellRef calleeSlot = inputs[0];
+    const CellRef modeSlot   = inputs[1];
+    const CellRef countSlot  = inputs[2];
+    const CellRef output     = outputs.front();
+    if (!arena.contains(output) || getOpcodeKind(output) ||
+        streamSlots_.contains(output) || iteratorSlots_.contains(output) ||
+        output == calleeSlot || output == modeSlot || output == countSlot ||
+        streamSlots_.contains(modeSlot) || iteratorSlots_.contains(modeSlot) ||
+        streamSlots_.contains(countSlot) || iteratorSlots_.contains(countSlot))
+      return fail(
+          "CheckClosureCall requires scalar operands and a distinct output");
+    const auto rawMode  = arena.asInt64(modeSlot);
+    const auto rawCount = arena.asInt64(countSlot);
+    if (!rawMode ||
+        (*rawMode != static_cast<std::int64_t>(ClosureCallMode::Explicit) &&
+         *rawMode != static_cast<std::int64_t>(ClosureCallMode::Contextual)))
+      return fail("CheckClosureCall has an invalid call mode");
+    if (!rawCount || *rawCount < 0 ||
+        static_cast<std::uint64_t>(*rawCount) >
+            closureLimits_.maxAppliedStreams)
+      return fail("CheckClosureCall has an invalid explicit argument count");
+    const auto mode = static_cast<ClosureCallMode>(*rawMode);
+    if (mode == ClosureCallMode::Contextual && *rawCount != 0)
+      return fail("Contextual CheckClosureCall cannot have explicit arguments");
+
+    std::optional<CellRef> handle;
+    std::size_t handleCount = 0;
+    try {
+      forEachResultCell(calleeSlot, [&](const CellRef cell) {
+        arena.consumeWork();
+        if (handleCount != 0)
+          throw std::length_error(
+              "CheckClosureCall requires exactly one closure handle");
+        if (!arena.contains(cell))
+          throw std::invalid_argument(
+              "CheckClosureCall handle does not resolve to a cell");
+        handle = cell;
+        ++handleCount;
+      });
+    } catch (const std::exception &error) {
+      return fail(error.what());
+    }
+    if (!handle)
+      return fail("CheckClosureCall requires exactly one closure handle");
+    if (*handle >
+        static_cast<CellRef>(std::numeric_limits<std::int64_t>::max()))
+      return fail("CheckClosureCall handle reference is not representable");
+    const auto value = closureValue(*handle);
+    if (!value) return fail(value.error().message);
+    if (!value->descriptor)
+      return fail("CheckClosureCall closure has no descriptor");
+    const auto descriptor = closureDescriptor(*value->descriptor);
+    if (!descriptor) return fail(descriptor.error().message);
+    if (!descriptor->frameDescriptor)
+      return fail("CheckClosureCall descriptor has no frame");
+    const auto frame = frameDescriptor(*descriptor->frameDescriptor);
+    if (!frame) return fail(frame.error().message);
+    const std::size_t rawArguments = static_cast<std::size_t>(*rawCount);
+    const std::size_t effectiveArguments =
+        mode == ClosureCallMode::Contextual
+            ? static_cast<std::size_t>(descriptor->maxFormalCount != 0)
+            : rawArguments;
+    if (effectiveArguments < descriptor->minFormalCount ||
+        effectiveArguments > descriptor->maxFormalCount)
+      return fail(
+          "CheckClosureCall argument count is outside the closure arity");
+
+    std::size_t snapshotRecords = 0;
+    if (!addWithin(snapshotRecords, cellReferences_.size(),
+                   closureLimits_.maxInvocationRefs) ||
+        !addWithin(snapshotRecords, cursorPC_.size(),
+                   closureLimits_.maxInvocationRefs))
+      return fail("CheckClosureCall snapshot limit exceeded");
+    for (std::size_t index = 0; index < snapshotRecords; ++index)
+      arena.consumeWork();
+    auto priorReferences = cellReferences_;
+    auto priorCursorPC   = cursorPC_;
+    try {
+      zigzag::ArenaSavepoint savepoint(arena);
+      writeCellReferences(outputs,
+                          {CellValue{static_cast<std::int64_t>(*handle)}});
+      setCursorOpcode(cursor, continuation);
+      savepoint.commit();
+      return {};
+    } catch (const std::exception &error) {
+      cellReferences_.swap(priorReferences);
+      cursorPC_.swap(priorCursorPC);
+      return fail(error.what());
+    }
+  }
+
+  if (inputs.size() < 3)
+    return fail("ApplyClosure requires handle, mode and hidden context");
+  const CellRef modeSlot = inputs[1];
+  if (streamSlots_.contains(modeSlot) || iteratorSlots_.contains(modeSlot))
+    return fail("ApplyClosure mode must be an Int64 cell");
+  const auto rawMode = arena.asInt64(modeSlot);
+  if (!rawMode ||
+      (*rawMode != static_cast<std::int64_t>(ClosureCallMode::Explicit) &&
+       *rawMode != static_cast<std::int64_t>(ClosureCallMode::Contextual)))
+    return fail("ApplyClosure has an invalid call mode");
+  const auto mode                    = static_cast<ClosureCallMode>(*rawMode);
+  const std::size_t rawArgumentCount = inputs.size() - 3;
+  if (mode == ClosureCallMode::Contextual && rawArgumentCount != 0)
+    return fail("Contextual ApplyClosure cannot have explicit arguments");
+
   std::optional<CellRef> handle;
   std::size_t handleCount = 0;
   try {
@@ -707,10 +909,17 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
                 "empty");
   const auto value = closureValue(*handle);
   if (!value) return fail(value.error().message);
+  if (!value->descriptor) return fail("ApplyClosure closure has no descriptor");
   const auto descriptor = closureDescriptor(*value->descriptor);
   if (!descriptor) return fail(descriptor.error().message);
-  if (inputs.size() - 1 != descriptor->appliedStreamCount)
-    return fail("ApplyClosure applied arity does not match its descriptor");
+  const std::size_t effectiveArgumentCount =
+      mode == ClosureCallMode::Contextual
+          ? static_cast<std::size_t>(descriptor->maxFormalCount != 0)
+          : rawArgumentCount;
+  if (rawArgumentCount > closureLimits_.maxAppliedStreams ||
+      effectiveArgumentCount < descriptor->minFormalCount ||
+      effectiveArgumentCount > descriptor->maxFormalCount)
+    return fail("ApplyClosure argument count is outside the closure arity");
   if (!descriptor->frameDescriptor)
     return fail("ApplyClosure descriptor has no frame");
   const auto frame = frameDescriptor(*descriptor->frameDescriptor);
@@ -718,20 +927,13 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
   if (outputs.size() != frame->resultPorts.size())
     return fail("ApplyClosure output arity does not match frame results");
 
-  std::vector<std::vector<CellRef>> applied;
-  std::size_t capturedRefs = 0;
-  for (const auto &source : value->captures)
-    if (!addWithin(capturedRefs, source.size(),
-                   closureLimits_.maxInvocationRefs))
-      return fail("ApplyClosure invocation-reference limit exceeded");
-  std::size_t sourceRefs = 0;
+  const CellRef contextSlot = inputs[2];
+  if (iteratorSlots_.contains(contextSlot))
+    return fail("ApplyClosure hidden context iterator is unsupported");
   std::array<std::size_t, closureStreamCapacity> sourceCounts{};
-  std::size_t sourceCountIndex = 0;
-  for (std::size_t index = 1; index < inputs.size(); ++index) {
-    const CellRef source = inputs[index];
-    if (iteratorSlots_.contains(source))
-      return fail("ApplyClosure iterator arguments are unsupported");
-    std::size_t count = 0;
+  std::size_t contextCount = 0;
+  std::size_t sourceRefs   = 0;
+  const auto countStream   = [&](const CellRef source, std::size_t &count) {
     forEachResultCell(source, [&](const CellRef cell) {
       arena.consumeWork();
       if (!arena.contains(cell) ||
@@ -739,18 +941,54 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
         throw std::length_error(
             "ApplyClosure invocation-reference limit exceeded");
     });
-    if (!addWithin(sourceRefs, count, closureLimits_.maxInvocationRefs))
+  };
+  try {
+    countStream(contextSlot, contextCount);
+    if (!addWithin(sourceRefs, contextCount, closureLimits_.maxInvocationRefs))
       return fail("ApplyClosure invocation-reference limit exceeded");
-    sourceCounts[sourceCountIndex++] = count;
+    for (std::size_t index = 0; index < rawArgumentCount; ++index) {
+      const CellRef source = inputs[index + 3];
+      if (iteratorSlots_.contains(source))
+        return fail("ApplyClosure iterator arguments are unsupported");
+      countStream(source, sourceCounts[index]);
+      if (!addWithin(sourceRefs, sourceCounts[index],
+                     closureLimits_.maxInvocationRefs))
+        return fail("ApplyClosure invocation-reference limit exceeded");
+    }
+  } catch (const std::exception &error) {
+    return fail(error.what());
   }
+  if (mode == ClosureCallMode::Contextual && descriptor->maxFormalCount != 0)
+    sourceCounts[0] = contextCount;
+
+  std::size_t capturedRefs = 0;
+  for (const auto &source : value->captures)
+    if (!addWithin(capturedRefs, source.size(),
+                   closureLimits_.maxInvocationRefs))
+      return fail("ApplyClosure invocation-reference limit exceeded");
   if (!addWithin(sourceRefs, capturedRefs, closureLimits_.maxInvocationRefs))
     return fail("ApplyClosure invocation-reference limit exceeded");
 
   std::size_t fanoutRefs = 0;
-  for (const auto &mapping : descriptor->frameInputs) {
-    const std::size_t count = mapping.source == ClosureInputSource::Capture
-                                  ? value->captures.at(mapping.index).size()
-                                  : sourceCounts[mapping.index];
+  for (std::size_t index = 0; index < descriptor->frameInputs.size(); ++index) {
+    const auto &mapping = descriptor->frameInputs[index];
+    std::size_t count   = 0;
+    switch (mapping.source) {
+    case ClosureInputSource::Capture:
+      count = value->captures.at(mapping.index).size();
+      break;
+    case ClosureInputSource::Applied:
+      count = sourceCounts[mapping.index];
+      break;
+    case ClosureInputSource::Context:
+      count = contextCount;
+      break;
+    case ClosureInputSource::AppliedPresence:
+      count = 1;
+      break;
+    }
+    if (frame->argumentPorts[index].kind == FramePortKind::Cell && count > 1)
+      return fail("ApplyClosure cell frame source contains multiple cells");
     if (!addWithin(fanoutRefs, count, closureLimits_.maxInvocationRefs))
       return fail("ApplyClosure mapped-reference limit exceeded");
   }
@@ -760,23 +998,43 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
     return fail("ApplyClosure aggregate-reference limit exceeded");
   for (std::size_t index = 0; index < fanoutRefs; ++index) arena.consumeWork();
 
-  applied.reserve(descriptor->appliedStreamCount);
-  for (std::size_t index = 1; index < inputs.size(); ++index) {
-    auto &source = applied.emplace_back();
-    source.reserve(sourceCounts[index - 1]);
-    forEachResultCell(inputs[index], [&](const CellRef cell) {
+  std::vector<CellRef> context;
+  context.reserve(contextCount);
+  forEachResultCell(contextSlot, [&](const CellRef cell) {
+    arena.consumeWork();
+    context.push_back(cell);
+  });
+  std::vector<std::vector<CellRef>> applied(descriptor->maxFormalCount);
+  for (std::size_t index = 0; index < rawArgumentCount; ++index) {
+    auto &argument = applied[index];
+    argument.reserve(sourceCounts[index]);
+    forEachResultCell(inputs[index + 3], [&](const CellRef cell) {
       arena.consumeWork();
-      source.push_back(cell);
+      argument.push_back(cell);
     });
   }
+  if (mode == ClosureCallMode::Contextual && descriptor->maxFormalCount != 0)
+    applied[0] = context;
 
   std::vector<std::vector<CellRef>> arguments;
   arguments.reserve(descriptor->frameInputs.size());
   for (const auto &mapping : descriptor->frameInputs) {
-    const auto &source = mapping.source == ClosureInputSource::Capture
-                             ? value->captures.at(mapping.index)
-                             : applied.at(mapping.index);
-    arguments.push_back(source);
+    switch (mapping.source) {
+    case ClosureInputSource::Capture:
+      arguments.push_back(value->captures.at(mapping.index));
+      break;
+    case ClosureInputSource::Applied:
+      arguments.push_back(applied.at(mapping.index));
+      break;
+    case ClosureInputSource::Context:
+      arguments.push_back(context);
+      break;
+    case ClosureInputSource::AppliedPresence:
+      arguments.push_back({mapping.index < effectiveArgumentCount
+                               ? *descriptor->presenceTrue
+                               : *descriptor->presenceFalse});
+      break;
+    }
   }
   return invokeFramePrepared(*descriptor->frameDescriptor, arguments, outputs,
                              cursor, continuation, opcode);

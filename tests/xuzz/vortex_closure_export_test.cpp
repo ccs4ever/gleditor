@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/store.hpp"
@@ -18,6 +19,7 @@ namespace {
 
 using zigzag::CellRef;
 using zigzag::DimVector;
+using zigzag::vortex::ClosureCallMode;
 using zigzag::vortex::ClosureDescriptorSpec;
 using zigzag::vortex::ClosureFrameInput;
 using zigzag::vortex::ClosureInputSource;
@@ -47,6 +49,18 @@ struct Harness {
 
   void next(const CellRef from, const CellRef to) {
     ASSERT_TRUE(arena.link(from, core.dims().spin, DimVector::POS, to));
+  }
+
+  std::pair<CellRef, CellRef> emptyStream(const std::string_view label) {
+    const auto slot  = arena.makeCell(label);
+    const auto clear = op(OpcodeKind::StreamClear);
+    core.bindOutput(clear, slot);
+    return {clear, slot};
+  }
+
+  CellRef explicitMode() {
+    return arena.makeScalarCell(
+        static_cast<std::int64_t>(ClosureCallMode::Explicit));
   }
 };
 
@@ -78,7 +92,7 @@ TEST(VortexClosureExportTest,
         h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
             .frameDescriptor    = *frame,
             .captureStreamCount = 1,
-            .appliedStreamCount = 1,
+            .maxFormalCount     = 1,
             .frameInputs        = {{ClosureInputSource::Capture, 0},
                                    {ClosureInputSource::Applied, 0}},
         });
@@ -117,22 +131,27 @@ TEST(VortexClosureExportTest,
     h.core.bindInput(create, *closureDescriptor);
     h.core.bindInput(create, captureStream);
     h.core.bindOutput(create, closureHandle);
+    const auto [clearContext, contextStream] =
+        h.emptyStream("empty hidden context");
     const auto outputCapture = h.arena.makeCell("capture output");
     const auto outputApplied = h.arena.makeCell("applied output");
     const auto apply         = h.op(OpcodeKind::ApplyClosure);
     h.core.bindInput(apply, closureHandle);
+    h.core.bindInput(apply, h.explicitMode());
+    h.core.bindInput(apply, contextStream);
     h.core.bindInput(apply, appliedStream);
     h.core.bindOutput(apply, outputCapture);
     h.core.bindOutput(apply, outputApplied);
     const auto halt = h.op(OpcodeKind::Halt);
     h.next(appendCaptures, appendApplied);
     h.next(appendApplied, create);
-    h.next(create, apply);
+    h.next(create, clearContext);
+    h.next(clearContext, apply);
     h.next(apply, halt);
     h.next(h.core.home(), appendCaptures);
 
-    const std::vector<CellRef> program{appendCaptures, appendApplied, create,
-                                       apply,          halt,          ret};
+    const std::vector<CellRef> program{
+        appendCaptures, appendApplied, create, clearContext, apply, halt, ret};
     xanadu::Store store(scroll);
     const auto exported =
         zigzag::vortex::exportProgram(h.core, h.vm, program, store);
@@ -158,12 +177,12 @@ TEST(VortexClosureExportTest,
   }
   ASSERT_GE(graph.size(), 5u);
   ASSERT_EQ(vm.getOpcodeKind(graph[2]), OpcodeKind::CreateClosure);
-  ASSERT_EQ(vm.getOpcodeKind(graph[3]), OpcodeKind::ApplyClosure);
+  ASSERT_EQ(vm.getOpcodeKind(graph[4]), OpcodeKind::ApplyClosure);
 
   const auto cursor    = vm.spawnCursor(*first, "reloaded-closure");
   const auto execution = vm.run(cursor, 200);
   ASSERT_TRUE(execution.success) << execution.errorMessage;
-  const auto outputs = core.outputsOf(graph[3]);
+  const auto outputs = core.outputsOf(graph[4]);
   ASSERT_EQ(outputs.size(), 2u);
   const auto captured = vm.resultCells(cursor, outputs[0]);
   const auto applied  = vm.resultCells(cursor, outputs[1]);
@@ -180,6 +199,19 @@ TEST(VortexClosureExportTest,
   EXPECT_EQ(arena.asInt64(applied[1]), std::optional{std::int64_t{99}});
   EXPECT_EQ(arena.asDouble(captured[3]), std::optional{1.5});
   EXPECT_EQ(arena.textOf(captured[3]), "not a numeric rendering");
+  const auto handleOutputs = core.outputsOf(graph[2]);
+  ASSERT_EQ(handleOutputs.size(), 1u);
+  const auto handle = vm.resultCell(cursor, handleOutputs.front());
+  ASSERT_TRUE(handle);
+  const auto closure = vm.closureValue(*handle);
+  ASSERT_TRUE(closure);
+  ASSERT_TRUE(closure->descriptor);
+  const auto parsedDescriptor = vm.closureDescriptor(*closure->descriptor);
+  ASSERT_TRUE(parsedDescriptor);
+  ASSERT_TRUE(parsedDescriptor->presenceTrue);
+  ASSERT_TRUE(parsedDescriptor->presenceFalse);
+  EXPECT_EQ(arena.asBool(*parsedDescriptor->presenceTrue), true);
+  EXPECT_EQ(arena.asBool(*parsedDescriptor->presenceFalse), false);
 }
 
 TEST(VortexClosureExportTest,
@@ -209,7 +241,7 @@ TEST(VortexClosureExportTest,
         h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
             .frameDescriptor    = *innerFrame,
             .captureStreamCount = 1,
-            .appliedStreamCount = 0,
+            .maxFormalCount     = 0,
             .frameInputs        = {{ClosureInputSource::Capture, 0}},
         });
     ASSERT_TRUE(closureDescriptor);
@@ -239,12 +271,17 @@ TEST(VortexClosureExportTest,
     h.core.bindInput(invoke, *outerFrame);
     const auto returnedHandle = h.arena.makeCell("returned handle slot");
     h.core.bindOutput(invoke, returnedHandle);
+    const auto [clearContext, contextStream] =
+        h.emptyStream("empty runtime-bound context");
     const auto applyOutput = h.arena.makeCell("fresh vm result");
     const auto apply       = h.op(OpcodeKind::ApplyClosure);
     h.core.bindInput(apply, returnedHandle);
+    h.core.bindInput(apply, h.explicitMode());
+    h.core.bindInput(apply, contextStream);
     h.core.bindOutput(apply, applyOutput);
     const auto halt = h.op(OpcodeKind::Halt);
-    h.next(invoke, apply);
+    h.next(invoke, clearContext);
+    h.next(clearContext, apply);
     h.next(apply, halt);
     h.next(h.core.home(), invoke);
     const auto originalCursor =
@@ -256,10 +293,11 @@ TEST(VortexClosureExportTest,
     ASSERT_TRUE(originalClosure);
     ASSERT_TRUE(h.vm.closureValue(*originalClosure));
     h.vm.setCursorOpcode(originalCursor, std::nullopt);
-    h.next(h.core.home(), apply);
+    h.next(h.core.home(), clearContext);
 
     xanadu::Store store(scroll);
-    const std::vector<CellRef> runtimeBoundProgram{invoke, apply, halt};
+    const std::vector<CellRef> runtimeBoundProgram{invoke, clearContext, apply,
+                                                   halt};
     const auto runtimeExported =
         zigzag::vortex::exportProgram(h.core, h.vm, runtimeBoundProgram, store);
     EXPECT_FALSE(runtimeExported.isZero());
@@ -269,12 +307,18 @@ TEST(VortexClosureExportTest,
     // to it requires a separate runtime-binding initialization protocol.
     const auto portableApply  = h.op(OpcodeKind::ApplyClosure);
     const auto portableOutput = h.arena.makeCell("portable result");
+    const auto [clearPortableContext, portableContext] =
+        h.emptyStream("empty portable context");
     h.core.bindInput(portableApply, *originalClosure);
+    h.core.bindInput(portableApply, h.explicitMode());
+    h.core.bindInput(portableApply, portableContext);
     h.core.bindOutput(portableApply, portableOutput);
     const auto portableHalt = h.op(OpcodeKind::Halt);
+    h.next(clearPortableContext, portableApply);
     h.next(portableApply, portableHalt);
-    h.next(h.core.home(), portableApply);
-    const std::vector<CellRef> program{portableApply, portableHalt};
+    h.next(h.core.home(), clearPortableContext);
+    const std::vector<CellRef> program{clearPortableContext, portableApply,
+                                       portableHalt};
     const auto exported =
         zigzag::vortex::exportProgram(h.core, h.vm, program, store);
     EXPECT_FALSE(exported.isZero());
@@ -319,8 +363,12 @@ TEST(VortexClosureExportTest,
       arena.linked(core.home(), core.dims().spin, DimVector::POS);
   ASSERT_TRUE(initializer);
   ASSERT_EQ(vm.getOpcodeKind(*initializer), OpcodeKind::RestoreBindings);
-  const auto apply =
+  const auto clearContext =
       arena.linked(*initializer, core.dims().spin, DimVector::POS);
+  ASSERT_TRUE(clearContext);
+  ASSERT_EQ(vm.getOpcodeKind(*clearContext), OpcodeKind::StreamClear);
+  const auto apply =
+      arena.linked(*clearContext, core.dims().spin, DimVector::POS);
   ASSERT_TRUE(apply);
   ASSERT_EQ(vm.getOpcodeKind(*apply), OpcodeKind::ApplyClosure);
   const auto cursor =
@@ -356,8 +404,14 @@ TEST(VortexClosureExportTest,
   const auto value = h.vm.makeClosureValue(*descriptor, {});
   ASSERT_TRUE(value);
   const auto apply = h.op(OpcodeKind::ApplyClosure);
+  const auto [clearContext, contextStream] =
+      h.emptyStream("empty malformed test context");
   h.core.bindInput(apply, *value);
-  const std::vector<CellRef> program{apply};
+  h.core.bindInput(apply, h.explicitMode());
+  h.core.bindInput(apply, contextStream);
+  h.next(clearContext, apply);
+  h.next(h.core.home(), clearContext);
+  const std::vector<CellRef> program{clearContext, apply};
   auto scroll = std::make_shared<xanadu::UserPermascroll>();
   xanadu::Store store(scroll);
   const auto before = store.latest();
@@ -385,21 +439,26 @@ TEST(VortexClosureExportTest,
   const auto append       = h.op(OpcodeKind::StreamAppend);
   h.core.bindInput(append, *value);
   h.core.bindOutput(append, handleStream);
+  const auto [clearContext, contextStream] =
+      h.emptyStream("empty bound-stream context");
   const auto apply = h.op(OpcodeKind::ApplyClosure);
   h.core.bindInput(apply, handleStream);
+  h.core.bindInput(apply, h.explicitMode());
+  h.core.bindInput(apply, contextStream);
   const auto halt = h.op(OpcodeKind::Halt);
-  h.next(append, apply);
+  h.next(append, clearContext);
+  h.next(clearContext, apply);
   h.next(apply, halt);
   h.next(h.core.home(), append);
   const auto cursor    = h.vm.spawnCursor(append, "bound-stream-export");
   const auto execution = h.vm.run(cursor, 100);
   ASSERT_TRUE(execution.success) << execution.errorMessage;
   h.vm.setCursorOpcode(cursor, std::nullopt);
-  h.next(h.core.home(), apply);
+  h.next(h.core.home(), clearContext);
   auto scroll = std::make_shared<xanadu::UserPermascroll>(
       xanadu::UserPermascroll::Config{.storageDir = temporary.path / "scroll"});
   xanadu::Store store(scroll);
-  const std::vector<CellRef> program{apply, halt};
+  const std::vector<CellRef> program{clearContext, apply, halt};
   const auto exported =
       zigzag::vortex::exportProgram(h.core, h.vm, program, store);
   EXPECT_FALSE(exported.isZero());

@@ -186,6 +186,29 @@ std::int64_t toInt(const CellValue &val) {
   }
 }
 
+std::optional<std::int64_t> checkedValueIndex(const CellValue &value) {
+  if (const auto *integer = std::get_if<std::int64_t>(&value)) return *integer;
+  if (const auto *boolean = std::get_if<bool>(&value)) return *boolean ? 1 : 0;
+  if (const auto *number = std::get_if<double>(&value)) {
+    // The upper Int64 endpoint rounds to 2^63 as a Double. Check that
+    // exclusive bound before converting, rather than overflowing the cast.
+    const double limit =
+        std::ldexp(1.0, std::numeric_limits<std::int64_t>::digits);
+    if (!std::isfinite(*number) || *number < -limit || *number >= limit)
+      return std::nullopt;
+    return static_cast<std::int64_t>(*number);
+  }
+  try {
+    const auto &text     = std::get<std::string>(value);
+    std::size_t consumed = 0;
+    const auto index     = std::stoll(text, &consumed);
+    if (consumed == text.size()) return index;
+  } catch (const std::invalid_argument &) {
+  } catch (const std::out_of_range &) {
+  }
+  return std::nullopt;
+}
+
 std::optional<CellRef> resolveCell(
     const std::vector<CellRef> &inCells, const std::vector<CellValue> &inputs,
     const std::unordered_map<CellRef, std::optional<CellRef>> &cellReferences,
@@ -285,12 +308,11 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // asInt64 ≤ Find sweep of the band would register dimConstant
     // operand cells and every other small-int data cell too.
     const auto kind = core_.arena().asInt64(opCell);
-    // The bound is the enum's last ordinal — PinHistorical while the
-    // append-last tail is RelationNext..PinHistorical; a new kind landing past
-    // it must move this ceiling the way linkedCeiling's does (meta.cpp).
+    // The bound is the enum's last ordinal; append-only opcodes move this
+    // ceiling with the generated-vocabulary bound in meta.cpp.
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::PinHistorical)) {
+            static_cast<std::uint64_t>(OpcodeKind::CheckClosureCall)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -554,7 +576,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::PinHistorical)) {
+          static_cast<std::uint64_t>(OpcodeKind::CheckClosureCall)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -1616,6 +1638,7 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
     const auto kind = getOpcodeKind(*preflightOp).value_or(OpcodeKind::Nop);
     if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
         kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
+        kind == OpcodeKind::CheckClosureCall ||
         kind == OpcodeKind::RestoreBindings)
       throw std::invalid_argument(
           "frame and closure opcodes cannot run in parameter pipelines");
@@ -1690,6 +1713,7 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
           "pipeline");
     if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
         kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
+        kind == OpcodeKind::CheckClosureCall ||
         kind == OpcodeKind::RestoreBindings)
       throw std::invalid_argument(
           "frame and closure opcodes cannot run in parameter pipelines");
@@ -1848,6 +1872,7 @@ bool VortexVM::evaluateCondition(CellRef clause,
     throw std::invalid_argument(
         "activation-frame opcodes cannot run as conditions");
   if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
+      kind == OpcodeKind::CheckClosureCall ||
       kind == OpcodeKind::RestoreBindings)
     throw std::invalid_argument("closure opcodes cannot run as conditions");
   if (kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
@@ -2507,6 +2532,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return {.success      = false,
             .errorMessage = "activation-frame opcodes require a VM cursor"};
   if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
+      kind == OpcodeKind::CheckClosureCall ||
       kind == OpcodeKind::RestoreBindings)
     return {.success      = false,
             .errorMessage = "closure opcodes require a VM cursor"};
@@ -2561,6 +2587,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeVqlMaskLinks(opcode, outputs);
   case OpcodeKind::CreateClosure:
   case OpcodeKind::ApplyClosure:
+  case OpcodeKind::CheckClosureCall:
   case OpcodeKind::RestoreBindings:
     return {.success       = false,
             .failingClause = opcode,
@@ -3332,23 +3359,27 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     if (!inCells.empty() || !inputs.empty()) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
-      std::int64_t off = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
-      std::optional<std::int64_t> len =
-          inputs.size() >= 3 ? std::optional<std::int64_t>{toInt(inputs[2])}
-                             : std::nullopt;
+      const auto off = inputs.size() >= 2 ? checkedValueIndex(inputs[1])
+                                          : std::optional<std::int64_t>{0};
+      const auto len =
+          inputs.size() >= 3 ? checkedValueIndex(inputs[2]) : std::nullopt;
+      if (!off || (inputs.size() >= 3 && !len))
+        return {.success = false,
+                .errorMessage =
+                    "Value offset and length must be valid Int64 indices"};
       std::optional<CellValue> repl = inputs.size() >= 4
                                           ? std::optional<CellValue>(inputs[3])
                                           : std::nullopt;
       if (c) {
         if (repl) {
           WriteFault fault = WriteFault::None;
-          const auto res   = core_.writeValue(*c, off, len, *repl, &fault);
+          const auto res   = core_.writeValue(*c, *off, len, *repl, &fault);
           if (fault == WriteFault::OpcodeKind) {
             return kindImmutabilityFault();
           }
           outputs.emplace_back(res ? *res : noCell);
         } else {
-          const auto res = core_.readValue(*c, off, len);
+          const auto res = core_.readValue(*c, *off, len);
           outputs.emplace_back(res ? *res : noCell);
         }
       } else {
@@ -3362,11 +3393,15 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     if (inCells.size() >= 4 || inputs.size() >= 4) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
-      std::int64_t off = toInt(inputs[1]);
-      std::int64_t len = toInt(inputs[2]);
+      const auto off = checkedValueIndex(inputs[1]);
+      const auto len = checkedValueIndex(inputs[2]);
+      if (!off || !len)
+        return {.success = false,
+                .errorMessage =
+                    "Splice offset and length must be valid Int64 indices"};
       if (c) {
         WriteFault fault = WriteFault::None;
-        const auto res   = core_.splice(*c, off, len, inputs[3], &fault);
+        const auto res   = core_.splice(*c, *off, *len, inputs[3], &fault);
         if (fault == WriteFault::OpcodeKind) {
           return kindImmutabilityFault();
         }
@@ -3996,7 +4031,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
     }
   }
 
-  if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure) {
+  if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
+      kind == OpcodeKind::CheckClosureCall) {
     ++totalCycles_;
     try {
       core_.arena().consumeWork();
@@ -4242,6 +4278,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       const auto conditionKind = getOpcodeKind(actual);
       return conditionKind == OpcodeKind::CreateClosure ||
              conditionKind == OpcodeKind::ApplyClosure ||
+             conditionKind == OpcodeKind::CheckClosureCall ||
              conditionKind == OpcodeKind::RestoreBindings;
     });
   };

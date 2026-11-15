@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
 #include <string_view>
 
 #include "common/xanadu/store.hpp"
@@ -10,7 +11,7 @@
 namespace zigzag {
 namespace {
 
-constexpr std::string_view closureDescriptorTag = "VORTEX_CLOSURE_DESCRIPTOR/1";
+constexpr std::string_view closureDescriptorTag = "VORTEX_CLOSURE_DESCRIPTOR/2";
 constexpr std::string_view closureValueTag      = "VORTEX_CLOSURE_VALUE/1";
 
 struct RuntimeObjectSource {
@@ -21,18 +22,21 @@ struct RuntimeObjectSource {
   DimRef claimDimension;
 };
 
-enum class TextReadResult { Read, LimitExceeded, Unreadable };
+enum class TextReadResult { Read, LimitExceeded, FuelExhausted, Unreadable };
 
-bool spendInspection(const ArenaManifold &arena, std::size_t &remaining,
-                     const std::size_t amount = 1) {
-  if (amount > remaining) return false;
+enum class InspectionSpend { Spent, LocalLimit, FuelExhausted };
+
+InspectionSpend spendInspection(const ArenaManifold &arena,
+                                std::size_t &remaining,
+                                const std::size_t amount = 1) {
+  if (amount > remaining) return InspectionSpend::LocalLimit;
   remaining -= amount;
   try {
     for (std::size_t i = 0; i < amount; ++i) arena.consumeWork();
-  } catch (...) {
-    return false;
+  } catch (const std::runtime_error &) {
+    return InspectionSpend::FuelExhausted;
   }
-  return true;
+  return InspectionSpend::Spent;
 }
 
 TextReadResult readBoundedText(const ArenaManifold &arena,
@@ -45,7 +49,10 @@ TextReadResult readBoundedText(const ArenaManifold &arena,
   if (spans.size() > remaining) return TextReadResult::LimitExceeded;
   std::size_t bytes = 0;
   for (const auto &span : spans) {
-    if (!spendInspection(arena, remaining))
+    const auto spent = spendInspection(arena, remaining);
+    if (spent == InspectionSpend::FuelExhausted)
+      return TextReadResult::FuelExhausted;
+    if (spent == InspectionSpend::LocalLimit)
       return TextReadResult::LimitExceeded;
     if (span.length > remaining ||
         span.length > std::numeric_limits<std::size_t>::max() - bytes)
@@ -53,7 +60,10 @@ TextReadResult readBoundedText(const ArenaManifold &arena,
     bytes += static_cast<std::size_t>(span.length);
   }
   if (bytes > remaining) return TextReadResult::LimitExceeded;
-  if (!spendInspection(arena, remaining, bytes))
+  const auto spent = spendInspection(arena, remaining, bytes);
+  if (spent == InspectionSpend::FuelExhausted)
+    return TextReadResult::FuelExhausted;
+  if (spent == InspectionSpend::LocalLimit)
     return TextReadResult::LimitExceeded;
   try {
     if (source.manifold != nullptr) {
@@ -84,10 +94,12 @@ classifyRuntimeObjectRoot(const ArenaManifold &arena, const CellRef root,
     return RuntimeObjectClaimResult::Unreadable;
 
   std::size_t workRemaining = limits.maxMappingWork;
+  bool fuelExhausted        = false;
   const auto chargeWork     = [&](const std::size_t amount) {
     try {
       for (std::size_t i = 0; i < amount; ++i) arena.consumeWork();
-    } catch (...) {
+    } catch (const std::runtime_error &) {
+      fuelExhausted = true;
       return false;
     }
     return true;
@@ -116,6 +128,8 @@ classifyRuntimeObjectRoot(const ArenaManifold &arena, const CellRef root,
   std::string rootText;
   const auto rootTextResult =
       readBoundedText(arena, source, source.root, workRemaining, rootText);
+  if (rootTextResult == TextReadResult::FuelExhausted)
+    return RuntimeObjectClaimResult::FuelExhausted;
   if (rootTextResult == TextReadResult::LimitExceeded)
     return RuntimeObjectClaimResult::ProbeLimitExceeded;
   if (rootTextResult == TextReadResult::Unreadable)
@@ -127,7 +141,9 @@ classifyRuntimeObjectRoot(const ArenaManifold &arena, const CellRef root,
     auto mappingWork  = workRemaining;
     const auto mapped = arena.checkedDimensionMapping(
         foreign->space, claimDimension, mappingWork, chargeWork);
-    if (!mapped) return RuntimeObjectClaimResult::ProbeLimitExceeded;
+    if (!mapped)
+      return fuelExhausted ? RuntimeObjectClaimResult::FuelExhausted
+                           : RuntimeObjectClaimResult::ProbeLimitExceeded;
     workRemaining = mappingWork;
     if (*mapped) {
       source.claimDimension = **mapped;
@@ -138,7 +154,9 @@ classifyRuntimeObjectRoot(const ArenaManifold &arena, const CellRef root,
       DimensionLookupBudget budget{lookupLimits};
       const auto named = source.manifold->dimensionNamedBounded(
           runtimeObjectClaimDimensionName, *source.reader, budget, chargeWork);
-      if (!named) return RuntimeObjectClaimResult::ProbeLimitExceeded;
+      if (!named)
+        return fuelExhausted ? RuntimeObjectClaimResult::FuelExhausted
+                             : RuntimeObjectClaimResult::ProbeLimitExceeded;
       if (!*named) return RuntimeObjectClaimResult::NoClaim;
       source.claimDimension = **named;
       workRemaining         = budget.workRemaining;
@@ -153,7 +171,10 @@ classifyRuntimeObjectRoot(const ArenaManifold &arena, const CellRef root,
 
   std::optional<CellRef> candidate;
   for (const auto &relation : relations) {
-    if (!spendInspection(arena, workRemaining))
+    const auto spent = spendInspection(arena, workRemaining);
+    if (spent == InspectionSpend::FuelExhausted)
+      return RuntimeObjectClaimResult::FuelExhausted;
+    if (spent == InspectionSpend::LocalLimit)
       return RuntimeObjectClaimResult::ProbeLimitExceeded;
     if (relation.dim != source.claimDimension) continue;
     if (candidate) return RuntimeObjectClaimResult::Unreadable;
@@ -175,7 +196,10 @@ classifyRuntimeObjectRoot(const ArenaManifold &arena, const CellRef root,
   bool sawClaimDimension = false;
   bool hasBacklink       = false;
   for (const auto &relation : candidateRelations) {
-    if (!spendInspection(arena, workRemaining))
+    const auto spent = spendInspection(arena, workRemaining);
+    if (spent == InspectionSpend::FuelExhausted)
+      return RuntimeObjectClaimResult::FuelExhausted;
+    if (spent == InspectionSpend::LocalLimit)
       return RuntimeObjectClaimResult::ProbeLimitExceeded;
     if (relation.dim != source.claimDimension) continue;
     if (sawClaimDimension) return RuntimeObjectClaimResult::Unreadable;
@@ -193,6 +217,8 @@ classifyRuntimeObjectRoot(const ArenaManifold &arena, const CellRef root,
   std::string targetText;
   const auto targetTextResult =
       readBoundedText(arena, source, *candidate, workRemaining, targetText);
+  if (targetTextResult == TextReadResult::FuelExhausted)
+    return RuntimeObjectClaimResult::FuelExhausted;
   if (targetTextResult == TextReadResult::LimitExceeded)
     return RuntimeObjectClaimResult::ProbeLimitExceeded;
   if (targetTextResult == TextReadResult::Unreadable)
@@ -263,6 +289,8 @@ readQueryScalar(ArenaManifold &arena, const CellRef cell,
     case RuntimeObjectClaimResult::ProbeLimitExceeded:
     case RuntimeObjectClaimResult::Unreadable:
       return std::unexpected(QueryScalarReadError::Unreadable);
+    case RuntimeObjectClaimResult::FuelExhausted:
+      throw std::runtime_error("Vortex evaluation work budget exhausted");
     }
   }
   return QueryScalar{std::move(text)};

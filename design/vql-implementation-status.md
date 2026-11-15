@@ -1032,3 +1032,53 @@ architecture, senior and resource reviews accepted the bounded stage. The broade
 seven callable and eight route failures plus one skip. Non-closed static formal defaults, computed
 shape targets, projections/history, value-lambda extensions and remaining
 route/lifecycle/measurement gates keep §4.12 incomplete.
+
+## Runtime graph integrity after VM restoration merges
+
+The [integrity restoration](projects/vql-vm-integrity-restoration.md) replaces compile-time topology
+selection/mutation and placeholder cursor handling with executable VM graphs. Runtime quantifiers
+short-circuit per occurrence and share lambda contract/destructuring lowering; cardinality/identity
+checks inspect actual streams. Morphisms allocate fresh targets at execution, skip absent targets
+without losing the chain, and survive AST-free export/reload and host/mesh source execution.
+Qualified dimension perspectives retain runtime canonical fallback; general root enumeration and
+full perspective clone-map transport remain open.
+
+Mutation indices now reject invalid values before writes, and maximal lengths clamp without signed
+overflow. Arity preflight preserves valid caller argument preparation before parameter matching. All
+four corrected §4.12 example bodies execute through the real CLI, including the documented runtime
+UTC clock semantics and archive wildcard retention.
+
+The full build passed. The final engine run has 4,376 active tests: 4,310 passed, 38 failed and 28
+skipped, with 12 disabled profiling/benchmark probes. All 30 added regressions passed, eight old
+failures were fixed and no failing name was new. Independent Luna architecture, senior and resource
+gates accepted the stage. Rank traversal still materializes O(n) data; constant generated opcode
+count is not a speedup or constant-memory claim. §4.12 and the full specification remain incomplete.
+
+## Explicit runtime closure calls and lazy fixed-formal defaults
+
+The [closure calls/defaults package](projects/vql-closure-calls-defaults-plan.md) compiles
+positional `$f(a, b)` calls, multiple fixed value-lambda formals and lazy whole-formal defaults into
+native closure frames. Explicit actuals retain separate streams and caller context; contextual `/$f`
+retains candidate injection. Defaults distinguish omission from supplied empty, preserve pre-match
+lexical capture membership and follow explicit-dot rebinding order. Invalid callees and excess arity
+refuse before actual effects; Apply revalidates graph metadata before frame entry.
+
+`VORTEX_CLOSURE_DESCRIPTOR/2` carries formal bounds, context/presence mappings and descriptor-owned
+Bool references. Generic frontend emitters use the migrated Apply convention. ASTs remain
+compilation intermediates; reload executes graph data after destroying the source AST and VM. Shared
+object inspection distinguishes global fuel exhaustion from local metadata limits instead of
+reporting exhausted work as a malformed descriptor.
+
+Focused acceptance covers structural/default filtering, lazy effects, caller capture scope, dot
+ordering, helper return-failure cleanup/retry, preflight and revalidation, fresh-VM export, host and
+Vquery SOURCE mesh. Real CLI probes return the exact Int64 `9007199254740994` and dot-default result
+`3`; separate REPL queries retain the creation-time capture and return `42` then `6`. Named closure
+arguments, variadic value lambdas, static AST-functor defaults and remaining C4/C6–C9 gates remain
+open. §4.12 is incomplete.
+
+Full build and repository formatting passed; all 143 expanded focused tests passed. The final engine
+run has 4,408 active tests: 4,342 passed, 38 baseline failures and 28 skipped, with 12 disabled
+profiling/benchmark probes. No failing name is new against `979e5b77`. Library/slice results retain
+the same one/two failures, and lint retains the same two unrelated UI typography violations.
+Independent Luna architecture, senior/runtime and resource gates accepted this bounded stage,
+including independent follow-up review of the fuel correction.

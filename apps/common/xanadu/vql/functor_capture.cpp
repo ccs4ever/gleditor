@@ -81,6 +81,18 @@ void chargeStepCopyWork(const PathStep &step, FunctorCopyCharge charge) {
     for (const auto &name : invocation->argNames) chargeString(name);
     for (const auto &argument : invocation->args)
       chargeValueCopyWork(argument, charge);
+  } else if (const auto *invocation =
+                 std::get_if<std::shared_ptr<RuntimeClosureInvocation>>(
+                     &step.selector)) {
+    if (!*invocation)
+      throw std::invalid_argument(
+          "functor capture found a null runtime closure invocation");
+    chargeValueCopyWork((*invocation)->callee, charge);
+    charge(multiplyWork((*invocation)->args.size(), sizeof(ValueExpr)));
+    charge(multiplyWork((*invocation)->argNames.size(), sizeof(std::string)));
+    for (const auto &name : (*invocation)->argNames) charge(name.size());
+    for (const auto &argument : (*invocation)->args)
+      chargeValueCopyWork(argument, charge);
   } else if (const auto *slice =
                  std::get_if<SliceSelectorStep>(&step.selector)) {
     if (slice->nameFilter) chargeString(*slice->nameFilter);

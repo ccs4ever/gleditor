@@ -93,6 +93,8 @@ private:
   ValueExpr parseValueAtom();
   ValueExpr parseValueOrComparisonExpr();
   FunctionInvocation parseFunctionInvocation();
+  std::shared_ptr<RuntimeClosureInvocation> parseRuntimeClosureInvocation();
+  ValueExpr parseRuntimeClosureValue();
 
   DefDeclaration parseDefDeclaration();
   ShapeLiteral parseShapeLiteral();

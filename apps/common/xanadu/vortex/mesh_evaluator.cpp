@@ -276,6 +276,7 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::EndMutationGroup:
   case OpcodeKind::CreateClosure:
   case OpcodeKind::ApplyClosure:
+  case OpcodeKind::CheckClosureCall:
   case OpcodeKind::RestoreBindings:
   case OpcodeKind::CurrentTimestamp:
   // RelationNext asks a host-registered provider that a shipped artifact
@@ -335,6 +336,7 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
           "Vortex mesh does not support activation-frame descriptors");
     if (instruction.opcode == OpcodeKind::CreateClosure ||
         instruction.opcode == OpcodeKind::ApplyClosure ||
+        instruction.opcode == OpcodeKind::CheckClosureCall ||
         instruction.opcode == OpcodeKind::RestoreBindings)
       throw std::runtime_error("Vortex mesh does not support runtime closures");
     if (instruction.opcode == OpcodeKind::VqlMaskLinks)
@@ -544,7 +546,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
     if (opcode < 0 ||
-        opcode > static_cast<std::int64_t>(OpcodeKind::PinHistorical))
+        opcode > static_cast<std::int64_t>(OpcodeKind::CheckClosureCall))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)
