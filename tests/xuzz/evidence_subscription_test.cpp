@@ -110,8 +110,13 @@ TEST_F(SubscriptionTest, FailedDurableSaveRetriesWithoutDuplicateAppend) {
   const auto doc    = handle();
   SubscriptionJournal journal(evidence, doc);
   const auto definitionId = journal.define(doc, definition());
-  const auto before       = evidence.records().size();
-  failSave                = true;
+  const auto logicalCount = [&] {
+    return std::ranges::count_if(evidence.records(), [](const auto &record) {
+      return record.kind != "attribute" && record.kind != "reference";
+    });
+  };
+  const auto before = logicalCount();
+  failSave          = true;
 
   const auto first =
       journal.commit(doc, definitionId, complete("cursor-1", {source}));
@@ -127,13 +132,15 @@ TEST_F(SubscriptionTest, FailedDurableSaveRetriesWithoutDuplicateAppend) {
       pending->pendingId, pending->pendingId, doc,         definitionId,
       *pendingCheckpoint, doc.generation,     "network-1", "cursor-1"};
   EXPECT_FALSE(journal.acknowledgementMatches(doc, forged));
-  EXPECT_EQ(evidence.records().size(), before + 2);
+  const auto afterPending = evidence.records().size();
+  EXPECT_EQ(logicalCount(), before + 2);
 
   failSave           = false;
   const auto retried = journal.retryDurability(doc, *pending);
   const auto *ready  = std::get_if<SubscriptionReadyToAcknowledge>(&retried);
   ASSERT_NE(ready, nullptr);
-  EXPECT_EQ(evidence.records().size(), before + 2);
+  EXPECT_EQ(evidence.records().size(), afterPending);
+  EXPECT_EQ(logicalCount(), before + 2);
   EXPECT_TRUE(journal.acknowledgementMatches(doc, *ready));
   EXPECT_EQ(journal.checkpoints(definitionId).size(), 1U);
 }
@@ -307,10 +314,16 @@ TEST_F(SubscriptionTest,
   const auto *ready = std::get_if<SubscriptionReadyToAcknowledge>(&result);
   ASSERT_NE(ready, nullptr);
 
-  const auto originalDelivery =
-      evidence.inspect(evidence.records().at(evidence.records().size() - 2).id);
+  const auto allRecords = evidence.records();
+  const auto deliveryIt = std::ranges::find_if(
+      std::views::reverse(allRecords), [](const auto &record) {
+        return record.kind == "subscription-delivery";
+      });
+  ASSERT_NE(deliveryIt, std::views::reverse(allRecords).end());
+  const auto originalDelivery = evidence.inspect(deliveryIt->id);
   ASSERT_EQ(originalDelivery.kind, "subscription-delivery");
   auto deliveryAttributes = originalDelivery.attributes;
+  deliveryAttributes.erase("parent-id");
   const std::string forgedCommit(48, 'a');
   deliveryAttributes["commit-token"] = forgedCommit;
   deliveryAttributes["record-index"] = "0";
@@ -320,6 +333,7 @@ TEST_F(SubscriptionTest,
       {{"retained-evidence-0", source}});
 
   auto checkpointAttributes = evidence.inspect(ready->checkpoint).attributes;
+  checkpointAttributes.erase("parent-id");
   checkpointAttributes["commit-token"]      = forgedCommit;
   checkpointAttributes["record-index"]      = "1";
   checkpointAttributes["delivery-record-1"] = std::to_string(forgedDelivery);

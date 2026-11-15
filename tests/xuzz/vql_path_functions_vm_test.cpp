@@ -227,8 +227,8 @@ TEST_F(PathFunctionFixture, ContainsInALetBindingIsTheBooleanScalar) {
   EXPECT_EQ(core.render(bound.front()), zigzag::vortex::CellValue(true));
 }
 
-TEST_F(PathFunctionFixture, FindIsRefusedUntilProseSearchExists) {
-  expectRefusal(R"(find("needle"))", "find");
+TEST_F(PathFunctionFixture, FindReturnsEmptyWithoutProseHitsAndEnforcesArity) {
+  EXPECT_TRUE(engine.execute(R"(find("needle"))").empty());
   expectRefusal("find()", "find");
   expectRefusal(R"(find("a", "b"))", "find");
 }

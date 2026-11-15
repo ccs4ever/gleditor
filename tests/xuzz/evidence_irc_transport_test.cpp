@@ -694,10 +694,11 @@ TEST(EvidenceIrcTransportTest,
                 std::make_shared<std::atomic_bool>()),
       cancel);
   EXPECT_EQ(receipt.state, IrcSendState::WrittenUnknown);
-  const auto later = session.readLive(1, cancel);
-  ASSERT_EQ(later.observation.messages.size(), 1U);
-  EXPECT_EQ(later.observation.messages.front().text, "hello");
-  EXPECT_EQ(later.observation.messages.front().messageId, "late");
+  const auto later = session.readLive(2, cancel);
+  ASSERT_EQ(later.observation.messages.size(), 2U);
+  EXPECT_EQ(later.observation.messages[0].text, "different payload");
+  EXPECT_EQ(later.observation.messages[1].text, "hello");
+  EXPECT_EQ(later.observation.messages[1].messageId, "late");
 }
 
 TEST(EvidenceIrcTransportTest, CancelledReadAndOversizedLineRemainBounded) {

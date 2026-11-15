@@ -207,8 +207,8 @@ std::optional<std::string> effectProblem(const EffectRequest &request) {
     bytes += text.size();
     return true;
   };
-  if (!admit(request.target) || !admit(request.stdinBytes) ||
-      !admit(request.sql) || !admit(request.cwd))
+  if ((!communication && !admit(request.target)) ||
+      !admit(request.stdinBytes) || !admit(request.sql) || !admit(request.cwd))
     return "effect input exceeds its byte budget";
   for (const auto &arg : request.argv)
     if (hasNul(arg) || !admit(arg)) return "invalid or excessive argv input";

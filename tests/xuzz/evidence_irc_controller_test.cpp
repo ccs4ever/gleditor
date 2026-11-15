@@ -373,7 +373,9 @@ TEST(EvidenceIrcControllerTest,
   std::size_t attempts{};
   std::size_t intents{};
   for (const auto &record : records) {
-    if (record.kind == "irc-message") messages.push_back(record.text);
+    if (record.kind == "irc-message" && record.attributes.contains("command") &&
+        record.attributes.at("command") == "PRIVMSG")
+      messages.push_back(record.text);
     if (record.kind == "irc-join-receipt") ++joinReceipts;
     if (record.kind == "communication-acquisition" &&
         record.attributes.contains("protocol") &&
@@ -396,7 +398,9 @@ TEST(EvidenceIrcControllerTest,
   ASSERT_TRUE(controller.execute("open " + quoteArgument(casePath.string())));
   std::vector<std::string> reopenedMessages;
   for (const auto &record : controller.evidenceCase().records())
-    if (record.kind == "irc-message") reopenedMessages.push_back(record.text);
+    if (record.kind == "irc-message" && record.attributes.contains("command") &&
+        record.attributes.at("command") == "PRIVMSG")
+      reopenedMessages.push_back(record.text);
   std::ranges::sort(reopenedMessages);
   EXPECT_EQ(reopenedMessages, (std::vector<std::string>{"first", "second"}));
   EXPECT_TRUE(controller.execute("close"));

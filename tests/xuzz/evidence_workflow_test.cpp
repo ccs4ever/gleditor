@@ -88,10 +88,17 @@ TEST_F(EvidenceWorkflowTest, BoundedDagRunsResumeAndCheckpointDurably) {
   const auto review = journal.beginStep(run, "review");
   static_cast<void>(
       journal.finishStep(run, review, WorkflowStepState::Completed, outputs));
-  const auto beforeCheckpoint = evidence.records().size();
+  const auto logicalCount = [&] {
+    return std::ranges::count_if(evidence.records(), [](const auto &record) {
+      return record.kind != "attribute" && record.kind != "reference";
+    });
+  };
+  const auto beforeCheckpoint = logicalCount();
   const auto checkpoint       = journal.checkpoint(run);
+  const auto afterCheckpoint  = evidence.records().size();
   EXPECT_EQ(journal.checkpoint(run), checkpoint);
-  EXPECT_EQ(evidence.records().size(), beforeCheckpoint + 1);
+  EXPECT_EQ(evidence.records().size(), afterCheckpoint);
+  EXPECT_EQ(logicalCount(), beforeCheckpoint + 1);
 
   evidence.close();
   evidence.open(casePath);

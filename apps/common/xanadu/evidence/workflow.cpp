@@ -257,7 +257,7 @@ struct WorkflowJournal::Impl {
     const auto found = std::ranges::find(records, run.id, &Record::id);
     if (found == records.end() || found->kind != "workflow-run")
       throw std::out_of_range("workflow run is unavailable");
-    if (referenceId(*found, "workflow-document") != documentRoot ||
+    if (referenceId(*found, "document-root-id") != documentRoot ||
         found->attributes.at("document-id") != documentId ||
         numberAttribute(*found, "generation") != run.generation)
       throw std::runtime_error("workflow generation fence mismatch");

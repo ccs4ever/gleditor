@@ -815,7 +815,8 @@ SubscriptionReadyToAcknowledge SubscriptionJournal::revalidateCheckpoint(
       if (!attributes.contains(referenceKey) ||
           attributes.at(referenceKey) != idText(record->id))
         throw std::runtime_error("checkpoint omits a delivery reference");
-      verifyReference(checkpointId, "delivery-record-" + std::to_string(i + 1),
+      verifyReference(checkpointId,
+                      "delivery-occurrence-" + std::to_string(i + 1),
                       record->id);
     } else {
       const auto gapOccurrence = i - deliveryCount + 1;
@@ -834,7 +835,7 @@ SubscriptionReadyToAcknowledge SubscriptionJournal::revalidateCheckpoint(
           attributes.at(referenceKey) != idText(record->id))
         throw std::runtime_error("checkpoint omits a gap reference");
       verifyReference(checkpointId,
-                      "gap-record-" + std::to_string(gapOccurrence),
+                      "coverage-gap-" + std::to_string(gapOccurrence),
                       record->id);
     }
   }

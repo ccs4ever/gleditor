@@ -321,11 +321,15 @@ TEST(EvidencePanelTest,
   ASSERT_TRUE(panel.activate(800)); // Create a durable local intent only.
   const auto draftSnapshot = panel.controller().snapshot();
   const auto &records      = draftSnapshot.records;
+#ifdef GLEDITOR_HAVE_GMIME
   EXPECT_TRUE(std::ranges::any_of(records, [](const auto &record) {
     return record.kind == "effect-intent" &&
            record.attributes.contains("operation") &&
            record.attributes.at("operation") == "mail-submit";
   })) << draftSnapshot.status;
+#else
+  EXPECT_FALSE(draftSnapshot.status.empty());
+#endif
   EXPECT_FALSE(std::ranges::any_of(records, [](const auto &record) {
     return record.kind == "effect-attempt";
   }));

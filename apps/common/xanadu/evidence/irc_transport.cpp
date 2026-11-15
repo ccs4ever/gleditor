@@ -1224,8 +1224,9 @@ IrcTransportResult IrcSession::pendingLive(std::string_view target,
            selected.size() < maxMessages) {
       const auto &message = impl_->observation.messages[scanCursor++];
       const bool matches =
-          target.empty() ||
-          messageMatchesTarget(message, target, impl_->config.nick);
+          target.empty()
+              ? (message.command == "PRIVMSG" || message.command == "NOTICE")
+              : messageMatchesTarget(message, target, impl_->config.nick);
       if (matches) selected.push_back(message);
     }
   };

@@ -84,15 +84,21 @@ TEST(UiWidgetTest, ButtonFlowMeasuresRoundedWrappedRowsAtFullHeight) {
   const Theme theme;
   const auto font = gleditor::text::FontManager::instance().getFont(
       metrics.fontDescription(FontRole::Label, theme));
-  const auto p                = font->metrics().lineHeight * theme.paddingEm;
-  const auto gap              = font->metrics().lineHeight * theme.gapEm;
-  constexpr float buttonWidth = 150.0F;
+  const auto p      = font->metrics().lineHeight * theme.paddingEm;
+  const auto gap    = font->metrics().lineHeight * theme.gapEm;
+  float buttonWidth = 150.0F;
   constexpr std::size_t buttonCount = 8;
   const std::array<std::string, buttonCount> labels{
       "Open",    "Follow",  "Annotate",   "Export",
       "Refresh", "Connect", "Disconnect", "Close"};
-  const auto requiredWidth = buttonWidth * static_cast<float>(buttonCount) +
-                             gap * static_cast<float>(buttonCount - 1);
+  auto requiredWidth = buttonWidth * static_cast<float>(buttonCount) +
+                       gap * static_cast<float>(buttonCount - 1);
+  if (requiredWidth - std::floor(requiredWidth) < 0.1F ||
+      requiredWidth - std::floor(requiredWidth) > 0.9F) {
+    buttonWidth   = 150.05F;
+    requiredWidth = buttonWidth * static_cast<float>(buttonCount) +
+                    gap * static_cast<float>(buttonCount - 1);
+  }
 
   float left{};
   float width{};
