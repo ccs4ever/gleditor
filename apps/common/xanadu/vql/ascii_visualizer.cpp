@@ -808,6 +808,8 @@ static void dumpPathExpression(std::ostringstream &oss,
     oss << ">";
   }
   oss << "\n";
+  if (path.isFunctor) oss << prefix << "+-- LeadingSlashFunctor: true\n";
+  if (path.isInvocationRoot) oss << prefix << "+-- InvocationRoot: true\n";
 
   for (std::size_t i = 0; i < path.steps.size(); ++i) {
     const auto &step = path.steps[i];

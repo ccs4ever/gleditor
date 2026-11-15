@@ -230,10 +230,10 @@ VQLCompiler::compileArgument(const ValueExpr &argument,
         return compileLensCall(invocation, context);
       if (isPathFunction(invocation.name))
         return compilePathFunctionCall(invocation, context);
-      throw QueryRefusal(isKnownUnloweredFunction(invocation.name)
-                             ? QueryErrorCategory::Unsupported
-                             : QueryErrorCategory::Unknown,
-                         "unknown compiled function: " + invocation.name);
+      throwUnresolvedFunction(invocation,
+                              isKnownUnloweredFunction(invocation.name)
+                                  ? QueryErrorCategory::Unsupported
+                                  : QueryErrorCategory::Unknown);
     }
     requirePositionalArguments(**function);
     return compileCall(found->second, (*function)->args, context, false);

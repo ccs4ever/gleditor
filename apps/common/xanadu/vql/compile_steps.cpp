@@ -72,25 +72,33 @@ VQLCompiler::emitMountFallback(const SignedDimensionStep &step,
 
 std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                                                std::vector<CellRef> stream,
-                                               bool hasContext) {
-  for (const auto &step : steps) {
+                                               bool hasContext,
+                                               bool allowInitialEmptyCall) {
+  for (std::size_t stepIndex = 0; stepIndex < steps.size(); ++stepIndex) {
+    const auto &step = steps[stepIndex];
     if (step.versionPin) {
-      stream = compileVersionPinnedStep(step, std::move(stream), hasContext);
+      stream =
+          compileVersionPinnedStep(step, std::move(stream), hasContext,
+                                   allowInitialEmptyCall && stepIndex == 0);
       continue;
     }
     const auto stepInput = stream;
     std::vector<CellRef> nextStream;
 
-    const auto *function  = std::get_if<FunctionInvocation>(&step.selector);
-    const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
-    const bool userCall   = function && definitions_.contains(function->name);
+    const auto *function = std::get_if<FunctionInvocation>(&step.selector);
+    const auto *runtimeCall =
+        std::get_if<std::shared_ptr<RuntimeClosureInvocation>>(&step.selector);
+    const auto *dimension   = std::get_if<SignedDimensionStep>(&step.selector);
+    const bool userCall     = function && definitions_.contains(function->name);
+    const bool rootUserCall = allowInitialEmptyCall && stepIndex == 0 &&
+                              (userCall || (runtimeCall && *runtimeCall));
+    const auto present =
+        rootUserCall ? std::optional{emitStreamPresence(stream)} : std::nullopt;
     const bool creationStep =
         !step.capturedFunctor &&
         ((dimension && !dimension->dimName.starts_with('$') &&
           !dimension->creates.empty()) ||
          (function && function->name == "link" && function->args.size() >= 2));
-    const auto present =
-        userCall ? std::optional{emitStreamPresence(stream)} : std::nullopt;
     if (const auto *lambda =
             std::get_if<std::shared_ptr<PathLambda>>(&step.selector)) {
       if (!*lambda)
@@ -140,10 +148,8 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       }
     } else if (function && !userCall && hasContext &&
                isWholeWalkStep(*function)) {
-      // Ahead of the user-call empty-stream fallback and the per-cell emitMap:
-      // an empty walk must still reach the step (count() answers a present 0).
-      // Without a context there is no walk to count, so the step keeps the
-      // per-cell path and its refusal.
+      // Whole-walk builtins consume the incoming stream once, including when
+      // it is empty. User definitions and argument-taking calls stay per-cell.
       nextStream = compileWholeWalkStep(*function, stream, hasContext);
     } else if (std::holds_alternative<PerspectiveStep>(step.selector)) {
       std::vector<CellRef> res;
@@ -159,26 +165,29 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       if (dimension && dimension->creates.empty())
         nextStream = emitMountFallback(*dimension, std::move(nextStream));
     }
-    // User calls may produce a value without a flowing context. Preserve the
-    // direct evaluator's one context-free call when the input stream is empty.
-    if (userCall) {
-      const auto empty = mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL");
-      const auto end   = mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL_END");
-      const auto choose =
-          emitOp(OpcodeKind::BranchFalseCell, "#EMPTY_CALL_TEST");
+    if (rootUserCall) {
+      const CellRef empty = mintOpcode(OpcodeKind::Nop, "#ROOT_CALL_EMPTY");
+      const CellRef end   = mintOpcode(OpcodeKind::Nop, "#ROOT_CALL_END");
+      const CellRef choose =
+          emitOp(OpcodeKind::BranchFalseCell, "#ROOT_CALL_TEST");
       emitInput(choose, *present);
       emitInput(choose, empty);
-      const auto done = emitOp(OpcodeKind::BranchFalseCell, "#EMPTY_CALL_SKIP");
+      const CellRef done =
+          emitOp(OpcodeKind::BranchFalseCell, "#ROOT_CALL_SKIP");
       emitInputConstant(done, false);
       emitInput(done, end);
       appendOpcode(empty);
-      requirePositionalArguments(*function);
-      const auto fallback = compileCall(definitions_.at(function->name),
-                                        function->args, std::nullopt, true);
-      emitAppendStream(nextStream.front(), fallback);
+      if (userCall) {
+        requirePositionalArguments(*function);
+        const auto fallback = compileCall(definitions_.at(function->name),
+                                          function->args, std::nullopt, true);
+        emitAppendStream(nextStream.front(), fallback);
+      } else {
+        const auto fallback = compileSelector(step, core_.home(), false);
+        emitAppendStream(nextStream.front(), fallback);
+      }
       appendOpcode(end);
     }
-
     if (step.derefMaster) {
       nextStream = emitMap(nextStream, [&](CellRef candidate) {
         const auto master = emitDereference(candidate);

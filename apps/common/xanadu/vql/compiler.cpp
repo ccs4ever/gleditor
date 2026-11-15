@@ -678,6 +678,23 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
 std::optional<CellRef>
 VQLCompiler::compilePathExpression(const PathExpression &path,
                                    CellRef ctxCell) {
+  if (path.isInvocationRoot) {
+    const auto *runtimeCall =
+        path.steps.empty()
+            ? nullptr
+            : std::get_if<std::shared_ptr<RuntimeClosureInvocation>>(
+                  &path.steps.front().selector);
+    const bool validSelector =
+        !path.steps.empty() && (std::holds_alternative<FunctionInvocation>(
+                                    path.steps.front().selector) ||
+                                (runtimeCall && *runtimeCall));
+    if (path.anchor.kind != AnchorKind::Context || path.isFunctor ||
+        path.anchor.derefMaster || path.anchor.versionPin ||
+        !path.anchorPredicates.empty() || path.anchorProjection ||
+        !validSelector || path.steps.front().capturedFunctor)
+      throw QueryRefusal(QueryErrorCategory::Malformed,
+                         "invalid initial invocation marker on path");
+  }
   if (path.anchor.versionPin) return compileVersionPinnedPath(path, ctxCell);
   std::vector<CellRef> stream;
   if (path.anchor.kind == AnchorKind::Variable &&
@@ -689,12 +706,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
         stream.push_back(*ambientContext_);
       else if (activeCalls_.empty() && !contextInputs_.empty())
         stream = contextInputs_;
-      else if (!path.steps.empty() &&
-               (std::holds_alternative<FunctionInvocation>(
-                    path.steps.front().selector) ||
-                std::holds_alternative<
-                    std::shared_ptr<RuntimeClosureInvocation>>(
-                    path.steps.front().selector)))
+      else if (path.isInvocationRoot)
         stream.push_back(ctxCell);
     } else if (const auto start = compileAnchor(path.anchor)) {
       stream.push_back(*start);
@@ -728,7 +740,8 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
   stream =
       compileSteps(path.steps, std::move(stream),
                    path.anchor.kind != AnchorKind::Context ||
-                       ambientContext_.has_value() || !contextInputs_.empty());
+                       ambientContext_.has_value() || !contextInputs_.empty(),
+                   path.isInvocationRoot);
 
   if (path.shapeProjection) {
     stream = applyShapeProjection(stream, *path.shapeProjection);
@@ -1004,43 +1017,100 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
 }
 
 std::optional<CellRef>
-VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef ctxCell) {
-  const auto lhs = comp.left ? compileValueExpr(*comp.left, ctxCell)
-                             : std::optional<CellRef>{core_.home()};
-  const auto rhs = comp.right ? compileValueExpr(*comp.right, ctxCell)
-                              : std::optional<CellRef>{core_.home()};
-  if (!lhs || !rhs) return std::nullopt;
+VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef) {
+  const auto context             = ambientContext_;
+  const std::vector<CellRef> lhs = comp.left
+                                       ? compileArgument(*comp.left, context)
+                                       : std::vector<CellRef>{core_.home()};
+  const std::vector<CellRef> rhs = comp.right
+                                       ? compileArgument(*comp.right, context)
+                                       : std::vector<CellRef>{core_.home()};
+
+  using Comparison      = zigzag::vortex::VqlComparisonKind;
+  Comparison comparison = Comparison::Equal;
+  switch (comp.op) {
+  case CompOp::Equal:
+    comparison = Comparison::Equal;
+    break;
+  case CompOp::NotEqual:
+    comparison = Comparison::NotEqual;
+    break;
+  case CompOp::LessThan:
+    comparison = Comparison::LessThan;
+    break;
+  case CompOp::LessEqual:
+    comparison = Comparison::LessEqual;
+    break;
+  case CompOp::GreaterThan:
+    comparison = Comparison::GreaterThan;
+    break;
+  case CompOp::GreaterEqual:
+    comparison = Comparison::GreaterEqual;
+    break;
+  }
+
+  // An empty operand makes every comparison false, including !=. Both
+  // expressions have already been compiled left-to-right, as their effects
+  // belong to operand preparation rather than to individual pairs.
+  if (lhs.empty() || rhs.empty()) return emitConstant(false);
 
   // Versions form a tree, so text or numeric order would answer where history
   // cannot ("10" is after "9"; siblings "2a1" and "2b1" are unordered).
-  // A variable operand is judged by the cell it is bound to; compiling the
-  // reference itself reads it through a fresh cell.
-  const auto boundCell = [&](const ValueExpr *operand,
-                             const CellRef compiled) -> std::optional<CellRef> {
+  // Causal folding is only defined for a known singleton. A stream that
+  // contains a known version cannot be reduced to its first member.
+  const auto scalarCell =
+      [&](const std::vector<CellRef> &values) -> std::optional<CellRef> {
+    if (values.size() != 1 || dynamicStreams_.contains(values.front()))
+      return std::nullopt;
+    return values.front();
+  };
+  const auto boundCell =
+      [&](const ValueExpr *operand,
+          const std::vector<CellRef> &values) -> std::optional<CellRef> {
     if (!operand) return std::nullopt;
     if (const auto *name = std::get_if<std::string>(&operand->kind)) {
       const auto found = varBindings_.find(*name);
-      if (found == varBindings_.end()) return std::nullopt;
-      return found->second;
+      if (found != varBindings_.end() && found->second && scalarCell(values))
+        return found->second;
     }
-    return compiled;
+    return scalarCell(values);
   };
   const auto versionOf =
       [&](const ValueExpr *operand,
-          const CellRef compiled) -> std::optional<MicroversionId> {
+          const std::vector<CellRef> &values) -> std::optional<MicroversionId> {
     if (!operand) return std::nullopt;
     const bool written =
         std::holds_alternative<std::shared_ptr<VersionExpr>>(operand->kind);
     if (!written && !std::holds_alternative<std::string>(operand->kind))
       return std::nullopt;
-    const auto cell = boundCell(operand, compiled);
+    const auto cell = boundCell(operand, values);
     if (!cell) return std::nullopt;
     const auto known = versionVars_.find(*cell);
     if (known == versionVars_.end()) return std::nullopt;
     return known->second;
   };
-  const auto leftVersion  = versionOf(comp.left.get(), *lhs);
-  const auto rightVersion = versionOf(comp.right.get(), *rhs);
+  const auto hasKnownVersion = [&](const ValueExpr *operand,
+                                   const std::vector<CellRef> &values) {
+    if (const auto *name =
+            operand ? std::get_if<std::string>(&operand->kind) : nullptr) {
+      const auto bound = varBindings_.find(*name);
+      if (bound != varBindings_.end() && bound->second &&
+          versionVars_.contains(*bound->second))
+        return true;
+    }
+    return std::ranges::any_of(values, [&](const CellRef cell) {
+      return versionVars_.contains(cell);
+    });
+  };
+  const auto leftVersion     = versionOf(comp.left.get(), lhs);
+  const auto rightVersion    = versionOf(comp.right.get(), rhs);
+  const bool leftHasVersion  = hasKnownVersion(comp.left.get(), lhs);
+  const bool rightHasVersion = hasKnownVersion(comp.right.get(), rhs);
+  if ((leftHasVersion && !leftVersion) || (rightHasVersion && !rightVersion))
+    throw QueryRefusal(
+        QueryErrorCategory::Unsupported,
+        "causal version comparison requires a singleton known version; "
+        "multi-valued or dynamic version streams are not lowered");
   if (leftVersion && rightVersion)
     return emitConstant(CellValue(
         compareVersionsCausally(comp.op, *leftVersion, *rightVersion)));
@@ -1049,10 +1119,24 @@ VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef ctxCell) {
     // (a run-time string, a function's result, a path): its text may or may
     // not be a version, and comparing it as text would order versions wrongly.
     // Refuse by name rather than answer in text order.
-    const auto *other = leftVersion ? comp.right.get() : comp.left.get();
-    const CellRef compiledOther = leftVersion ? *rhs : *lhs;
+    const auto *other       = leftVersion ? comp.right.get() : comp.left.get();
+    const auto &otherValues = leftVersion ? rhs : lhs;
+    if (otherValues.size() != 1 ||
+        dynamicStreams_.contains(otherValues.front())) {
+      constexpr std::array<std::string_view, 6> opNames{"=", "!=", "<",
+                                                        ">", "<=", ">="};
+      const auto opName = opNames[static_cast<std::size_t>(comp.op)];
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          "version comparison '" + std::string(opName) +
+              "' against a run-time " +
+              (other ? valueFormName(*other) : std::string{"stream"}) +
+              " is not lowered; multi-valued or dynamic stream operands "
+              "require a causal version representation");
+    }
+    const CellRef compiledOther = otherValues.front();
     const CellRef otherCell =
-        boundCell(other, compiledOther).value_or(compiledOther);
+        boundCell(other, otherValues).value_or(compiledOther);
     if (other && !constantCells_.contains(otherCell)) {
       constexpr std::array<std::string_view, 6> opNames{"=", "!=", "<",
                                                         ">", "<=", ">="};
@@ -1066,37 +1150,86 @@ VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef ctxCell) {
     }
   }
 
-  zigzag::vortex::VqlComparisonKind comparison =
-      zigzag::vortex::VqlComparisonKind::Equal;
-  switch (comp.op) {
-  case CompOp::Equal:
-    comparison = zigzag::vortex::VqlComparisonKind::Equal;
-    break;
-  case CompOp::NotEqual:
-    comparison = zigzag::vortex::VqlComparisonKind::NotEqual;
-    break;
-  case CompOp::LessThan:
-    comparison = zigzag::vortex::VqlComparisonKind::LessThan;
-    break;
-  case CompOp::LessEqual:
-    comparison = zigzag::vortex::VqlComparisonKind::LessEqual;
-    break;
-  case CompOp::GreaterThan:
-    comparison = zigzag::vortex::VqlComparisonKind::GreaterThan;
-    break;
-  case CompOp::GreaterEqual:
-    comparison = zigzag::vortex::VqlComparisonKind::GreaterEqual;
-    break;
-  }
+  return compileCartesianComparison(comparison, lhs, rhs);
+}
 
-  CellRef op = emitOp(OpcodeKind::VqlCompare, "#VQL_COMPARE");
-  emitInput(op, emitConstant(CellValue(static_cast<std::int64_t>(comparison))));
-  emitInput(op, *lhs);
-  emitInput(op, *rhs);
+CellRef VQLCompiler::compileCartesianComparison(
+    const zigzag::vortex::VqlComparisonKind comparison,
+    const std::span<const CellRef> left, const std::span<const CellRef> right) {
+  const CellRef falseValue = emitConstant(false);
+  const CellRef trueValue  = emitConstant(true);
+  const CellRef result     = core_.arena().makeCell();
+  const CellRef initialize =
+      emitOp(OpcodeKind::CopyCellRefs, "#VQL_COMPARE_FALSE");
+  emitInput(initialize, falseValue);
+  emitOutput(initialize, result);
 
-  CellRef outCell = core_.arena().makeCell();
-  emitOutput(op, outCell);
-  return outCell;
+  const auto branchFalse = [&](const CellRef condition, const CellRef target) {
+    const CellRef branch =
+        emitOp(OpcodeKind::BranchFalseCell, "#VQL_COMPARE_BRANCH");
+    emitInput(branch, condition);
+    emitInput(branch, target);
+  };
+  const auto jump = [&](const CellRef target) {
+    branchFalse(falseValue, target);
+  };
+  const auto fresh = [&] { return core_.arena().makeCell(); };
+
+  const CellRef outerIterator = fresh();
+  const CellRef outerBegin =
+      emitOp(OpcodeKind::StreamBegin, "#VQL_COMPARE_LEFT_BEGIN");
+  for (const CellRef input : left) emitInput(outerBegin, input);
+  emitOutput(outerBegin, outerIterator);
+  const CellRef outerNext =
+      emitOp(OpcodeKind::IteratorNext, "#VQL_COMPARE_LEFT_NEXT");
+  emitInput(outerNext, outerIterator);
+  const CellRef leftItem    = fresh();
+  const CellRef leftPresent = fresh();
+  emitOutput(outerNext, leftItem);
+  emitOutput(outerNext, leftPresent);
+  const CellRef outerDone = mintOpcode(OpcodeKind::Nop, "#VQL_COMPARE_DONE");
+  branchFalse(leftPresent, outerDone);
+
+  const CellRef innerIterator = fresh();
+  const CellRef innerBegin =
+      emitOp(OpcodeKind::StreamBegin, "#VQL_COMPARE_RIGHT_BEGIN");
+  for (const CellRef input : right) emitInput(innerBegin, input);
+  emitOutput(innerBegin, innerIterator);
+  const CellRef innerNext =
+      emitOp(OpcodeKind::IteratorNext, "#VQL_COMPARE_RIGHT_NEXT");
+  emitInput(innerNext, innerIterator);
+  const CellRef rightItem    = fresh();
+  const CellRef rightPresent = fresh();
+  emitOutput(innerNext, rightItem);
+  emitOutput(innerNext, rightPresent);
+  const CellRef innerDone =
+      mintOpcode(OpcodeKind::Nop, "#VQL_COMPARE_RIGHT_DONE");
+  branchFalse(rightPresent, innerDone);
+
+  const CellRef compare = emitOp(OpcodeKind::VqlCompare, "#VQL_COMPARE_PAIR");
+  emitInputConstant(compare, CellValue(static_cast<std::int64_t>(comparison)));
+  emitInput(compare, leftItem);
+  emitInput(compare, rightItem);
+  const CellRef pairMatches = fresh();
+  emitOutput(compare, pairMatches);
+  const CellRef innerContinue =
+      mintOpcode(OpcodeKind::Nop, "#VQL_COMPARE_CONTINUE_RIGHT");
+  branchFalse(pairMatches, innerContinue);
+
+  const CellRef copyTrue =
+      emitOp(OpcodeKind::CopyCellRefs, "#VQL_COMPARE_TRUE");
+  emitInput(copyTrue, trueValue);
+  emitOutput(copyTrue, result);
+  const CellRef found = mintOpcode(OpcodeKind::Nop, "#VQL_COMPARE_FOUND");
+  jump(found);
+
+  appendOpcode(innerContinue);
+  jump(innerNext);
+  appendOpcode(innerDone);
+  jump(outerNext);
+  appendOpcode(outerDone);
+  appendOpcode(found);
+  return result;
 }
 
 std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
@@ -1141,10 +1274,9 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
               return compileLensValue(*val, ctxCell);
             if (isPathFunction(val->name))
               return compilePathFunctionValue(*val, ctxCell);
-            throw QueryRefusal(isKnownUnloweredFunction(val->name)
-                                   ? QueryErrorCategory::Unsupported
-                                   : QueryErrorCategory::Unknown,
-                               "unknown compiled function: " + val->name);
+            throwUnresolvedFunction(*val, isKnownUnloweredFunction(val->name)
+                                              ? QueryErrorCategory::Unsupported
+                                              : QueryErrorCategory::Unknown);
           }
           requirePositionalArguments(*val);
           const auto results =

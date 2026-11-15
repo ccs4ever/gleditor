@@ -519,8 +519,14 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
         "steps after shape projection require an explicit intermediate binding",
         current_.loc);
 
+  const bool isInvocationRoot =
+      implicitContext && !isFunctor && !steps.empty() &&
+      (std::holds_alternative<FunctionInvocation>(steps.front().selector) ||
+       std::holds_alternative<std::shared_ptr<RuntimeClosureInvocation>>(
+           steps.front().selector));
   return PathExpression{.anchor           = std::move(anchor),
                         .isFunctor        = isFunctor,
+                        .isInvocationRoot = isInvocationRoot,
                         .anchorPredicates = std::move(anchorPredicates),
                         .anchorProjection = std::move(anchorProjection),
                         .steps            = std::move(steps),
@@ -1751,7 +1757,8 @@ ValueExpr Parser::parseRuntimeClosureValue() {
     return ValueExpr{.kind = std::move(invocation)};
   }
 
-  PathExpression path{.anchor = AnchorNode{.kind = AnchorKind::Context}};
+  PathExpression path{.anchor = AnchorNode{.kind = AnchorKind::Context},
+                      .isInvocationRoot = true};
   path.steps.push_back(PathStep{.selector = std::move(invocation)});
   while (check(TokenKind::Slash) || check(TokenKind::Arrow) ||
          check(TokenKind::Transclude)) {

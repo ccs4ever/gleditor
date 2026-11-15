@@ -356,6 +356,9 @@ struct PathExpression {
   /// in place it reads from the context, as it always did; bound by `let` or
   /// passed as an argument it is kept as steps and applied later.
   bool isFunctor{false};
+  /// A bare named or runtime-closure invocation at the path root. This keeps
+  /// its one-shot call control distinct from an explicitly rooted context walk.
+  bool isInvocationRoot{false};
   /// `#[...]`: predicates on the anchor's own cells, before any step.
   std::vector<BooleanExpr> anchorPredicates;
   std::optional<ShapeLiteral>

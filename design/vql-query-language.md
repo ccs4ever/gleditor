@@ -1122,9 +1122,11 @@ preserved; surplus arguments refuse before evaluation unless a final variadic pa
 them. Function and lambda lexical bindings restore on success, contract mismatch and exceptions.
 This restores lexical scope, not topology already edited by a body.
 
-A path function maps over selected candidates; an empty path does not invoke a downstream body.
-Top-level function invocation is distinct. A script's final executed statement determines its result
-even when that result is empty; emptiness never resurrects an earlier result.
+A path function maps over selected candidates; an empty path does not invoke a downstream body. A
+bare initial invocation is distinct: it still runs once without a candidate when inherited context
+is empty. Explicit `./f()` and leading-slash relative functors retain path mapping semantics. A
+script's final executed statement determines its result even when that result is empty; emptiness
+never resurrects an earlier result.
 
 Function and lambda parameter lists support pattern destructuring, parameter defaults, and
 variadics:
@@ -2281,24 +2283,26 @@ explicit refusals. The rulings below describe the intended semantics.
   generic first-class shapes and other excluded forms remain refused. See
   [iterations 29–41](projects/vortex-vm-only-iterations.md). Matching still materializes subjects;
   no zero-copy or universal allocation guarantee follows. Step predicates retain cell identity
-  through guarded reference slots and Boolean control flow short-circuits. Nonempty literal shape
-  predicates lower directional presence/absence rules, scalar literal targets and nested static
-  shape targets to native one-hop probes and comparisons, including foreign neighbors and
-  self-links. Bidirectional targets accept either matching neighbor; negated rules retain
-  absence-only semantics and skip target evaluation. Dynamic targets still refuse. Scalar predicates
-  run before shape predicates and both precede the range clamp; the AST does not retain their source
-  interleaving. Empty/wildcard shape predicates and dynamic shape rules still require lowering.
-  Shape preflight rejects cycles, nesting beyond 128, and expanded shape work beyond 4096 units
-  across a compilation, accounting for duplicated bidirectional branches. Validation also permits at
-  most 4096 rule visits, including ignored targets and repeated shared subtrees. Unsupported cases
-  refuse explicitly. Runtime rank iterators and eager sequence registers now support per-member
-  typed filtering, stream cardinality, predicates and integer index clamps. Foreign neighbors
-  resolve through canonical arena proxies; choice points restore iterator state and proxy minting.
-  Computed defaults also execute inside eligible reusable frames, including self/mutual recursive
-  matching and return promises. Their temporary registers and captures are local to each activation.
-  Universal lazy streaming, decorated recursive static functors and value-lambda variadics, mutation
-  enforcement and complete frontend/parallel parity remain open. Compiled execution never silently
-  calls a direct evaluator.
+  through guarded reference slots and Boolean control flow short-circuits. Comparison operands
+  retain full streams and prepare once, left then right; native loops test pairs existentially
+  through the scalar matcher, including `!=`. Either empty stream yields false for every comparison
+  operator. Nonempty literal shape predicates lower directional presence/absence rules, scalar
+  literal targets and nested static shape targets to native one-hop probes and comparisons,
+  including foreign neighbors and self-links. Bidirectional targets accept either matching neighbor;
+  negated rules retain absence-only semantics and skip target evaluation. Dynamic targets still
+  refuse. Scalar predicates run before shape predicates and both precede the range clamp; the AST
+  does not retain their source interleaving. Empty/wildcard shape predicates and dynamic shape rules
+  still require lowering. Shape preflight rejects cycles, nesting beyond 128, and expanded shape
+  work beyond 4096 units across a compilation, accounting for duplicated bidirectional branches.
+  Validation also permits at most 4096 rule visits, including ignored targets and repeated shared
+  subtrees. Unsupported cases refuse explicitly. Runtime rank iterators and eager sequence registers
+  now support per-member typed filtering, stream cardinality, predicates and integer index clamps.
+  Foreign neighbors resolve through canonical arena proxies; choice points restore iterator state
+  and proxy minting. Computed defaults also execute inside eligible reusable frames, including
+  self/mutual recursive matching and return promises. Their temporary registers and captures are
+  local to each activation. Universal lazy streaming, decorated recursive static functors and
+  value-lambda variadics, mutation enforcement and complete frontend/parallel parity remain open.
+  Compiled execution never silently calls a direct evaluator.
 
 ______________________________________________________________________
 

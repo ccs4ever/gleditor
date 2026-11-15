@@ -1082,3 +1082,27 @@ profiling/benchmark probes. No failing name is new against `979e5b77`. Library/s
 the same one/two failures, and lint retains the same two unrelated UI typography violations.
 Independent Luna architecture, senior/runtime and resource gates accepted this bounded stage,
 including independent follow-up review of the fuel correction.
+
+## Stream invocation roots and Cartesian comparison graphs
+
+The [stream-call semantics package](projects/vql-stream-call-semantics-plan.md) distinguishes a bare
+initial invocation from a function after an empty traversal. The parser retains that distinction in
+compilation-only AST metadata; graph entry control and the first-step empty-context branch preserve
+native recursion without fabricating a candidate for explicit dot, relative functors or downstream
+calls. Historical step pins retain the initial-call rule. Inconsistent AST markers refuse before
+effects.
+
+Comparisons prepare both complete operand streams once, left then right, and run existential scalar
+pairs in native iterator loops. Every operator, including `!=`, returns false when either side is
+empty. Existing exact scalar and causal-version rules remain; uncertain runtime version ordering
+still refuses. Stream snapshot setup now charges each input before publishing its iterator, and
+unknown-call diagnostics retain name, argument count and typed error category.
+
+Full build and repository formatting passed. The broad matrix has 980 passes, 20 baseline failures,
+one opt-in skip and seven disabled probes. All 19 added tests passed. The final engine run has 4,427
+active tests: 4,367 passed, 32 baseline failures and 28 skipped, with 12 disabled probes. Six
+targeted baseline failures are fixed and no failing name is new against `f0f74ad0`. The real CLI
+returns `different`, `0` and recursive result `third`; AST-free Store reload, host and Vquery SOURCE
+mesh routes passed. Independent Luna architecture, senior and resource gates accepted the bounded
+implementation and its root-marker/history refinements. Slice/library and lint retain their existing
+failures. §4.12 and the overall specification remain incomplete.

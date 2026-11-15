@@ -257,10 +257,12 @@ struct ScopedStreamBinding {
 } // namespace
 
 std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
-    const PathStep &step, std::vector<CellRef> stream, const bool hasContext) {
+    const PathStep &step, std::vector<CellRef> stream, const bool hasContext,
+    const bool allowInitialEmptyCall) {
   if (!step.versionPin) {
     PathStep unpinned = step;
-    return compileSteps(std::span{&unpinned, 1}, std::move(stream), hasContext);
+    return compileSteps(std::span{&unpinned, 1}, std::move(stream), hasContext,
+                        allowInitialEmptyCall);
   }
   if (!coordinator_) {
     refuse("version pins need a store with history; this compiler has no "
@@ -278,7 +280,8 @@ std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
   unpinned.rangeClamp  = std::nullopt;
   unpinned.derefMaster = false;
   std::vector<CellRef> stepped =
-      compileSteps(std::span{&unpinned, 1}, std::move(stream), hasContext);
+      compileSteps(std::span{&unpinned, 1}, std::move(stream), hasContext,
+                   allowInitialEmptyCall);
 
   const auto variable = [this](const std::string &name) {
     return versionVariable(core_, varBindings_, name);

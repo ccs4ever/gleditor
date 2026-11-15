@@ -266,11 +266,9 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
       } else {
         // Specified names with no owning card (delta, the store generators)
         // are Unsupported; any other name is not a VQL function at all.
-        throw QueryRefusal(isKnownUnloweredFunction(fn.name)
-                               ? QueryErrorCategory::Unsupported
-                               : QueryErrorCategory::Unknown,
-                           "VQL path function '" + fn.name +
-                               "' is not compiled to Vortex yet");
+        throwUnresolvedFunction(fn, isKnownUnloweredFunction(fn.name)
+                                        ? QueryErrorCategory::Unsupported
+                                        : QueryErrorCategory::Unknown);
       }
     }
   } else if (std::holds_alternative<RootSelectorStep>(step.selector) ||

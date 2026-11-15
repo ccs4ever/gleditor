@@ -28,6 +28,8 @@
 #include <string_view>
 #include <utility>
 
+#include "common/xanadu/vql/invocation.hpp"
+
 namespace xanadu::vql {
 using zigzag::CellRef;
 using zigzag::DimRef;
@@ -91,8 +93,7 @@ std::vector<CellRef>
 VQLCompiler::compilePathFunctionWalk(const FunctionInvocation &fn,
                                      const std::span<const CellRef> stream) {
   if (fn.name != "count" || !fn.args.empty())
-    throw QueryRefusal(QueryErrorCategory::Unsupported,
-                       "unknown compiled function: " + fn.name);
+    throwUnresolvedFunction(fn, QueryErrorCategory::Unsupported);
   // The counting loop of count(path) over the incoming walk. The counter is
   // minted by an Add so an empty walk leaves a present zero, which boxes to a
   // present 0 rather than an absent result.
@@ -124,8 +125,7 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
                                      const std::optional<CellRef> context) {
   if (fn.name == "find") refuseFind(fn);
   if (fn.name != "count" && fn.name != "sort_into" && fn.name != "contains")
-    throw QueryRefusal(QueryErrorCategory::Unsupported,
-                       "unknown compiled function: " + fn.name);
+    throwUnresolvedFunction(fn, QueryErrorCategory::Unsupported);
 
   // Validate every contract before the first argument is compiled.
   // The only path shape the lowered sort can order: one plain +dimension step

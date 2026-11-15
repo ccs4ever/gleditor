@@ -42,6 +42,12 @@ tests passed; the full engine run retains exactly the 38 baseline failures, with
 names. Native export/reload, host, source mesh, CLI and persistent REPL routes passed. C2 remains
 open for variadic value lambdas, named closure actuals and static AST-functor defaults.
 
+The [stream-call semantics package](vql-stream-call-semantics-plan.md) then repairs empty-path
+function execution and Cartesian comparisons while preserving bare nested invocation roots and
+native recursion. All 19 new tests passed. Its final full engine run has 32 baseline failures, six
+fewer than `f0f74ad0`, with no new failing names. This supports function semantics across the
+existing packages; it does not close the remaining signature, lifecycle or route gates.
+
 | Package | Remaining work                                                                                                                                                                                     | Acceptance evidence                                                                                                                                                                                                                                                                               |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | C1      | Implemented in iteration 52: runtime closure bindings, native initialization and successful session publication.                                                                                   | A closure created inside a native frame is returned, stored and applied after cursor inactivity and fresh-VM reload; absent/open and bound-empty remain distinct; metadata refusals write no Store operations. The real REPL retains values across queries.                                       |

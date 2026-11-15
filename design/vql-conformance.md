@@ -24,6 +24,12 @@ explicit-dot scope, preflight before argument effects, return failure cleanup, g
 and Vquery SOURCE mesh execution. Real CLI and separate REPL queries cover exact integers and
 retained capture membership. Variadic value lambdas and named closure arguments remain unsupported.
 
+The [stream-call regressions](projects/vql-stream-call-semantics-plan.md) also cover a bare initial
+call inside an empty inherited frame context, empty explicit paths without downstream effects, and
+Cartesian existential comparison through the existing exact scalar matcher. Both operands execute
+once before pair iteration; empty either side yields false for all six operators. Portable graphs,
+caller context, repeated graph execution and budget failure/retry are covered.
+
 ## Historical engine matrix
 
 The matrix and restricted-compiler discussion below record the earlier compiler cutoff and the

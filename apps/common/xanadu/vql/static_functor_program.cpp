@@ -237,6 +237,7 @@ private:
                            path.anchor.kind != AnchorKind::Variable))
       throw UnsupportedProgram{};
     boolean(path.isFunctor);
+    boolean(path.isInvocationRoot);
     token(static_cast<char>(path.anchor.kind));
     string(path.anchor.name);
     if (path.anchor.kind == AnchorKind::Variable)

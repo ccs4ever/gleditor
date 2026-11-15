@@ -4,6 +4,7 @@
 #include <string>
 
 #include "common/xanadu/vql/ast.hpp"
+#include "common/xanadu/vql/query_error.hpp"
 
 namespace xanadu::vql {
 
@@ -17,6 +18,14 @@ inline void requirePositionalArguments(const FunctionInvocation &invocation) {
           invocation.name + "'");
     }
   }
+}
+
+[[noreturn]] inline void
+throwUnresolvedFunction(const FunctionInvocation &invocation,
+                        const QueryErrorCategory category) {
+  throw QueryRefusal(category, "VQL function '" + invocation.name + "' with " +
+                                   std::to_string(invocation.args.size()) +
+                                   " argument(s) is not compiled to Vortex");
 }
 
 } // namespace xanadu::vql

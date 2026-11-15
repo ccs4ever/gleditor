@@ -276,6 +276,9 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
       if (iteratorSlots_.contains(input))
         return invalidStreamOperation(
             "StreamBegin cannot snapshot an iterator register");
+      // Each input can create a chunk even when it carries no stream members.
+      // Finish this charged preparation before replacing the target iterator.
+      core_.arena().consumeWork();
       const auto found = streams_.find(input);
       if (found != streams_.end()) {
         if (found->second) chunks.push_back(found->second);

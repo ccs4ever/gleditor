@@ -81,12 +81,19 @@ TEST(VQLStreamParityTest, EmptyRankCallsAndReturnFailuresMatch) {
     const auto contextFree =
         executor.execute("def f(): Int := 42; ##/d.absent/f()");
     ASSERT_TRUE(contextFree) << contextFree.error().message;
-    ASSERT_EQ(contextFree->size(), 1u);
-    EXPECT_EQ(h.arena.asInt64(contextFree->front()), 42);
+    EXPECT_TRUE(contextFree->empty());
+    const auto rootConstant = executor.execute("def f(): Int := 42; f()");
+    ASSERT_TRUE(rootConstant) << rootConstant.error().message;
+    ASSERT_EQ(rootConstant->size(), 1u);
+    EXPECT_EQ(h.arena.asInt64(rootConstant->front()), 42);
     const auto fallbackStream = executor.execute(
         "def all(): Stream<Cell> := ##/d.items; ##/d.absent/all()");
     ASSERT_TRUE(fallbackStream) << fallbackStream.error().message;
-    EXPECT_EQ(*fallbackStream, (std::vector<CellRef>{h.first, h.bad, h.last}));
+    EXPECT_TRUE(fallbackStream->empty());
+    const auto rootStream =
+        executor.execute("def all(): Stream<Cell> := ##/d.items; all()");
+    ASSERT_TRUE(rootStream) << rootStream.error().message;
+    EXPECT_EQ(*rootStream, (std::vector<CellRef>{h.first, h.bad, h.last}));
     const auto broken = executor.execute(
         "def broken($x: Int): String := $x; ##/d.items/broken()");
     ASSERT_FALSE(broken);
@@ -263,8 +270,13 @@ TEST(VQLStreamParityTest, DecoratedFunctorsApplyModifiersAfterCapturedPath) {
         executor.execute("def answer(): Int := 42; let $f := /answer(); let $g "
                          ":= /$f[. = 42]; ##/d.absent/$g");
     ASSERT_TRUE(emptyConstant) << emptyConstant.error().message;
-    ASSERT_EQ(emptyConstant->size(), 1u);
-    EXPECT_EQ(h.arena.asInt64(emptyConstant->front()), 42);
+    EXPECT_TRUE(emptyConstant->empty());
+    const auto nonemptyConstant =
+        executor.execute("def answer(): Int := 42; let $f := /answer(); let $g "
+                         ":= /$f[. = 42]; ##/$g");
+    ASSERT_TRUE(nonemptyConstant) << nonemptyConstant.error().message;
+    ASSERT_EQ(nonemptyConstant->size(), 1u);
+    EXPECT_EQ(h.arena.asInt64(nonemptyConstant->front()), 42);
     const auto aggregate = executor.execute("let $f := /d.items; ./$f[3, 4]",
                                             {h.core.home(), h.first});
     ASSERT_TRUE(aggregate) << aggregate.error().message;

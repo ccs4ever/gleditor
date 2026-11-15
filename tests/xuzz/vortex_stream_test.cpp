@@ -683,4 +683,60 @@ TEST(VortexStreamTest, ScalarWriteReusesPreviouslyTypedStreamRegister) {
   EXPECT_EQ(h.core.render(resultCell), CellValue{static_cast<std::int64_t>(6)});
 }
 
+TEST(VortexStreamTest, BeginChargesInputsBeforeReplacingIteratorAndCanRetry) {
+  for (const auto kind :
+       {OpcodeKind::StreamBegin, OpcodeKind::StreamReverseBegin}) {
+    Harness h;
+    const auto kept     = h.arena.makeCell("kept");
+    const auto first    = h.arena.makeCell("first");
+    const auto second   = h.arena.makeCell("second");
+    const auto iterator = h.arena.makeCell();
+    const auto item     = h.arena.makeCell();
+    const auto present  = h.arena.makeCell();
+    const auto seed     = h.vm.mintOpcode(kind);
+    const auto replace  = h.vm.mintOpcode(kind);
+    const auto next     = h.vm.mintOpcode(OpcodeKind::IteratorNext);
+    const auto halt     = h.vm.mintOpcode(OpcodeKind::Halt);
+    const CellRef code[]{seed, replace, next, halt};
+    bindSequence(h, code);
+    h.core.bindInput(seed, kept);
+    h.core.bindOutput(seed, iterator);
+    h.core.bindInput(replace, first);
+    h.core.bindInput(replace, second);
+    h.core.bindOutput(replace, iterator);
+    h.core.bindInput(next, iterator);
+    h.core.bindOutput(next, item);
+    h.core.bindOutput(next, present);
+    const auto cursor = h.vm.spawnCursor(seed, "begin-input-budget");
+    EXPECT_TRUE(h.vm.step(cursor).success);
+    ASSERT_EQ(h.vm.getCursorOpcode(cursor), replace);
+
+    h.arena.setExecutionLimits(100'000, 1, 100'000);
+    const auto failed = h.vm.step(cursor);
+    ASSERT_FALSE(failed.success);
+    EXPECT_NE(failed.errorMessage.find("work budget exhausted"),
+              std::string::npos);
+    EXPECT_EQ(h.vm.getCursorOpcode(cursor), replace);
+
+    h.arena.setExecutionLimits(100'000, 100'000, 100'000);
+    h.vm.setCursorOpcode(cursor, next);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    EXPECT_EQ(h.vm.cellReferenceOf(item), kept);
+    EXPECT_EQ(h.arena.asBool(present), true);
+
+    h.vm.setCursorOpcode(cursor, replace);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    EXPECT_EQ(h.vm.cellReferenceOf(item),
+              kind == OpcodeKind::StreamBegin ? first : second);
+    h.vm.setCursorOpcode(cursor, next);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    EXPECT_EQ(h.vm.cellReferenceOf(item),
+              kind == OpcodeKind::StreamBegin ? second : first);
+    h.vm.setCursorOpcode(cursor, next);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+    EXPECT_EQ(h.arena.asBool(present), false);
+  }
+}
+
 } // namespace

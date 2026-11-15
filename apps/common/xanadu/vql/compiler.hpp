@@ -338,7 +338,8 @@ private:
               body);
   std::vector<zigzag::CellRef> compileSteps(std::span<const PathStep> steps,
                                             std::vector<zigzag::CellRef> stream,
-                                            bool hasContext);
+                                            bool hasContext,
+                                            bool allowInitialEmptyCall = false);
   std::vector<zigzag::CellRef> compileSelector(const PathStep &step,
                                                zigzag::CellRef current,
                                                bool hasContext);
@@ -403,8 +404,8 @@ private:
   /// Q3, compile_history.cpp.
   std::vector<zigzag::CellRef>
   compileVersionPinnedStep(const PathStep &step,
-                           std::vector<zigzag::CellRef> stream,
-                           bool hasContext);
+                           std::vector<zigzag::CellRef> stream, bool hasContext,
+                           bool allowInitialEmptyCall = false);
   std::optional<zigzag::CellRef>
   compileVersionPinnedPath(const PathExpression &path, zigzag::CellRef ctxCell);
   std::optional<zigzag::CellRef>
@@ -597,6 +598,10 @@ private:
   zigzag::CellRef compileClosureLambda(const PathLambda &lambda);
   std::optional<zigzag::CellRef> compileComparison(const ComparisonExpr &comp,
                                                    zigzag::CellRef ctxCell);
+  zigzag::CellRef
+  compileCartesianComparison(zigzag::vortex::VqlComparisonKind comparison,
+                             std::span<const zigzag::CellRef> left,
+                             std::span<const zigzag::CellRef> right);
   zigzag::CellRef compileShapePredicate(const ShapeLiteral &shape,
                                         zigzag::CellRef candidate);
 
