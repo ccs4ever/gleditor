@@ -73,10 +73,12 @@ VQLCompiler::emitMountFallback(const SignedDimensionStep &step,
 
 std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                                                std::vector<CellRef> stream,
-                                               bool hasContext) {
+                                               bool hasContext,
+                                               bool allowEmptyCallFallback) {
   for (const auto &step : steps) {
     if (step.versionPin) {
       stream = compileVersionPinnedStep(step, std::move(stream), hasContext);
+      allowEmptyCallFallback = false;
       continue;
     }
     const auto stepInput = stream;
@@ -90,6 +92,14 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
         ((dimension && !dimension->dimName.starts_with('$') &&
           !dimension->creates.empty()) ||
          (function && function->name == "link" && function->args.size() >= 2));
+    const bool emptyBuiltinCall = allowEmptyCallFallback && function &&
+                                  !userCall && !isWholeWalkStep(*function) &&
+                                  function->name != "value" &&
+                                  function->name != "link";
+    const auto present =
+        (allowEmptyCallFallback && (userCall || emptyBuiltinCall))
+            ? std::optional{emitStreamPresence(stream)}
+            : std::nullopt;
     if (const auto *lambda =
             std::get_if<std::shared_ptr<PathLambda>>(&step.selector)) {
       if (!*lambda)
@@ -263,11 +273,6 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
         res.insert(res.end(), stepRes.begin(), stepRes.end());
       }
       nextStream = res;
-    } else if (userCall && !hasContext) {
-      requirePositionalArguments(*function);
-      const auto fallback = compileCall(definitions_.at(function->name),
-                                        function->args, std::nullopt, true);
-      nextStream          = fallback;
     } else {
       bool hasViewCell = false;
       auto &reg        = dynamicRegistry();
@@ -364,6 +369,30 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
           nextStream = emitMountFallback(*dimension, std::move(nextStream));
       }
     }
+    // Unanchored calls inside a frame may execute when the frame's ambient
+    // context slot is empty at runtime. Run once with no receiver in that case.
+    if (allowEmptyCallFallback && (userCall || emptyBuiltinCall)) {
+      const auto empty = mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL");
+      const auto end   = mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL_END");
+      const auto choose =
+          emitOp(OpcodeKind::BranchFalseCell, "#EMPTY_CALL_TEST");
+      emitInput(choose, *present);
+      emitInput(choose, empty);
+      const auto done = emitOp(OpcodeKind::BranchFalseCell, "#EMPTY_CALL_SKIP");
+      emitInputConstant(done, false);
+      emitInput(done, end);
+      appendOpcode(empty);
+      if (userCall) {
+        requirePositionalArguments(*function);
+        const auto fallback = compileCall(definitions_.at(function->name),
+                                          function->args, std::nullopt, true);
+        emitAppendStream(nextStream.front(), fallback);
+      } else {
+        const auto fallback = compileSelector(step, core_.home(), false);
+        emitAppendStream(nextStream.front(), fallback);
+      }
+      appendOpcode(end);
+    }
 
     if (step.derefMaster) {
       nextStream = emitMap(nextStream, [&](CellRef candidate) {
@@ -433,7 +462,8 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
     }
     if (step.projectionAfter)
       stream = applyShapeProjection(stream, *step.projectionAfter);
-    hasContext = true;
+    hasContext             = true;
+    allowEmptyCallFallback = false;
   }
 
   return stream;

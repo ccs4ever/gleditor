@@ -548,15 +548,23 @@ VortexVM *VortexVM::pruneAssemblyState() {
   std::erase_if(cursorPC_, [this](const auto &entry) {
     return !core_.arena().contains(entry.first);
   });
-  std::erase_if(streamSlots_, [this](const auto slot) {
-    return !core_.arena().contains(slot);
-  });
-  std::erase_if(iteratorSlots_, [this](const auto slot) {
-    return !core_.arena().contains(slot);
-  });
   std::erase_if(cellReferences_, [this](const auto &entry) {
     return !core_.arena().contains(entry.first);
   });
+  std::erase_if(streams_, [this](const auto &entry) {
+    return !core_.arena().contains(entry.first);
+  });
+  std::erase_if(iterators_, [this](const auto &entry) {
+    return !core_.arena().contains(entry.first);
+  });
+  std::erase_if(streamSlots_, [this](const CellRef slot) {
+    return !core_.arena().contains(slot);
+  });
+  std::erase_if(iteratorSlots_, [this](const CellRef slot) {
+    return !core_.arena().contains(slot);
+  });
+  if (streamCursor_ && !core_.arena().contains(*streamCursor_))
+    streamCursor_.reset();
   pruneResumeState();
   return this;
 }

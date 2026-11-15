@@ -20,6 +20,7 @@
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/prose_hits.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu::vql {
 namespace {
@@ -177,16 +178,8 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       [this, priorContractCoordinator] {
         vm_.setContractCoordinator(priorContractCoordinator);
       }};
+  const auto preCompileMark = coordinator_.core().arena().mark();
   try {
-    const auto programMark = coordinator_.arena().mark();
-    bool programCommitted  = false;
-    const RestoreScope unwindMark{[this, programMark, &programCommitted] {
-      if (!programCommitted) {
-        std::ignore = coordinator_.arena().release(programMark);
-        vm_.pruneAssemblyState();
-      }
-    }};
-
     // PROSE-HITS REGISTRATION SITE
     struct ProseHitsCache {
       std::string lastNeedle;
@@ -229,6 +222,8 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     compilation.contextCells = contextCells;
     compilation.initialBindings =
         bindingSource_ ? bindingSource_->get() : bindings_;
+    const std::size_t preCompileViewCount =
+        session_ ? session_->dynamicViews().viewCells.size() : 0U;
     if (session_) {
       compilation.dynamicViews    = &session_->dynamicViews();
       compilation.initialFunctors = session_->compilerFunctors();
@@ -238,14 +233,21 @@ QueryExecutor::executeVortex(const QueryExpression &query,
                                             .roots     = mount.roots});
     }
     if (declaresOnly(query)) {
-      programCommitted  = true;
+      // Mounts and unmounts alone are session state; compiling a program for
+      // them would mint cells in the arena for nothing.
       const auto events = compiler.declareMounts(query, compilation);
       publishMounts(session_, events);
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().release(preCompileMark));
+      vm_.pruneAssemblyState();
       return std::vector<zigzag::CellRef>{};
     }
     const auto result = compiler.compile(query, compilation);
     disassembly_      = result.disassembly;
     if (!result.success) {
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().release(preCompileMark));
+      vm_.pruneAssemblyState();
       return std::unexpected(QueryExecutionError{
           .category = result.category.value_or(QueryErrorCategory::Unsupported),
           .message  = result.errorMessage,
@@ -253,6 +255,9 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     }
 
     if (!result.cursor || !result.terminalOpcode) {
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().release(preCompileMark));
+      vm_.pruneAssemblyState();
       return std::unexpected(QueryExecutionError{
           .category = QueryExecutionError::Category::Compile,
           .message  = "compiled VQL has no executable activation metadata",
@@ -266,8 +271,22 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       vm_.abortScopedChoices(id);
       vm_.setCursorOpcode(id, std::nullopt);
     }};
+    const auto preRunTrailSize = coordinator_.core().arena().trailSize();
+    const auto preRunCellCount = coordinator_.core().arena().cellCount();
+
     const auto execution = vm_.run(cursor, options_.maxCycles);
     if (!execution.success) {
+      vm_.abortScopedChoices(cursor);
+      vm_.setCursorOpcode(cursor, std::nullopt);
+      vm_.clearChoicePoints();
+      if (coordinator_.core().arena().trailSize() == preRunTrailSize) {
+        zigzag::expectMarkOrder(
+            coordinator_.core().arena().release(preCompileMark));
+        vm_.pruneAssemblyState();
+      } else {
+        zigzag::expectMarkOrder(
+            coordinator_.core().arena().discard(preCompileMark));
+      }
       const auto category =
           execution.contractViolation ==
                   zigzag::vortex::ContractViolationKind::Postcondition
@@ -286,420 +305,6 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       const auto values = vm_.resultCells(slot);
       cells.insert(cells.end(), values.begin(), values.end());
     }
-
-    auto &arena = coordinator_.arena();
-    std::unordered_map<zigzag::CellRef, zigzag::CellRef> remap;
-    std::unordered_map<std::string, std::vector<zigzag::CellRef>>
-        sessionBindingCells;
-    if (session_) {
-      for (const auto &binding : result.sessionBindings) {
-        for (const auto slot : binding.slots) {
-          for (const auto c : vm_.resultCells(slot)) {
-            sessionBindingCells[binding.name].push_back(c);
-          }
-        }
-      }
-    }
-    const bool hasMutations = arena.trailSize() > programMark.trailSize ||
-                              arena.spaceCount() != programMark.spaceCount;
-
-    if (hasMutations) {
-      programCommitted = true;
-      zigzag::expectMarkOrder(arena.discard(programMark));
-    } else {
-      bool hasNewResultCells = false;
-      for (const auto c : cells) {
-        if (const auto dense = arena.denseOf(c);
-            dense.has_value() && *dense >= programMark.cellCount) {
-          hasNewResultCells = true;
-          break;
-        }
-      }
-      if (!hasNewResultCells && session_) {
-        for (const auto &binding : result.sessionBindings) {
-          for (const auto slot : binding.slots) {
-            for (const auto c : vm_.resultCells(slot)) {
-              if (const auto dense = arena.denseOf(c);
-                  dense.has_value() && *dense >= programMark.cellCount) {
-                hasNewResultCells = true;
-                break;
-              }
-            }
-            if (hasNewResultCells) break;
-          }
-          if (hasNewResultCells) break;
-        }
-        if (!hasNewResultCells) {
-          const auto &dv = session_->dynamicViews();
-          for (const auto &[k, v] : dv.viewCells) {
-            if (const auto dense = arena.denseOf(k);
-                dense.has_value() && *dense >= programMark.cellCount) {
-              hasNewResultCells = true;
-              break;
-            }
-          }
-          if (!hasNewResultCells) {
-            for (const auto &[k, v] : dv.shapeHandles) {
-              if (const auto dense = arena.denseOf(k);
-                  dense.has_value() && *dense >= programMark.cellCount) {
-                hasNewResultCells = true;
-                break;
-              }
-            }
-          }
-          if (!hasNewResultCells) {
-            for (const auto &[k, v] : dv.cellLenses) {
-              if (const auto dense = arena.denseOf(k);
-                  dense.has_value() && *dense >= programMark.cellCount) {
-                hasNewResultCells = true;
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      if (!hasNewResultCells) {
-        programCommitted = true;
-        zigzag::expectMarkOrder(arena.release(programMark));
-        vm_.pruneAssemblyState();
-      } else {
-        // Card O2b: copy-out program-minted result cells and release
-        // programMark
-        std::unordered_set<zigzag::CellRef> visited;
-        std::vector<zigzag::CellRef> queue;
-
-        const auto isVmInternalDim = [&](zigzag::DimRef dim) {
-          const auto &sys = coordinator_.core().dims();
-          return dim == sys.dims || dim == sys.grab || dim == sys.step ||
-                 dim == sys.spin || dim == sys.stack || dim == sys.contract ||
-                 dim == sys.cursors || dim == sys.cache || dim == sys.vars ||
-                 dim == sys.values || dim == sys.pinningCursors ||
-                 dim == sys.stdlib || dim == sys.clause || dim == sys.scan ||
-                 (sys.runtimeObjectClaim && dim == *sys.runtimeObjectClaim);
-        };
-
-        const auto enqueue = [&](const zigzag::CellRef c) {
-          if (c == zigzag::noCell) return;
-          const auto dense = arena.denseOf(c);
-          if (dense.has_value() && *dense >= programMark.cellCount &&
-              visited.insert(c).second) {
-            queue.push_back(c);
-          }
-        };
-
-        for (const auto c : cells) enqueue(c);
-        if (session_) {
-          for (const auto &binding : result.sessionBindings) {
-            for (const auto slot : binding.slots) {
-              for (const auto c : vm_.resultCells(slot)) enqueue(c);
-            }
-          }
-          const auto &dv = session_->dynamicViews();
-          for (const auto &[k, v] : dv.viewCells) {
-            enqueue(k);
-            enqueue(v.source);
-            if (v.view) {
-              for (const auto &[hk, hv] : v.view->handles) {
-                enqueue(hk);
-                enqueue(hv);
-              }
-            }
-          }
-          for (const auto &[k, v] : dv.ownerViews) {
-            enqueue(k);
-            enqueue(v);
-          }
-          for (const auto &[k, v] : dv.shapeHandles) {
-            enqueue(k);
-          }
-          for (const auto &[k, v] : dv.cellLenses) {
-            enqueue(k);
-          }
-        }
-        for (std::size_t i = 0; i < programMark.cellCount; ++i) {
-          const auto c = arena.refOf(static_cast<std::uint32_t>(i));
-          for (const auto &entry : arena.dimensionsOf(c)) {
-            if (isVmInternalDim(entry.dim)) continue;
-            if (entry.pos != zigzag::noCell) enqueue(entry.pos);
-            if (entry.neg != zigzag::noCell) enqueue(entry.neg);
-          }
-        }
-
-        struct SnapshotCell {
-          zigzag::CellRef oldRef{zigzag::noCell};
-          bool isProxy{false};
-          std::uint32_t proxySpace{0};
-          zigzag::CellRef proxyIndex{zigzag::noCell};
-          xanadu::ValueKind valueKind{xanadu::ValueKind::None};
-          std::uint64_t valueBits{0};
-          std::vector<xanadu::PrimediaSpan> content;
-          std::optional<std::uint32_t> quoteSpace;
-          std::string scratchText;
-          struct LinkEntry {
-            zigzag::DimRef dim{zigzag::noCell};
-            zigzag::DimVector dir{zigzag::DimVector::POS};
-            zigzag::CellRef target{zigzag::noCell};
-          };
-          std::vector<LinkEntry> links;
-        };
-
-        std::vector<SnapshotCell> snapshotCells;
-        for (std::size_t q = 0; q < queue.size(); ++q) {
-          const auto c = queue[q];
-          SnapshotCell sc;
-          sc.oldRef = c;
-          if (const auto foreign = arena.foreignOf(c)) {
-            sc.isProxy    = true;
-            sc.proxySpace = foreign->space;
-            sc.proxyIndex = foreign->index;
-          }
-          if (const auto s = arena.slot(c); s.has_value()) {
-            sc.valueKind = static_cast<xanadu::ValueKind>(s->valueKind);
-            sc.valueBits = s->valueBits;
-          }
-          const auto spans = arena.contentOf(c);
-          sc.content.assign(spans.begin(), spans.end());
-          if (const auto foreign = arena.foreignOf(c)) {
-            if (const auto s = arena.spaceAt(foreign->space)) {
-              if (s->store) {
-                sc.quoteSpace = foreign->space;
-                if (s->manifold) {
-                  const auto foreignSpans =
-                      s->manifold->contentOf(foreign->index);
-                  sc.content.assign(foreignSpans.begin(), foreignSpans.end());
-                }
-              }
-            }
-          } else if (const auto quote = arena.quotedContent(c)) {
-            for (std::uint32_t s = 1; s <= arena.spaceCount(); ++s) {
-              if (const auto att = arena.spaceAt(s);
-                  att && att->store == quote->store) {
-                sc.quoteSpace = s;
-                sc.content.assign(quote->spans.begin(), quote->spans.end());
-                break;
-              }
-            }
-          }
-          for (const auto &span : sc.content) {
-            if (span.scroll == xanadu::scratchScroll) {
-              sc.scratchText = arena.textOf(c);
-              break;
-            }
-          }
-          for (const auto &entry : arena.dimensionsOf(c)) {
-            if (isVmInternalDim(entry.dim)) continue;
-            if (entry.pos != zigzag::noCell) {
-              sc.links.push_back(
-                  {entry.dim, zigzag::DimVector::POS, entry.pos});
-              enqueue(entry.pos);
-            }
-            if (entry.neg != zigzag::noCell) {
-              sc.links.push_back(
-                  {entry.dim, zigzag::DimVector::NEG, entry.neg});
-              enqueue(entry.neg);
-            }
-          }
-          snapshotCells.push_back(std::move(sc));
-        }
-
-        struct PreExistingModification {
-          zigzag::CellRef cell{zigzag::noCell};
-          xanadu::ValueKind valueKind{xanadu::ValueKind::None};
-          std::uint64_t valueBits{0};
-          std::vector<xanadu::PrimediaSpan> content;
-          std::string scratchText;
-          std::vector<SnapshotCell::LinkEntry> links;
-        };
-        std::vector<PreExistingModification> modifiedPreExisting;
-        if (arena.trailSize() > programMark.trailSize) {
-          for (std::size_t i = 0; i < programMark.cellCount; ++i) {
-            const auto c = arena.refOf(static_cast<std::uint32_t>(i));
-            PreExistingModification mod;
-            mod.cell = c;
-            if (const auto s = arena.slot(c); s.has_value()) {
-              mod.valueKind = static_cast<xanadu::ValueKind>(s->valueKind);
-              mod.valueBits = s->valueBits;
-            }
-            const auto spans = arena.contentOf(c);
-            mod.content.assign(spans.begin(), spans.end());
-            for (const auto &span : mod.content) {
-              if (span.scroll == xanadu::scratchScroll) {
-                mod.scratchText = arena.textOf(c);
-                break;
-              }
-            }
-            for (const auto &entry : arena.dimensionsOf(c)) {
-              if (isVmInternalDim(entry.dim)) continue;
-              if (entry.pos != zigzag::noCell) {
-                mod.links.push_back(
-                    {entry.dim, zigzag::DimVector::POS, entry.pos});
-              }
-              if (entry.neg != zigzag::noCell) {
-                mod.links.push_back(
-                    {entry.dim, zigzag::DimVector::NEG, entry.neg});
-              }
-            }
-            modifiedPreExisting.push_back(std::move(mod));
-          }
-        }
-
-        programCommitted        = true;
-        auto releaseMark        = programMark;
-        const auto currentMark  = arena.mark();
-        std::ignore             = arena.discard(currentMark);
-        releaseMark.scratchSize = currentMark.scratchSize;
-        releaseMark.contentSize = currentMark.contentSize;
-        releaseMark.spaceCount  = currentMark.spaceCount;
-        zigzag::expectMarkOrder(arena.release(releaseMark));
-        vm_.pruneAssemblyState();
-
-        for (const auto &sc : snapshotCells) {
-          zigzag::CellRef newCell = zigzag::noCell;
-          if (sc.isProxy) {
-            newCell = arena.proxyFor(sc.proxySpace, sc.proxyIndex);
-          } else if (sc.quoteSpace) {
-            newCell = arena.makeQuote(*sc.quoteSpace, sc.content);
-            if (sc.valueKind != xanadu::ValueKind::None) {
-              zigzag::expectWritten(
-                  arena.setValueBits(newCell, sc.valueKind, sc.valueBits));
-            }
-          } else if (sc.valueKind == xanadu::ValueKind::Int64) {
-            newCell =
-                arena.makeScalarCell(std::bit_cast<std::int64_t>(sc.valueBits));
-          } else if (sc.valueKind == xanadu::ValueKind::Double) {
-            newCell = arena.makeScalarCell(std::bit_cast<double>(sc.valueBits));
-          } else if (sc.valueKind == xanadu::ValueKind::Bool) {
-            newCell = arena.makeScalarCell(sc.valueBits != 0);
-          } else if (sc.valueKind != xanadu::ValueKind::None) {
-            newCell = arena.makeCell();
-            zigzag::expectWritten(
-                arena.setValueBits(newCell, sc.valueKind, sc.valueBits));
-          } else {
-            newCell = arena.makeCell();
-            if (!sc.content.empty()) {
-              zigzag::expectWritten(arena.setContent(newCell, sc.content));
-            } else if (!sc.scratchText.empty()) {
-              const auto span = arena.intern(sc.scratchText);
-              zigzag::expectWritten(
-                  arena.setContent(newCell, std::span{&span, 1}));
-            }
-          }
-          remap[sc.oldRef] = newCell;
-        }
-
-        for (const auto &sc : snapshotCells) {
-          const auto from = remap.at(sc.oldRef);
-          for (const auto &link : sc.links) {
-            if (isVmInternalDim(link.dim)) continue;
-            const auto to = remap.contains(link.target) ? remap.at(link.target)
-                                                        : link.target;
-            if (!arena.contains(to)) continue;
-            if (arena.linked(from, link.dim, link.dir) != to) {
-              zigzag::expectWritten(arena.link(from, link.dim, link.dir, to));
-            }
-          }
-        }
-
-        for (const auto &mod : modifiedPreExisting) {
-          if (const auto s = arena.slot(mod.cell);
-              s.has_value() &&
-              (mod.valueKind != static_cast<xanadu::ValueKind>(s->valueKind) ||
-               mod.valueBits != s->valueBits)) {
-            zigzag::expectWritten(
-                arena.setValueBits(mod.cell, mod.valueKind, mod.valueBits));
-          }
-          if (const auto curContent = arena.contentOf(mod.cell);
-              !std::ranges::equal(curContent, mod.content)) {
-            if (!mod.content.empty()) {
-              zigzag::expectWritten(arena.setContent(mod.cell, mod.content));
-            } else if (!mod.scratchText.empty()) {
-              const auto span = arena.intern(mod.scratchText);
-              zigzag::expectWritten(
-                  arena.setContent(mod.cell, std::span{&span, 1}));
-            }
-          }
-          for (const auto &entry : arena.dimensionsOf(mod.cell)) {
-            if (isVmInternalDim(entry.dim)) continue;
-            for (const auto dir :
-                 {zigzag::DimVector::POS, zigzag::DimVector::NEG}) {
-              const auto curTgt = arena.linked(mod.cell, entry.dim, dir);
-              if (!curTgt) continue;
-              const bool shouldHave =
-                  std::ranges::any_of(mod.links, [&](const auto &l) {
-                    const auto desiredTgt = remap.contains(l.target)
-                                                ? remap.at(l.target)
-                                                : l.target;
-                    return l.dim == entry.dim && l.dir == dir &&
-                           desiredTgt == *curTgt;
-                  });
-              if (!shouldHave) {
-                zigzag::expectWritten(arena.unlink(mod.cell, entry.dim, dir));
-              }
-            }
-          }
-          for (const auto &link : mod.links) {
-            if (isVmInternalDim(link.dim)) continue;
-            const auto desiredTgt = remap.contains(link.target)
-                                        ? remap.at(link.target)
-                                        : link.target;
-            if (!arena.contains(desiredTgt)) continue;
-            if (arena.linked(mod.cell, link.dim, link.dir) != desiredTgt) {
-              zigzag::expectWritten(
-                  arena.link(mod.cell, link.dim, link.dir, desiredTgt));
-            }
-          }
-        }
-      }
-    }
-
-    for (auto &c : cells) {
-      if (remap.contains(c)) c = remap.at(c);
-    }
-
-    if (session_ && !remap.empty()) {
-      auto &dv = session_->dynamicViews();
-      std::unordered_map<zigzag::CellRef, ViewCellRecord> nextViewCells;
-      for (auto &[k, v] : dv.viewCells) {
-        const auto newK = remap.contains(k) ? remap.at(k) : k;
-        auto newV       = v;
-        if (remap.contains(newV.source)) newV.source = remap.at(newV.source);
-        if (newV.view) {
-          std::unordered_map<zigzag::CellRef, zigzag::CellRef> newHandles;
-          for (auto &[hk, hv] : newV.view->handles) {
-            const auto nhk  = remap.contains(hk) ? remap.at(hk) : hk;
-            const auto nhv  = remap.contains(hv) ? remap.at(hv) : hv;
-            newHandles[nhk] = nhv;
-          }
-          newV.view->handles = std::move(newHandles);
-        }
-        nextViewCells[newK] = std::move(newV);
-      }
-      dv.viewCells = std::move(nextViewCells);
-
-      std::unordered_map<zigzag::CellRef, zigzag::CellRef> nextOwnerViews;
-      for (auto &[k, v] : dv.ownerViews) {
-        const auto newK      = remap.contains(k) ? remap.at(k) : k;
-        const auto newV      = remap.contains(v) ? remap.at(v) : v;
-        nextOwnerViews[newK] = newV;
-      }
-      dv.ownerViews = std::move(nextOwnerViews);
-
-      std::unordered_map<zigzag::CellRef, PutGetLensRecord> nextCellLenses;
-      for (auto &[k, v] : dv.cellLenses) {
-        const auto newK      = remap.contains(k) ? remap.at(k) : k;
-        nextCellLenses[newK] = std::move(v);
-      }
-      dv.cellLenses = std::move(nextCellLenses);
-
-      std::unordered_map<zigzag::CellRef, ShapeLiteral> nextShapeHandles;
-      for (auto &[k, v] : dv.shapeHandles) {
-        const auto newK        = remap.contains(k) ? remap.at(k) : k;
-        nextShapeHandles[newK] = std::move(v);
-      }
-      dv.shapeHandles = std::move(nextShapeHandles);
-    }
-
     if (session_) {
       ContractBindings published;
       std::unordered_map<std::string, std::vector<PathStep>> functors;
@@ -713,27 +318,62 @@ QueryExecutor::executeVortex(const QueryExpression &query,
           continue;
         }
         auto &values = published[binding.name];
-        if (const auto found = sessionBindingCells.find(binding.name);
-            found != sessionBindingCells.end()) {
-          for (auto val : found->second) {
-            if (remap.contains(val)) val = remap.at(val);
-            values.push_back(val);
-          }
+        for (const auto slot : binding.slots) {
+          const auto slotValues = vm_.resultCells(slot);
+          values.insert(values.end(), slotValues.begin(), slotValues.end());
         }
       }
       session_->publishCompilerBindings(std::move(published),
                                         std::move(functors));
       session_->publishUserDefs(query.defs);
     }
-    programCommitted = true;
+    vm_.abortScopedChoices(cursor);
+    vm_.setCursorOpcode(cursor, std::nullopt);
     vm_.clearChoicePoints();
+
+    const auto &arena = coordinator_.core().arena();
+    const bool noDynamicViewsChanged =
+        !session_ ||
+        (session_->dynamicViews().viewCells.size() == preCompileViewCount &&
+         session_->dynamicViews().shapeHandles.empty() &&
+         session_->dynamicViews().cellLenses.empty());
+    const bool noMutations =
+        noDynamicViewsChanged && arena.trailSize() == preRunTrailSize &&
+        arena.cellCount() == preRunCellCount &&
+        arena.spaceCount() == preCompileMark.spaceCount &&
+        std::ranges::none_of(result.sessionBindings, [](const auto &binding) {
+          return binding.kind ==
+                 CompilationResult::SessionBinding::Kind::Stream;
+        });
+    const bool noNewResultCells =
+        std::ranges::all_of(cells, [&](zigzag::CellRef c) {
+          const auto dense = arena.denseOf(c);
+          return !dense.has_value() || *dense < preCompileMark.cellCount;
+        });
+
+    if (noMutations && noNewResultCells) {
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().release(preCompileMark));
+      vm_.pruneAssemblyState();
+    } else {
+      zigzag::expectMarkOrder(
+          coordinator_.core().arena().discard(preCompileMark));
+    }
     return cells;
   } catch (const TypeContractError &error) {
+    vm_.clearChoicePoints();
+    zigzag::expectMarkOrder(
+        coordinator_.core().arena().release(preCompileMark));
+    vm_.pruneAssemblyState();
     return std::unexpected(QueryExecutionError{
         .category = QueryExecutionError::Category::TypeContract,
         .message  = error.what(),
     });
   } catch (const std::exception &error) {
+    vm_.clearChoicePoints();
+    zigzag::expectMarkOrder(
+        coordinator_.core().arena().release(preCompileMark));
+    vm_.pruneAssemblyState();
     return std::unexpected(runtimeError(error));
   }
 }

@@ -207,7 +207,8 @@ TEST(VQLLazyContractFramesTest,
       "+d.after: $after: Cell := fallback() }): Stream<Cell> := "
       "{ return $nested, $after; }; return choose($outer), "
       "./+d.fallback";
-  const auto compiled = h.compile(source, {{"outer", {outer}}});
+  const auto compiled = h.compile(source, {{"outer", {outer}}},
+                                  {.contextCells = {callerContext}});
   ASSERT_TRUE(compiled.success) << compiled.errorMessage;
   EXPECT_TRUE(hasFrameInvocationFor(h, compiled, "choose"));
   EXPECT_GT(opcodeCount(h, compiled, OpcodeKind::ScopedChoice), 0U);

@@ -338,9 +338,10 @@ private:
           gleditor::cpp26::function_ref<
               std::vector<zigzag::CellRef>(zigzag::CellRef)>
               body);
-  std::vector<zigzag::CellRef> compileSteps(std::span<const PathStep> steps,
-                                            std::vector<zigzag::CellRef> stream,
-                                            bool hasContext);
+  std::vector<zigzag::CellRef>
+  compileSteps(std::span<const PathStep> steps,
+               std::vector<zigzag::CellRef> stream, bool hasContext,
+               bool allowEmptyCallFallback = false);
   std::vector<zigzag::CellRef> compileSelector(const PathStep &step,
                                                zigzag::CellRef current,
                                                bool hasContext);

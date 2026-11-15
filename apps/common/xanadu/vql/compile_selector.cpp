@@ -86,7 +86,7 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
       for (CellRef current : stream) {
         const CellRef group = beginMutationGroup("#CREATE_CELL_GROUP");
         std::vector<CellRef> createdCells;
-        CellRef attachPoint = emitExtreme(current, dim, sd.direction);
+        CellRef attachPoint = emitExtreme(current, dim, zigzag::DimVector::POS);
         for (const auto &createVal : sd.creates) {
           std::optional<CellRef> initialValue;
           if (createVal.kind == CreateValue::Kind::Expression && createVal.expr)
@@ -94,8 +94,7 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
           CellRef newOp = emitOp(OpcodeKind::New, "#MINT_CELL");
           emitInput(newOp, attachPoint);
           emitInputConstant(newOp, static_cast<std::int64_t>(dim));
-          emitInputConstant(newOp,
-                            static_cast<std::int64_t>(toSign(sd.direction)));
+          emitInputConstant(newOp, std::int64_t{1});
           emitInputConstant(newOp, true);
 
           // An output-less New mints on each execution. Read the resulting
@@ -103,8 +102,7 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
           const auto read = emitOp(OpcodeKind::Link, "#MINT_RESULT");
           emitInput(read, attachPoint);
           emitInputConstant(read, static_cast<std::int64_t>(dim));
-          emitInputConstant(read,
-                            static_cast<std::int64_t>(toSign(sd.direction)));
+          emitInputConstant(read, std::int64_t{1});
           CellRef freshCell = core_.arena().makeCell();
           emitOutput(read, freshCell);
 
@@ -214,7 +212,8 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         }
       }
     } else if (fn.name == "link" && fn.args.size() >= 2) {
-      if (std::holds_alternative<ScalarLiteral>(fn.args[1].kind)) {
+      if (const auto *lit = std::get_if<ScalarLiteral>(&fn.args[1].kind);
+          lit && !std::holds_alternative<std::string>(lit->value)) {
         throw std::invalid_argument(
             "link target must be a cell identity, not a scalar value");
       }
@@ -304,81 +303,11 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
                                std::to_string(fn.args.size()) + " argument(s)");
       }
     }
-  } else if (std::holds_alternative<PerspectiveStep>(step.selector)) {
-    const auto &persp = std::get<PerspectiveStep>(step.selector);
-    if (!persp.targetStep) {
-      nextStream = {current};
-    } else if (persp.perspective.empty()) {
-      nextStream = compileSelector(*persp.targetStep, current, hasContext);
-    } else {
-      std::string normPersp = persp.perspective;
-      if (normPersp.starts_with('@')) normPersp.erase(0, 1);
-      if (normPersp.ends_with(':')) normPersp.pop_back();
-
-      if (const auto *sd =
-              std::get_if<SignedDimensionStep>(&persp.targetStep->selector)) {
-        PathStep perspStep          = *persp.targetStep;
-        SignedDimensionStep perspSd = *sd;
-        perspSd.dimName             = "@" + normPersp + ":" + sd->dimName;
-        perspStep.selector          = perspSd;
-        auto walked = compileSelector(perspStep, current, hasContext);
-        if (walked.empty()) {
-          nextStream = compileSelector(*persp.targetStep, current, hasContext);
-        } else {
-          const auto present = emitStreamPresence(walked);
-          const auto absent  = core_.arena().makeCell();
-          const auto negate =
-              emitOp(OpcodeKind::Not, "#PERSPECTIVE_FALLBACK_NOT");
-          emitInput(negate, present);
-          emitOutput(negate, absent);
-          const auto end =
-              mintOpcode(OpcodeKind::Nop, "#PERSPECTIVE_FALLBACK_END");
-          const auto branch =
-              emitOp(OpcodeKind::BranchFalseCell, "#PERSPECTIVE_FALLBACK");
-          emitInput(branch, absent);
-          emitInput(branch, end);
-          auto canonical =
-              compileSelector(*persp.targetStep, current, hasContext);
-          emitAppendStream(walked.front(), canonical);
-          appendOpcode(end);
-          nextStream = std::move(walked);
-        }
-      } else {
-        nextStream = compileSelector(*persp.targetStep, current, hasContext);
-      }
-    }
-  } else if (std::holds_alternative<std::shared_ptr<MacroDimensionGroup>>(
-                 step.selector)) {
-    const auto &macro =
-        std::get<std::shared_ptr<MacroDimensionGroup>>(step.selector);
-    if (!macro) throw std::invalid_argument("null macro dimension group");
-    auto walked = compileSteps(macro->steps, {current}, hasContext);
-    if (macro->repetition == Repetition::ZeroOrOne ||
-        macro->repetition == Repetition::ZeroOrMore) {
-      const auto result  = emitStreamClear();
-      const auto present = emitStreamPresence(walked);
-      const auto ifEmpty = mintOpcode(OpcodeKind::Nop, "#MACRO_FALLBACK");
-      const auto end     = mintOpcode(OpcodeKind::Nop, "#MACRO_END");
-
-      const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#MACRO_CHECK");
-      emitInput(branch, present);
-      emitInput(branch, ifEmpty);
-
-      emitAppendStream(result, walked);
-      const auto jump = emitOp(OpcodeKind::BranchFalseCell, "#MACRO_SKIP");
-      emitInputConstant(jump, false);
-      emitInput(jump, end);
-
-      appendOpcode(ifEmpty);
-      emitAppendStream(result, std::span{&current, 1});
-
-      appendOpcode(end);
-      nextStream = {result};
-    } else {
-      nextStream = std::move(walked);
-    }
   } else if (std::holds_alternative<RootSelectorStep>(step.selector) ||
-             std::holds_alternative<GenesisSelector>(step.selector)) {
+             std::holds_alternative<GenesisSelector>(step.selector) ||
+             std::holds_alternative<PerspectiveStep>(step.selector) ||
+             std::holds_alternative<std::shared_ptr<MacroDimensionGroup>>(
+                 step.selector)) {
     nextStream = compileRootSelectorStep(step, current, hasContext);
   } else if (std::holds_alternative<PathMorphism>(step.selector)) {
     nextStream = compilePathMorphismStep(step, current, hasContext);

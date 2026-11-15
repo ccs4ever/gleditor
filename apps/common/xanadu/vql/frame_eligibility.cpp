@@ -955,11 +955,10 @@ private:
                           });
               } else if constexpr (std::same_as<Selector, PathMorphism>) {
                 const bool hasSubject =
-                    !selector.isSproutList &&
-                    (!std::holds_alternative<std::shared_ptr<PathExpression>>(
-                         selector.subject.kind) ||
-                     std::get<std::shared_ptr<PathExpression>>(
-                         selector.subject.kind) != nullptr);
+                    !std::holds_alternative<std::shared_ptr<PathExpression>>(
+                        selector.subject.kind) ||
+                    std::get<std::shared_ptr<PathExpression>>(
+                        selector.subject.kind) != nullptr;
                 if (hasSubject) {
                   value(selector.subject, scope, depth + 1);
                 }
@@ -1044,11 +1043,10 @@ private:
               refuse("document and slice selectors are not frame eligible");
             } else if constexpr (std::same_as<Selector, PathMorphism>) {
               const bool hasSubject =
-                  !selector.isSproutList &&
-                  (!std::holds_alternative<std::shared_ptr<PathExpression>>(
-                       selector.subject.kind) ||
-                   std::get<std::shared_ptr<PathExpression>>(
-                       selector.subject.kind) != nullptr);
+                  !std::holds_alternative<std::shared_ptr<PathExpression>>(
+                      selector.subject.kind) ||
+                  std::get<std::shared_ptr<PathExpression>>(
+                      selector.subject.kind) != nullptr;
               if (hasSubject) {
                 value(selector.subject, scope, depth + 1);
               }

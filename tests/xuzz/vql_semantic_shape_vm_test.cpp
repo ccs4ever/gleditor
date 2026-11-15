@@ -179,10 +179,11 @@ TEST_F(VQLSemanticShapeVmTest, ShapeHeldInAVariableRefusesByName) {
   expectUntouched();
 }
 
-TEST_F(VQLSemanticShapeVmTest, ProjectRefusesByNameWithoutEffects) {
-  const auto message = refusalOf("project($s, {+d.keep})");
-  EXPECT_NE(message.find("project"), std::string::npos) << message;
-  EXPECT_NE(message.find("content spans"), std::string::npos) << message;
+TEST_F(VQLSemanticShapeVmTest, ProjectCopiesTopologyWithoutMutatingSource) {
+  const auto result = engine.execute("project($s, {+d.keep})");
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_NE(result.front(), subject);
+  EXPECT_EQ(arena.textOf(result.front()), "subject");
   expectUntouched();
 }
 

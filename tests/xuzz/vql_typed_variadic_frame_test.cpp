@@ -187,8 +187,7 @@ TEST(VQLTypedVariadicFrameTest,
   const auto ufcsCalls = invokes(h, ufcs, "collect");
   ASSERT_FALSE(ufcsCalls.empty());
   EXPECT_EQ(invokeLabels(h, ufcs, "collect"),
-            (std::unordered_set<std::string>{"#INVOKE_FRAME collect<rest=0>",
-                                             "#INVOKE_FRAME collect<rest=1>"}));
+            (std::unordered_set<std::string>{"#INVOKE_FRAME collect<rest=1>"}));
   const auto ufcsDescriptors =
       descriptorsForLabel(h, ufcs, "collect", "#INVOKE_FRAME collect<rest=1>");
   ASSERT_EQ(ufcsDescriptors.size(), 1U);

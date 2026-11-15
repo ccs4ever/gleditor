@@ -581,8 +581,10 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
           std::holds_alternative<std::string>(parameter.target))
         functor = functorArgument(argument);
     }
+    const auto argumentContext =
+        context.has_value() ? context : ambientContext_;
     values.push_back(functor ? std::vector<CellRef>{}
-                             : compileArgument(argument, context));
+                             : compileArgument(argument, argumentContext));
     functors.push_back(std::move(functor));
   }
   ambientContext_ = context;
@@ -679,9 +681,6 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
         cells = compileArgument(*parameter.defaultValue,
                                 ambientContext_.has_value() ? ambientContext_
                                                             : context);
-      }
-      if (cells.size() == 1 && dynamicStreams_.contains(cells.front())) {
-        cells = {emitFirstCell(cells.front())};
       }
     }
     std::optional<PreparedContractValidator> typePrepared;
@@ -1303,8 +1302,11 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
         (program != key.staticFunctorPrograms.end() &&
          program->formalIndex == actualFormalIndex))
       actuals.emplace_back();
-    else
-      actuals.push_back(compileArgument(argument, context));
+    else {
+      const auto argumentContext =
+          context.has_value() ? context : ambientContext_;
+      actuals.push_back(compileArgument(argument, argumentContext));
+    }
     ++actualFormalIndex;
   }
 

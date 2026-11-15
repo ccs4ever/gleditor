@@ -1,7 +1,6 @@
 // Q10: PathMorphism steps (`$p/+d.comment => [ ... ]`), with or without a
 // perspective qualifier.
 #include "common/xanadu/vql/compiler.hpp"
-#include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace xanadu::vql {
 using zigzag::CellRef;
@@ -20,40 +19,23 @@ std::vector<CellRef> VQLCompiler::compilePathMorphismStep(
                        "lowering yet");
   }
 
-  std::string dimName     = "d.content";
-  auto direction          = zigzag::DimVector::POS;
-  const auto parseDimText = [&](std::string_view raw) {
-    if (raw.starts_with('+')) {
-      direction = zigzag::DimVector::POS;
-      dimName   = std::string(raw.substr(1));
-    } else if (raw.starts_with('-')) {
-      direction = zigzag::DimVector::NEG;
-      dimName   = std::string(raw.substr(1));
-    } else {
-      direction = zigzag::DimVector::POS;
-      dimName   = std::string(raw);
-    }
-  };
-
+  std::string dimName = "d.content";
+  auto direction      = zigzag::DimVector::POS;
   if (const auto *literal =
           std::get_if<ScalarLiteral>(&morphism->subject.kind)) {
     if (const auto *dimension = std::get_if<std::string>(&literal->value)) {
-      parseDimText(*dimension);
+      if (dimension->starts_with('+')) {
+        dimName = dimension->substr(1);
+      } else if (dimension->starts_with('-')) {
+        dimName   = dimension->substr(1);
+        direction = zigzag::DimVector::NEG;
+      } else {
+        dimName = *dimension;
+      }
     } else {
       throw QueryRefusal(QueryErrorCategory::Unsupported,
                          "VQL dimension morphism requires a dimension subject");
     }
-  } else if (const auto *dimension =
-                 std::get_if<std::string>(&morphism->subject.kind)) {
-    parseDimText(*dimension);
-  } else if (const auto *p = std::get_if<std::shared_ptr<PathExpression>>(
-                 &morphism->subject.kind);
-             p && *p && !(*p)->steps.empty() &&
-             std::holds_alternative<SignedDimensionStep>(
-                 (*p)->steps[0].selector)) {
-    const auto &sd = std::get<SignedDimensionStep>((*p)->steps[0].selector);
-    dimName        = sd.dimName;
-    direction      = sd.direction;
   } else if (!std::holds_alternative<std::shared_ptr<PathExpression>>(
                  morphism->subject.kind) ||
              std::get<std::shared_ptr<PathExpression>>(

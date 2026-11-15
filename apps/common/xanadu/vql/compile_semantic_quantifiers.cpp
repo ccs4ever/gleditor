@@ -307,7 +307,9 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
       } else if (const auto *shape =
                      std::get_if<std::shared_ptr<ShapeLiteral>>(&predArg.kind);
                  shape && *shape) {
-        matchCell = compileShapePredicate(**shape, item);
+        matchCell = (**shape).rules.empty()
+                        ? emitConstant(true)
+                        : compileShapePredicate(**shape, item);
       } else {
         const auto results = compileArgument(predArg, item);
         if (results.empty()) {

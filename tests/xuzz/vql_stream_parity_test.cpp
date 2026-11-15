@@ -78,13 +78,16 @@ TEST(VQLStreamParityTest, EmptyRankCallsAndReturnFailuresMatch) {
         executor.execute("def f($x: Cell): Cell := $x; ##/d.absent/f()");
     ASSERT_TRUE(empty) << empty.error().message;
     EXPECT_TRUE(empty->empty());
-    const auto contextFree =
+    const auto emptyWalkZeroArg =
         executor.execute("def f(): Int := 42; ##/d.absent/f()");
+    ASSERT_TRUE(emptyWalkZeroArg) << emptyWalkZeroArg.error().message;
+    EXPECT_TRUE(emptyWalkZeroArg->empty());
+    const auto contextFree = executor.execute("def f(): Int := 42; f()");
     ASSERT_TRUE(contextFree) << contextFree.error().message;
     ASSERT_EQ(contextFree->size(), 1u);
     EXPECT_EQ(h.arena.asInt64(contextFree->front()), 42);
-    const auto fallbackStream = executor.execute(
-        "def all(): Stream<Cell> := ##/d.items; ##/d.absent/all()");
+    const auto fallbackStream =
+        executor.execute("def all(): Stream<Cell> := ##/d.items; all()");
     ASSERT_TRUE(fallbackStream) << fallbackStream.error().message;
     EXPECT_EQ(*fallbackStream, (std::vector<CellRef>{h.first, h.bad, h.last}));
     const auto broken = executor.execute(
@@ -259,9 +262,14 @@ TEST(VQLStreamParityTest, DecoratedFunctorsApplyModifiersAfterCapturedPath) {
       ASSERT_TRUE(result) << result.error().message;
       EXPECT_EQ(*result, expected);
     }
-    const auto emptyConstant =
+    const auto emptyWalkConstant =
         executor.execute("def answer(): Int := 42; let $f := /answer(); let $g "
                          ":= /$f[. = 42]; ##/d.absent/$g");
+    ASSERT_TRUE(emptyWalkConstant) << emptyWalkConstant.error().message;
+    EXPECT_TRUE(emptyWalkConstant->empty());
+    const auto emptyConstant =
+        executor.execute("def answer(): Int := 42; let $f := /answer(); let $g "
+                         ":= /$f[. = 42]; ##/$g");
     ASSERT_TRUE(emptyConstant) << emptyConstant.error().message;
     ASSERT_EQ(emptyConstant->size(), 1u);
     EXPECT_EQ(h.arena.asInt64(emptyConstant->front()), 42);

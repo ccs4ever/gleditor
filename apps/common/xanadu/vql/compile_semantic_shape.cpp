@@ -417,10 +417,12 @@ VQLCompiler::compileSemanticShapeCall(const FunctionInvocation &fn,
 
   const auto masked = applyShapeProjection(subjects, maskShape);
 
+  const CellRef firstSubject =
+      assignments.empty() ? zigzag::noCell : emitFirstCell(subjects.front());
   for (std::size_t index = 0; index < assignments.size(); ++index) {
     const auto &[edge, rule] = assignments[index];
     const CellRef link       = emitOp(OpcodeKind::Link, "#APPLY_SHAPE_ASSIGN");
-    emitInput(link, subjects.front());
+    emitInput(link, firstSubject);
     emitInputConstant(
         link, static_cast<std::int64_t>(resolveDimension(rule->dimName)));
     emitInputConstant(link, static_cast<std::int64_t>(toSign(edge.second)));

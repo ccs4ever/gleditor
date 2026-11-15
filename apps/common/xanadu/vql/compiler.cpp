@@ -736,10 +736,15 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
   }
   if (path.anchorProjection)
     stream = applyShapeProjection(stream, *path.anchorProjection);
+  const bool allowEmptyCallFallback =
+      path.anchor.kind == AnchorKind::Context && !path.isFunctor &&
+      path.anchorPredicates.empty() && !path.anchor.derefMaster &&
+      !path.anchorProjection.has_value();
   stream =
       compileSteps(path.steps, std::move(stream),
                    path.anchor.kind != AnchorKind::Context ||
-                       ambientContext_.has_value() || !contextInputs_.empty());
+                       ambientContext_.has_value() || !contextInputs_.empty(),
+                   allowEmptyCallFallback);
 
   if (path.shapeProjection) {
     stream = applyShapeProjection(stream, *path.shapeProjection);
@@ -898,9 +903,7 @@ std::optional<CellRef> VQLCompiler::compileAnchor(const AnchorNode &anchor) {
       throw std::invalid_argument("literal cell anchor is invalid");
     }
     res = static_cast<CellRef>(anchor.cellId);
-    if (!core_.arena().contains(res)) {
-      throw std::invalid_argument("literal cell anchor is not in arena");
-    }
+    if (!core_.arena().contains(res)) return std::nullopt;
     break;
   case AnchorKind::Context:
     res = core_.home();
