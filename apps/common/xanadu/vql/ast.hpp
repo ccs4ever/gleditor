@@ -82,6 +82,7 @@ struct EffectClause;
 struct ShapeLiteral;
 struct VersionExpr;
 struct PathLambda;
+struct RuntimeClosureInvocation;
 struct BinaryValueExpr;
 struct Statement;
 struct ScriptBody;
@@ -120,6 +121,7 @@ struct BooleanExpr;
 struct ValueExpr {
   std::variant<std::shared_ptr<PathExpression>, ScalarLiteral,
                std::string /*VariableRef*/, std::shared_ptr<FunctionInvocation>,
+               std::shared_ptr<RuntimeClosureInvocation>,
                std::shared_ptr<ShapeLiteral>, std::shared_ptr<VersionExpr>,
                std::shared_ptr<PathLambda>, std::shared_ptr<BooleanExpr>,
                std::shared_ptr<BinaryValueExpr>>
@@ -136,6 +138,14 @@ struct FunctionInvocation {
   std::vector<ValueExpr> args;
   std::vector<std::string> argNames;
   bool isSliceRead{false};
+};
+
+/// A call through a first-class runtime closure value. The callee is an
+/// ordinary expression so bounded walkers can validate it before lowering.
+struct RuntimeClosureInvocation {
+  ValueExpr callee;
+  std::vector<ValueExpr> args;
+  std::vector<std::string> argNames;
 };
 
 // -- First-Class Shapes -------------------------------------------------------
@@ -308,7 +318,8 @@ using StepSelector =
                  FunctionInvocation, GenesisSelector, SliceSelectorStep,
                  DocSelectorStep, PathMorphism, DimensionPivotStep,
                  VirtualDimensionStep, RootSelectorStep, PerspectiveStep,
-                 std::shared_ptr<PathLambda>>;
+                 std::shared_ptr<PathLambda>,
+                 std::shared_ptr<RuntimeClosureInvocation>>;
 
 struct PathStep {
   StepSelector selector;

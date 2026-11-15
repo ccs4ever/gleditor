@@ -174,6 +174,26 @@ private:
                            const std::size_t childDepth) {
                       invocation(call, childDepth);
                     });
+          } else if constexpr (std::same_as<
+                                   Part,
+                                   std::shared_ptr<RuntimeClosureInvocation>>) {
+            pointer(part, depth + 1, "runtime closure call",
+                    [this](const RuntimeClosureInvocation &call,
+                           const std::size_t childDepth) {
+                      tick(childDepth);
+                      const bool malformedNames =
+                          call.argNames.size() != call.args.size();
+                      value(call.callee, childDepth + 1);
+                      number(call.args.size());
+                      number(call.argNames.size());
+                      for (const auto &name : call.argNames) string(name);
+                      for (const auto &argument : call.args)
+                        value(argument, childDepth + 1);
+                      if (malformedNames)
+                        throw ProgramFailure(
+                            "runtime closure argument-name count is invalid");
+                      throw UnsupportedProgram{};
+                    });
           } else if constexpr (std::same_as<Part,
                                             std::shared_ptr<BooleanExpr>>) {
             token('B');
@@ -421,6 +441,26 @@ private:
                    std::get_if<FunctionInvocation>(&step.selector)) {
       token('f');
       invocation(*call, depth + 1);
+    } else if (const auto *call =
+                   std::get_if<std::shared_ptr<RuntimeClosureInvocation>>(
+                       &step.selector)) {
+      pointer(*call, depth + 1, "runtime closure path call",
+              [this](const RuntimeClosureInvocation &invocation,
+                     const std::size_t childDepth) {
+                tick(childDepth);
+                const bool malformedNames =
+                    invocation.argNames.size() != invocation.args.size();
+                value(invocation.callee, childDepth + 1);
+                number(invocation.args.size());
+                number(invocation.argNames.size());
+                for (const auto &name : invocation.argNames) string(name);
+                for (const auto &argument : invocation.args)
+                  value(argument, childDepth + 1);
+                if (malformedNames)
+                  throw ProgramFailure(
+                      "runtime closure argument-name count is invalid");
+                throw UnsupportedProgram{};
+              });
     } else if (const auto *group =
                    std::get_if<std::shared_ptr<MacroDimensionGroup>>(
                        &step.selector)) {

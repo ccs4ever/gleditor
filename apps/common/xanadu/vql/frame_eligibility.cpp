@@ -544,6 +544,15 @@ private:
                         const std::size_t childDepth) {
                       invocation(call, scope, childDepth);
                     });
+          } else if constexpr (std::same_as<
+                                   Part,
+                                   std::shared_ptr<RuntimeClosureInvocation>>) {
+            readOnlyCandidate_ = false;
+            pointer(part, depth + 1,
+                    [&](const RuntimeClosureInvocation &call,
+                        const std::size_t childDepth) {
+                      runtimeClosureInvocation(call, scope, childDepth);
+                    });
           } else if constexpr (std::same_as<Part,
                                             std::shared_ptr<ShapeLiteral>>) {
             pointer(
@@ -703,6 +712,35 @@ private:
                             ordinaryPathPosition && !literalPosition);
     }
     callSites_.push_back(std::move(callSite));
+  }
+
+  void runtimeClosureInvocation(const RuntimeClosureInvocation &call,
+                                const Scope &scope, const std::size_t depth) {
+    tick(depth);
+    readOnlyCandidate_ = false;
+    if (staticFunctorProgramMode_)
+      refuse("runtime closure calls are not static functor programs");
+    const bool malformedNames = call.argNames.size() != call.args.size();
+    value(call.callee, scope, depth + 1);
+    for (std::size_t index = 0; index < call.args.size(); ++index) {
+      tick(depth + 1);
+      budget_.chargeWork(1);
+      if (index < call.argNames.size())
+        budget_.charge(call.argNames[index].size());
+      value(call.args[index], scope, depth + 2);
+    }
+    for (std::size_t index = call.args.size(); index < call.argNames.size();
+         ++index) {
+      budget_.chargeWork(1);
+      budget_.charge(call.argNames[index].size());
+    }
+    if (malformedNames)
+      throw ScanFailure(
+          "runtime closure invocation argument-name count is inconsistent");
+    if (std::ranges::any_of(call.argNames, [](const std::string &name) {
+          return !name.empty();
+        }))
+      refuse("named runtime closure arguments are not supported");
   }
 
   void versionExpr(const VersionExpr &expr, const Scope &scope,
@@ -897,6 +935,16 @@ private:
                         });
               } else if constexpr (std::same_as<Selector, FunctionInvocation>) {
                 invocation(selector, scope, depth + 1, true);
+              } else if constexpr (std::same_as<
+                                       Selector,
+                                       std::shared_ptr<
+                                           RuntimeClosureInvocation>>) {
+                readOnlyCandidate_ = false;
+                pointer(selector, depth + 1,
+                        [&](const RuntimeClosureInvocation &call,
+                            const std::size_t childDepth) {
+                          runtimeClosureInvocation(call, scope, childDepth);
+                        });
               } else if constexpr (std::same_as<Selector, SliceSelectorStep> ||
                                    std::same_as<Selector, DocSelectorStep>) {
                 if (selector.predicateFilter)
@@ -971,6 +1019,15 @@ private:
                       });
             } else if constexpr (std::same_as<Selector, FunctionInvocation>) {
               invocation(selector, scope, depth + 1, true);
+            } else if constexpr (std::same_as<Selector,
+                                              std::shared_ptr<
+                                                  RuntimeClosureInvocation>>) {
+              readOnlyCandidate_ = false;
+              pointer(selector, depth + 1,
+                      [&](const RuntimeClosureInvocation &call,
+                          const std::size_t childDepth) {
+                        runtimeClosureInvocation(call, scope, childDepth);
+                      });
             } else if constexpr (std::same_as<Selector, GenesisSelector> ||
                                  std::same_as<Selector, DimensionPivotStep> ||
                                  std::same_as<Selector, RootSelectorStep>) {
@@ -1331,9 +1388,6 @@ private:
 
   void pathLambda(const PathLambda &lambda, const Scope &outer,
                   const std::size_t depth, const bool valueLambdaBody = false) {
-    if (lambda.params.size() > 1)
-      refuse("path lambdas with multiple parameters are not frame eligible");
-
     std::vector<std::string> shadowedByLambda;
     Scope scope = outer;
     scope.insert(".");
@@ -1343,6 +1397,10 @@ private:
       const std::size_t childDepth = depth + 1;
       const Scope prematchScope    = scope;
       if (param.defaultValue) {
+        if (const auto *path = std::get_if<std::shared_ptr<PathExpression>>(
+                &param.defaultValue->kind);
+            path && *path && (*path)->isFunctor)
+          refuse("value-lambda defaults cannot capture static path functors");
         const bool prior          = scanningParameterDefault_;
         scanningParameterDefault_ = true;
         pointer(param.defaultValue, childDepth,

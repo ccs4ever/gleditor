@@ -18,6 +18,12 @@ The regression files `vql_quantifiers_vm_regression_test.cpp`,
 `vql_root_selectors_vm_regression_test.cpp` and `vql_path_morphism_vm_regression_test.cpp` exercise
 these boundaries, including AST-free export/reload and host/mesh source routes for morphisms.
 
+Explicit `$f(a, b)` calls and fixed-formal lambda defaults also execute as native closure frames.
+The closure-call parser/default tests exercise lazy omission, supplied empty streams, lexical and
+explicit-dot scope, preflight before argument effects, return failure cleanup, graph reload, host
+and Vquery SOURCE mesh execution. Real CLI and separate REPL queries cover exact integers and
+retained capture membership. Variadic value lambdas and named closure arguments remain unsupported.
+
 ## Historical engine matrix
 
 The matrix and restricted-compiler discussion below record the earlier compiler cutoff and the

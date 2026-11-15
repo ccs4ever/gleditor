@@ -6,10 +6,10 @@ bindings and typed structural closure bodies. Earlier bounded milestones are rec
 native frames, lazy contract defaults or supported mutation groups were wholly unimplemented.
 
 The audit groups the remaining acceptance work into nine packages, with C1 completed in iteration 52
-and C2 partly implemented in iteration 53. These package identifiers are acceptance gates, not
-reserved iteration numbers. At the owner's request, subsequent iterations group related
-implementation and route work into larger deliverables. The earlier eight to eleven iteration
-estimate is superseded by that grouping; it is not a completion promise.
+and C2 extended beyond iteration 53 by explicit calls and lazy fixed-formal defaults. These package
+identifiers are acceptance gates, not reserved iteration numbers. At the owner's request, subsequent
+iterations group related implementation and route work into larger deliverables. The earlier eight
+to eleven iteration estimate is superseded by that grouping; it is not a completion promise.
 
 Iteration 52 implements C1 as an end-to-end deliverable: graph-resident runtime binding snapshots
 and native initialization, portable bound closure application after reload, and successful query
@@ -36,10 +36,16 @@ engine gate has 38 existing failures and no new failures against its pre-stage b
 a full-suite pass. C2, C4, C6 and the final C8/C9 acceptance work remain open. The broader C7
 boundary audit must remain tied to that final route matrix.
 
+The [explicit closure calls/defaults package](vql-closure-calls-defaults-plan.md) extends C2 with
+multiple fixed formals, lazy whole-formal defaults and positional runtime calls. Its 143 focused
+tests passed; the full engine run retains exactly the 38 baseline failures, with no new failing
+names. Native export/reload, host, source mesh, CLI and persistent REPL routes passed. C2 remains
+open for variadic value lambdas, named closure actuals and static AST-functor defaults.
+
 | Package | Remaining work                                                                                                                                                                                     | Acceptance evidence                                                                                                                                                                                                                                                                               |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | C1      | Implemented in iteration 52: runtime closure bindings, native initialization and successful session publication.                                                                                   | A closure created inside a native frame is returned, stored and applied after cursor inactivity and fresh-VM reload; absent/open and bound-empty remain distinct; metadata refusals write no Store operations. The real REPL retains values across queries.                                       |
-| C2      | Iteration 53 adds zero/unary typed/dot/destructured formals, compatible blocks and nested creation; whole-formal defaults and broader callable forms remain.                                       | Types, defaults, dot/context, destructuring and nested creation preserve pre-match scope, shadowing, filtering, return promises, capture lifetime and rollback. Unsupported forms refuse until their slice lands.                                                                                 |
+| C2      | Explicit calls, multiple fixed typed/dot/destructured formals, lazy whole-formal defaults and nested creation are implemented; variadics and named closure arguments remain.                       | Types, defaults, dot/context, destructuring and nested creation preserve pre-match scope, shadowing, filtering, return promises, capture lifetime and rollback. Unsupported forms refuse until their slice lands.                                                                                 |
 | C3      | Iteration 54 implements runtime handle application and recursive forwarding in reusable bodies; decorated static callable boundaries remain in C4.                                                 | Direct, forwarded and mutually recursive applications preserve capture timing, argument grouping, explicit empty values and result identity/order. Existing static variants retain their semantics.                                                                                               |
 | C4      | Iteration 55 adds computed scalar/Boolean predicates, existing literal/nested shapes and frozen static bodies; non-closed defaults, computed shape targets and historical/projection forms remain. | Captured/computed predicates, shapes and deferred pins/yield forms preserve body-then-decoration ordering, full reference widths and portable graphs. Limits and malformed inputs refuse explicitly.                                                                                              |
 | C5      | Iteration 54 implements final named rest defaults, context and destructuring; value-lambda variadics remain in C2.                                                                                 | Defaults, dot and destructuring preserve omission versus explicit empty, each actual's contract before concatenation, duplicates/order, forwarding and native recursion.                                                                                                                          |

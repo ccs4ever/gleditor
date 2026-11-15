@@ -271,6 +271,11 @@ bool VQLEngine::satisfiesType(const TypeExpr &type,
 std::vector<zigzag::CellRef>
 VQLEngine::cellsOfValueExpr(const ValueExpr &expr,
                             const std::optional<zigzag::CellRef> context) {
+  if (std::holds_alternative<std::shared_ptr<RuntimeClosureInvocation>>(
+          expr.kind))
+    throw QueryRefusal(
+        QueryErrorCategory::Unsupported,
+        "runtime closure calls require Vortex VM graph lowering");
   if (const auto *version =
           std::get_if<std::shared_ptr<VersionExpr>>(&expr.kind)) {
     const auto resolved = evaluateVersionExpr(**version, context);
@@ -1412,6 +1417,11 @@ std::optional<zigzag::vortex::CellValue>
 VQLEngine::evaluateValueExpr(const ValueExpr &expr,
                              std::optional<zigzag::CellRef> context) {
   this->arena().consumeWork();
+  if (std::holds_alternative<std::shared_ptr<RuntimeClosureInvocation>>(
+          expr.kind))
+    throw QueryRefusal(
+        QueryErrorCategory::Unsupported,
+        "runtime closure calls require Vortex VM graph lowering");
   if (std::holds_alternative<ScalarLiteral>(expr.kind)) {
     const auto &lit = std::get<ScalarLiteral>(expr.kind);
     if (std::holds_alternative<std::string>(lit.value)) {

@@ -254,12 +254,9 @@ TEST(VQLClosureValueFramesTest, CapturedNumericKindsAndExactBitsStayDistinct) {
   EXPECT_EQ(h.arena.asInt64(integer), std::optional{INT64_C(9007199254740993)});
 }
 
-TEST(VQLClosureValueFramesTest,
-     UnsupportedSignaturesAndLimitsRollbackAndRetry) {
+TEST(VQLClosureValueFramesTest, UnsupportedVariadicsAndLimitsRollbackAndRetry) {
   for (const auto source :
-       {R"(let $f := \($x := 0) $x; return $f)",
-        R"(let $f := \($x, $y) $x; return $f)",
-        R"(let $f := \(...$xs) $xs; return $f)",
+       {R"(let $f := \(...$xs) $xs; return $f)",
         R"(let $f := \($x) %"fresh"; return $f)",
         R"(let $route := /+d.next; let $f := \($x) $route; return $f)"}) {
     Harness h;

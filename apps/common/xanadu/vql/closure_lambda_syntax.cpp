@@ -12,18 +12,20 @@ analyzeClosureLambdaSyntax(const PathLambda &lambda,
   auto scope = analyzeFrameClosureScope(lambda, limits);
   if (!scope)
     return std::unexpected(FrameEligibilityError{scope.error().message});
-  if (scope->refusalReason || lambda.params.size() > 1)
-    return std::optional<ClosureLambdaSyntax>{};
+  if (scope->refusalReason) return std::optional<ClosureLambdaSyntax>{};
 
   ClosureLambdaSyntax result;
-  result.hasFormal = !lambda.params.empty();
-  if (result.hasFormal) {
-    const auto &formal = lambda.params.front();
-    if (formal.defaultValue || formal.isVariadic)
-      return std::optional<ClosureLambdaSyntax>{};
-    if (const auto *name = std::get_if<std::string>(&formal.target)) {
-      if (name->empty()) return std::optional<ClosureLambdaSyntax>{};
-      result.parameterName = *name;
+  result.formalCount = lambda.params.size();
+  result.hasFormal   = !lambda.params.empty();
+  for (std::size_t index = 0; index < lambda.params.size(); ++index) {
+    const auto &formal = lambda.params[index];
+    if (formal.isVariadic) return std::optional<ClosureLambdaSyntax>{};
+    if (formal.defaultValue) result.defaultParameterIndices.push_back(index);
+    if (index == 0) {
+      if (const auto *name = std::get_if<std::string>(&formal.target)) {
+        if (name->empty()) return std::optional<ClosureLambdaSyntax>{};
+        result.parameterName = *name;
+      }
     }
   }
 

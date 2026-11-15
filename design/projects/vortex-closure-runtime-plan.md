@@ -35,7 +35,11 @@ Descriptor and value roots use a shared runtime-object probe and a structural cl
 root owns a unique positive claim endpoint containing its kind/version. Sharing that endpoint would
 rewire the reciprocal ZigZag link, so factories must create one per root. The claim endpoint's
 negative backlink does not make it an object root. The version tags are
-`VORTEX_CLOSURE_DESCRIPTOR/1` and `VORTEX_CLOSURE_VALUE/1`.
+`VORTEX_CLOSURE_DESCRIPTOR/2` and `VORTEX_CLOSURE_VALUE/1`. The descriptor version now records
+formal bounds, hidden-context and presence mappings, and two canonical typed Bool cells. The
+previous descriptor reader is removed. See
+[explicit calls and defaults](vql-closure-calls-defaults-plan.md) for the current Apply operand
+convention and preflight operation; the stage-50 account above describes the original foundation.
 
 The generic marker lives below Vortex. The core resolves the claim dimension once and supplies its
 `DimRef` to the shared scalar reader; runtime reads must not use unbounded name lookup. Only an

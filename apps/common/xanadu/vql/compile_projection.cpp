@@ -117,6 +117,9 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
         }
         return;
       }
+      if (std::holds_alternative<std::shared_ptr<RuntimeClosureInvocation>>(
+              expression.kind))
+        rejectTarget();
       if (const auto *path =
               std::get_if<std::shared_ptr<PathExpression>>(&expression.kind)) {
         if (!*path || !isSimpleProjectionPath(**path)) rejectTarget();

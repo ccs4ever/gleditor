@@ -5,6 +5,7 @@
 #ifndef COMMON_XANADU_VQL_CLOSURE_LAMBDA_SYNTAX_HPP
 #define COMMON_XANADU_VQL_CLOSURE_LAMBDA_SYNTAX_HPP
 
+#include <cstddef>
 #include <expected>
 #include <optional>
 #include <string>
@@ -15,8 +16,12 @@
 namespace xanadu::vql {
 
 struct ClosureLambdaSyntax {
+  std::size_t formalCount{0};
+  /// Formal indices whose values are supplied lazily by native frame code.
+  std::vector<std::size_t> defaultParameterIndices;
+  /// Legacy first-formal summary retained for existing compiler clients.
   bool hasFormal{false};
-  /// Nonempty only when the one formal is a named alias.
+  /// Nonempty only when the first formal is a named alias.
   std::string parameterName;
   /// Lexical aliases read by the body, in stable sorted order.
   std::vector<std::string> freeCaptureNames;
@@ -26,10 +31,10 @@ struct ClosureLambdaSyntax {
   std::vector<ClosureCallSite> callSites;
 };
 
-/// Recognize a bounded zero- or one-formal closure value. Formal-level
-/// defaults and variadics are not supported. Structural contracts and body
-/// traversal use the shared frame scope walker. Unsupported syntax returns an
-/// empty optional; malformed ASTs and exhausted limits are hard errors.
+/// Recognize a bounded fixed-formal closure value. Variadics remain
+/// unsupported. Structural contracts and body traversal use the shared frame
+/// scope walker. Unsupported syntax returns an empty optional; malformed ASTs
+/// and exhausted limits are hard errors.
 [[nodiscard]] std::expected<std::optional<ClosureLambdaSyntax>,
                             FrameEligibilityError>
 analyzeClosureLambdaSyntax(const PathLambda &lambda,

@@ -464,6 +464,10 @@ private:
               const std::vector<ValueExpr> &arguments,
               std::optional<zigzag::CellRef> context, bool ufcs,
               bool entersActiveCallStack = true);
+  std::vector<zigzag::CellRef>
+  compileClosureInvocation(const RuntimeClosureInvocation &invocation,
+                           std::optional<zigzag::CellRef> context,
+                           zigzag::vortex::ClosureCallMode mode);
   std::vector<zigzag::CellRef> compileReusableFrameCall(
       const DefDeclaration &definition, const std::vector<ValueExpr> &arguments,
       std::optional<zigzag::CellRef> context, bool ufcs,
@@ -586,6 +590,8 @@ private:
   zigzag::CellRef emitStreamPresence(std::span<const zigzag::CellRef> inputs);
   std::optional<zigzag::CellRef> compileBooleanExpr(const BooleanExpr &expr,
                                                     zigzag::CellRef ctxCell);
+  std::optional<zigzag::CellRef>
+  compileCandidatePredicate(const BooleanExpr &expr, zigzag::CellRef candidate);
   std::optional<zigzag::CellRef> compileValueExpr(const ValueExpr &expr,
                                                   zigzag::CellRef ctxCell);
   zigzag::CellRef compileClosureLambda(const PathLambda &lambda);

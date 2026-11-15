@@ -308,12 +308,11 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // asInt64 ≤ Find sweep of the band would register dimConstant
     // operand cells and every other small-int data cell too.
     const auto kind = core_.arena().asInt64(opCell);
-    // The bound is the enum's last ordinal — PinHistorical while the
-    // append-last tail is RelationNext..PinHistorical; a new kind landing past
-    // it must move this ceiling the way linkedCeiling's does (meta.cpp).
+    // The bound is the enum's last ordinal; append-only opcodes move this
+    // ceiling with the generated-vocabulary bound in meta.cpp.
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::PinHistorical)) {
+            static_cast<std::uint64_t>(OpcodeKind::CheckClosureCall)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -568,7 +567,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::PinHistorical)) {
+          static_cast<std::uint64_t>(OpcodeKind::CheckClosureCall)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -1630,6 +1629,7 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
     const auto kind = getOpcodeKind(*preflightOp).value_or(OpcodeKind::Nop);
     if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
         kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
+        kind == OpcodeKind::CheckClosureCall ||
         kind == OpcodeKind::RestoreBindings)
       throw std::invalid_argument(
           "frame and closure opcodes cannot run in parameter pipelines");
@@ -1704,6 +1704,7 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
           "pipeline");
     if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
         kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
+        kind == OpcodeKind::CheckClosureCall ||
         kind == OpcodeKind::RestoreBindings)
       throw std::invalid_argument(
           "frame and closure opcodes cannot run in parameter pipelines");
@@ -1862,6 +1863,7 @@ bool VortexVM::evaluateCondition(CellRef clause,
     throw std::invalid_argument(
         "activation-frame opcodes cannot run as conditions");
   if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
+      kind == OpcodeKind::CheckClosureCall ||
       kind == OpcodeKind::RestoreBindings)
     throw std::invalid_argument("closure opcodes cannot run as conditions");
   if (kind == OpcodeKind::PushGuard || kind == OpcodeKind::PopGuard ||
@@ -2521,6 +2523,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return {.success      = false,
             .errorMessage = "activation-frame opcodes require a VM cursor"};
   if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
+      kind == OpcodeKind::CheckClosureCall ||
       kind == OpcodeKind::RestoreBindings)
     return {.success      = false,
             .errorMessage = "closure opcodes require a VM cursor"};
@@ -2575,6 +2578,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeVqlMaskLinks(opcode, outputs);
   case OpcodeKind::CreateClosure:
   case OpcodeKind::ApplyClosure:
+  case OpcodeKind::CheckClosureCall:
   case OpcodeKind::RestoreBindings:
     return {.success       = false,
             .failingClause = opcode,
@@ -4018,7 +4022,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
     }
   }
 
-  if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure) {
+  if (kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
+      kind == OpcodeKind::CheckClosureCall) {
     ++totalCycles_;
     try {
       core_.arena().consumeWork();
@@ -4264,6 +4269,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       const auto conditionKind = getOpcodeKind(actual);
       return conditionKind == OpcodeKind::CreateClosure ||
              conditionKind == OpcodeKind::ApplyClosure ||
+             conditionKind == OpcodeKind::CheckClosureCall ||
              conditionKind == OpcodeKind::RestoreBindings;
     });
   };

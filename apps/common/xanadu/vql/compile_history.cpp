@@ -321,7 +321,7 @@ std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
       const auto result = core_.arena().makeCell();
       const auto clear  = emitOp(OpcodeKind::ClearCellRefs, "#FILTER_CLEAR");
       emitOutput(clear, result);
-      auto condition = compileBooleanExpr(predicate, candidate);
+      auto condition = compileCandidatePredicate(predicate, candidate);
       if (!condition) condition = emitConstant(false);
       const auto end    = mintOpcode(OpcodeKind::Nop, "#FILTER_END");
       const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#FILTER_BRANCH");

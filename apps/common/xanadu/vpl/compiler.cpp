@@ -353,6 +353,8 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "SAMECELL";
   case OpcodeKind::PinHistorical:
     return "PINHISTORICAL";
+  case OpcodeKind::CheckClosureCall:
+    return "CHECK_CLOSURE_CALL";
   default:
     return "UNKNOWN";
   }

@@ -162,19 +162,19 @@ enum class OpcodeKind : std::uint8_t {
   // parameter name on the cursor's +d.vars, pushes the frame, and
   // jumps. A non-head operand, a missing descriptor, or an arity
   // mismatch lands on the bound failure target — `run`'s §6.2
-  // refusals, not a halt. Appended last for the persisted-kind reason.
+  // refusals, not a halt. Appended to preserve persisted opcode ordinals.
   RunCall,
 
   // RunCall's frame successor: reads the run's descriptor produced /
   // result cells — produced writes result into the bound output and
-  // spins on; unproduced lands on the failure target. Appended last
-  // for the same persisted-kind reason.
+  // spins on; unproduced lands on the failure target. Appended to preserve
+  // persisted opcode ordinals.
   RunResume,
 
   // Read-only accessor over a registered relation provider: given a relation
   // key, a position, a scan bound and the goal's argument cells, returns the
-  // first matching tuple at or after the position. Appended last for the
-  // persisted-kind reason; it holds no resolution logic.
+  // first matching tuple at or after the position. Appended to preserve
+  // persisted opcode ordinals; it holds no resolution logic.
   RelationNext,
 
   // (name, mintFlag) -> the dimension's number as an Int64, or noCell in the
@@ -184,17 +184,21 @@ enum class OpcodeKind : std::uint8_t {
   // No inputs; one Int64 output, the arena's operation high-water mark.
   Hypertime,
 
-  // Numeric power for any exponent. Appended last: the enum's tail, which the
-  // decode bounds and the vagent ceiling track.
+  // Numeric power for any exponent. Its ordinal is part of the serialized
+  // opcode vocabulary and remains covered by the decode bounds.
   Pow,
 
   // Cell identity: two cell inputs, one Bool output, true iff both resolve to
-  // the same cell. Appended last for the persisted-kind reason.
+  // the same cell. Appended to preserve persisted opcode ordinals.
   SameCell,
 
   // Map run-time cell to its historical counterpart in an attached historical
   // space fold.
   PinHistorical,
+
+  // Validate a dynamic closure and its arity before argument graphs run.
+  // Appended to preserve persisted opcode-kind integers.
+  CheckClosureCall,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.
@@ -281,7 +285,17 @@ struct FrameLimits {
   std::size_t maxBackingCells{1'048'576};
 };
 
-enum class ClosureInputSource : std::uint8_t { Capture, Applied };
+/// How ApplyClosure obtains positional actuals independently of context.
+enum class ClosureCallMode : std::uint8_t { Explicit, Contextual };
+
+/// Descriptor mapping from the invocation inputs to native frame ports.
+/// Capture and Applied keep their original wire ordinals.
+enum class ClosureInputSource : std::uint8_t {
+  Capture,
+  Applied,
+  Context,
+  AppliedPresence
+};
 
 struct ClosureFrameInput {
   ClosureInputSource source{ClosureInputSource::Capture};
@@ -291,7 +305,10 @@ struct ClosureFrameInput {
 struct ClosureDescriptorSpec {
   std::optional<CellRef> frameDescriptor;
   std::size_t captureStreamCount{};
-  std::size_t appliedStreamCount{};
+  /// Generic descriptors default to exact arity; VQL may set zero so its
+  /// ordinary empty-stream parameter filters handle omitted formals.
+  std::optional<std::size_t> minFormalCount;
+  std::size_t maxFormalCount{};
   std::vector<ClosureFrameInput> frameInputs;
 };
 
@@ -302,7 +319,10 @@ struct ClosureDescriptorError {
 struct ParsedClosureDescriptor {
   std::optional<CellRef> frameDescriptor;
   std::size_t captureStreamCount{};
-  std::size_t appliedStreamCount{};
+  std::size_t minFormalCount{};
+  std::size_t maxFormalCount{};
+  std::optional<CellRef> presenceTrue;
+  std::optional<CellRef> presenceFalse;
   std::vector<ClosureFrameInput> frameInputs;
   std::vector<std::pair<CellRef, CellRef>> referenceCells;
 };

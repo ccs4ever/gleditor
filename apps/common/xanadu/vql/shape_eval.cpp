@@ -93,6 +93,11 @@ VQLEngine::expandShape(const ShapeLiteral &shape,
 std::optional<ShapeLiteral>
 VQLEngine::shapeValue(const ValueExpr &expr,
                       const std::optional<zigzag::CellRef> context) {
+  if (std::holds_alternative<std::shared_ptr<RuntimeClosureInvocation>>(
+          expr.kind))
+    throw QueryRefusal(
+        QueryErrorCategory::Unsupported,
+        "runtime closure calls cannot be evaluated by the shape interpreter");
   if (const auto *literal =
           std::get_if<std::shared_ptr<ShapeLiteral>>(&expr.kind)) {
     return *literal ? std::optional{expandShape(**literal, context)}

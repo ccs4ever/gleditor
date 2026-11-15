@@ -201,7 +201,7 @@ Lowered<zigzag::CellRef> buildFrameLevel(LowerContext &ctx, std::size_t arity,
       ctx.vm().makeClosureDescriptor(zigzag::vortex::ClosureDescriptorSpec{
           .frameDescriptor    = *reserved,
           .captureStreamCount = currentArgIndex > 0 ? 1U : 0U,
-          .appliedStreamCount = 1U,
+          .maxFormalCount     = 1U,
           .frameInputs        = std::move(inputs)});
   if (!closure)
     return internalError<zigzag::CellRef>(
