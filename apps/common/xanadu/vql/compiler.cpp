@@ -423,6 +423,7 @@ CellRef VQLCompiler::emitInputConstant(CellRef op, const CellValue &val) {
 
 CompilationResult VQLCompiler::compile(const QueryExpression &query,
                                        const CompilationOptions &options) {
+  dynamicViews_ = options.dynamicViews;
   zigzag::vortex::AssemblyTransaction transaction(vm_);
   remainingContractEmissions_ = options.maxContractEmissions;
   maxNamedFrameVariants_      = options.limits.maxNamedFrameVariants;
@@ -788,7 +789,7 @@ VQLCompiler::applyShapeProjection(std::span<const CellRef> owners,
   validateShapeProjection(shape);
   if (isDynamicShape(shape)) {
     compileDynamicShapeProjection(shape);
-    auto &reg = registryFor(core_.arena());
+    auto &reg = dynamicRegistry();
     std::vector<CellRef> viewCells;
     for (const auto owner : owners) {
       auto view        = std::make_shared<DynamicViewRecord>();

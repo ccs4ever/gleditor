@@ -186,6 +186,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     compilation.initialBindings =
         bindingSource_ ? bindingSource_->get() : bindings_;
     if (session_) {
+      compilation.dynamicViews    = &session_->dynamicViews();
       compilation.initialFunctors = session_->compilerFunctors();
       for (const auto &[name, mount] : session_->compilerMounts())
         compilation.mounts.emplace(

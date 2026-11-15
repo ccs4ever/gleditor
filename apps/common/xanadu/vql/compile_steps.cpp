@@ -102,7 +102,7 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       nextStream = compileSteps(*step.capturedFunctor, stream, hasContext);
     } else if (dimension && dimension->dimName.starts_with('$')) {
       const std::string name = dimension->dimName.substr(1);
-      auto &reg              = registryFor(core_.arena());
+      auto &reg              = dynamicRegistry();
       std::optional<PutGetLensRecord> lensRec;
       if (const auto it = reg.namedLenses.find(name);
           it != reg.namedLenses.end()) {
@@ -269,7 +269,7 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       nextStream = res;
     } else {
       bool hasViewCell = false;
-      auto &reg        = registryFor(core_.arena());
+      auto &reg        = dynamicRegistry();
       if (dimension) {
         for (const auto c : stream) {
           if (reg.viewCells.contains(c)) {

@@ -257,7 +257,7 @@ void VQLCompiler::compileShapeProjection(const ShapeLiteral &shape,
         "shape projection target cannot use attached pipelines");
 
   if (isDynamicShape(shape)) {
-    auto &reg        = registryFor(core_.arena());
+    auto &reg        = dynamicRegistry();
     auto view        = std::make_shared<DynamicViewRecord>();
     view->shape      = shape;
     CellRef viewCell = zigzag::noCell;
@@ -282,7 +282,7 @@ void VQLCompiler::compileShapeProjection(const ShapeLiteral &shape,
       continue;
     }
     if (const auto *name = std::get_if<std::string>(&entry.rule)) {
-      auto &reg = registryFor(core_.arena());
+      auto &reg = dynamicRegistry();
       std::optional<CellRef> handle;
       if (const auto it = varBindings_.find(*name);
           it != varBindings_.end() && it->second) {

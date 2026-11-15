@@ -76,7 +76,7 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
         values.empty() ? std::nullopt : std::optional{values.front()};
     varBindings_[let.varName] = value;
     if (value) {
-      auto &reg = registryFor(core_.arena());
+      auto &reg = dynamicRegistry();
       if (const auto it = reg.cellLenses.find(*value);
           it != reg.cellLenses.end()) {
         reg.namedLenses[let.varName] = it->second;

@@ -33,9 +33,15 @@ struct DynamicViewRegistry {
   std::unordered_map<std::string, PutGetLensRecord> namedLenses;
   std::unordered_map<zigzag::CellRef, PutGetLensRecord> cellLenses;
   std::unordered_map<zigzag::CellRef, ShapeLiteral> shapeHandles;
-};
 
-DynamicViewRegistry &registryFor(zigzag::ArenaManifold &arena);
+  void clear() noexcept {
+    viewCells.clear();
+    ownerViews.clear();
+    namedLenses.clear();
+    cellLenses.clear();
+    shapeHandles.clear();
+  }
+};
 
 bool isDynamicShape(const ShapeLiteral &shape);
 

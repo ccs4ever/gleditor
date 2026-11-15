@@ -25,6 +25,7 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vql/ast.hpp"
 #include "common/xanadu/vql/contracts.hpp"
+#include "common/xanadu/vql/dynamic_view_registry.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu::vql {
@@ -154,6 +155,12 @@ public:
   }
   [[nodiscard]] const zigzag::ArenaManifold &arena() const noexcept {
     return core_->arena();
+  }
+  [[nodiscard]] DynamicViewRegistry &dynamicViews() noexcept {
+    return dynamicViews_;
+  }
+  [[nodiscard]] const DynamicViewRegistry &dynamicViews() const noexcept {
+    return dynamicViews_;
   }
 
 private:
@@ -362,6 +369,7 @@ private:
   WatchId nextWatchId_{1};
   std::unordered_map<WatchId, WatchSubscription> watches_;
   std::unordered_map<std::string, DefDeclaration> userDefs_;
+  DynamicViewRegistry dynamicViews_;
 };
 
 } // namespace xanadu::vql

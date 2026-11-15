@@ -33,6 +33,7 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ast.hpp"
+#include "common/xanadu/vql/dynamic_view_registry.hpp"
 #include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/query_error.hpp"
 #include "common/xanadu/vql/static_functor_program.hpp"
@@ -82,6 +83,7 @@ struct CompilationOptions {
   std::unordered_map<std::string, Mount> mounts;
   std::size_t maxContractEmissions{65536};
   Limits limits{};
+  DynamicViewRegistry *dynamicViews{nullptr};
 };
 
 struct CompilationResult {
@@ -620,6 +622,11 @@ private:
   std::unordered_map<const ValueExpr *, zigzag::CellRef> shapeTargetConstants_;
   zigzag::CellRef compileShapePredicateImpl(const ShapeLiteral &shape,
                                             zigzag::CellRef candidate);
+  DynamicViewRegistry *dynamicViews_{nullptr};
+  DynamicViewRegistry fallbackDynamicViews_{};
+  [[nodiscard]] DynamicViewRegistry &dynamicRegistry() noexcept {
+    return dynamicViews_ != nullptr ? *dynamicViews_ : fallbackDynamicViews_;
+  }
 };
 
 } // namespace xanadu::vql

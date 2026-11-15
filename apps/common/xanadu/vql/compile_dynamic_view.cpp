@@ -7,17 +7,6 @@ namespace xanadu::vql {
 using zigzag::CellRef;
 using zigzag::vortex::OpcodeKind;
 
-namespace {
-
-static std::unordered_map<zigzag::ArenaManifold *, DynamicViewRegistry>
-    g_registries;
-
-} // namespace
-
-DynamicViewRegistry &registryFor(zigzag::ArenaManifold &arena) {
-  return g_registries[&arena];
-}
-
 bool isDynamicShape(const ShapeLiteral &shape) {
   for (const auto &entry : shape.rules) {
     if (std::holds_alternative<DimensionPivotRule>(entry.rule) ||
@@ -84,7 +73,7 @@ VQLCompiler::compileLensCall(const FunctionInvocation &fn,
       throw std::runtime_error("lens get takes one parameter; put takes two");
     }
     const CellRef handle   = core_.arena().makeCell();
-    auto &reg              = registryFor(core_.arena());
+    auto &reg              = dynamicRegistry();
     reg.cellLenses[handle] = PutGetLensRecord{.get = *get, .put = *put};
     return {handle};
   }
@@ -103,7 +92,7 @@ std::optional<CellRef> VQLCompiler::compileShapeValue(const ShapeLiteral &shape,
                                                       const CellRef ctxCell) {
   (void)ctxCell;
   const CellRef handle     = core_.arena().makeCell();
-  auto &reg                = registryFor(core_.arena());
+  auto &reg                = dynamicRegistry();
   reg.shapeHandles[handle] = shape;
   const CellRef constOp =
       emitConstant(static_cast<std::int64_t>(handle), std::nullopt);
