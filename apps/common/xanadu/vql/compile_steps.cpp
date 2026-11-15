@@ -119,6 +119,12 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                    bound != varBindings_.end() && bound->second) {
           aliases.push_back(*bound->second);
         }
+        if (!hasContext) {
+          nextStream = aliases;
+          hasContext = true;
+          stream     = nextStream;
+          continue;
+        }
         const CellRef closureHandle = normalizeFrameStream(aliases);
         if (stream.empty()) {
           nextStream = aliases;
@@ -147,6 +153,13 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       // Without a context there is no walk to count, so the step keeps the
       // per-cell path and its refusal.
       nextStream = compileWholeWalkStep(*function, stream, hasContext);
+    } else if (std::holds_alternative<PerspectiveStep>(step.selector)) {
+      std::vector<CellRef> res;
+      for (const auto cell : stream) {
+        auto stepRes = compileSelector(step, cell, hasContext);
+        res.insert(res.end(), stepRes.begin(), stepRes.end());
+      }
+      nextStream = res;
     } else {
       nextStream = emitMap(stream, [&](CellRef current) {
         return compileSelector(step, current, hasContext);
