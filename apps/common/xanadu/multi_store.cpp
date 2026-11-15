@@ -43,6 +43,7 @@ void MultiStoreCoordinator::initDimensions() {
   dimClone_        = core_->dims().clone;
   dimName_         = core_->dims().name;
   dimRole_         = core_->dims().role;
+  resolveDimension("d.source");
 }
 
 std::optional<CellRef>

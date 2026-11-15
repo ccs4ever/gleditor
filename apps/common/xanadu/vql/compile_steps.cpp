@@ -154,7 +154,7 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
     }
     // User calls may produce a value without a flowing context. Preserve the
     // direct evaluator's one context-free call when the input stream is empty.
-    if (userCall) {
+    if (userCall && !hasContext) {
       const auto empty = mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL");
       const auto end   = mintOpcode(OpcodeKind::Nop, "#EMPTY_CALL_END");
       const auto choose =

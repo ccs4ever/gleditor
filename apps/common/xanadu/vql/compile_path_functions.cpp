@@ -62,15 +62,6 @@ void requirePositional(const FunctionInvocation &fn) {
                        QueryErrorCategory::Malformed);
 }
 
-// find reads store documents and answers quote cells over their spans; neither
-// is something a graph can do today.
-void refuseFind(const FunctionInvocation &fn) {
-  requireArity(fn, 1, "one needle");
-  refusePathFunction(fn, "is not compiled to Vortex yet: searching document "
-                         "prose needs a substring-search opcode and a quote "
-                         "constructor, and neither exists");
-}
-
 } // namespace
 
 std::vector<CellRef> VQLCompiler::compilePathFunctionStep(
@@ -80,7 +71,6 @@ std::vector<CellRef> VQLCompiler::compilePathFunctionStep(
     refusePathFunction(fn, "without an argument counts the whole walk, and "
                            "step lowering runs once per cell; not compiled "
                            "yet");
-  if (fn.name == "find") refuseFind(fn);
   // A top-level call parses as a step, so the argument form is evaluated per
   // current cell, as the string builtin and user calls are.
   return compilePathFunctionCall(fn, hasContext ? std::optional{current}
@@ -122,8 +112,8 @@ VQLCompiler::compilePathFunctionWalk(const FunctionInvocation &fn,
 std::vector<CellRef>
 VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
                                      const std::optional<CellRef> context) {
-  if (fn.name == "find") refuseFind(fn);
-  if (fn.name != "count" && fn.name != "sort_into" && fn.name != "contains")
+  if (fn.name != "count" && fn.name != "sort_into" && fn.name != "contains" &&
+      fn.name != "find")
     throw QueryRefusal(QueryErrorCategory::Unsupported,
                        "unknown compiled function: " + fn.name);
 
@@ -133,7 +123,10 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
   // or a non-contiguous section, which the insertion sort cannot detect at run
   // time (the oracle refuses those), so it refuses here, before any effect.
   std::optional<DimRef> sortDimension;
-  if (fn.name == "count") {
+  if (fn.name == "find") {
+    requireArity(fn, 1, "one needle argument");
+    requirePositional(fn);
+  } else if (fn.name == "count") {
     requireArity(fn, 1, "exactly one path argument");
     requirePositional(fn);
   } else if (fn.name == "contains") {
@@ -309,6 +302,46 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     emitOutput(opcode, boxed);
     return std::vector<CellRef>{boxed};
   };
+
+  if (fn.name == "find") {
+    const auto needleCells = compileArgument(fn.args.front(), context);
+    if (needleCells.empty()) {
+      refusePathFunction(fn, "needle argument evaluated to empty");
+    }
+    const auto needle       = emitFirstCell(needleCells.front());
+    const auto relationCell = emitConstant(std::string("prose_hits"));
+    const auto pos          = fresh();
+    const auto limit        = fresh();
+    const auto zero         = emitConstant(std::int64_t{0});
+    arithmetic(OpcodeKind::Add, zero, zero, pos);
+    arithmetic(OpcodeKind::Add, zero, zero, limit);
+    const auto resultStream = emitStreamClear();
+    const auto loopTop      = label("#FIND_LOOP_TOP");
+    const auto loopEnd      = label("#FIND_LOOP_END");
+    appendOpcode(loopTop);
+    const auto relOp = emitOp(OpcodeKind::RelationNext, "#FIND_RELATION_NEXT");
+    emitInput(relOp, relationCell);
+    emitInput(relOp, pos);
+    emitInput(relOp, limit);
+    emitInput(relOp, needle);
+    const auto found     = fresh();
+    const auto nextPos   = fresh();
+    const auto nextLimit = fresh();
+    const auto answer    = fresh();
+    emitOutput(relOp, found);
+    emitOutput(relOp, nextPos);
+    emitOutput(relOp, nextLimit);
+    emitOutput(relOp, answer);
+    branchFalse(found, loopEnd);
+    const auto append = emitOp(OpcodeKind::StreamAppend, "#FIND_STREAM_APPEND");
+    emitInput(append, answer);
+    emitOutput(append, resultStream);
+    arithmetic(OpcodeKind::Add, nextPos, zero, pos);
+    arithmetic(OpcodeKind::Add, nextLimit, zero, limit);
+    jump(loopTop);
+    appendOpcode(loopEnd);
+    return {resultStream};
+  }
 
   if (fn.name == "count") {
     const auto inputs = compileArgument(fn.args.front(), context);

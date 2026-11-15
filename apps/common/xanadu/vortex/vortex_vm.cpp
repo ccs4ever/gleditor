@@ -526,6 +526,15 @@ VortexVM *VortexVM::pruneAssemblyState() {
   std::erase_if(cursorPC_, [this](const auto &entry) {
     return !core_.arena().contains(entry.first);
   });
+  std::erase_if(streamSlots_, [this](const auto slot) {
+    return !core_.arena().contains(slot);
+  });
+  std::erase_if(iteratorSlots_, [this](const auto slot) {
+    return !core_.arena().contains(slot);
+  });
+  std::erase_if(cellReferences_, [this](const auto &entry) {
+    return !core_.arena().contains(entry.first);
+  });
   pruneResumeState();
   return this;
 }
