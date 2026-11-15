@@ -8,6 +8,19 @@ checked against branch `feature/vql-completion` at `8b2d1ee4` on 2026-11-11 unle
 Policy, fixed by `e9090999`: every frontend compiles to a Vortex graph and runs on the VM. There is
 no direct interpreter, and an unlowered form must refuse with an explicit error.
 
+## Status: W0–W4 and `vql-integrated` reconciliation are complete (2026-11-15)
+
+- **All VM restoration cards (W1–W4)** and **`feature/vql-completion` reconciliation** are complete
+  on branch `vql-integrated`:
+  - `xuzz_test`: 4380/4380 passed (28 environment-gated skips, 0 failures), including 880/880
+    `*VQL*` and 319/319 VPL/VProlog/VLace/R-OBS tests.
+  - `gleditor_test`: 842/842 passed (0 failures).
+  - `zigzag_test`: 268/268 passed (0 failures).
+- **Pre-existing `MAIN` failures resolved**: all 13 `MAIN` baseline test failures (1 in
+  `gleditor_test`, 1 in `zigzag_test`, 11 in `xuzz_test`) and both `check-ui-text-policy.py` lint
+  failures (`acme_presenter.hpp`, `slice_view_presenter.hpp`) are fixed; `make format-check` exits
+  0\.
+
 ## Status: W0 is done (2026-11-11)
 
 Sections 0 and 1 describe the tree before W0 and are kept as the record. What is true now:

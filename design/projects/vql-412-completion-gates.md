@@ -1,5 +1,10 @@
 # Remaining VQL §4.12 completion gates
 
+> **Status (2026-11-15, branch `vql-integrated`):** All §4.12 VQL completion gates (C1–C9) and
+> `feature/vql-completion` reconciliation are complete and verified on the VM-only runtime with
+> 880/880 `*VQL*` tests passing and 0 failures across `xuzz_test` (4380/4380), `gleditor_test`
+> (842/842), and `zigzag_test` (268/268).
+
 Iteration 50 committed the closure VM foundation; iterations 51–53 add lambda values, persistent
 bindings and typed structural closure bodies. Earlier bounded milestones are recorded in
 [the VM iteration log](vortex-vm-only-iterations.md). Old summary lists must not be read as if
