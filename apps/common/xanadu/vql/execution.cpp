@@ -230,6 +230,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     compilation.initialBindings =
         bindingSource_ ? bindingSource_->get() : bindings_;
     if (session_) {
+      compilation.dynamicViews    = &session_->dynamicViews();
       compilation.initialFunctors = session_->compilerFunctors();
       for (const auto &[name, mount] : session_->compilerMounts())
         compilation.mounts.emplace(
@@ -329,6 +330,34 @@ QueryExecutor::executeVortex(const QueryExpression &query,
           }
           if (hasNewResultCells) break;
         }
+        if (!hasNewResultCells) {
+          const auto &dv = session_->dynamicViews();
+          for (const auto &[k, v] : dv.viewCells) {
+            if (const auto dense = arena.denseOf(k);
+                dense.has_value() && *dense >= programMark.cellCount) {
+              hasNewResultCells = true;
+              break;
+            }
+          }
+          if (!hasNewResultCells) {
+            for (const auto &[k, v] : dv.shapeHandles) {
+              if (const auto dense = arena.denseOf(k);
+                  dense.has_value() && *dense >= programMark.cellCount) {
+                hasNewResultCells = true;
+                break;
+              }
+            }
+          }
+          if (!hasNewResultCells) {
+            for (const auto &[k, v] : dv.cellLenses) {
+              if (const auto dense = arena.denseOf(k);
+                  dense.has_value() && *dense >= programMark.cellCount) {
+                hasNewResultCells = true;
+                break;
+              }
+            }
+          }
+        }
       }
 
       if (!hasNewResultCells) {
@@ -366,6 +395,27 @@ QueryExecutor::executeVortex(const QueryExpression &query,
             for (const auto slot : binding.slots) {
               for (const auto c : vm_.resultCells(slot)) enqueue(c);
             }
+          }
+          const auto &dv = session_->dynamicViews();
+          for (const auto &[k, v] : dv.viewCells) {
+            enqueue(k);
+            enqueue(v.source);
+            if (v.view) {
+              for (const auto &[hk, hv] : v.view->handles) {
+                enqueue(hk);
+                enqueue(hv);
+              }
+            }
+          }
+          for (const auto &[k, v] : dv.ownerViews) {
+            enqueue(k);
+            enqueue(v);
+          }
+          for (const auto &[k, v] : dv.shapeHandles) {
+            enqueue(k);
+          }
+          for (const auto &[k, v] : dv.cellLenses) {
+            enqueue(k);
           }
         }
         for (std::size_t i = 0; i < programMark.cellCount; ++i) {
@@ -606,6 +656,49 @@ QueryExecutor::executeVortex(const QueryExpression &query,
 
     for (auto &c : cells) {
       if (remap.contains(c)) c = remap.at(c);
+    }
+
+    if (session_ && !remap.empty()) {
+      auto &dv = session_->dynamicViews();
+      std::unordered_map<zigzag::CellRef, ViewCellRecord> nextViewCells;
+      for (auto &[k, v] : dv.viewCells) {
+        const auto newK = remap.contains(k) ? remap.at(k) : k;
+        auto newV        = v;
+        if (remap.contains(newV.source)) newV.source = remap.at(newV.source);
+        if (newV.view) {
+          std::unordered_map<zigzag::CellRef, zigzag::CellRef> newHandles;
+          for (auto &[hk, hv] : newV.view->handles) {
+            const auto nhk   = remap.contains(hk) ? remap.at(hk) : hk;
+            const auto nhv   = remap.contains(hv) ? remap.at(hv) : hv;
+            newHandles[nhk] = nhv;
+          }
+          newV.view->handles = std::move(newHandles);
+        }
+        nextViewCells[newK] = std::move(newV);
+      }
+      dv.viewCells = std::move(nextViewCells);
+
+      std::unordered_map<zigzag::CellRef, zigzag::CellRef> nextOwnerViews;
+      for (auto &[k, v] : dv.ownerViews) {
+        const auto newK = remap.contains(k) ? remap.at(k) : k;
+        const auto newV = remap.contains(v) ? remap.at(v) : v;
+        nextOwnerViews[newK] = newV;
+      }
+      dv.ownerViews = std::move(nextOwnerViews);
+
+      std::unordered_map<zigzag::CellRef, PutGetLensRecord> nextCellLenses;
+      for (auto &[k, v] : dv.cellLenses) {
+        const auto newK = remap.contains(k) ? remap.at(k) : k;
+        nextCellLenses[newK] = std::move(v);
+      }
+      dv.cellLenses = std::move(nextCellLenses);
+
+      std::unordered_map<zigzag::CellRef, ShapeLiteral> nextShapeHandles;
+      for (auto &[k, v] : dv.shapeHandles) {
+        const auto newK = remap.contains(k) ? remap.at(k) : k;
+        nextShapeHandles[newK] = std::move(v);
+      }
+      dv.shapeHandles = std::move(nextShapeHandles);
     }
 
     if (session_) {

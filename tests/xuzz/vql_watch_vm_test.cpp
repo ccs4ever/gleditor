@@ -137,8 +137,13 @@ TEST_F(VQLWatchVmTest, PerspectiveBlockReadsAreQualifiedNotCanonical) {
   const auto subject = arena.makeCell("subject");
   engine.setVariable("p", subject);
   EXPECT_TRUE(engine.execute("$p/+d.comment").empty());
-  EXPECT_THAT(refusalOf("with perspective(\"alice\") { $p/+d.comment }"),
-              HasSubstr("path selector does not have Vortex graph lowering"));
+  engine.execute(
+      "with perspective(\"alice\") { $p/+d.comment => [ \"alice\" ] }");
+  EXPECT_TRUE(engine.execute("$p/+d.comment").empty());
+  const auto scoped =
+      engine.execute("with perspective(\"alice\") { $p/+d.comment }");
+  ASSERT_EQ(scoped.size(), 1U);
+  EXPECT_EQ(arena.textOf(scoped.front()), "alice");
   EXPECT_TRUE(engine.execute("$p/+d.comment").empty());
 }
 
@@ -157,12 +162,14 @@ TEST_F(VQLWatchVmTest, PerspectiveBlockRefusesStepsItCannotQualify) {
 TEST_F(VQLWatchVmTest, InnerPerspectiveBlockOverridesTheOuterName) {
   const auto subject = arena.makeCell("subject");
   engine.setVariable("p", subject);
-  // The outer block qualifies nothing inside the inner one: the inner body is
-  // refused by the selector lowering under its own name, not the outer's, and
-  // an outer statement beside it is qualified separately.
-  EXPECT_THAT(refusalOf("with perspective(\"bob\") { "
-                        "with perspective(\"alice\") { $p/+d.comment } }"),
-              HasSubstr("path selector does not have Vortex graph lowering"));
+  engine.execute("with perspective(\"bob\") { $p/+d.comment => [ \"bob\" ] }");
+  engine.execute(
+      "with perspective(\"alice\") { $p/+d.comment => [ \"alice\" ] }");
+  const auto res =
+      engine.execute("with perspective(\"bob\") { "
+                     "with perspective(\"alice\") { $p/+d.comment } }");
+  ASSERT_EQ(res.size(), 1U);
+  EXPECT_EQ(arena.textOf(res.front()), "alice");
 }
 
 } // namespace

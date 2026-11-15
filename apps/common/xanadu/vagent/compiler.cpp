@@ -134,12 +134,11 @@ public:
   // the prologue's per-name #RESOLVE ops fill them off the call frame's
   // d.vars/d.values channel), then emitted under the statement wrapper
   // with a #Return tail and the spill/publish records run relies on.
-  std::expected<FragmentBody, Diagnostic>
-  compileFragment(
-      const Expr &body, const std::vector<Parameter> &parameters,
-      ResultUse use, const OwnerFields *ownerFields = nullptr,
-      const std::map<std::string, std::string, std::less<>>
-          *capFieldNames = nullptr) {
+  std::expected<FragmentBody, Diagnostic> compileFragment(
+      const Expr &body, const std::vector<Parameter> &parameters, ResultUse use,
+      const OwnerFields *ownerFields = nullptr,
+      const std::map<std::string, std::string, std::less<>> *capFieldNames =
+          nullptr) {
     try {
       if (&vm_.core() != &core_)
         refuse(body, DiagnosticCode::InvalidDeclaration,
@@ -160,7 +159,7 @@ public:
         paramNames_.push_back(parameter.name);
         ++localCount_;
       }
-      paramCount_ = parameters.size();
+      paramCount_    = parameters.size();
       capFieldNames_ = capFieldNames;
       if (ownerFields && !ownerFields->empty()) {
         ownerFields_ = ownerFields;
@@ -199,27 +198,23 @@ public:
   std::expected<CellValue, Diagnostic>
   evalStatic(const Expr &expression, std::optional<Scalar> expected,
              const CompilerBindings &bindings,
-             const std::map<std::string, MethodTarget, std::less<>>
-                 *methods) {
+             const std::map<std::string, MethodTarget, std::less<>> *methods) {
     auto fail = [&](DiagnosticCode code, std::string detail) {
-      return std::unexpected(Diagnostic{code, std::move(detail),
-                                        expression.loc});
+      return std::unexpected(
+          Diagnostic{code, std::move(detail), expression.loc});
     };
     FragmentContext evalContext;
     if (fragments_) evalContext = *fragments_;
-    evalContext.methods        = methods;
+    evalContext.methods = methods;
     // A `static` inside the operand evaluates eagerly at its own emit —
     // the enclosing run needs the folded cell before it starts.
     evalContext.pendingStatics = nullptr;
     evalContext.bindings       = &bindings;
-    Emitter eval(core_, vm_, bindings, limits_, &evalContext, compiler_,
-                 false);
-    auto lowered =
-        eval.compile(*expression.children.front(), ResultUse::Value);
+    Emitter eval(core_, vm_, bindings, limits_, &evalContext, compiler_, false);
+    auto lowered = eval.compile(*expression.children.front(), ResultUse::Value);
     if (!lowered)
       return fail(lowered.error().code,
-                  "'static' operand does not lower: " +
-                      lowered.error().detail);
+                  "'static' operand does not lower: " + lowered.error().detail);
     const auto cursor = vm_.spawnCursor(lowered->entry, "vagent.static");
     vm_.setCursorOpcode(cursor, lowered->entry);
     const auto outcome = vm_.run(cursor, limits_.staticFuel);
@@ -231,8 +226,7 @@ public:
                                                zigzag::DimVector::POS));
     if (!outcome.success)
       return fail(DiagnosticCode::InvalidDeclaration,
-                  "'static' operand did not evaluate: " +
-                      outcome.errorMessage);
+                  "'static' operand did not evaluate: " + outcome.errorMessage);
     // The compiler.cpp:108-110 invariant holds across eval: a `static`
     // that leaves the VM off its no-choice, no-mark baseline would
     // refuse the next compileStatement anyway — refuse it here.
@@ -241,29 +235,27 @@ public:
                   "'static' evaluation left the VM off its no-choice, "
                   "no-mark baseline");
     const auto flag = core_.render(lowered->produced);
-    if (!flag || !std::holds_alternative<bool>(*flag) ||
-        !std::get<bool>(*flag))
+    if (!flag || !std::holds_alternative<bool>(*flag) || !std::get<bool>(*flag))
       return fail(DiagnosticCode::InvalidDeclaration,
                   "'static' operand produced no value");
     const auto value = core_.render(lowered->result);
     const bool matches =
         value &&
-        (!expected
-             ? (std::holds_alternative<std::int64_t>(*value) ||
-                std::holds_alternative<double>(*value) ||
-                std::holds_alternative<std::string>(*value) ||
-                std::holds_alternative<bool>(*value))
-             : (*expected == Scalar::Int &&
-                std::holds_alternative<std::int64_t>(*value)) ||
-                   (*expected == Scalar::Float &&
-                    std::holds_alternative<double>(*value)) ||
-                   (*expected == Scalar::Str &&
-                    std::holds_alternative<std::string>(*value)) ||
-                   (*expected == Scalar::Bool &&
-                    std::holds_alternative<bool>(*value)) ||
-                   (*expected == Scalar::Unit &&
-                    std::holds_alternative<std::string>(*value) &&
-                    std::get<std::string>(*value).empty()));
+        (!expected ? (std::holds_alternative<std::int64_t>(*value) ||
+                      std::holds_alternative<double>(*value) ||
+                      std::holds_alternative<std::string>(*value) ||
+                      std::holds_alternative<bool>(*value))
+                   : (*expected == Scalar::Int &&
+                      std::holds_alternative<std::int64_t>(*value)) ||
+                         (*expected == Scalar::Float &&
+                          std::holds_alternative<double>(*value)) ||
+                         (*expected == Scalar::Str &&
+                          std::holds_alternative<std::string>(*value)) ||
+                         (*expected == Scalar::Bool &&
+                          std::holds_alternative<bool>(*value)) ||
+                         (*expected == Scalar::Unit &&
+                          std::holds_alternative<std::string>(*value) &&
+                          std::get<std::string>(*value).empty()));
     if (!matches)
       return fail(DiagnosticCode::TypeMismatch,
                   "'static' result does not match its checked type");
@@ -300,8 +292,7 @@ private:
       const auto local = scope->find(expression.text);
       if (local != scope->end()) {
         localReferences_[&expression] = local->second.index;
-        if (local->second.rich)
-          resultTypes_[&expression] = *local->second.rich;
+        if (local->second.rich) resultTypes_[&expression] = *local->second.rich;
         return local->second.type;
       }
     }
@@ -314,9 +305,8 @@ private:
         const auto found = ownerFields_->find(field->second);
         if (found == ownerFields_->end())
           refuse(expression, DiagnosticCode::UnknownName,
-                 "owner field '" + field->second +
-                     "' captured by " + expression.text +
-                     " is not declared");
+                 "owner field '" + field->second + "' captured by " +
+                     expression.text + " is not declared");
         const auto type = scalarType(found->second);
         if (!type)
           refuse(expression, DiagnosticCode::InvalidDeclaration,
@@ -433,8 +423,7 @@ private:
     if (expression.scope || expression.recipients || expression.deadline ||
         expression.guard || expression.recovery || expression.binding ||
         (expression.annotation && expression.kind != ExprKind::Let) ||
-        (!expression.names.empty() &&
-         expression.kind != ExprKind::Record))
+        (!expression.names.empty() && expression.kind != ExprKind::Record))
       refuse(expression, DiagnosticCode::InvalidDeclaration,
              "scalar lowering does not yet support expression metadata");
     for (const auto &child : expression.children)
@@ -754,13 +743,11 @@ private:
       // marshal is static — literals and nested terms/records only,
       // emit's operand marshal holds the same boundary — so the cell
       // mints here and emit copies its ref out.
-      auto marshaled =
-          marshalTermExpr(core_.arena(), core_, expression);
+      auto marshaled = marshalTermExpr(core_.arena(), core_, expression);
       if (!marshaled)
-        refuse(expression, marshaled.error().code,
-               marshaled.error().detail);
+        refuse(expression, marshaled.error().code, marshaled.error().detail);
       recordCells_[&expression] = *marshaled;
-      type = Scalar::Cell;
+      type                      = Scalar::Cell;
       break;
     }
     case ExprKind::Field: {
@@ -805,8 +792,7 @@ private:
       // resolver's own order).
       {
         auto &snapshot = staticCaptures_[&expression];
-        for (auto scope = scopes_.rbegin(); scope != scopes_.rend();
-             ++scope)
+        for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope)
           for (const auto &[name, local] : *scope)
             snapshot.emplace(name, local);
       }
@@ -845,8 +831,7 @@ private:
       // resolver's own lookup order).
       {
         auto &snapshot = frameCaptures_[&expression];
-        for (auto scope = scopes_.rbegin(); scope != scopes_.rend();
-             ++scope)
+        for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope)
           for (const auto &[name, local] : *scope)
             snapshot.emplace(name, local);
       }
@@ -934,10 +919,9 @@ private:
         }
         type = Scalar::Bottom;
         if (const auto found = resultTypes_.find(&operandExpr);
-            found != resultTypes_.end() &&
-            found->second.name == "Code" &&
+            found != resultTypes_.end() && found->second.name == "Code" &&
             found->second.arguments.size() == 1) {
-          const auto &result = found->second.arguments.front();
+          const auto &result        = found->second.arguments.front();
           resultTypes_[&expression] = result;
           if (const auto scalar = scalarType(result))
             type = *scalar;
@@ -1391,7 +1375,7 @@ private:
         const auto field = capFieldRefs_.find(&expression);
         return findOp(ownerCell(),
                       field != capFieldRefs_.end() ? field->second
-                                                 : expression.text,
+                                                   : expression.text,
                       output, continuation);
       }
       const auto source = resolved(expression);
@@ -1450,9 +1434,8 @@ private:
           bindIn(set, textCell(left.text));
           bindIn(set, rightValue);
           bindOut(set, wrote);
-          spin(set,
-               jump(gate(wrote, copy(output, cells_->unit, continuation),
-                         cells_->fail)));
+          spin(set, jump(gate(wrote, copy(output, cells_->unit, continuation),
+                              cells_->fail)));
           return emit(right, rightValue, set);
         }
         // A cells path materializes its rank under the bound head itself, so
@@ -1529,8 +1512,8 @@ private:
       // one image-side cell the whole run shares, like a string
       // literal; writes through it are not a construct yet.
       return copy(output,
-                  literalCell(CellValue{static_cast<std::int64_t>(
-                      recordCells_.at(&expression))}),
+                  literalCell(CellValue{
+                      static_cast<std::int64_t>(recordCells_.at(&expression))}),
                   continuation);
     case ExprKind::Cells:
       return emitCells(expression, output, continuation);
@@ -1614,8 +1597,7 @@ private:
            ++hops) {
         if (hops > snapshot.size()) break; // alias cycles can't form
         const auto source = snapshot.find(init->text);
-        init                = source == snapshot.end() ? nullptr
-                                                       : source->second.init;
+        init = source == snapshot.end() ? nullptr : source->second.init;
       }
       if (!init) continue;
       if (init->kind == ExprKind::Static)
@@ -1642,12 +1624,12 @@ private:
       if (!checked)
         refuse(expression, DiagnosticCode::TypeMismatch,
                "'static' result type is not literal-expressible");
-      fragments_->pendingStatics->push_back(PendingStatic{
-          .expr    = &expression,
-          .target  = placeholder,
-          .type    = *checked,
-          .methods = fragments_->methods,
-          .closed  = closedOverlay(expression)});
+      fragments_->pendingStatics->push_back(
+          PendingStatic{.expr    = &expression,
+                        .target  = placeholder,
+                        .type    = *checked,
+                        .methods = fragments_->methods,
+                        .closed  = closedOverlay(expression)});
       // The placeholder's literal record lands now — the body's
       // refs/literals records are sealed into +d.refs at this body's
       // own emit, long before the drain restates the content. An
@@ -1678,11 +1660,9 @@ private:
       bindings[entry.name] =
           CompilerBinding{literal(cell), entry.type, /*stateSide=*/false};
     }
-    auto value =
-        evalStatic(expression, expected, bindings,
-                   fragments_ ? fragments_->methods : nullptr);
-    if (!value)
-      refuse(expression, value.error().code, value.error().detail);
+    auto value = evalStatic(expression, expected, bindings,
+                            fragments_ ? fragments_->methods : nullptr);
+    if (!value) refuse(expression, value.error().code, value.error().detail);
     return literalCell(*value);
   }
 
@@ -1914,9 +1894,8 @@ private:
     if (snapshot == frameCaptures_.end()) return frame;
     for (const auto &[name, local] : snapshot->second)
       if (const auto type = resultType(local.type))
-        frame.emplace(name,
-                      CompilerBinding{localCells_.at(local.index), *type,
-                                      /*stateSide=*/false});
+        frame.emplace(name, CompilerBinding{localCells_.at(local.index), *type,
+                                            /*stateSide=*/false});
     return frame;
   }
 
@@ -1945,9 +1924,9 @@ private:
     const auto &operandExpr = *expression.children[1];
     if (operandExpr.kind != ExprKind::Code)
       return emitRunDynamic(expression, operandExpr, output, continuation);
-    const auto *record      = fragmentRecord(operandExpr);
-    const auto frame        = frameBindings(operandExpr);
-    auto object             = xanadu::vagent::compileFragment(
+    const auto *record = fragmentRecord(operandExpr);
+    const auto frame   = frameBindings(operandExpr);
+    auto object        = xanadu::vagent::compileFragment(
         operandExpr, *fragments_, *compiler_, &frame, ownerFields_);
     if (!object) refuse(expression, object.error().code, object.error().detail);
 
@@ -2012,8 +1991,7 @@ private:
 
     const auto runCall = mint(OpcodeKind::RunCall);
     bindIn(runCall, box);
-    bindIn(runCall,
-           dimRef(core_.findOrMintDimension("d.entry"), "d.entry"));
+    bindIn(runCall, dimRef(core_.findOrMintDimension("d.entry"), "d.entry"));
     bindIn(runCall, reference(cells_->fail));
     spin(runCall, runResume);
 
@@ -2022,8 +2000,7 @@ private:
     // op walks the values beside the descriptor's parameter rank.
     std::vector<CellRef> argTemps;
     if (expression.children.size() == 3)
-      for (std::size_t i = 0; i < expression.children[2]->children.size();
-           ++i)
+      for (std::size_t i = 0; i < expression.children[2]->children.size(); ++i)
         argTemps.push_back(temporary());
     const auto argsRank = own(core_.arena().makeCell());
     if (!argTemps.empty()) {
@@ -2036,8 +2013,7 @@ private:
     CellRef tail = runCall;
     if (expression.children.size() == 3)
       for (std::size_t i = argTemps.size(); i-- > 0;)
-        tail = emit(*expression.children[2]->children[i], argTemps[i],
-                    tail);
+        tail = emit(*expression.children[2]->children[i], argTemps[i], tail);
     return emit(operandExpr, box, tail);
   }
 
@@ -2061,8 +2037,7 @@ private:
 
     const auto runCall = mint(OpcodeKind::RunCall);
     bindIn(runCall, box);
-    bindIn(runCall,
-           dimRef(core_.findOrMintDimension("d.entry"), "d.entry"));
+    bindIn(runCall, dimRef(core_.findOrMintDimension("d.entry"), "d.entry"));
     bindIn(runCall, reference(cells_->fail));
     spin(runCall, runResume);
 
@@ -2138,14 +2113,12 @@ private:
   // §5.3's per-literal in-scope local snapshot — preflight's scopes_
   // is popped by emit, so each code"…" records its visible locals for
   // frameBindings to materialize into the env-join overlay.
-  std::unordered_map<const Expr *,
-                     std::map<std::string, Local, std::less<>>>
+  std::unordered_map<const Expr *, std::map<std::string, Local, std::less<>>>
       frameCaptures_;
   // Per-`static` in-scope local snapshot — same walk as frameCaptures_
   // (scopes_ is popped by emit); closedOverlay filters it to the
   // manifest-carrying entries at emit time.
-  std::unordered_map<const Expr *,
-                     std::map<std::string, Local, std::less<>>>
+  std::unordered_map<const Expr *, std::map<std::string, Local, std::less<>>>
       staticCaptures_;
   std::unordered_map<const Expr *, CellRef> externalReferences_;
   std::size_t nodeCount_{0};
@@ -2180,8 +2153,7 @@ private:
   // §5.8's owner-relative member fields — set on member fragment
   // compiles only. ownerIndex_ is the local slot `$owner` bound into;
   // ownerRefs_ marks the expressions binding() resolved owner-side.
-  static constexpr std::size_t npos =
-      std::numeric_limits<std::size_t>::max();
+  static constexpr std::size_t npos = std::numeric_limits<std::size_t>::max();
   const OwnerFields *ownerFields_{nullptr};
   std::size_t ownerIndex_{npos};
   std::unordered_set<const Expr *> ownerRefs_;
@@ -2189,8 +2161,8 @@ private:
   // a cap$N naming an owner field to the field name here, and the
   // Identifier arm's find hop reads capFieldRefs_ for that name (the
   // alias's own text is never a field).
-  const std::map<std::string, std::string, std::less<>>
-      *capFieldNames_{nullptr};
+  const std::map<std::string, std::string, std::less<>> *capFieldNames_{
+      nullptr};
   std::unordered_map<const Expr *, std::string> capFieldRefs_;
   CellRef ownerCell() const { return localCells_.at(ownerIndex_); }
   // Binding cells referenced through cap$N aliases — operands on them
@@ -2231,9 +2203,8 @@ Compiler::compileFragmentBody(const FragmentBodyRequest &request) {
                   request.bindings ? *request.bindings : kEmptyBindings,
                   limits_, request.fragments, this,
                   /*recordOps=*/true);
-  return emitter.compileFragment(*request.body, request.parameters,
-                                 request.use, request.ownerFields,
-                                 request.capFieldNames);
+  return emitter.compileFragment(*request.body, request.parameters, request.use,
+                                 request.ownerFields, request.capFieldNames);
 }
 
 std::expected<void, std::vector<Diagnostic>>
@@ -2242,8 +2213,8 @@ Compiler::drainStatics(FragmentContext &context) {
   // The sink detaches before evals run: a `static` inside an operand
   // evaluates eagerly at its own emit — the enclosing run needs the
   // folded cell before it starts — so nothing appends mid-drain.
-  auto pending              = std::move(*context.pendingStatics);
-  context.pendingStatics    = nullptr;
+  auto pending           = std::move(*context.pendingStatics);
+  context.pendingStatics = nullptr;
   std::vector<Diagnostic> errors;
   // A `let x := static(…)` chains records: the dependent operand binds
   // `x` through the init's `Static` node, whose own record must fold
@@ -2267,7 +2238,7 @@ Compiler::drainStatics(FragmentContext &context) {
   };
   const auto drain = [&](this auto &&self, std::size_t i) -> void {
     if (folded[i] || draining[i]) return;
-    draining[i] = true; // before resolving — guards init cycles
+    draining[i]        = true; // before resolving — guards init cycles
     const auto &record = pending[i];
     CompilerBindings bindings =
         context.bindings ? *context.bindings : CompilerBindings{};

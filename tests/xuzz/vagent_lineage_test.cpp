@@ -307,8 +307,8 @@ TEST(VagentLineageTest, MarkedRefSlotsRestateThroughRegenesis) {
   const auto vars   = a0.dimensionNamed("d.vars").value();
   const auto values = a0.dimensionNamed("d.values").value();
   const auto record = a0.makeCell("child");
-  zigzag::expectWritten(a0.link(record, values, Posward,
-                              refCell(a0, h.context->core, member)));
+  zigzag::expectWritten(
+      a0.link(record, values, Posward, refCell(a0, h.context->core, member)));
   zigzag::expectWritten(
       a0.link(zigzag::rankTail(a0, agent, vars), vars, Posward, record));
 
@@ -363,11 +363,10 @@ TEST(VagentLineageTest, VarSlotMemberRefRestatesThroughRegenesis) {
   zigzag::expectWritten(a0.link(record, values, Posward, holder));
   zigzag::expectWritten(
       a0.link(holder, nameDim, Posward, a0.makeCell("var.slot")));
-  h.context->core.writeValue(holder, 0, std::nullopt,
-                             zigzag::vortex::CellValue{
-                                 static_cast<std::int64_t>(member)});
-  zigzag::expectWritten(
-      a0.link(holder, reloc, Posward, a0.makeCell("cell")));
+  h.context->core.writeValue(
+      holder, 0, std::nullopt,
+      zigzag::vortex::CellValue{static_cast<std::int64_t>(member)});
+  zigzag::expectWritten(a0.link(holder, reloc, Posward, a0.makeCell("cell")));
   zigzag::expectWritten(
       a0.link(zigzag::rankTail(a0, agent, vars), vars, Posward, record));
 
@@ -389,8 +388,7 @@ TEST(VagentLineageTest, VarSlotMemberRefRestatesThroughRegenesis) {
   const auto restated = static_cast<CellRef>(*named);
   EXPECT_TRUE(a1.contains(restated))
       << "the var.slot's position names a live cell on the new arena";
-  if (a1.contains(restated))
-    EXPECT_EQ(a1.textOf(restated), "child-member");
+  if (a1.contains(restated)) EXPECT_EQ(a1.textOf(restated), "child-member");
 }
 
 TEST(VagentLineageTest, SessionMintFilesOnceWithNoVisibleTwin) {
@@ -610,14 +608,14 @@ TEST(VagentLineageTest, RegenesisRefusesAnAlienRoot) {
 
 /// The executor's Tick-shaped ActorExecution over the harness context —
 /// the same envelope the mesh grant carries.
-zigzag::vortex::mesh::ActorExecution tickOn(
-    zigzag::vortex::WorkerContext &ctx) {
+zigzag::vortex::mesh::ActorExecution
+tickOn(zigzag::vortex::WorkerContext &ctx) {
   zigzag::vortex::mesh::ActorExecution exec;
   exec.pid   = xanadu::identity::ActorPid{"worker", "agent", 1, 1};
   exec.grant = zigzag::vortex::mesh::ActorGrant{.programRef      = "sha256:p",
-                                               .baseRef         = "sha256:b",
-                                               .maxInstructions = 100'000,
-                                               .maxCells        = 10'000};
+                                                .baseRef         = "sha256:b",
+                                                .maxInstructions = 100'000,
+                                                .maxCells        = 10'000};
   xanadu::identity::ActorMessage msg;
   msg.type      = xanadu::identity::MessageType::ActorSend;
   msg.requestId = "req-1";
@@ -659,9 +657,8 @@ TEST(VagentLineageTest, DelegatedRestorerRefsSurviveRegenesis) {
       fprintf(stderr, "frontend %zu:%zu: %s\n", d.loc.line, d.loc.column,
               d.detail.c_str());
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   if (!image)
     for (const auto &d : image.error())
       fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
@@ -674,9 +671,8 @@ TEST(VagentLineageTest, DelegatedRestorerRefsSurviveRegenesis) {
   auto &a0          = ctx.arena;
   const auto iDim   = ctx.core.findOrMintDimension("d.intention");
   const auto reloc  = ctx.core.findOrMintDimension("d.mesh.relocation");
-  const auto parked =
-      zigzag::rankAfter(a0, image->agentCell, iDim) |
-      std::ranges::to<std::vector>();
+  const auto parked = zigzag::rankAfter(a0, image->agentCell, iDim) |
+                      std::ranges::to<std::vector>();
   ASSERT_EQ(parked.size(), 2u) << "monitor plus delegated restorer";
 
   // The restorer is the intention whose delegator names the monitor —
@@ -684,8 +680,7 @@ TEST(VagentLineageTest, DelegatedRestorerRefsSurviveRegenesis) {
   CellRef restorer = noCell, monitor = noCell;
   for (const auto i : parked) {
     const auto delegator = fieldValue(a0, ctx.core, i, "delegator");
-    if (delegator != noCell &&
-        a0.asInt64(delegator).value_or(0) != 0) {
+    if (delegator != noCell && a0.asInt64(delegator).value_or(0) != 0) {
       restorer = i;
     } else {
       monitor = i;
@@ -709,17 +704,15 @@ TEST(VagentLineageTest, DelegatedRestorerRefsSurviveRegenesis) {
   ASSERT_TRUE(c1.has_value()) << (c1 ? "" : c1.error());
   auto &a1 = c1->context->arena;
 
-  const auto iDim1  = a1.dimensionNamed("d.intention").value();
-  const auto twins  =
-      zigzag::rankAfter(a1, c1->agentCell, iDim1) |
-      std::ranges::to<std::vector>();
+  const auto iDim1 = a1.dimensionNamed("d.intention").value();
+  const auto twins = zigzag::rankAfter(a1, c1->agentCell, iDim1) |
+                     std::ranges::to<std::vector>();
   ASSERT_EQ(twins.size(), 2u);
 
   CellRef restorer1 = noCell, monitor1 = noCell;
   for (const auto i : twins) {
     const auto delegator = fieldValue(a1, c1->context->core, i, "delegator");
-    if (delegator != noCell &&
-        a1.asInt64(delegator).value_or(0) != 0) {
+    if (delegator != noCell && a1.asInt64(delegator).value_or(0) != 0) {
       restorer1 = i;
     } else {
       monitor1 = i;
@@ -730,8 +723,8 @@ TEST(VagentLineageTest, DelegatedRestorerRefsSurviveRegenesis) {
 
   // The delegator arm restated to the monitor's twin — not verbatim,
   // not dead.
-  const auto delegator1 = fieldValue(a1, c1->context->core, restorer1,
-                                     "delegator");
+  const auto delegator1 =
+      fieldValue(a1, c1->context->core, restorer1, "delegator");
   ASSERT_NE(delegator1, noCell);
   const auto named = a1.asInt64(delegator1);
   ASSERT_TRUE(named.has_value());
@@ -765,22 +758,21 @@ TEST(VagentLineageTest, AdoptResultSlotRestatesThroughRegenesis) {
   // binding writes the child intention's position through the var.slot
   // holder with the relocation mark — the shape the earlier test mints
   // by hand, driven here by an actual turn.
-  auto artifacts = compileArtifacts(
-      "module demo\nevent Tick\nevent Go { x: Int, y: Int }\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  var task: Opt<Intention> := none\n"
-      "  on Tick { task := adopt Work() }\n"
-      "  plan p for Work { await Go as g within 99s }\n"
-      "}");
+  auto artifacts =
+      compileArtifacts("module demo\nevent Tick\nevent Go { x: Int, y: Int }\n"
+                       "goal Work() perform\n"
+                       "agent A {\n"
+                       "  var task: Opt<Intention> := none\n"
+                       "  on Tick { task := adopt Work() }\n"
+                       "  plan p for Work { await Go as g within 99s }\n"
+                       "}");
   if (!artifacts)
     for (const auto &d : artifacts.error())
       fprintf(stderr, "frontend %zu:%zu: %s\n", d.loc.line, d.loc.column,
               d.detail.c_str());
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image.has_value());
 
   VagentExecutor exec;
@@ -788,16 +780,15 @@ TEST(VagentLineageTest, AdoptResultSlotRestatesThroughRegenesis) {
 
   auto &a0         = ctx.arena;
   const auto reloc = ctx.core.findOrMintDimension("d.mesh.relocation");
-  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "task", false);
+  const auto rec   = varsRecord(a0, ctx.core, image->agentCell, "task", false);
   ASSERT_TRUE(rec.has_value());
   const auto slot = a0.linked(*rec, ctx.core.dims().values, Posward);
   ASSERT_TRUE(slot.has_value());
 
   // The parked intention is the holder's referent.
   const auto iDim   = ctx.core.findOrMintDimension("d.intention");
-  const auto parked =
-      zigzag::rankAfter(a0, image->agentCell, iDim) |
-      std::ranges::to<std::vector>();
+  const auto parked = zigzag::rankAfter(a0, image->agentCell, iDim) |
+                      std::ranges::to<std::vector>();
   ASSERT_EQ(parked.size(), 1u);
   const auto held = a0.asInt64(*slot);
   ASSERT_TRUE(held.has_value());
@@ -853,9 +844,8 @@ TEST(VagentLineageTest, CapcallRefResultRestatesThroughRegenesis) {
       fprintf(stderr, "frontend %zu:%zu: %s\n", d.loc.line, d.loc.column,
               d.detail.c_str());
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image.has_value());
 
   VagentExecutor exec;
@@ -869,7 +859,7 @@ TEST(VagentLineageTest, CapcallRefResultRestatesThroughRegenesis) {
 
   auto &a0         = ctx.arena;
   const auto reloc = ctx.core.findOrMintDimension("d.mesh.relocation");
-  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "r", false);
+  const auto rec   = varsRecord(a0, ctx.core, image->agentCell, "r", false);
   ASSERT_TRUE(rec.has_value());
   const auto value = a0.linked(*rec, ctx.core.dims().values, Posward);
   ASSERT_TRUE(value.has_value());
@@ -907,28 +897,27 @@ TEST(VagentLineageTest, CapcallCodeResultRestatesThroughRegenesis) {
   // record lives in the expansion's table, so the method body emits
   // through it only because lowerProgram threads the tables. Without
   // them the body silently stubs to () and `r` binds "".
-  auto artifacts = compileArtifacts(
-      "module demo\nevent Tick\nevent Done\n"
-      "capacity Nav { def probe(): Code<Int> }\n"
-      "skill W implements Nav {\n"
-      "  def probe(): Code<Int> { code\"1 + 2\" }\n"
-      "}\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  uses Nav\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan p for Work { install W()\n"
-      "                    let r := Nav.probe()\n"
-      "                    emit Done{} }\n"
-      "}");
+  auto artifacts =
+      compileArtifacts("module demo\nevent Tick\nevent Done\n"
+                       "capacity Nav { def probe(): Code<Int> }\n"
+                       "skill W implements Nav {\n"
+                       "  def probe(): Code<Int> { code\"1 + 2\" }\n"
+                       "}\n"
+                       "goal Work() perform\n"
+                       "agent A {\n"
+                       "  uses Nav\n"
+                       "  on Tick { adopt Work() }\n"
+                       "  plan p for Work { install W()\n"
+                       "                    let r := Nav.probe()\n"
+                       "                    emit Done{} }\n"
+                       "}");
   if (!artifacts)
     for (const auto &d : artifacts.error())
       fprintf(stderr, "frontend %zu:%zu: %s\n", d.loc.line, d.loc.column,
               d.detail.c_str());
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image.has_value());
 
   VagentExecutor exec;
@@ -942,7 +931,7 @@ TEST(VagentLineageTest, CapcallCodeResultRestatesThroughRegenesis) {
 
   auto &a0         = ctx.arena;
   const auto reloc = ctx.core.findOrMintDimension("d.mesh.relocation");
-  const auto rec = varsRecord(a0, ctx.core, image->agentCell, "r", false);
+  const auto rec   = varsRecord(a0, ctx.core, image->agentCell, "r", false);
   ASSERT_TRUE(rec.has_value());
   const auto value = a0.linked(*rec, ctx.core.dims().values, Posward);
   ASSERT_TRUE(value.has_value());
@@ -952,9 +941,9 @@ TEST(VagentLineageTest, CapcallCodeResultRestatesThroughRegenesis) {
   const auto referent = static_cast<CellRef>(*pos);
   ASSERT_TRUE(a0.contains(referent))
       << "the produced code literal head position names a live cell";
-  EXPECT_TRUE(a0.linked(referent, ctx.core.findOrMintDimension("d.entry"),
-                      Posward)
-                  .has_value())
+  EXPECT_TRUE(
+      a0.linked(referent, ctx.core.findOrMintDimension("d.entry"), Posward)
+          .has_value())
       << "the referent is the literal's emitted head";
   EXPECT_TRUE(a0.linked(*value, reloc, Posward).has_value())
       << "a ref-typed capcall result must ride the manifest";
@@ -986,28 +975,27 @@ TEST(VagentLineageTest, RunSeesEnclosingLetLocals) {
   // the caller's own slot cell, and the capture slot reads the live
   // value at run time. `run(c, [4])` also exercises RunCall's
   // descriptor-arity + name-binding half — n=4, x=5 → 9.
-  auto artifacts = compileArtifacts(
-      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
-      "capacity Nav { def probe(): Int }\n"
-      "skill W implements Nav {\n"
-      "  def probe(): Int {\n"
-      "    let x := 5;\n"
-      "    let c := code\"n: Int | n + x\";\n"
-      "    run(c, [4])\n"
-      "  }\n"
-      "}\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  uses Nav\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan p for Work { install W()\n"
-      "                    let r := Nav.probe()\n"
-      "                    emit Done{} }\n"
-      "}");
+  auto artifacts =
+      compileArtifacts("module demo\nimport std:meta\nevent Tick\nevent Done\n"
+                       "capacity Nav { def probe(): Int }\n"
+                       "skill W implements Nav {\n"
+                       "  def probe(): Int {\n"
+                       "    let x := 5;\n"
+                       "    let c := code\"n: Int | n + x\";\n"
+                       "    run(c, [4])\n"
+                       "  }\n"
+                       "}\n"
+                       "goal Work() perform\n"
+                       "agent A {\n"
+                       "  uses Nav\n"
+                       "  on Tick { adopt Work() }\n"
+                       "  plan p for Work { install W()\n"
+                       "                    let r := Nav.probe()\n"
+                       "                    emit Done{} }\n"
+                       "}");
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   if (!image)
     for (const auto &d : image.error())
       fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
@@ -1049,28 +1037,27 @@ TEST(VagentLineageTest, RunSeesOwnerFieldCaptures) {
   // finds the caller's own binding on the shared vars rank) and the
   // env join marks cap$0 owner-relative: its operand lowers to the
   // same #FIND hop a bare `v` would, keyed on the field's own name.
-  auto artifacts = compileArtifacts(
-      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
-      "capacity Nav { def probe(): Int }\n"
-      "skill W implements Nav {\n"
-      "  var v: Int := 7\n"
-      "  def probe(): Int {\n"
-      "    let c := code\"v + 1\"\n"
-      "    run(c)\n"
-      "  }\n"
-      "}\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  uses Nav\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan p for Work { install W()\n"
-      "                    let r := Nav.probe()\n"
-      "                    emit Done{} }\n"
-      "}");
+  auto artifacts =
+      compileArtifacts("module demo\nimport std:meta\nevent Tick\nevent Done\n"
+                       "capacity Nav { def probe(): Int }\n"
+                       "skill W implements Nav {\n"
+                       "  var v: Int := 7\n"
+                       "  def probe(): Int {\n"
+                       "    let c := code\"v + 1\"\n"
+                       "    run(c)\n"
+                       "  }\n"
+                       "}\n"
+                       "goal Work() perform\n"
+                       "agent A {\n"
+                       "  uses Nav\n"
+                       "  on Tick { adopt Work() }\n"
+                       "  plan p for Work { install W()\n"
+                       "                    let r := Nav.probe()\n"
+                       "                    emit Done{} }\n"
+                       "}");
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   if (!image)
     for (const auto &d : image.error())
       fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
@@ -1108,23 +1095,22 @@ TEST(VagentLineageTest, AgentVarCaptureKeepsTheVarEdge) {
   // clone-slot capture path's recipe record re-aims +d.values at the
   // holder and evicts the var record's own edge (the documented
   // state-side hazard at compiler.cpp's capName arm).
-  auto artifacts = compileArtifacts(
-      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  var v: Int := 7\n"
-      "  def probe(): Int {\n"
-      "    let c := code\"v + 1\"\n"
-      "    run(c)\n"
-      "  }\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan p for Work { let r := probe()\n"
-      "                    emit Done{} }\n"
-      "}");
+  auto artifacts =
+      compileArtifacts("module demo\nimport std:meta\nevent Tick\nevent Done\n"
+                       "goal Work() perform\n"
+                       "agent A {\n"
+                       "  var v: Int := 7\n"
+                       "  def probe(): Int {\n"
+                       "    let c := code\"v + 1\"\n"
+                       "    run(c)\n"
+                       "  }\n"
+                       "  on Tick { adopt Work() }\n"
+                       "  plan p for Work { let r := probe()\n"
+                       "                    emit Done{} }\n"
+                       "}");
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image.has_value());
 
   auto &a0       = ctx.arena;
@@ -1149,22 +1135,21 @@ TEST(VagentLineageTest, MemberDefCallFromPlanAndHandler) {
   // at run once the callee's own walk has landed it. Tick: v = 7 →
   // bump → v = 8; plan: the let r is frame-local, so v := r carries
   // the second call's result state-side — 8 + 1 = 9.
-  auto artifacts = compileArtifacts(
-      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  var v: Int := 7\n"
-      "  on Tick { v := bump()\n"
-      "            adopt Work() }\n"
-      "  plan p for Work { let r := bump()\n"
-      "                    v := r\n"
-      "                    emit Done{} }\n"
-      "  def bump(): Int { v + 1 }\n"
-      "}");
+  auto artifacts =
+      compileArtifacts("module demo\nimport std:meta\nevent Tick\nevent Done\n"
+                       "goal Work() perform\n"
+                       "agent A {\n"
+                       "  var v: Int := 7\n"
+                       "  on Tick { v := bump()\n"
+                       "            adopt Work() }\n"
+                       "  plan p for Work { let r := bump()\n"
+                       "                    v := r\n"
+                       "                    emit Done{} }\n"
+                       "  def bump(): Int { v + 1 }\n"
+                       "}");
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   if (!image)
     for (const auto &d : image.error())
       fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
@@ -1201,19 +1186,17 @@ TEST(VagentLineageTest, StaticVarSeedEvalsAfterMemberWalk) {
   // initializer calls it — the drain runs once the member walk has
   // linked `later`'s `sym +d.values → head`, so the seed folds its
   // real result, not a placeholder.
-  auto artifacts = compileArtifacts(
-      "module demo\nevent Tick\nevent Done\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  var v: Int := static (later(21))\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan p for Work { emit Done{} }\n"
-      "  def later(n: Int): Int { n * 2 }\n"
-      "}");
+  auto artifacts = compileArtifacts("module demo\nevent Tick\nevent Done\n"
+                                    "goal Work() perform\n"
+                                    "agent A {\n"
+                                    "  var v: Int := static (later(21))\n"
+                                    "  on Tick { adopt Work() }\n"
+                                    "  plan p for Work { emit Done{} }\n"
+                                    "  def later(n: Int): Int { n * 2 }\n"
+                                    "}");
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   if (!image)
     for (const auto &d : image.error())
       fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
@@ -1238,21 +1221,20 @@ TEST(VagentLineageTest, StaticOperandSeesClosedLetsAndCalls) {
   // Closed-name overlay: `let b := 5` mints a manifest cell the eval
   // reads, and `static (later(b))` runs the member `def` in the
   // compile arena — Tick folds b*10=50 + the call's 60 into v = 110.
-  auto artifacts = compileArtifacts(
-      "module demo\nevent Tick\nevent Done\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  var v: Int := 0\n"
-      "  on Tick { let b := 5\n"
-      "            v := static (b * 10) + static (later(b))\n"
-      "            adopt Work() }\n"
-      "  plan p for Work { emit Done{} }\n"
-      "  def later(n: Int): Int { n * 12 }\n"
-      "}");
+  auto artifacts =
+      compileArtifacts("module demo\nevent Tick\nevent Done\n"
+                       "goal Work() perform\n"
+                       "agent A {\n"
+                       "  var v: Int := 0\n"
+                       "  on Tick { let b := 5\n"
+                       "            v := static (b * 10) + static (later(b))\n"
+                       "            adopt Work() }\n"
+                       "  plan p for Work { emit Done{} }\n"
+                       "  def later(n: Int): Int { n * 12 }\n"
+                       "}");
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   if (!image)
     for (const auto &d : image.error())
       fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
@@ -1270,8 +1252,7 @@ TEST(VagentLineageTest, StaticOperandSeesClosedLetsAndCalls) {
   ASSERT_TRUE(value.has_value());
   const auto pos = a0.asInt64(*value);
   ASSERT_TRUE(pos.has_value());
-  EXPECT_EQ(*pos, 110)
-      << "closed let and member call must each fold at drain";
+  EXPECT_EQ(*pos, 110) << "closed let and member call must each fold at drain";
 }
 
 TEST(VagentLineageTest, StaticEvalChainsStaticLets) {
@@ -1280,21 +1261,19 @@ TEST(VagentLineageTest, StaticEvalChainsStaticLets) {
 
   // `let x := static(…)` binds the placeholder itself — drained in
   // emit order, so the second eval reads the first's folded value.
-  auto artifacts = compileArtifacts(
-      "module demo\nevent Tick\nevent Done\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  var v: Int := 0\n"
-      "  on Tick { let x := static (2 * 3)\n"
-      "            let y := x\n"
-      "            v := static (y + 1)\n"
-      "            adopt Work() }\n"
-      "  plan p for Work { emit Done{} }\n"
-      "}");
+  auto artifacts = compileArtifacts("module demo\nevent Tick\nevent Done\n"
+                                    "goal Work() perform\n"
+                                    "agent A {\n"
+                                    "  var v: Int := 0\n"
+                                    "  on Tick { let x := static (2 * 3)\n"
+                                    "            let y := x\n"
+                                    "            v := static (y + 1)\n"
+                                    "            adopt Work() }\n"
+                                    "  plan p for Work { emit Done{} }\n"
+                                    "}");
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   if (!image)
     for (const auto &d : image.error())
       fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
@@ -1312,8 +1291,7 @@ TEST(VagentLineageTest, StaticEvalChainsStaticLets) {
   ASSERT_TRUE(value.has_value());
   const auto pos = a0.asInt64(*value);
   ASSERT_TRUE(pos.has_value());
-  EXPECT_EQ(*pos, 7)
-      << "chained static lets must drain in emission order";
+  EXPECT_EQ(*pos, 7) << "chained static lets must drain in emission order";
 }
 
 TEST(VagentLineageTest, MemberDefCallBindsPositionalArgs) {
@@ -1326,23 +1304,22 @@ TEST(VagentLineageTest, MemberDefCallBindsPositionalArgs) {
   // inside its body, and `code"…"` inside `dbl` calls `add` too —
   // literals inherit the member walk's methods table through the
   // shared FragmentContext.
-  auto artifacts = compileArtifacts(
-      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  var v: Int := 1\n"
-      "  var w: Int := 0\n"
-      "  def add(n: Int, m: Int): Int { n + m }\n"
-      "  def dbl(): Int { run(code\"add(10, 5)\") }\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan p for Work { v := add(v, 41)\n"
-      "                    w := dbl()\n"
-      "                    emit Done{} }\n"
-      "}");
+  auto artifacts =
+      compileArtifacts("module demo\nimport std:meta\nevent Tick\nevent Done\n"
+                       "goal Work() perform\n"
+                       "agent A {\n"
+                       "  var v: Int := 1\n"
+                       "  var w: Int := 0\n"
+                       "  def add(n: Int, m: Int): Int { n + m }\n"
+                       "  def dbl(): Int { run(code\"add(10, 5)\") }\n"
+                       "  on Tick { adopt Work() }\n"
+                       "  plan p for Work { v := add(v, 41)\n"
+                       "                    w := dbl()\n"
+                       "                    emit Done{} }\n"
+                       "}");
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   if (!image)
     for (const auto &d : image.error())
       fprintf(stderr, "lower %zu:%zu: %s\n", d.loc.line, d.loc.column,
@@ -1386,23 +1363,22 @@ TEST(VagentLineageTest, MemberDefCallRefusesOutsideAgentScope) {
   // walk keeps the table empty, so probe's head files under stubbed
   // rather than resolving `helper()` to the agent's `helper` — skill
   // methods dispatch through `S.m` capcall instead.
-  auto artifacts = compileArtifacts(
-      "module demo\nimport std:meta\nevent Tick\nevent Done\n"
-      "capacity Nav { def probe(): Int }\n"
-      "skill W implements Nav {\n"
-      "  def helper(): Int { 1 }\n"
-      "  def probe(): Int { helper() }\n"
-      "}\n"
-      "goal Work() perform\n"
-      "agent A {\n"
-      "  def helper(): Int { 2 }\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan p for Work { emit Done{} }\n"
-      "}");
+  auto artifacts =
+      compileArtifacts("module demo\nimport std:meta\nevent Tick\nevent Done\n"
+                       "capacity Nav { def probe(): Int }\n"
+                       "skill W implements Nav {\n"
+                       "  def helper(): Int { 1 }\n"
+                       "  def probe(): Int { helper() }\n"
+                       "}\n"
+                       "goal Work() perform\n"
+                       "agent A {\n"
+                       "  def helper(): Int { 2 }\n"
+                       "  on Tick { adopt Work() }\n"
+                       "  plan p for Work { emit Done{} }\n"
+                       "}");
   ASSERT_TRUE(artifacts.has_value());
-  auto image =
-      lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                   &artifacts->expansion, &artifacts->fragmentInfo);
+  auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                            &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image.has_value());
   EXPECT_THAT(image->stubbed, ::testing::Contains("probe"))
       << "a flat helper() inside a skill body must stub probe's head, "

@@ -1,8 +1,8 @@
 # R12 — System Architect critique (v1.11)
 
-Scope: layering, ownership, adapter-vs-core boundaries; verification of my two r11 majors
-(R11-A — `patch:<n>` ordinal recycling; R11-B — verify-arm publish destination) plus new defects in
-the v1.11 deltas only. Re-verified against the tree (`manifold.{hpp,cpp}`, `arena_manifold.{hpp,cpp}`,
+Scope: layering, ownership, adapter-vs-core boundaries; verification of my two r11 majors (R11-A —
+`patch:<n>` ordinal recycling; R11-B — verify-arm publish destination) plus new defects in the v1.11
+deltas only. Re-verified against the tree (`manifold.{hpp,cpp}`, `arena_manifold.{hpp,cpp}`,
 `store.{hpp,cpp}`, `publication.{hpp,cpp}`, `mesh_actor.cpp`, `mesh_value.{hpp,cpp}`,
 `worker_context.hpp`, `vortex_core.cpp`, `vortex_stdlib.cpp`, `segmented_ops_spool.hpp`).
 
@@ -31,8 +31,8 @@ the v1.11 deltas only. Re-verified against the tree (`manifold.{hpp,cpp}`, `aren
   a declared clause's stored `+d.name` unlinks it and installs `patch:<n>`, leaving the user name
   dead; unqualified aliases append; `learn_method`'s replace-vs-`learn_plan`-append asymmetry is
   drawn; `unlearn` picks twins "in any order" under unique labels, LIFO surviving only among patches
-  recording one target (`:1735-1738`). `patch:`'s module-declaration reservation (`:2171-2175`) keeps
-  `plan_named("patch:<n>")` on the verbatim-label path — verified coherent.
+  recording one target (`:1735-1738`). `patch:`'s module-declaration reservation (`:2171-2175`)
+  keeps `plan_named("patch:<n>")` on the verbatim-label path — verified coherent.
 - One wording caveat worth a word: "`d.vars`" does not pin *whose* — see finding 2.
 
 ## R11-B — FIXED: the publish destination is named at every boundary and reachable today
@@ -65,25 +65,25 @@ the v1.11 deltas only. Re-verified against the tree (`manifold.{hpp,cpp}`, `aren
 - **The twin is named owed, not assumed:** "a kept-in-step adapter *twin* … is **owed a
   segment-apply surface** `adopt`/`historyFromSeal` do not provide (`adoptOpRecords` takes
   already-decoded records, `historyFromSeal` mints its own store; nothing applies a received segment
-  into a store the caller already holds)" (`:1543-1547`) — accurate to the code
-  (`historyFromSeal` mints `Store()` at `publication.cpp:1097`; `applyOpsSegment` is file-local).
+  into a store the caller already holds)" (`:1543-1547`) — accurate to the code (`historyFromSeal`
+  mints `Store()` at `publication.cpp:1097`; `applyOpsSegment` is file-local).
 
 ## New findings (v1.11 deltas only)
 
 ### 1. MAJOR — the ref-capture record's `+d.grab → slot` evicts the op's own input wing: `-d.grab` on a first-position wing slot is already occupied, exactly the M14 collision the record exists to avoid (§6.1 `:1129-1132`, `:1046-1050`; §6.6 `:2093-2097`)
 
-**Problem.** R11-C's new recipe record correlates record→slot as "`+d.grab → the same slot cell`
-the ref-record names by `+d.ref`", reasoning that "a second `+d.ref` edge cannot correlate them —
-the slot's `-d.ref` backlink is single-occupancy and the later link would evict the first, M14's
-rule". Correct as far as it goes — but the chosen `+d.grab` hits the *same* occupancy law on a
-different dim: a **first-position input wing slot's `-d.grab` is already held by the op**.
-`bindInput` mints the slot and links `op +d.grab → slot` for the wing's first cell
-(`vortex_core.cpp:384-390`; only *subsequent* wing cells chain `+d.step` and keep `-d.grab` free).
-`link(record, +d.grab, slot)` then displaces the op: `link` clears whatever each end held
-(`arena_manifold.cpp:1347-1377` — `displacedIt` arm `setOneSide(op, d.grab, POS, noCell)`), so
-`linked(op, grab, POS)` returns `nullopt` and `inputsOf(op)` comes back **empty** — the record write
-severs the op's *entire* input wing (slot plus the `+d.step` chain behind it orphans), both when the
-emitter writes the recipe at emission and again on every `reify` replay's `Link`.
+**Problem.** R11-C's new recipe record correlates record→slot as "`+d.grab → the same slot cell` the
+ref-record names by `+d.ref`", reasoning that "a second `+d.ref` edge cannot correlate them — the
+slot's `-d.ref` backlink is single-occupancy and the later link would evict the first, M14's rule".
+Correct as far as it goes — but the chosen `+d.grab` hits the *same* occupancy law on a different
+dim: a **first-position input wing slot's `-d.grab` is already held by the op**. `bindInput` mints
+the slot and links `op +d.grab → slot` for the wing's first cell (`vortex_core.cpp:384-390`; only
+*subsequent* wing cells chain `+d.step` and keep `-d.grab` free). `link(record, +d.grab, slot)` then
+displaces the op: `link` clears whatever each end held (`arena_manifold.cpp:1347-1377` —
+`displacedIt` arm `setOneSide(op, d.grab, POS, noCell)`), so `linked(op, grab, POS)` returns
+`nullopt` and `inputsOf(op)` comes back **empty** — the record write severs the op's *entire* input
+wing (slot plus the `+d.step` chain behind it orphans), both when the emitter writes the recipe at
+emission and again on every `reify` replay's `Link`.
 
 The affected class is routine, not exotic: ref-records cover "both wing slots, `reference()` cells,
 and dimension-constant slots" (`:1914-1916`), and a `dimConstant`/`reference()` operand bound as an
@@ -94,9 +94,9 @@ wing produces no error, the op just runs with no inputs.
 
 **Fix.** Pick a correlation whose backlink on the slot is free. In order of house-style fit: (a) a
 dedicated dim on the recipe record (`d.refslot`-style — "more cells and dimensions over bit-packing"
-is the standing preference, and `+d.values`/`+d.step`/`+d.ref` are all already occupied or excluded);
-(b) correlate through the ref-record instead — `+d.grab → the ref-record` (a no-`+d.name` record
-carries no `+d.grab` role label, so its `-d.grab` is free) and reach the slot via
+is the standing preference, and `+d.values`/`+d.step`/`+d.ref` are all already occupied or
+excluded); (b) correlate through the ref-record instead — `+d.grab → the ref-record` (a no-`+d.name`
+record carries no `+d.grab` role label, so its `-d.grab` is free) and reach the slot via
 `refRecord +d.ref → slot`, one extra hop; (c) order ref-capture records parallel to `+d.refs` and
 drop the edge — weakest, inherits ordering fragility. The eviction reasoning the doc already makes
 for `+d.ref` (`:1130-1132`) should be repeated for whichever dim is chosen, since *both* the slot's
@@ -104,14 +104,14 @@ for `+d.ref` (`:1130-1132`) should be repeated for whichever dim is chosen, sinc
 
 ### 2. MINOR — "durable per-agent counter on `d.vars`" does not pin the agent cell's `d.vars` — the module reading silently reintroduces the ABA (§6.1 `:1158-1159`; §6.6 `:1671-1672`; §6.7 `:2176-2179`)
 
-**Problem.** `d.vars` is overloaded in this doc: module `d.vars` holds *symbols*
-(`symbol_named`'s walk, `:2201-2204`), the agent cell's `d.vars` holds member state (`:1762-1763`).
-The counter must sit on the **agent's** `d.vars` — a counter appended to the *module's* rank hangs
-off a program-side rank head, so it is reachable from the agent cell only by transiting a
-program-side cell → fails the state-side transit clause (`:1606-1609`) → excluded from `promote` →
-resets to zero each resume → recycled `patch:<n>`, exactly the ABA this fix kills. The intended
-reading is the only consistent one, but the word that carries it is absent. **Fix:** "the same
-per-agent counter on the *agent cell's* `d.vars`".
+**Problem.** `d.vars` is overloaded in this doc: module `d.vars` holds *symbols* (`symbol_named`'s
+walk, `:2201-2204`), the agent cell's `d.vars` holds member state (`:1762-1763`). The counter must
+sit on the **agent's** `d.vars` — a counter appended to the *module's* rank hangs off a program-side
+rank head, so it is reachable from the agent cell only by transiting a program-side cell → fails the
+state-side transit clause (`:1606-1609`) → excluded from `promote` → resets to zero each resume →
+recycled `patch:<n>`, exactly the ABA this fix kills. The intended reading is the only consistent
+one, but the word that carries it is absent. **Fix:** "the same per-agent counter on the *agent
+cell's* `d.vars`".
 
 ### 3. MINOR — verify-arm wording conflates the comparand's subject with the comparison's operands (§6.6 `:1526-1535` vs `:1989-1996`)
 
@@ -180,8 +180,8 @@ is dead until the next genesis" is stated as the rule.
   → `resolver.resolve` → `isVerified`/length → `applyOpsSegment`), signed-inventory skip honestly
   stated.
 - **`learn_method` corollaries** (`:1805-1808`), the `unlearn` symbol arm's `module:` re-composition
-  via the `-d.vars` walk (`:1738-1745`), and the alias-as-write-only-metadata idiom
-  (`clauses_of` + `patch:` prefix / `plan_named("patch:<n>")` / `label_of`) — consistent end to end.
+  via the `-d.vars` walk (`:1738-1745`), and the alias-as-write-only-metadata idiom (`clauses_of` +
+  `patch:` prefix / `plan_named("patch:<n>")` / `label_of`) — consistent end to end.
 
 ## Structural notes
 
@@ -190,6 +190,7 @@ is dead until the next genesis" is stated as the rule.
   `:322`) and asks for *sanctioned* surface rather than blessing the const-hole; the honest framing
   holds.
 - Under the supply arm `arena.base()->store()` and the adapter's seeded store coincide by
-  construction, so the single destination spelling covers both arms — the doc says so at `:1581-1583`.
+  construction, so the single destination spelling covers both arms — the doc says so at
+  `:1581-1583`.
 
 VERDICT: NOT CONVERGED

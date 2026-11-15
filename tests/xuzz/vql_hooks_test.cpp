@@ -192,8 +192,9 @@ TEST_F(VQLHooksTest, VariablePerspectiveNameWithoutAConstantRefusesByName) {
 // H5
 TEST_F(VQLHooksTest, PathMorphismRefusesThroughItsOwnStub) {
   engine.setVariable("p", arena.makeCell("subject"));
-  EXPECT_THAT(refusalOf(R"($p/+d.comment => [ "note" ])"),
-              HasSubstr("path selector does not have Vortex graph lowering"));
+  const auto spawned = engine.execute(R"($p/+d.comment => [ "note" ])");
+  ASSERT_EQ(spawned.size(), 1U);
+  EXPECT_EQ(arena.textOf(spawned.front()), "note");
 }
 
 // H7

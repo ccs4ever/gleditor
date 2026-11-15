@@ -11,20 +11,20 @@ changelog :2747-2844).
 
 ## Verdicts on R8 findings
 
-| R8 | Verdict |
-| --- | --- |
-| R8-1 "(step (e) above)" mislabel | **Fixed.** :1639 reads "(step (e) below)" — correct: the (a)–(f) enumeration sits at :1732-1796, below the reference. |
-| R8-2 `patch:` under "emitter's automatic prefixes" | **Fixed.** :1854-1857: "The label prefixes `src:`/`reify:` and the `patch:` clause-name convention are **reserved at module declaration**" — `patch:` is now the clause-name convention beside the label prefixes, exactly the proposed subject. |
-| R8-3 descriptor clause arm | **Fixed.** :1503-1509: the convention now has two arms — qualified `[<module>:][<Agent>.]<member>` for program-original targets, "the **verbatim `patch:<n>` clause label** for learned-clause targets — … never a canonicalized `<module>:<Agent>.patch:<n>` the `plan_named` match would then miss". Stronger than proposed: also names the graft-verb parent (`goal`/`event` name for replay attach) and states the declared-handler anonymity gap (:1520-1524, spec V15). |
-| R8-4 content-named symbols | **Fixed.** :1626-1628: "the shape restriction that keeps the qualified strings clause `+d.name` labels carry on the same dim from matching; symbol names need no such guard, they live as cell *content*, never on `+d.name`". |
+| R8                                                 | Verdict                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R8-1 "(step (e) above)" mislabel                   | **Fixed.** :1639 reads "(step (e) below)" — correct: the (a)–(f) enumeration sits at :1732-1796, below the reference.                                                                                                                                                                                                                                                                                                                                                         |
+| R8-2 `patch:` under "emitter's automatic prefixes" | **Fixed.** :1854-1857: "The label prefixes `src:`/`reify:` and the `patch:` clause-name convention are **reserved at module declaration**" — `patch:` is now the clause-name convention beside the label prefixes, exactly the proposed subject.                                                                                                                                                                                                                              |
+| R8-3 descriptor clause arm                         | **Fixed.** :1503-1509: the convention now has two arms — qualified `[<module>:][<Agent>.]<member>` for program-original targets, "the **verbatim `patch:<n>` clause label** for learned-clause targets — … never a canonicalized `<module>:<Agent>.patch:<n>` the `plan_named` match would then miss". Stronger than proposed: also names the graft-verb parent (`goal`/`event` name for replay attach) and states the declared-handler anonymity gap (:1520-1524, spec V15). |
+| R8-4 content-named symbols                         | **Fixed.** :1626-1628: "the shape restriction that keeps the qualified strings clause `+d.name` labels carry on the same dim from matching; symbol names need no such guard, they live as cell *content*, never on `+d.name`".                                                                                                                                                                                                                                                |
 
 All 13 nits: **12 landed, 1 partially.**
 
 - dequeue cite — **Fixed** :1688: "`mailbox.front()`/`pop_front()` at `:467-468`" (verified:
   `mesh_actor.cpp:467-468` is exactly `front()`/`pop_front()`).
-- `sealLocalSpool` call-site pair — **Fixed** :613-615 and :1385-1387: `mesh_value.cpp:227-228`,`:241`
-  beside `publication.cpp:611-617`,`:664-672` (all four cites verified; see below for the
-  `[0..opsTotal)` wording that rides on them).
+- `sealLocalSpool` call-site pair — **Fixed** :613-615 and :1385-1387:
+  `mesh_value.cpp:227-228`,`:241` beside `publication.cpp:611-617`,`:664-672` (all four cites
+  verified; see below for the `[0..opsTotal)` wording that rides on them).
 - `getOpcodeKind` rationale — **Fixed** :1758-1764: map *membership* is now the stated consumer
   (§6.5's write-guard `opcodeMap_.contains(masterOf(cell))`); `getOpcodeKind`'s `asInt64` fallback
   verified at `vortex_vm.cpp:106-111`.
@@ -45,19 +45,20 @@ All 13 nits: **12 landed, 1 partially.**
   `module vars`→`member vars`/`cap$N` rephrase are chronicled.
 - **copy-inheritance "two reasons" — partially applied.** :1784-1785 keeps "The sweep runs last for
   two reasons that meet at copy-inheritance" while renaming the reasons "First, coverage" / "Second,
-  ordering". Ordering (rebinds must see post-installation symbols) is not a copy-inheritance reason —
-  the header still mislabels, and changelog :2822 now correctly names "(coverage, ordering)", making
-  the body's header inconsistent with its own changelog. Residual nit, carried.
+  ordering". Ordering (rebinds must see post-installation symbols) is not a copy-inheritance reason
+  — the header still mislabels, and changelog :2822 now correctly names "(coverage, ordering)",
+  making the body's header inconsistent with its own changelog. Residual nit, carried.
 
 ## Whole-document coherence of the v1.8 reframe
 
 **"Lineage store" terminology is consistent.** `lineage-store seam` (:373, :1649, :1683, :2326,
 :2443), `the adapter's own lineage store`/`adapter-kept lineage Store` (:94, :1409, :2413),
-`the store lineage itself` (:599), `shared base lineage` (:356, :595, :2774), `bound programRef
-lineage` (:1872, :2570-2571), `prefix-less lineage` (:1412, :1747, :2770) — "lineage" uniformly names
-the ops-prefix chain, "lineage store" the adapter-owned `Store` object carrying it. `position-stable,
-not byte-identical` is now uniform (:603, :1368, :1744, :2297, :2804); the only "byte-identical"
-left is v1.7's changelog entry (:2751), correct as history and explicitly corrected at :2807.
+`the store lineage itself` (:599), `shared base lineage` (:356, :595, :2774),
+`bound programRef lineage` (:1872, :2570-2571), `prefix-less lineage` (:1412, :1747, :2770) —
+"lineage" uniformly names the ops-prefix chain, "lineage store" the adapter-owned `Store` object
+carrying it. `position-stable, not byte-identical` is now uniform (:603, :1368, :1744, :2297,
+:2804); the only "byte-identical" left is v1.7's changelog entry (:2751), correct as history and
+explicitly corrected at :2807.
 
 **Changelog narrates correctly.** The 1.7 entry was corrected in place where the disposition asked
 (`mesh_value.cpp:227-228`,`:241` + `:664-672` cites :2755-2756, sweep renamed :2763, `R7-B`
@@ -99,8 +100,8 @@ sealed ops segment is a different serialization — `sealedOpsName = "ops"` (`pr
 `applyOpsSegment` throws on anything not starting with that magic (`publication.cpp:1033`), so an
 `ops.nodes` file fed to it fails at the first check. The mechanism described is the right one
 (position-preserving segment, `adoptOpRecords`); only the filename is wrong. **Fix:** "the sealed
-`ops` segment (`sealedOpsName`, `provenance.hpp:286`) the toolchain emits once per artifact" — or, if
-the native spool is the intended seed, swap the mechanism to the spool-load path and drop
+`ops` segment (`sealedOpsName`, `provenance.hpp:286`) the toolchain emits once per artifact" — or,
+if the native spool is the intended seed, swap the mechanism to the spool-load path and drop
 `applyOpsSegment`.
 
 **R9-2 MINOR — the spawn-side seam has two unreconciled API shapes.** §6.6 :1375-1377 resolves the
@@ -111,9 +112,9 @@ so no `spawn` signature change is implied; §10.1's comment agrees ("`spawn()` t
 change: "the lineage-store seam (`spawn` store parameter, `resume` store supply/verify)" (:2336
 "Where" column). A `spawn` parameter and adapter-side `attach` are alternative shapes of the same
 seam — an implementer cannot tell whether `MeshActorRuntime::spawn`'s signature changes or the
-adapter attaches through the context it already holds. **Fix:** pick one ("`spawn` gains a store/`Space`
-parameter that lands via `attach`", or "no `spawn` change — the adapter attaches through
-`WorkerContext`"), or mark them explicitly as alternatives pending the API design.
+adapter attaches through the context it already holds. **Fix:** pick one ("`spawn` gains a
+store/`Space` parameter that lands via `attach`", or "no `spawn` change — the adapter attaches
+through `WorkerContext`"), or mark them explicitly as alternatives pending the API design.
 
 **Nit bundle (all in v1.8 delta text):**
 
@@ -121,9 +122,10 @@ parameter that lands via `attach`", or "no `spawn` change — the adapter attach
   1-indexed (`sealableOps` iterates `sinceExclusive + 1 ..= segmentedOps().size()`,
   `publication.cpp:983-985`), so `opsAlreadySealed = 0` seals `1..opsTotal` — the disposition itself
   wrote `[1..opCount]`. `[0..opsTotal)` includes the reserved slot and drops the last op.
-- :1738 — "`mergeValues` promotes imported twins into a fresh store in discovery order": the order is
-  a canonical sort on `(contentHash, authorKey, parent)` (`mesh_value.cpp:522-526`), not discovery
-  order. The claim needs no order at all — any consistent order still fails the positional test.
+- :1738 — "`mergeValues` promotes imported twins into a fresh store in discovery order": the order
+  is a canonical sort on `(contentHash, authorKey, parent)` (`mesh_value.cpp:522-526`), not
+  discovery order. The claim needs no order at all — any consistent order still fails the positional
+  test.
 - :1784-1785 — the "two reasons that meet at copy-inheritance" header retained over renamed
   (coverage/ordering) reasons; see the partial-fix entry above.
 - :1050 — "`plan_named` … matches every clause `+d.name` label verbatim, event-handler clauses
@@ -140,7 +142,8 @@ parameter that lands via `attach`", or "no `spawn` change — the adapter attach
   completeness.
 
 VERDICT: NOT CONVERGED (minor level) — every r8 finding landed (one nit partially: the
-copy-inheritance header), the lineage-store reframe is coherent end-to-end and the changelog narrates
-accurately, but the delta introduces two new minors: the `ops.nodes`/`applyOpsSegment` format
-mismatch (R9-1) and the `spawn`-parameter-vs-`attach` seam-shape ambiguity (R9-2), plus a 6-item nit
-bundle led by the `[0..opsTotal)` off-by-one. No majors; defect surface still contracting.
+copy-inheritance header), the lineage-store reframe is coherent end-to-end and the changelog
+narrates accurately, but the delta introduces two new minors: the `ops.nodes`/`applyOpsSegment`
+format mismatch (R9-1) and the `spawn`-parameter-vs-`attach` seam-shape ambiguity (R9-2), plus a
+6-item nit bundle led by the `[0..opsTotal)` off-by-one. No majors; defect surface still
+contracting.

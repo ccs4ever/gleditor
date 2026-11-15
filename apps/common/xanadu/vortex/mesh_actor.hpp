@@ -184,9 +184,9 @@ public:
   /// original request and the ack's verdict: the granted pid the
   /// member's `pid` record notes, or Refused when the ack names
   /// none (the wire's free-text reason is not a typed error).
-  using SpawnResultHook = std::function<void(
-      const ActorMessage &request,
-      const std::expected<ActorPid, ActorError> &result)>;
+  using SpawnResultHook =
+      std::function<void(const ActorMessage &request,
+                         const std::expected<ActorPid, ActorError> &result)>;
 
   MeshActorRuntime(std::string node, std::uint64_t epoch,
                    ActorOptions options = {});

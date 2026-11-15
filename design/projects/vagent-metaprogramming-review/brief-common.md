@@ -1,7 +1,7 @@
 You are one of seven critics reviewing a design document in the gleditor repository:
 
-Document: /data/git/gleditor-restore/design/vagent-metaprogramming.md
-Repo root: /data/git/gleditor-restore
+Document: /data/git/gleditor-restore/design/vagent-metaprogramming.md Repo root:
+/data/git/gleditor-restore
 
 The document designs metaprogramming for vagent — compile-time and runtime mutation of code with
 type safety, as the path toward neuro-network plasticity. vagent is a proposed agent-oriented

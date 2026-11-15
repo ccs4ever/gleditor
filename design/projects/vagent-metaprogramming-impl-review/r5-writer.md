@@ -5,11 +5,10 @@ Verdict: **CONVERGED**. Counts: **0 BLOCKING / 0 MAJOR / 0 MINOR / 5 NIT** (one 
 Every r4 item verified landed — my m-1 (refusal-edge cite ranges) and n-1 (`:952-960`) both closed,
 the entire r4-disposition minor bundle checked clause-by-clause against v5, and the R4-A promote
 rewrite — the round's largest single edit — verified end-to-end against spec v1.19 and the tree.
-Residual is four fresh nits — one mid-sentence cite truncation (disposition-directed, one line
-short of the completion), one forward-reference naming wobble, one topical cite sitting on a
-negated predicate, one missing arm-name echo in phase 4's body — plus the carried mdformat wraps.
-`mdl -i` clean (exit 0); `mdformat --check --wrap 100` with the three required extensions clean
-(exit 0).
+Residual is four fresh nits — one mid-sentence cite truncation (disposition-directed, one line short
+of the completion), one forward-reference naming wobble, one topical cite sitting on a negated
+predicate, one missing arm-name echo in phase 4's body — plus the carried mdformat wraps. `mdl -i`
+clean (exit 0); `mdformat --check --wrap 100` with the three required extensions clean (exit 0).
 
 ## My r4 items — both CLOSED
 
@@ -37,8 +36,8 @@ block (:430-452) reads cleanly in sequence — class first (what *can* emit), th
 *reached*) — and every load-bearing cite verifies:
 
 - "`root` is the **agent cell** alone (spec :375, :634-635)" — :375 verbatim "the checkpoint
-  promotes what is reachable from the agent cell"; :635 "Program cells do not *republish*:
-  `promote` walks only what the agent" (see n-1 on the truncation).
+  promotes what is reachable from the agent cell"; :635 "Program cells do not *republish*: `promote`
+  walks only what the agent" (see n-1 on the truncation).
 - "bare grafts must die with the incarnation (spec :375-377, :1791-1799)" — :377 "a session graft is
   gone at `resume`" (the boundary that makes `learn` = graft + record a distinction, exactly as the
   plan glosses); :1791-1798 the state-side definition with "they die with the incarnation at
@@ -71,12 +70,12 @@ replay's job — graft-adds would double if they also promoted), the durable bul
 - **`d.vars` repoint precision** (:434-435): "a *fresh ephemeral* the keying record's `+d.values`
   edge repoints at (spec :1300)" — spec :1300 verified (the `+d.vars → [key] +d.values → scalar`
   record shape).
-- **`unlearn` drop classes** (:438-441): mid-rank drops are repoints — "`unlink` =
-  `link(…,nullopt)` does no chain repair, `arena_manifold.hpp:616-618`" verified verbatim
-  (`unlink` returns `link(from, dim, dir, std::nullopt)` at :616-618) — that promote fine; the tail
-  drop is a true removal → tombstone only. `learn_plan`'s supersede correctly no longer cited as the
-  removal example — it appears only in (d) replay (:469-471, "displacing the superseded declared
-  clause again"), where it belongs.
+- **`unlearn` drop classes** (:438-441): mid-rank drops are repoints — "`unlink` = `link(…,nullopt)`
+  does no chain repair, `arena_manifold.hpp:616-618`" verified verbatim (`unlink` returns
+  `link(from, dim, dir, std::nullopt)` at :616-618) — that promote fine; the tail drop is a true
+  removal → tombstone only. `learn_plan`'s supersede correctly no longer cited as the removal
+  example — it appears only in (d) replay (:469-471, "displacing the superseded declared clause
+  again"), where it belongs.
 - **Residual re-scoped** (:410-415): "one `dimensionNamed`-invisible orphan at its *first* fold —
   the first-use edge split: `makeDimension`'s store cell `B` while the session's edges named arena
   cell `A`, and `discover`→promote mints `A'` carrying them (`store.cpp:1066`,
@@ -87,8 +86,8 @@ replay's job — graft-adds would double if they also promoted), the durable bul
   `command_transaction.cpp:16-18` (`d.target`/`d.action`/`d.reply` exact), `dim_cap.cpp:83-85`
   (`d.actor`/`d.ticket`/`d.signature` exact), `or_parallel.cpp:181-184` (four `ensureDimension`
   mints, unchanged).
-- **"nineteen cells, eighteen filed names"** (:399-401): verified — 17 `mintNamedDimension` calls
-  at `vortex_core.cpp:50-69` (`d.grab`…`d.role`), `home` at `:35`, `d.dims` at `:44`; `d.dims` is
+- **"nineteen cells, eighteen filed names"** (:399-401): verified — 17 `mintNamedDimension` calls at
+  `vortex_core.cpp:50-69` (`d.grab`…`d.role`), `home` at `:35`, `d.dims` at `:44`; `d.dims` is
   itself a dimension cell (filed), `home` plain → 19 cells, 18 filed names.
 - **`dimDims && home` conjunct** (:395): "`(:91-103)`" now spans the `dimDims` fetch (:91), `home`
   (:92), the gate (:93) and the append (:102) — exact.
@@ -97,8 +96,8 @@ replay's job — graft-adds would double if they also promoted), the durable bul
   rule), and any other call-shaped operand is a check error" — matching the plan's "without it
   §9.1's `splice inc(count)` parses as a call-shaped-operand refusal".
 - **`run`/`graft` arm promise split** (:177-179): "the `run` refusal arm lands with the member
-  surface in phase 3, the `graft` arm with the mutation verbs in phase 4" (meta m9) — see n-3 on
-  the phase-4 echo.
+  surface in phase 3, the `graft` arm with the mutation verbs in phase 4" (meta m9) — see n-3 on the
+  phase-4 echo.
 - **Cite fixes**: `arena_manifold.hpp:833-836` and `static` baseline `:952-960` verified above;
   `spec :634-635` verified with the n-1 caveat.
 
@@ -141,8 +140,9 @@ replay's job — graft-adds would double if they also promoted), the durable bul
   program root" (:457-458) is the classification walk, correctly retained.
 - **Phase-5 exit** "one cell per filed dim name after a fold" (:520-521) — consistent with the
   re-scoped residual (filed → one cell; the unfiled orphan is the first-fold `A'`).
-- **Format gates**: `mdl -i` exit 0; `mdformat --check --extensions gfm --extensions dollarmath
-  --extensions frontmatter --wrap 100` exit 0.
+- **Format gates**: `mdl -i` exit 0;
+  `mdformat --check --extensions gfm --extensions dollarmath --extensions frontmatter --wrap 100`
+  exit 0.
 
 ## Top-3
 
@@ -150,8 +150,8 @@ replay's job — graft-adds would double if they also promoted), the durable bul
    spec-grounded counterfactuals (grafts die at incarnation, carry-without-prune, (d) doubling on an
    unmatchable `patch:<n>` label), closed by the durable-ranks observation, and contradicts nothing;
    the "harness session root" text is fully gone.
-2. **All r4 items closed** — both my findings (cite ranges `:456-470`+`:784-786`; `static` baseline
+1. **All r4 items closed** — both my findings (cite ranges `:456-470`+`:784-786`; `static` baseline
    `:952-960`) and the entire disposition bundle verified line-exact against spec and tree.
-3. **Residual is cosmetic** — four nits: the `:634-635` mid-sentence truncation, the "image
+1. **Residual is cosmetic** — four nits: the `:634-635` mid-sentence truncation, the "image
    seed"/"image band" naming wobble, the topical `:2397-2402` cite sitting on the negated predicate,
    and the un-echoed `graft` arm name in phase 4 — plus the five carried mdformat wraps.

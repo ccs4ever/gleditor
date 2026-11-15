@@ -28,8 +28,7 @@ stepChain(zigzag::ArenaManifold &arena, CellRef origin, DimRef leadDim,
           DimRef step) {
   std::vector<CellRef> out;
   for (auto cell = arena.linked(origin, leadDim, Posward);
-       cell && arena.contains(*cell);
-       cell = arena.linked(*cell, step, Posward))
+       cell && arena.contains(*cell); cell = arena.linked(*cell, step, Posward))
     out.push_back(*cell);
   return out;
 }
@@ -38,8 +37,7 @@ stepChain(zigzag::ArenaManifold &arena, CellRef origin, DimRef leadDim,
 /// (the `prune`/`unlearn` unlink idiom). The forward edge drops first so
 /// the successor's backlink is free before the predecessor repair rewires
 /// it.
-inline void unlinkRank(zigzag::ArenaManifold &arena, CellRef cell,
-                       DimRef dim) {
+inline void unlinkRank(zigzag::ArenaManifold &arena, CellRef cell, DimRef dim) {
   const auto pred = arena.linked(cell, dim, Negward);
   const auto succ = arena.linked(cell, dim, Posward);
   if (succ) zigzag::expectWritten(arena.unlink(cell, dim, Posward));
@@ -60,14 +58,12 @@ inline void unlinkRank(zigzag::ArenaManifold &arena, CellRef cell,
 /// Int64 position goes verbatim through both and silently stale.
 /// Write member refs, record refs and term refs through this; flags
 /// and integer values keep `makeScalarCell`.
-[[nodiscard]] inline CellRef
-refCell(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
-        CellRef ref) {
-  const auto cell =
-      arena.makeScalarCell(static_cast<std::int64_t>(ref));
+[[nodiscard]] inline CellRef refCell(zigzag::ArenaManifold &arena,
+                                     zigzag::vortex::VortexCore &core,
+                                     CellRef ref) {
+  const auto cell = arena.makeScalarCell(static_cast<std::int64_t>(ref));
   zigzag::expectWritten(
-      arena.link(cell,
-                 core.findOrMintDimension("d.mesh.relocation"),
+      arena.link(cell, core.findOrMintDimension("d.mesh.relocation"),
                  zigzag::DimVector::POS, arena.makeCell("cell")));
   return cell;
 }
@@ -77,9 +73,9 @@ refCell(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
 /// `std::nullopt` the caller can fall back or fault on.
 [[nodiscard]] inline std::optional<std::int64_t>
 toInt64(std::string_view text) noexcept {
-  std::int64_t value = 0;
-  const auto *first  = text.data();
-  const auto *last   = first + text.size();
+  std::int64_t value   = 0;
+  const auto *first    = text.data();
+  const auto *last     = first + text.size();
   const auto [ptr, ec] = std::from_chars(first, last, value);
   if (ec != std::errc{} || ptr != last) return std::nullopt;
   return value;
@@ -104,8 +100,8 @@ varsRecord(zigzag::ArenaManifold &arena, VortexCore &core, CellRef owner,
     // A record minted without +d.owner (test fixtures, pre-scope writes)
     // is unscoped and matches any owner; a scoped record must name this
     // one — that is what keeps sibling symbols' keys apart.
-    return !v || arena.asInt64(*v).value_or(-1) ==
-                     static_cast<std::int64_t>(owner);
+    return !v ||
+           arena.asInt64(*v).value_or(-1) == static_cast<std::int64_t>(owner);
   };
   for (const auto record : zigzag::rankAfter(arena, owner, vars))
     if (arena.textOf(record) == key && owns(record)) return record;

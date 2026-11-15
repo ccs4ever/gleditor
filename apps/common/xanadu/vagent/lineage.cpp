@@ -101,8 +101,7 @@ restateScopeArms(Store &lineage, xanadu::MicroversionId version,
       }
     if (scopeDim == zigzag::noCell) continue;
     for (const auto arenaPos : promoted.arena) {
-      const auto arm =
-          arena.linked(arenaPos, scopeDim, zigzag::DimVector::POS);
+      const auto arm = arena.linked(arenaPos, scopeDim, zigzag::DimVector::POS);
       if (!arm) continue;
       const auto named = arena.asInt64(*arm);
       if (!named) continue;
@@ -112,10 +111,9 @@ restateScopeArms(Store &lineage, xanadu::MicroversionId version,
         continue;
       const auto foldArm = twinOf(*arm);
       if (foldArm == zigzag::noCell) continue;
-      version = lineage.setValue(version, foldArm, xanadu::PrimediaSpan{},
-                                 xanadu::ValueKind::Int64,
-                                 std::bit_cast<std::uint64_t>(
-                                     static_cast<std::int64_t>(position)));
+      version = lineage.setValue(
+          version, foldArm, xanadu::PrimediaSpan{}, xanadu::ValueKind::Int64,
+          std::bit_cast<std::uint64_t>(static_cast<std::int64_t>(position)));
     }
   }
   return version;
@@ -165,10 +163,9 @@ restateRefSlots(Store &lineage, xanadu::MicroversionId version,
       return;
     const auto foldSlot = twinOf(slot);
     if (foldSlot == zigzag::noCell) return;
-    version = lineage.setValue(version, foldSlot, xanadu::PrimediaSpan{},
-                               xanadu::ValueKind::Int64,
-                               std::bit_cast<std::uint64_t>(
-                                   static_cast<std::int64_t>(position)));
+    version = lineage.setValue(
+        version, foldSlot, xanadu::PrimediaSpan{}, xanadu::ValueKind::Int64,
+        std::bit_cast<std::uint64_t>(static_cast<std::int64_t>(position)));
   };
   for (const auto head : promoted.arena) {
     for (auto record = arena.linked(head, refsDim, zigzag::DimVector::POS);
@@ -197,8 +194,7 @@ restateRefSlots(Store &lineage, xanadu::MicroversionId version,
       const auto cell =
           static_cast<zigzag::CellRef>(zigzag::ephemeralBit | dense);
       if (!arena.holdsOwn(cell)) continue;
-      if (!arena.linked(cell, relocDim, zigzag::DimVector::POS))
-        continue;
+      if (!arena.linked(cell, relocDim, zigzag::DimVector::POS)) continue;
       restate(cell);
     }
   return version;
@@ -241,8 +237,7 @@ harvestRelocationTargets(ArenaManifold &arena) {
   std::vector<zigzag::CellRef> targets;
   for (const auto slot : markedRelocationSlots(arena)) {
     const auto named = arena.asInt64(slot);
-    if (named && zigzag::isEphemeral(
-                     static_cast<zigzag::CellRef>(*named)))
+    if (named && zigzag::isEphemeral(static_cast<zigzag::CellRef>(*named)))
       targets.push_back(static_cast<zigzag::CellRef>(*named));
   }
   return targets;
@@ -281,8 +276,7 @@ namespace {
 template <typename M>
 [[nodiscard]] std::optional<zigzag::CellRef>
 varsMember(M &m, const xanadu::SpanReader *reader, zigzag::CellRef owner,
-           zigzag::DimRef vars, zigzag::DimRef values,
-           std::string_view key) {
+           zigzag::DimRef vars, zigzag::DimRef values, std::string_view key) {
   const auto textOf = [&](zigzag::CellRef cell) {
     if constexpr (std::is_same_v<std::decay_t<M>, zigzag::ArenaManifold>)
       return m.textOf(cell, reader);
@@ -329,23 +323,19 @@ seedProgramImage(Store &lineage, ArenaManifold &arena,
   std::vector<zigzag::CellRef> arenaPositions;
   if (varsDim != zigzag::noCell && valuesDim != zigzag::noCell &&
       stepDim != zigzag::noCell)
-    if (const auto imageRecord =
-            varsMember(arena, nullptr, programRoot, varsDim, valuesDim,
-                       "imageRecord"))
-      if (const auto opsHead =
-              varsMember(arena, nullptr, *imageRecord, varsDim,
-                         valuesDim, "ops"))
-        for (const auto member :
-             zigzag::rankAfter(arena, *opsHead, stepDim))
+    if (const auto imageRecord = varsMember(arena, nullptr, programRoot,
+                                            varsDim, valuesDim, "imageRecord"))
+      if (const auto opsHead = varsMember(arena, nullptr, *imageRecord, varsDim,
+                                          valuesDim, "ops"))
+        for (const auto member : zigzag::rankAfter(arena, *opsHead, stepDim))
           if (const auto position = arena.asInt64(member)) {
-            arenaPositions.push_back(
-                static_cast<zigzag::CellRef>(*position));
+            arenaPositions.push_back(static_cast<zigzag::CellRef>(*position));
             if (zigzag::isEphemeral(*position))
               extra.push_back(static_cast<zigzag::CellRef>(*position));
           }
 
-  auto promoted = zigzag::promote(lineage, lineage.latest(), arena,
-                                  programRoot, {}, extra);
+  auto promoted =
+      zigzag::promote(lineage, lineage.latest(), arena, programRoot, {}, extra);
   if (!promoted) {
     return std::unexpected(
         "seedProgramImage: promote refused the program image "
@@ -368,7 +358,7 @@ seedProgramImage(Store &lineage, ArenaManifold &arena,
   // rank members sit in the same order both sides of the seed. A
   // lineage-backed compile arena's root is a base cell: promote maps
   // those to themselves, so the identity is the lookup's fallback.
-  auto fold = lineage.rebuildManifold(promoted->version);
+  auto fold         = lineage.rebuildManifold(promoted->version);
   const auto twinOf = [&](zigzag::CellRef ref) {
     if (!zigzag::isEphemeral(ref)) return ref;
     const auto it = twin.find(ref);
@@ -381,19 +371,18 @@ seedProgramImage(Store &lineage, ArenaManifold &arena,
       stepTwin == zigzag::noCell)
     return std::unexpected(
         "seedProgramImage: the record dims did not reach the band");
-  const auto recordTwin =
-      varsMember(fold, &lineage, twinOf(programRoot), varsTwin,
-                 valuesTwin, "imageRecord");
+  const auto recordTwin = varsMember(fold, &lineage, twinOf(programRoot),
+                                     varsTwin, valuesTwin, "imageRecord");
   if (!recordTwin)
     return std::unexpected(
         "seedProgramImage: the image record did not reach the band");
-  const auto opsTwin = varsMember(fold, &lineage, *recordTwin, varsTwin,
-                                  valuesTwin, "ops");
+  const auto opsTwin =
+      varsMember(fold, &lineage, *recordTwin, varsTwin, valuesTwin, "ops");
   if (!opsTwin)
     return std::unexpected(
         "seedProgramImage: the ops enumeration did not reach the band");
 
-  auto version = promoted->version;
+  auto version      = promoted->version;
   std::size_t index = 0;
   for (const auto member : zigzag::rankAfter(fold, *opsTwin, stepTwin)) {
     if (index >= arenaPositions.size())
@@ -404,10 +393,9 @@ seedProgramImage(Store &lineage, ArenaManifold &arena,
     if (position == zigzag::noCell)
       return std::unexpected(
           "seedProgramImage: a recorded op names no promoted cell");
-    version = lineage.setValue(version, member, xanadu::PrimediaSpan{},
-                               xanadu::ValueKind::Int64,
-                               std::bit_cast<std::uint64_t>(
-                                   static_cast<std::int64_t>(position)));
+    version = lineage.setValue(
+        version, member, xanadu::PrimediaSpan{}, xanadu::ValueKind::Int64,
+        std::bit_cast<std::uint64_t>(static_cast<std::int64_t>(position)));
   }
   if (index != arenaPositions.size())
     return std::unexpected(
@@ -518,10 +506,8 @@ regenesisCycle(Store &lineage, ArenaManifold &arena, const CellRef agentRoot,
   const auto refForDim = arena.dimensionNamed("d.refFor");
   for (const auto slot : markedRelocationSlots(arena)) {
     if (!zigzag::isEphemeral(slot)) continue;
-    if ((refDim &&
-         arena.linked(slot, *refDim, zigzag::DimVector::NEG)) ||
-        (refForDim &&
-         arena.linked(slot, *refForDim, zigzag::DimVector::NEG)))
+    if ((refDim && arena.linked(slot, *refDim, zigzag::DimVector::NEG)) ||
+        (refForDim && arena.linked(slot, *refForDim, zigzag::DimVector::NEG)))
       continue;
     const auto named = arena.asInt64(slot);
     if (!named) continue;

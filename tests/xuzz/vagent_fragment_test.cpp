@@ -484,9 +484,8 @@ agent MetaUser {
   // Reify replays the capture member: the binding is read off the
   // slot's int64 (external → verbatim), and the copy's slot twin joins
   // the same +d.clone tail — a captured cell is shared, never copied.
-  const auto binds = mintMetaBindSet(h.arena, h.core,
-                                   h.arena.makeCell("program"),
-                                   h.arena.makeCell("agent"));
+  const auto binds = mintMetaBindSet(
+      h.arena, h.core, h.arena.makeCell("program"), h.arena.makeCell("agent"));
   ASSERT_TRUE(binds) << binds.error();
   MetaRuntime runtime{h.core, h.vm, *binds};
   const auto copy = runtime.reify(head);
@@ -685,9 +684,8 @@ agent MetaUser {
   ASSERT_TRUE(binds) << binds.error();
   MetaRuntime runtime{h.core, h.vm, *binds};
 
-  const auto outcome =
-      runtime.runFragment(head, {CellValue(std::int64_t{10}),
-                                 CellValue(std::int64_t{3})});
+  const auto outcome = runtime.runFragment(
+      head, {CellValue(std::int64_t{10}), CellValue(std::int64_t{3})});
   EXPECT_EQ(outcome.refusal, MetaRunOutcome::Refusal::None) << outcome.detail;
   EXPECT_TRUE(outcome.produced);
   ASSERT_TRUE(outcome.result.has_value());

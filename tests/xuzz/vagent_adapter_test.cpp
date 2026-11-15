@@ -8,6 +8,7 @@
 
 #include <algorithm>
 
+#include "../../apps/common/xanadu/store.hpp"
 #include "../../apps/common/xanadu/vagent/adapter.hpp"
 #include "../../apps/common/xanadu/vagent/decls.hpp"
 #include "../../apps/common/xanadu/vagent/frontend.hpp"
@@ -15,7 +16,6 @@
 #include "../../apps/common/xanadu/vagent/marshal.hpp"
 #include "../../apps/common/xanadu/vagent/percept_codec.hpp"
 #include "../../apps/common/xanadu/vagent/records.hpp"
-#include "../../apps/common/xanadu/store.hpp"
 #include "../../apps/common/xanadu/vortex/mesh_actor.hpp"
 
 namespace {
@@ -45,23 +45,21 @@ struct AdapterHarness {
         fprintf(stderr, "frontend: %s\n", d.detail.c_str());
       return std::unexpected(artifacts.error());
     }
-    auto image =
-        lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
-                     &artifacts->expansion, &artifacts->fragmentInfo);
+    auto image = lowerProgram(artifacts->program, ctx.core, ctx.vm, {},
+                              &artifacts->expansion, &artifacts->fragmentInfo);
     if (!image)
       for (const auto &d : image.error())
         fprintf(stderr, "lower: %s\n", d.detail.c_str());
     return image;
   }
 
-  ActorExecution execution(std::optional<ActorMessage> message =
-                               std::nullopt) {
+  ActorExecution execution(std::optional<ActorMessage> message = std::nullopt) {
     ActorExecution exec;
-    exec.pid   = ActorPid{"worker", "agent", 1, 1};
-    exec.grant = ActorGrant{.programRef      = "sha256:p",
-                            .baseRef         = "sha256:b",
-                            .maxInstructions = 100'000,
-                            .maxCells        = 10'000};
+    exec.pid     = ActorPid{"worker", "agent", 1, 1};
+    exec.grant   = ActorGrant{.programRef      = "sha256:p",
+                              .baseRef         = "sha256:b",
+                              .maxInstructions = 100'000,
+                              .maxCells        = 10'000};
     exec.message = std::move(message);
     exec.cursor =
         ctx.vm.spawnCursor(ctx.vm.mintOpcode(OpcodeKind::Halt), "actor");
@@ -79,18 +77,16 @@ struct AdapterHarness {
   std::vector<std::string> journalOf(CellRef agent) {
     const auto seen = ctx.core.findOrMintDimension("d.seen");
     std::vector<std::string> names;
-    for (const CellRef cell :
-         zigzag::rankAfter(ctx.arena, agent, seen))
+    for (const CellRef cell : zigzag::rankAfter(ctx.arena, agent, seen))
       names.emplace_back(ctx.arena.textOf(cell));
     return names;
   }
 
-  std::optional<CellRef> memberCell(CellRef agent,
-                                  std::string_view varName) {
+  std::optional<CellRef> memberCell(CellRef agent, std::string_view varName) {
     const auto rec = varsRecord(ctx.arena, ctx.core, agent, varName, false);
     if (!rec) return std::nullopt;
-    const auto ref = ctx.arena.linked(*rec, ctx.core.dims().values,
-                                    DimVector::POS);
+    const auto ref =
+        ctx.arena.linked(*rec, ctx.core.dims().values, DimVector::POS);
     if (!ref) return std::nullopt;
     const auto member = ctx.arena.asInt64(*ref);
     if (!member) return std::nullopt;
@@ -100,11 +96,10 @@ struct AdapterHarness {
 
 TEST(VagentAdapterTest, NotedPidResolvesBackToItsMember) {
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\nagent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\nagent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
   const auto member = h.memberCell(image->agentCell, "child");
@@ -163,15 +158,14 @@ TEST(VagentAdapterTest, ActorDownBecomesChildDownAndFailsTheWait) {
   down.requestId = "mon-1";
   down.source    = childPid;
   down.value     = "ActorDown";
-  auto turnDown = h.execution(down);
-  turnDown.pid  = parentPid;
+  auto turnDown  = h.execution(down);
+  turnDown.pid   = parentPid;
   ASSERT_TRUE(h.adapter(turnDown, h.ctx));
   const auto journal = h.journalOf(image->agentCell);
   EXPECT_THAT(journal, ::testing::Contains("ChildDown"));
   // The raw message never dispatches as a generic event — ChildDown
   // is the only loss percept the journal holds.
-  EXPECT_THAT(journal,
-              ::testing::Not(::testing::Contains("ActorDown")));
+  EXPECT_THAT(journal, ::testing::Not(::testing::Contains("ActorDown")));
   // The faulted wait's else ran with cause "down"; the continuation
   // needs its own turn to emit Lost, and the handler's Down rides the
   // same drain — journal order is Initialize, ChildDown, Down, Lost.
@@ -186,17 +180,15 @@ TEST(VagentAdapterTest, ActorDownBecomesChildDownAndFailsTheWait) {
 
 TEST(VagentAdapterTest, CommittedTurnDrainsTheOutbox) {
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Tick\nagent A {\n"
-              "  on Initialize { emit Tick{} }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\nagent A {\n"
+                             "  on Initialize { emit Tick{} }\n"
+                             "}");
   ASSERT_TRUE(image);
   // One adapter turn: the Initialize handler stages Tick, the
   // post-commit drain routes it broadcast — back onto the sender's
   // own journal like every other member's.
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
-  EXPECT_THAT(h.journalOf(image->agentCell),
-              ::testing::Contains("Tick"));
+  EXPECT_THAT(h.journalOf(image->agentCell), ::testing::Contains("Tick"));
   // The staged record is delivered, not re-staged: the drain is
   // read-only and deliver's +d.delivered dedupe makes a second turn
   // stage nothing new — the journal stays Initialize + Tick.
@@ -206,11 +198,10 @@ TEST(VagentAdapterTest, CommittedTurnDrainsTheOutbox) {
 
 TEST(VagentAdapterTest, UnroutableTargetFaultsTheSender) {
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Ping\nagent A {\n"
-              "  var target: Opt<Agent> := none\n"
-              "  on Initialize { emit Ping{} for target }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Ping\nagent A {\n"
+                             "  var target: Opt<Agent> := none\n"
+                             "  on Initialize { emit Ping{} for target }\n"
+                             "}");
   ASSERT_TRUE(image);
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
   const auto journal = h.journalOf(image->agentCell);
@@ -221,16 +212,16 @@ TEST(VagentAdapterTest, UnroutableTargetFaultsTheSender) {
 
 TEST(VagentAdapterTest, GenesisRewritesPidAndFailsEffectWaits) {
   AdapterHarness h;
-  const auto image = h.lower(
-      "module demo\nevent Tick\ngoal Work() perform\n"
-      "capacity Navigation { effect def read(): Str within 9s }\n"
-      "native skill Device implements Navigation\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Device\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan w for Work { let r := Navigation.read() else cause }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\ngoal Work() perform\n"
+              "capacity Navigation { effect def read(): Str within 9s }\n"
+              "native skill Device implements Navigation\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Device\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { let r := Navigation.read() else cause }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
@@ -250,15 +241,13 @@ TEST(VagentAdapterTest, GenesisRewritesPidAndFailsEffectWaits) {
   genesis.transported = &transported;
   ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
   ASSERT_TRUE(h.adapter.memberForPid(h.ctx, genesis.pid));
-  EXPECT_EQ(*h.adapter.memberForPid(h.ctx, genesis.pid),
-            image->agentCell);
+  EXPECT_EQ(*h.adapter.memberForPid(h.ctx, genesis.pid), image->agentCell);
   auto turnWake = h.execution();
   turnWake.pid  = genesis.pid;
   ASSERT_TRUE(h.adapter(turnWake, h.ctx));
   const auto r = varsRecord(arena, core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
-  const auto rv =
-      arena.linked(*r, core.dims().values, DimVector::POS);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv);
   EXPECT_EQ(arena.textOf(*rv), "migrated");
   EXPECT_EQ(arena.outstandingMarks(), 0u);
@@ -266,8 +255,7 @@ TEST(VagentAdapterTest, GenesisRewritesPidAndFailsEffectWaits) {
 
 TEST(VagentAdapterTest, FirstSpawnGenesisOnlyNotesThePid) {
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nagent A { }");
+  const auto image = h.lower("module demo\nagent A { }");
   ASSERT_TRUE(image);
   // transport=null means first spawn — the incarnation's pid lands
   // durably without the migrated-agent mark.
@@ -275,8 +263,7 @@ TEST(VagentAdapterTest, FirstSpawnGenesisOnlyNotesThePid) {
   genesis.pid = ActorPid{"node1", "firstspawn", 1, 3};
   ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
   ASSERT_TRUE(h.adapter.memberForPid(h.ctx, genesis.pid));
-  EXPECT_EQ(*h.adapter.memberForPid(h.ctx, genesis.pid),
-            image->agentCell);
+  EXPECT_EQ(*h.adapter.memberForPid(h.ctx, genesis.pid), image->agentCell);
 }
 
 TEST(VagentAdapterTest, SpawnRefusedFailsTheMemberAndItsDeliveries) {
@@ -303,12 +290,11 @@ TEST(VagentAdapterTest, SpawnRefusedFailsTheMemberAndItsDeliveries) {
 
 TEST(VagentAdapterTest, MemberReboundUpdatesStaleReferences) {
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
@@ -320,15 +306,13 @@ TEST(VagentAdapterTest, MemberReboundUpdatesStaleReferences) {
   // stale one, then Moved dispatches. (Opt vars that merely copied
   // the binding keep their opt node; only direct member refs rebind.)
   const auto replacement = arena.makeCell();
-  zigzag::expectWritten(
-      arena.link(replacement, core.dims().name, DimVector::POS,
-                 arena.makeCell("A")));
+  zigzag::expectWritten(arena.link(replacement, core.dims().name,
+                                   DimVector::POS, arena.makeCell("A")));
   h.adapter.memberRebound(h.ctx, image->agentCell, replacement);
   const auto rebound = h.memberCell(image->agentCell, "child");
   ASSERT_TRUE(rebound);
   EXPECT_EQ(*rebound, replacement);
-  EXPECT_THAT(h.journalOf(image->agentCell),
-              ::testing::Contains("Moved"));
+  EXPECT_THAT(h.journalOf(image->agentCell), ::testing::Contains("Moved"));
 }
 
 TEST(VagentAdapterTest, MovedFromParentRenamesParentPidAndRebinds) {
@@ -353,15 +337,12 @@ TEST(VagentAdapterTest, MovedFromParentRenamesParentPidAndRebinds) {
   const auto ppRec =
       varsRecord(arena, core, image->agentCell, "$parentPid", true);
   ASSERT_TRUE(ppRec);
-  zigzag::expectWritten(arena.link(*ppRec, core.dims().values,
-                                 DimVector::POS,
-                                 arena.makeCell(arena.textOf(*pidText))));
-  const auto psRec =
-      varsRecord(arena, core, image->agentCell, "$parent", true);
+  zigzag::expectWritten(arena.link(*ppRec, core.dims().values, DimVector::POS,
+                                   arena.makeCell(arena.textOf(*pidText))));
+  const auto psRec = varsRecord(arena, core, image->agentCell, "$parent", true);
   ASSERT_TRUE(psRec);
-  zigzag::expectWritten(arena.link(*psRec, core.dims().values,
-                                 DimVector::POS,
-                                 refCell(arena, core, parent)));
+  zigzag::expectWritten(arena.link(*psRec, core.dims().values, DimVector::POS,
+                                   refCell(arena, core, parent)));
 
   // Once any member is noted, an unresolvable exec pid binds nobody —
   // the agent's own genesis pid goes on record first.
@@ -370,15 +351,14 @@ TEST(VagentAdapterTest, MovedFromParentRenamesParentPidAndRebinds) {
 
   // The wire Moved: the parent's new incarnation — same cursor, new
   // node and epoch.
-  auto msg      = h.send("Moved{name: \"P\"}");
-  msg.source    = ActorPid{"n2", "parentid", 2, 1};
+  auto msg   = h.send("Moved{name: \"P\"}");
+  msg.source = ActorPid{"n2", "parentid", 2, 1};
   ASSERT_TRUE(h.adapter(h.execution(msg), h.ctx));
 
-  const auto rebound = varsRecord(arena, core, image->agentCell, "$parent",
-                                  false);
+  const auto rebound =
+      varsRecord(arena, core, image->agentCell, "$parent", false);
   ASSERT_TRUE(rebound);
-  const auto held =
-      arena.linked(*rebound, core.dims().values, DimVector::POS);
+  const auto held = arena.linked(*rebound, core.dims().values, DimVector::POS);
   ASSERT_TRUE(held);
   const auto heldRef = arena.asInt64(*held);
   ASSERT_TRUE(heldRef);
@@ -391,11 +371,10 @@ TEST(VagentAdapterTest, MovedFromParentRenamesParentPidAndRebinds) {
 
   // $parentPid renamed to the new incarnation — the text the rebound
   // member's own pid record carries — and the pid resolves to it.
-  const auto pp = varsRecord(arena, core, image->agentCell, "$parentPid",
-                             false);
+  const auto pp =
+      varsRecord(arena, core, image->agentCell, "$parentPid", false);
   ASSERT_TRUE(pp);
-  const auto ppv =
-      arena.linked(*pp, core.dims().values, DimVector::POS);
+  const auto ppv = arena.linked(*pp, core.dims().values, DimVector::POS);
   ASSERT_TRUE(ppv);
   const auto newPidRec = varsRecord(arena, core, heldMember, "pid", false);
   ASSERT_TRUE(newPidRec);
@@ -411,16 +390,16 @@ TEST(VagentAdapterTest, MovedFromParentRenamesParentPidAndRebinds) {
 
 TEST(VagentAdapterTest, NativeBodyRepliesDoneAndBindsTheResult) {
   AdapterHarness h;
-  const auto image = h.lower(
-      "module demo\nevent Tick\ngoal Work() perform\n"
-      "capacity Navigation { effect def read(): Str within 9s }\n"
-      "native skill Device implements Navigation\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Device\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan w for Work { let r := Navigation.read() else cause }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\ngoal Work() perform\n"
+              "capacity Navigation { effect def read(): Str within 9s }\n"
+              "native skill Device implements Navigation\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Device\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { let r := Navigation.read() else cause }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
@@ -438,12 +417,10 @@ TEST(VagentAdapterTest, NativeBodyRepliesDoneAndBindsTheResult) {
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
   const auto r = varsRecord(arena, core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
-  const auto rv =
-      arena.linked(*r, core.dims().values, DimVector::POS);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv);
   EXPECT_EQ(arena.textOf(*rv), "berries");
-  EXPECT_THAT(h.journalOf(image->agentCell),
-              ::testing::Contains("EffectDone"));
+  EXPECT_THAT(h.journalOf(image->agentCell), ::testing::Contains("EffectDone"));
   // `dispatched` makes the invoke once-durable: later drains see the
   // same staged entry and leave the body alone.
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
@@ -453,31 +430,29 @@ TEST(VagentAdapterTest, NativeBodyRepliesDoneAndBindsTheResult) {
 
 TEST(VagentAdapterTest, NativeFaultCarriesTheCauseIntoElse) {
   AdapterHarness h;
-  const auto image = h.lower(
-      "module demo\nevent Tick\ngoal Work() perform\n"
-      "capacity Navigation { effect def read(): Str within 9s }\n"
-      "native skill Device implements Navigation\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Device\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan w for Work { let r := Navigation.read() else cause }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\ngoal Work() perform\n"
+              "capacity Navigation { effect def read(): Str within 9s }\n"
+              "native skill Device implements Navigation\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Device\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { let r := Navigation.read() else cause }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
-  h.adapter.bindNative(
-      "Navigation", "read",
-      [](WorkerContext &, CellRef, CellRef)
-          -> std::expected<CellRef, std::string> {
-        return std::unexpected("denied");
-      });
+  h.adapter.bindNative("Navigation", "read",
+                       [](WorkerContext &, CellRef,
+                          CellRef) -> std::expected<CellRef, std::string> {
+                         return std::unexpected("denied");
+                       });
   ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
   const auto r = varsRecord(arena, core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
-  const auto rv =
-      arena.linked(*r, core.dims().values, DimVector::POS);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv);
   EXPECT_EQ(arena.textOf(*rv), "denied");
   EXPECT_THAT(h.journalOf(image->agentCell),
@@ -486,16 +461,16 @@ TEST(VagentAdapterTest, NativeFaultCarriesTheCauseIntoElse) {
 
 TEST(VagentAdapterTest, UnboundNativeFaultsUnbound) {
   AdapterHarness h;
-  const auto image = h.lower(
-      "module demo\nevent Tick\ngoal Work() perform\n"
-      "capacity Navigation { effect def read(): Str within 9s }\n"
-      "native skill Device implements Navigation\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Device\n"
-      "  on Tick { adopt Work() }\n"
-      "  plan w for Work { let r := Navigation.read() else cause }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\ngoal Work() perform\n"
+              "capacity Navigation { effect def read(): Str within 9s }\n"
+              "native skill Device implements Navigation\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Device\n"
+              "  on Tick { adopt Work() }\n"
+              "  plan w for Work { let r := Navigation.read() else cause }\n"
+              "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
@@ -505,24 +480,23 @@ TEST(VagentAdapterTest, UnboundNativeFaultsUnbound) {
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
   const auto r = varsRecord(arena, core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
-  const auto rv =
-      arena.linked(*r, core.dims().values, DimVector::POS);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv);
   EXPECT_EQ(arena.textOf(*rv), "unbound");
 }
 
 TEST(VagentAdapterTest, HandlerFormEffectDispatchesItsReply) {
   AdapterHarness h;
-  const auto image = h.lower(
-      "module demo\nevent Tick\nevent Got\n"
-      "capacity Navigation { effect def ping(): Str within 9s }\n"
-      "native skill Device implements Navigation\n"
-      "agent A {\n"
-      "  uses Navigation\n"
-      "  install Device\n"
-      "  on Tick { Navigation.ping() }\n"
-      "  on EffectDone { emit Got{} }\n"
-      "}");
+  const auto image =
+      h.lower("module demo\nevent Tick\nevent Got\n"
+              "capacity Navigation { effect def ping(): Str within 9s }\n"
+              "native skill Device implements Navigation\n"
+              "agent A {\n"
+              "  uses Navigation\n"
+              "  install Device\n"
+              "  on Tick { Navigation.ping() }\n"
+              "  on EffectDone { emit Got{} }\n"
+              "}");
   ASSERT_TRUE(image);
   h.adapter.bindNative("Navigation", "ping",
                        [](WorkerContext &c, CellRef, CellRef) {
@@ -533,10 +507,8 @@ TEST(VagentAdapterTest, HandlerFormEffectDispatchesItsReply) {
   ASSERT_TRUE(h.adapter(h.execution(h.send("Tick")), h.ctx));
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
-  EXPECT_THAT(h.journalOf(image->agentCell),
-              ::testing::Contains("EffectDone"));
-  EXPECT_THAT(h.journalOf(image->agentCell),
-              ::testing::Contains("Got"));
+  EXPECT_THAT(h.journalOf(image->agentCell), ::testing::Contains("EffectDone"));
+  EXPECT_THAT(h.journalOf(image->agentCell), ::testing::Contains("Got"));
 }
 
 TEST(VagentAdapterTest, SpawnOutcomeNotesGrantAndFailsRefusal) {
@@ -572,41 +544,38 @@ TEST(VagentAdapterTest, SpawnOutcomeNotesGrantAndFailsRefusal) {
   EXPECT_EQ(*h.adapter.memberForPid(h.ctx, meshPid), *granted);
   // The refused member's staged name fails §8.6-style on the agent.
   request.requestId = "req-refuse";
-  h.adapter.spawnOutcome(
-      h.ctx, request,
-      std::expected<ActorPid, ActorError>{
-          std::unexpected(ActorError::Refused)});
+  h.adapter.spawnOutcome(h.ctx, request,
+                         std::expected<ActorPid, ActorError>{
+                             std::unexpected(ActorError::Refused)});
   EXPECT_THAT(h.journalOf(image->agentCell),
               ::testing::Contains("SpawnFailed"));
   // An id no member ever claimed reports nothing at all.
   request.requestId = "req-nobody";
-  h.adapter.spawnOutcome(
-      h.ctx, request,
-      std::expected<ActorPid, ActorError>{
-          std::unexpected(ActorError::Refused)});
+  h.adapter.spawnOutcome(h.ctx, request,
+                         std::expected<ActorPid, ActorError>{
+                             std::unexpected(ActorError::Refused)});
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
 TEST(VagentAdapterTest, SpawnStagesTheWireRequestThroughTheSender) {
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
-  int calls = 0;
+  int calls   = 0;
   std::string requestId;
   CellRef sentMember = zigzag::noCell;
   h.adapter.setSpawnSender(
-      [&](WorkerContext &, CellRef member, std::string_view id)
-          -> std::expected<void, ActorError> {
+      [&](WorkerContext &, CellRef member,
+          std::string_view id) -> std::expected<void, ActorError> {
         ++calls;
-        requestId   = std::string{id};
-        sentMember  = member;
+        requestId  = std::string{id};
+        sentMember = member;
         return {};
       });
   ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
@@ -616,8 +585,7 @@ TEST(VagentAdapterTest, SpawnStagesTheWireRequestThroughTheSender) {
   EXPECT_EQ(sentMember, *member);
   // The durable correlation the ack resolves: the member's
   // spawnRequest record names the staged entry's own id.
-  const auto req =
-      varsRecord(arena, core, *member, "spawnRequest", false);
+  const auto req = varsRecord(arena, core, *member, "spawnRequest", false);
   ASSERT_TRUE(req);
   const auto rv = arena.linked(*req, core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv);
@@ -642,12 +610,11 @@ TEST(VagentAdapterTest, RemoteSpawnGrantsThroughTheMeshRuntime) {
   // on the member through spawnOutcome, the same path an
   // ActorSpawnAck takes off the wire.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"vagent-local", "agentid", 1, 1};
   h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
@@ -658,8 +625,7 @@ TEST(VagentAdapterTest, RemoteSpawnGrantsThroughTheMeshRuntime) {
   runtime.trustNode("vagent-local", identity);
   runtime.setAuthorizer(
       [](const xanadu::identity::Fingerprint &,
-         const ActorMessage &request)
-          -> std::expected<ActorGrant, ActorError> {
+         const ActorMessage &request) -> std::expected<ActorGrant, ActorError> {
         ActorGrant grant;
         grant.programRef      = request.programRef;
         grant.baseRef         = "local-lineage";
@@ -668,8 +634,8 @@ TEST(VagentAdapterTest, RemoteSpawnGrantsThroughTheMeshRuntime) {
         grant.maxOutputBytes  = 32'768;
         grant.maxSolutions    = 64;
         grant.maxMailboxBytes = 1u << 20;
-        grant.expiresAt = std::chrono::system_clock::now() +
-                          std::chrono::hours{1};
+        grant.expiresAt =
+            std::chrono::system_clock::now() + std::chrono::hours{1};
         return grant;
       });
   runtime.setExecutor(
@@ -681,13 +647,11 @@ TEST(VagentAdapterTest, RemoteSpawnGrantsThroughTheMeshRuntime) {
   ActorMessage captured;
   h.adapter.setSpawnSender(
       [&](WorkerContext &ctx, CellRef /*member*/,
-          std::string_view requestId)
-          -> std::expected<void, ActorError> {
+          std::string_view requestId) -> std::expected<void, ActorError> {
         const auto directory = h.adapter.members(ctx);
         if (directory.empty())
           return std::unexpected(ActorError::InvalidMessage);
-        const auto self =
-            h.adapter.memberPid(ctx, directory.front());
+        const auto self = h.adapter.memberPid(ctx, directory.front());
         if (!self) return std::unexpected(ActorError::InvalidMessage);
         ActorMessage request;
         request.type          = MessageType::ActorSpawn;
@@ -697,8 +661,8 @@ TEST(VagentAdapterTest, RemoteSpawnGrantsThroughTheMeshRuntime) {
         request.hashcashStamp = "local";
         request.capability    = "local";
         captured              = request;
-        auto result = runtime.spawn(
-            identity, request, std::chrono::system_clock::now());
+        auto result =
+            runtime.spawn(identity, request, std::chrono::system_clock::now());
         if (!result) return std::unexpected(result.error());
         h.adapter.spawnOutcome(ctx, request, result);
         return {};
@@ -736,12 +700,11 @@ TEST(VagentAdapterTest, RemoteSpawnRefusedFailsTheMember) {
   // drain's spawnFailed raises SpawnFailed on the asking agent —
   // the member keeps its name but never gets a pid.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"vagent-local", "agentid", 1, 1};
   h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
@@ -752,8 +715,7 @@ TEST(VagentAdapterTest, RemoteSpawnRefusedFailsTheMember) {
   runtime.trustNode("vagent-local", identity);
   runtime.setAuthorizer(
       [](const xanadu::identity::Fingerprint &,
-         const ActorMessage &)
-          -> std::expected<ActorGrant, ActorError> {
+         const ActorMessage &) -> std::expected<ActorGrant, ActorError> {
         return std::unexpected(ActorError::NotAuthorized);
       });
   runtime.setExecutor(
@@ -764,13 +726,11 @@ TEST(VagentAdapterTest, RemoteSpawnRefusedFailsTheMember) {
 
   h.adapter.setSpawnSender(
       [&](WorkerContext &ctx, CellRef,
-          std::string_view requestId)
-          -> std::expected<void, ActorError> {
+          std::string_view requestId) -> std::expected<void, ActorError> {
         const auto directory = h.adapter.members(ctx);
         const auto self      = directory.empty()
                                    ? std::nullopt
-                                   : h.adapter.memberPid(ctx,
-                                                         directory.front());
+                                   : h.adapter.memberPid(ctx, directory.front());
         if (!self) return std::unexpected(ActorError::InvalidMessage);
         ActorMessage request;
         request.type          = MessageType::ActorSpawn;
@@ -779,8 +739,8 @@ TEST(VagentAdapterTest, RemoteSpawnRefusedFailsTheMember) {
         request.programRef    = "vagent:test";
         request.hashcashStamp = "local";
         request.capability    = "local";
-        auto result = runtime.spawn(
-            identity, request, std::chrono::system_clock::now());
+        auto result =
+            runtime.spawn(identity, request, std::chrono::system_clock::now());
         if (!result) return std::unexpected(result.error());
         h.adapter.spawnOutcome(ctx, request, result);
         return {};
@@ -801,12 +761,11 @@ TEST(VagentAdapterTest, RemoteSpawnRefusedFailsTheMember) {
 
 TEST(VagentAdapterTest, MemberStoppingRaisesOnceAndDestroysTheMember) {
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
@@ -821,8 +780,7 @@ TEST(VagentAdapterTest, MemberStoppingRaisesOnceAndDestroysTheMember) {
   h.adapter.memberStopping(h.ctx, image->agentCell, *member, "lease");
   const auto flag = varsRecord(arena, core, *member, "destroying", false);
   ASSERT_TRUE(flag);
-  const auto fv = arena.linked(*flag, core.dims().values,
-                               DimVector::POS);
+  const auto fv = arena.linked(*flag, core.dims().values, DimVector::POS);
   ASSERT_TRUE(fv);
   EXPECT_EQ(arena.asInt64(*fv).value_or(0), 1);
   EXPECT_THAT(h.journalOf(image->agentCell),
@@ -870,28 +828,25 @@ TEST(VagentAdapterTest, NextDeadlineIsTheEarliestParkedAwait) {
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
   // The else bound "deadline" and the intention unparked — the heap
   // owes this member nothing until it parks again.
-  EXPECT_FALSE(h.adapter.nextDeadline(h.ctx, image->agentCell)
-                   .has_value());
+  EXPECT_FALSE(h.adapter.nextDeadline(h.ctx, image->agentCell).has_value());
   const auto r = varsRecord(arena, core, image->agentCell, "r", false);
   ASSERT_TRUE(r);
-  const auto rv = arena.linked(*r, core.dims().values,
-                               DimVector::POS);
+  const auto rv = arena.linked(*r, core.dims().values, DimVector::POS);
   ASSERT_TRUE(rv);
   EXPECT_EQ(arena.textOf(*rv), "unanswered");
 }
 
 TEST(VagentAdapterTest, SpawnSendFailureFailsTheMember) {
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   h.adapter.setSpawnSender(
-      [](WorkerContext &, CellRef, std::string_view)
-          -> std::expected<void, ActorError> {
+      [](WorkerContext &, CellRef,
+         std::string_view) -> std::expected<void, ActorError> {
         return std::unexpected(ActorError::TransportUnavailable);
       });
   ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
@@ -911,16 +866,16 @@ TEST(VagentAdapterTest, GenesisOverASeededLineageRunsTheCeremony) {
   const auto filed = fileDimensionVocabulary(lineage, stage, {});
   ASSERT_TRUE(filed) << (filed ? "" : filed.error());
   WorkerContext compile{&filed->fold, &lineage};
-  auto artifacts = compileArtifacts(
-      "module demo\nagent A { def f(): Int { 1 + 2 } }");
+  auto artifacts =
+      compileArtifacts("module demo\nagent A { def f(): Int { 1 + 2 } }");
   ASSERT_TRUE(artifacts);
   const auto image =
       lowerProgram(artifacts->program, compile.core, compile.vm, {},
                    &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image);
   ASSERT_NE(image->imageRecord, zigzag::noCell);
-  const auto seeded = seedProgramImage(lineage, compile.arena,
-                                       image->programRoot);
+  const auto seeded =
+      seedProgramImage(lineage, compile.arena, image->programRoot);
   ASSERT_TRUE(seeded) << (seeded ? "" : seeded.error());
   const auto fold = std::make_unique<zigzag::Manifold>(
       lineage.rebuildManifold(seeded->version));
@@ -954,18 +909,17 @@ TEST(VagentAdapterTest, SeededLineageExecutesTheEmitChain) {
   const auto filed = fileDimensionVocabulary(lineage, stage, {});
   ASSERT_TRUE(filed) << (filed ? "" : filed.error());
   WorkerContext compile{&filed->fold, &lineage};
-  auto artifacts = compileArtifacts(
-      "module demo\nevent Ready\nagent A {\n"
-      "  on Initialize { emit Ready{} }\n"
-      "  on Ready { }\n"
-      "}");
+  auto artifacts = compileArtifacts("module demo\nevent Ready\nagent A {\n"
+                                    "  on Initialize { emit Ready{} }\n"
+                                    "  on Ready { }\n"
+                                    "}");
   ASSERT_TRUE(artifacts);
   const auto image =
       lowerProgram(artifacts->program, compile.core, compile.vm, {},
                    &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image);
-  const auto seeded = seedProgramImage(lineage, compile.arena,
-                                       image->programRoot);
+  const auto seeded =
+      seedProgramImage(lineage, compile.arena, image->programRoot);
   ASSERT_TRUE(seeded) << (seeded ? "" : seeded.error());
   const auto fold = std::make_unique<zigzag::Manifold>(
       lineage.rebuildManifold(seeded->version));
@@ -1010,21 +964,21 @@ TEST(VagentAdapterTest, SendPerceptBindsNamedFieldsAndDeduplicates) {
   const auto filed = fileDimensionVocabulary(lineage, stage, {});
   ASSERT_TRUE(filed) << (filed ? "" : filed.error());
   WorkerContext compile{&filed->fold, &lineage};
-  auto artifacts = compileArtifacts(
-      "module demo\nevent Add { amount: Int }\nagent A {\n"
-      "  var total: Int := 0\n"
-      "  on Add as a {\n"
-      "    let next := total + a.amount\n"
-      "    total := next\n"
-      "  }\n"
-      "}");
+  auto artifacts =
+      compileArtifacts("module demo\nevent Add { amount: Int }\nagent A {\n"
+                       "  var total: Int := 0\n"
+                       "  on Add as a {\n"
+                       "    let next := total + a.amount\n"
+                       "    total := next\n"
+                       "  }\n"
+                       "}");
   ASSERT_TRUE(artifacts);
   const auto image =
       lowerProgram(artifacts->program, compile.core, compile.vm, {},
                    &artifacts->expansion, &artifacts->fragmentInfo);
   ASSERT_TRUE(image);
-  const auto seeded = seedProgramImage(lineage, compile.arena,
-                                       image->programRoot);
+  const auto seeded =
+      seedProgramImage(lineage, compile.arena, image->programRoot);
   ASSERT_TRUE(seeded) << (seeded ? "" : seeded.error());
   const auto fold = std::make_unique<zigzag::Manifold>(
       lineage.rebuildManifold(seeded->version));
@@ -1038,12 +992,10 @@ TEST(VagentAdapterTest, SendPerceptBindsNamedFieldsAndDeduplicates) {
   ASSERT_TRUE(member);
 
   const auto total = [&] {
-    const auto rec =
-        varsRecord(ctx.arena, ctx.core, *member, "total", false);
+    const auto rec = varsRecord(ctx.arena, ctx.core, *member, "total", false);
     if (!rec) return std::optional<std::int64_t>{};
     const auto value = ctx.arena.linked(*rec, ctx.core.dims().values);
-    return value ? ctx.arena.asInt64(*value)
-                 : std::optional<std::int64_t>{};
+    return value ? ctx.arena.asInt64(*value) : std::optional<std::int64_t>{};
   };
   const auto journal = [&] {
     const auto seen = ctx.core.findOrMintDimension("d.seen");
@@ -1061,20 +1013,19 @@ TEST(VagentAdapterTest, SendPerceptBindsNamedFieldsAndDeduplicates) {
   exec.cursor =
       ctx.vm.spawnCursor(ctx.vm.mintOpcode(OpcodeKind::Halt), "actor");
 
-  const std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
-      seven{{"amount", std::int64_t{7}}};
+  const std::vector<std::pair<std::string, zigzag::vortex::CellValue>> seven{
+      {"amount", std::int64_t{7}}};
   adapter.sendPercept(ctx, *member, "Add", seven, "s1");
   adapter.sendPercept(ctx, *member, "Add", seven, "s1");
   ASSERT_TRUE(adapter(exec, ctx));
   EXPECT_THAT(journal(), ::testing::ElementsAre("Add", "Initialize"));
   EXPECT_THAT(total(), ::testing::Optional(7));
 
-  const std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
-      three{{"amount", std::int64_t{3}}};
+  const std::vector<std::pair<std::string, zigzag::vortex::CellValue>> three{
+      {"amount", std::int64_t{3}}};
   adapter.sendPercept(ctx, *member, "Add", three, "s2");
   ASSERT_TRUE(adapter(exec, ctx));
-  EXPECT_THAT(journal(),
-              ::testing::ElementsAre("Add", "Initialize", "Add"));
+  EXPECT_THAT(journal(), ::testing::ElementsAre("Add", "Initialize", "Add"));
   EXPECT_THAT(total(), ::testing::Optional(10));
 }
 
@@ -1099,8 +1050,8 @@ TEST(VagentAdapterTest, RemoteMemberSendRidesTheWireOnce) {
   const ActorPid childPid{"node9", "childid", 2, 7};
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -1124,8 +1075,7 @@ TEST(VagentAdapterTest, RemoteMemberSendRidesTheWireOnce) {
   // The id carries the entry's idempotence id and the target's key —
   // a broadcast to two remote members can't collide on the wire's
   // dedupe.
-  EXPECT_THAT(wire[0].requestId,
-              ::testing::EndsWith(":5:node97:childid:2:7"));
+  EXPECT_THAT(wire[0].requestId, ::testing::EndsWith(":5:node97:childid:2:7"));
   // dispatched is durable: a second committed turn reads the same
   // outbox and sends nothing.
   ASSERT_TRUE(h.adapter(h.execution(), h.ctx));
@@ -1142,13 +1092,12 @@ TEST(VagentAdapterTest, MissingTransportFaultsTheRemoteSender) {
   // member carrying it — the DeliveryFailed reports only the leg
   // that never left.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\nevent Tick\nevent Ping\n"
-              "agent A {\n"
-              "  var peer: Opt<Agent> := none\n"
-              "  on Boot { peer := spawn A() }\n"
-              "  on Tick { emit Ping{} for peer }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\nevent Tick\nevent Ping\n"
+                             "agent A {\n"
+                             "  var peer: Opt<Agent> := none\n"
+                             "  on Boot { peer := spawn A() }\n"
+                             "  on Tick { emit Ping{} for peer }\n"
+                             "}");
   ASSERT_TRUE(image);
   ASSERT_TRUE(h.adapter(h.execution(h.send("Boot")), h.ctx));
   const auto child = h.memberCell(image->agentCell, "peer");
@@ -1169,20 +1118,19 @@ TEST(VagentAdapterTest, VerbStopOnARemoteChildSendsThePerformative) {
   // parent's ChildStopping arrives when the child's own agent acts,
   // not when the verb lands.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\nevent Tick\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "  on Tick { stop child }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\nevent Tick\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "  on Tick { stop child }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"worker", "agent", 1, 1};
   const ActorPid childPid{"node4", "childid", 3, 9};
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -1222,8 +1170,8 @@ TEST(VagentAdapterTest, WireStopFromParentRunsDestroyAndReportsBack) {
   ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -1237,8 +1185,7 @@ TEST(VagentAdapterTest, WireStopFromParentRunsDestroyAndReportsBack) {
   turn.pid    = selfPid;
   ASSERT_TRUE(h.adapter(turn, h.ctx));
 
-  EXPECT_THAT(h.journalOf(image->agentCell),
-              ::testing::Contains("Destroy"));
+  EXPECT_THAT(h.journalOf(image->agentCell), ::testing::Contains("Destroy"));
   ASSERT_EQ(wire.size(), 1u);
   ASSERT_TRUE(wire[0].target);
   EXPECT_EQ(*wire[0].target, parentPid);
@@ -1264,8 +1211,8 @@ TEST(VagentAdapterTest, WireStopFromANonParentIsDropped) {
   ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -1290,12 +1237,11 @@ TEST(VagentAdapterTest, WireChildStoppingCollapsesTheTrailingDown) {
   // shared dedupe key, so the orderly-reason ActorDown that trails
   // it raises nothing — and no ChildDown either.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"worker", "agent", 1, 1};
   const ActorPid childPid{"node3", "childid", 2, 7};
@@ -1336,12 +1282,11 @@ TEST(VagentAdapterTest, ActorDownUnreachableIsLossNotStopping) {
   // evidence is never interpreted as absence" keeps local children
   // off this path entirely.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"worker", "agent", 1, 1};
   const ActorPid childPid{"node3", "childid", 2, 7};
@@ -1363,8 +1308,7 @@ TEST(VagentAdapterTest, ActorDownUnreachableIsLossNotStopping) {
 
   const auto journal = h.journalOf(image->agentCell);
   EXPECT_THAT(journal, ::testing::Contains("ChildDown"));
-  EXPECT_THAT(journal,
-              ::testing::Not(::testing::Contains("ChildStopping")));
+  EXPECT_THAT(journal, ::testing::Not(::testing::Contains("ChildStopping")));
 }
 
 TEST(VagentAdapterTest, OrderlyActorDownReasonsTakeTheStoppingArm) {
@@ -1372,12 +1316,11 @@ TEST(VagentAdapterTest, OrderlyActorDownReasonsTakeTheStoppingArm) {
   // "terminate" verdict reports ChildStopping{cause:"terminate"},
   // and its pre-mark collapses a trailing loss-reason report.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"worker", "agent", 1, 1};
   const ActorPid childPid{"node3", "childid", 2, 7};
@@ -1418,12 +1361,11 @@ TEST(VagentAdapterTest, MigrationGenesisWiresMovedToParentAndChild) {
   // spawn request names and to each member whose $parent is the
   // agent, member-addressed sends the next drain puts on the wire.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\n"
-              "agent A {\n"
-              "  var child: Opt<Agent> := none\n"
-              "  on Boot { child := spawn A() }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\n"
+                             "agent A {\n"
+                             "  var child: Opt<Agent> := none\n"
+                             "  on Boot { child := spawn A() }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"node8", "reincarnation", 5, 88};
   const ActorPid parentPid{"node0", "parentid", 1, 2};
@@ -1439,30 +1381,25 @@ TEST(VagentAdapterTest, MigrationGenesisWiresMovedToParentAndChild) {
   h.adapter.noteMemberPid(h.ctx, *child, childPid);
   auto &arena = h.ctx.arena;
   auto &core  = h.ctx.core;
-  if (const auto rec =
-          varsRecord(arena, core, *child, "$parent", true))
-    zigzag::expectWritten(
-        arena.link(*rec, core.dims().values, DimVector::POS,
-                   arena.makeScalarCell(
-                       static_cast<std::int64_t>(image->agentCell))));
+  if (const auto rec = varsRecord(arena, core, *child, "$parent", true))
+    zigzag::expectWritten(arena.link(
+        *rec, core.dims().values, DimVector::POS,
+        arena.makeScalarCell(static_cast<std::int64_t>(image->agentCell))));
   const auto parent = arena.makeCell();
   {
     const auto dirs   = core.findOrMintDimension("d.dirs");
     const auto agents = core.findOrMintDimension("d.agents");
-    for (const CellRef dir :
-         zigzag::rankAfter(arena, core.home(), dirs)) {
-      zigzag::expectWritten(
-          arena.link(zigzag::rankTail(arena, dir, agents), agents,
-                     DimVector::POS, parent));
+    for (const CellRef dir : zigzag::rankAfter(arena, core.home(), dirs)) {
+      zigzag::expectWritten(arena.link(zigzag::rankTail(arena, dir, agents),
+                                       agents, DimVector::POS, parent));
       break;
     }
   }
   h.adapter.noteMemberPid(h.ctx, parent, parentPid);
   if (const auto rec =
           varsRecord(arena, core, image->agentCell, "$parentPid", true))
-    zigzag::expectWritten(
-        arena.link(*rec, core.dims().values, DimVector::POS,
-                   arena.makeCell("5:node08:parentid:1:2")));
+    zigzag::expectWritten(arena.link(*rec, core.dims().values, DimVector::POS,
+                                     arena.makeCell("5:node08:parentid:1:2")));
 
   xanadu::Store transported;
   ActorMessage request;
@@ -1476,13 +1413,13 @@ TEST(VagentAdapterTest, MigrationGenesisWiresMovedToParentAndChild) {
 
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
-  auto turn  = h.execution();
-  turn.pid   = selfPid;
+  auto turn = h.execution();
+  turn.pid  = selfPid;
   ASSERT_TRUE(h.adapter(turn, h.ctx));
 
   // One Moved per remote peer — parent and child — rendered with the
@@ -1496,8 +1433,7 @@ TEST(VagentAdapterTest, MigrationGenesisWiresMovedToParentAndChild) {
     ASSERT_TRUE(m.target);
     targets.push_back(*m.target);
   }
-  EXPECT_THAT(targets,
-              ::testing::UnorderedElementsAre(parentPid, childPid));
+  EXPECT_THAT(targets, ::testing::UnorderedElementsAre(parentPid, childPid));
 }
 
 // A remote member minted straight into the directory — the shape
@@ -1511,23 +1447,19 @@ CellRef mintRemoteMember(AdapterHarness &h, CellRef agent,
   const auto dirs   = h.ctx.core.findOrMintDimension("d.dirs");
   const auto agents = h.ctx.core.findOrMintDimension("d.agents");
   const auto member = arena.makeCell();
-  for (const CellRef dir :
-       zigzag::rankAfter(arena, h.ctx.core.home(), dirs)) {
-    zigzag::expectWritten(
-        arena.link(zigzag::rankTail(arena, dir, agents), agents,
-                   DimVector::POS, member));
+  for (const CellRef dir : zigzag::rankAfter(arena, h.ctx.core.home(), dirs)) {
+    zigzag::expectWritten(arena.link(zigzag::rankTail(arena, dir, agents),
+                                     agents, DimVector::POS, member));
     break;
   }
-  zigzag::expectWritten(
-      arena.link(member, h.ctx.core.dims().name, DimVector::POS,
-                 arena.makeCell(name)));
+  zigzag::expectWritten(arena.link(member, h.ctx.core.dims().name,
+                                   DimVector::POS, arena.makeCell(name)));
   h.adapter.noteMemberPid(h.ctx, member, pid);
   if (!varName.empty())
-    if (const auto rec =
-            varsRecord(arena, h.ctx.core, agent, varName, true))
-      zigzag::expectWritten(
-          arena.link(*rec, h.ctx.core.dims().values, DimVector::POS,
-                     refCell(arena, h.ctx.core, member)));
+    if (const auto rec = varsRecord(arena, h.ctx.core, agent, varName, true))
+      zigzag::expectWritten(arena.link(*rec, h.ctx.core.dims().values,
+                                       DimVector::POS,
+                                       refCell(arena, h.ctx.core, member)));
   return member;
 }
 
@@ -1539,12 +1471,11 @@ TEST(VagentAdapterTest, WireAchieveFromParentAdoptsAndReportsOutcome) {
   // to the delegator's pid — the semantic correlation echoes, never
   // the transport requestId.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent ChildDone\n"
-              "goal Deliver() perform\n"
-              "agent A {\n"
-              "  plan d for Deliver { emit ChildDone{} }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent ChildDone\n"
+                             "goal Deliver() perform\n"
+                             "agent A {\n"
+                             "  plan d for Deliver { emit ChildDone{} }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"node1", "selfid", 1, 4};
   const ActorPid parentPid{"node0", "parentid", 1, 2};
@@ -1557,8 +1488,8 @@ TEST(VagentAdapterTest, WireAchieveFromParentAdoptsAndReportsOutcome) {
   ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -1568,7 +1499,7 @@ TEST(VagentAdapterTest, WireAchieveFromParentAdoptsAndReportsOutcome) {
   achieve.source    = parentPid;
   achieve.target    = selfPid;
   achieve.requestId = "w-achieve-1";
-  achieve.value = "Deliver{__kind: \"achieve\", __correlation: \"r1\"}";
+  achieve.value     = "Deliver{__kind: \"achieve\", __correlation: \"r1\"}";
   auto turn         = h.execution(achieve);
   turn.pid          = selfPid;
   ASSERT_TRUE(h.adapter(turn, h.ctx));
@@ -1577,8 +1508,7 @@ TEST(VagentAdapterTest, WireAchieveFromParentAdoptsAndReportsOutcome) {
   // remote leg to the parent, and the child's retire staged the
   // outcome reply on the same drain.
   const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
-  EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim)
-                  .empty());
+  EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim).empty());
   ASSERT_EQ(wire.size(), 2u);
   EXPECT_EQ(wire[0].value, "ChildDone");
   ASSERT_TRUE(wire[1].target);
@@ -1603,35 +1533,31 @@ TEST(VagentAdapterTest, WireAchieveFromNonKinIsRefusedOnTheWire) {
   // way is refused — the reply rides the member-addressed arm to the
   // stranger's pid and nothing adopts.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\n"
-              "goal Deliver() perform\n"
-              "agent A {\n"
-              "  plan d for Deliver { }\n"
-              "}");
+  const auto image = h.lower("module demo\n"
+                             "goal Deliver() perform\n"
+                             "agent A {\n"
+                             "  plan d for Deliver { }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"node1", "selfid", 1, 4};
   const ActorPid strangerPid{"node7", "stranger", 5, 5};
-  auto &arena = h.ctx.arena;
-  const auto dirs   = h.ctx.core.findOrMintDimension("d.dirs");
-  const auto agents = h.ctx.core.findOrMintDimension("d.agents");
+  auto &arena         = h.ctx.arena;
+  const auto dirs     = h.ctx.core.findOrMintDimension("d.dirs");
+  const auto agents   = h.ctx.core.findOrMintDimension("d.agents");
   const auto stranger = arena.makeCell();
-  for (const CellRef dir :
-       zigzag::rankAfter(arena, h.ctx.core.home(), dirs)) {
-    zigzag::expectWritten(
-        arena.link(zigzag::rankTail(arena, dir, agents), agents,
-                   DimVector::POS, stranger));
+  for (const CellRef dir : zigzag::rankAfter(arena, h.ctx.core.home(), dirs)) {
+    zigzag::expectWritten(arena.link(zigzag::rankTail(arena, dir, agents),
+                                     agents, DimVector::POS, stranger));
     break;
   }
-  zigzag::expectWritten(
-      arena.link(stranger, h.ctx.core.dims().name, DimVector::POS,
-                 arena.makeCell("Stranger")));
+  zigzag::expectWritten(arena.link(stranger, h.ctx.core.dims().name,
+                                   DimVector::POS, arena.makeCell("Stranger")));
   h.adapter.noteMemberPid(h.ctx, stranger, strangerPid);
   h.adapter.noteMemberPid(h.ctx, image->agentCell, selfPid);
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -1641,7 +1567,7 @@ TEST(VagentAdapterTest, WireAchieveFromNonKinIsRefusedOnTheWire) {
   achieve.source    = strangerPid;
   achieve.target    = selfPid;
   achieve.requestId = "w-achieve-2";
-  achieve.value = "Deliver{__kind: \"achieve\", __correlation: \"r2\"}";
+  achieve.value     = "Deliver{__kind: \"achieve\", __correlation: \"r2\"}";
   auto turn         = h.execution(achieve);
   turn.pid          = selfPid;
   ASSERT_TRUE(h.adapter(turn, h.ctx));
@@ -1674,23 +1600,22 @@ TEST(VagentAdapterTest, WireOutcomeReadiesTheParkedAchieve) {
   // the token through `__correlation`, and the parked intention
   // readies — the spine resumes into emit Done.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Tick\nevent Done\n"
-              "goal Outer() perform\n"
-              "goal Deliver() perform\n"
-              "agent A {\n"
-              "  var peer: Opt<Agent> := none\n"
-              "  on Tick { adopt Outer() }\n"
-              "  plan o for Outer { achieve Deliver() by peer "
-              "within 9s; emit Done{} }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\nevent Done\n"
+                             "goal Outer() perform\n"
+                             "goal Deliver() perform\n"
+                             "agent A {\n"
+                             "  var peer: Opt<Agent> := none\n"
+                             "  on Tick { adopt Outer() }\n"
+                             "  plan o for Outer { achieve Deliver() by peer "
+                             "within 9s; emit Done{} }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"worker", "agent", 1, 1};
   const ActorPid peerPid{"node9", "peerid", 2, 7};
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -1719,15 +1644,14 @@ TEST(VagentAdapterTest, WireOutcomeReadiesTheParkedAchieve) {
   reply.requestId = "w-outcome-1";
   reply.value     = "outcome{status: \"achieved\", __kind: \"outcome\", "
                     "__correlation: \"" +
-                    corr + "\"}";
-  auto turn       = h.execution(reply);
-  turn.pid        = selfPid;
+                corr + "\"}";
+  auto turn = h.execution(reply);
+  turn.pid  = selfPid;
   ASSERT_TRUE(h.adapter(turn, h.ctx));
 
   // The resumed spine emits Done — the broadcast's remote leg wires
   // to the peer, the local leg journals.
-  EXPECT_THAT(h.journalOf(image->agentCell),
-              ::testing::Contains("Done"));
+  EXPECT_THAT(h.journalOf(image->agentCell), ::testing::Contains("Done"));
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
 }
 
@@ -1737,24 +1661,23 @@ TEST(VagentAdapterTest, WireOutcomeFailureFaultsTheParkedAchieve) {
   // with no else recovery the delegated rung faults it — PlanFailed
   // journals with the wire's cause intact.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Tick\nevent Done\n"
-              "goal Outer() perform\n"
-              "goal Deliver() perform\n"
-              "agent A {\n"
-              "  var peer: Opt<Agent> := none\n"
-              "  on Tick { adopt Outer() }\n"
-              "  plan o for Outer { achieve Deliver() by peer "
-              "within 9s;\n"
-              "                   emit Done{} }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\nevent Done\n"
+                             "goal Outer() perform\n"
+                             "goal Deliver() perform\n"
+                             "agent A {\n"
+                             "  var peer: Opt<Agent> := none\n"
+                             "  on Tick { adopt Outer() }\n"
+                             "  plan o for Outer { achieve Deliver() by peer "
+                             "within 9s;\n"
+                             "                   emit Done{} }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"worker", "agent", 1, 1};
   const ActorPid peerPid{"node9", "peerid", 2, 7};
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -1777,9 +1700,9 @@ TEST(VagentAdapterTest, WireOutcomeFailureFaultsTheParkedAchieve) {
   reply.requestId = "w-outcome-2";
   reply.value     = "outcome{status: \"failed\", cause: \"nope\", "
                     "__kind: \"outcome\", __correlation: \"" +
-                    corr + "\"}";
-  auto turn       = h.execution(reply);
-  turn.pid        = selfPid;
+                corr + "\"}";
+  auto turn = h.execution(reply);
+  turn.pid  = selfPid;
   ASSERT_TRUE(h.adapter(turn, h.ctx));
 
   // The delegated rung sees the refused mark the same settle —
@@ -1814,8 +1737,8 @@ TEST(VagentAdapterTest, WireCancelDropsTheAdoptedChild) {
   ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -1825,7 +1748,7 @@ TEST(VagentAdapterTest, WireCancelDropsTheAdoptedChild) {
   achieve.source    = parentPid;
   achieve.target    = selfPid;
   achieve.requestId = "w-achieve-3";
-  achieve.value = "Deliver{__kind: \"achieve\", __correlation: \"r3\"}";
+  achieve.value     = "Deliver{__kind: \"achieve\", __correlation: \"r3\"}";
   auto turn         = h.execution(achieve);
   turn.pid          = selfPid;
   ASSERT_TRUE(h.adapter(turn, h.ctx));
@@ -1848,8 +1771,7 @@ TEST(VagentAdapterTest, WireCancelDropsTheAdoptedChild) {
   turn2.pid        = selfPid;
   ASSERT_TRUE(h.adapter(turn2, h.ctx));
 
-  EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim)
-                  .empty());
+  EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim).empty());
   EXPECT_THAT(h.journalOf(image->agentCell),
               ::testing::Contains("GoalDropped"));
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);
@@ -1860,12 +1782,11 @@ TEST(VagentAdapterTest, WireCancelBeforeAdoptionIsRemembered) {
   // adopted yet mints $cancelled:<id>, and the late achieve with the
   // same token is consumed silently — no adoption, no reply.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\n"
-              "goal Deliver() perform\n"
-              "agent A {\n"
-              "  plan d for Deliver { }\n"
-              "}");
+  const auto image = h.lower("module demo\n"
+                             "goal Deliver() perform\n"
+                             "agent A {\n"
+                             "  plan d for Deliver { }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"node1", "selfid", 1, 4};
   const ActorPid parentPid{"node0", "parentid", 1, 2};
@@ -1878,8 +1799,8 @@ TEST(VagentAdapterTest, WireCancelBeforeAdoptionIsRemembered) {
   ASSERT_TRUE(h.adapter.genesis(genesis, h.ctx));
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -1893,24 +1814,22 @@ TEST(VagentAdapterTest, WireCancelBeforeAdoptionIsRemembered) {
   auto turn        = h.execution(cancel);
   turn.pid         = selfPid;
   ASSERT_TRUE(h.adapter(turn, h.ctx));
-  ASSERT_TRUE(
-      varsRecord(h.ctx.arena, h.ctx.core, image->agentCell,
-                 "$cancelled:r9", false)
-          .has_value());
+  ASSERT_TRUE(varsRecord(h.ctx.arena, h.ctx.core, image->agentCell,
+                         "$cancelled:r9", false)
+                  .has_value());
 
   ActorMessage achieve;
   achieve.type      = MessageType::ActorSend;
   achieve.source    = parentPid;
   achieve.target    = selfPid;
   achieve.requestId = "w-achieve-4";
-  achieve.value = "Deliver{__kind: \"achieve\", __correlation: \"r9\"}";
+  achieve.value     = "Deliver{__kind: \"achieve\", __correlation: \"r9\"}";
   auto turn2        = h.execution(achieve);
   turn2.pid         = selfPid;
   ASSERT_TRUE(h.adapter(turn2, h.ctx));
 
   const auto iDim = h.ctx.core.findOrMintDimension("d.intention");
-  EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim)
-                  .empty());
+  EXPECT_TRUE(zigzag::rankAfter(h.ctx.arena, image->agentCell, iDim).empty());
   EXPECT_TRUE(wire.empty());
 
   // The marker holds only the retry window — send_retries ×
@@ -1927,7 +1846,7 @@ TEST(VagentAdapterTest, WireCancelBeforeAdoptionIsRemembered) {
   late.source    = parentPid;
   late.target    = selfPid;
   late.requestId = "w-achieve-5";
-  late.value = "Deliver{__kind: \"achieve\", __correlation: \"r9\"}";
+  late.value     = "Deliver{__kind: \"achieve\", __correlation: \"r9\"}";
   auto turn3     = h.execution(late);
   turn3.pid      = selfPid;
   ASSERT_TRUE(h.adapter(turn3, h.ctx));
@@ -1958,12 +1877,11 @@ TEST(VagentAdapterTest, TwoRuntimesDelegateAcrossTheWire) {
                    "within 9s; emit Done{} }\n"
                    "}");
   ASSERT_TRUE(pImage);
-  const auto cImage =
-      child.lower("module demo\nevent ChildDone\n"
-                  "goal Deliver() perform\n"
-                  "agent B {\n"
-                  "  plan d for Deliver { emit ChildDone{} }\n"
-                  "}");
+  const auto cImage = child.lower("module demo\nevent ChildDone\n"
+                                  "goal Deliver() perform\n"
+                                  "agent B {\n"
+                                  "  plan d for Deliver { emit ChildDone{} }\n"
+                                  "}");
   ASSERT_TRUE(cImage);
 
   const ActorPid parentPid{"node0", "parentid", 1, 2};
@@ -1980,10 +1898,8 @@ TEST(VagentAdapterTest, TwoRuntimesDelegateAcrossTheWire) {
   genesis.request = &spawnRequest;
   ASSERT_TRUE(child.adapter.genesis(genesis, child.ctx));
 
-  parent.adapter.noteMemberPid(parent.ctx, pImage->agentCell,
-                               parentPid);
-  mintRemoteMember(parent, pImage->agentCell, "Peer", childPid,
-                   "peer");
+  parent.adapter.noteMemberPid(parent.ctx, pImage->agentCell, parentPid);
+  mintRemoteMember(parent, pImage->agentCell, "Peer", childPid, "peer");
 
   // The transport: each runtime's sent messages queue for the other.
   std::vector<ActorMessage> parentToChild, childToParent;
@@ -2051,8 +1967,7 @@ TEST(VagentAdapterTest, TwoRuntimesDelegateAcrossTheWire) {
   // the child's own broadcast percept journals on the parent too.
   ASSERT_TRUE(deliver(parent, parentPid, childToParent[0]));
   ASSERT_TRUE(deliver(parent, parentPid, childToParent[1]));
-  EXPECT_THAT(parent.journalOf(pImage->agentCell),
-              ::testing::Contains("Done"));
+  EXPECT_THAT(parent.journalOf(pImage->agentCell), ::testing::Contains("Done"));
   EXPECT_THAT(parent.journalOf(pImage->agentCell),
               ::testing::Contains("ChildDone"));
   EXPECT_EQ(parent.ctx.arena.outstandingMarks(), 0u);
@@ -2065,11 +1980,10 @@ TEST(VagentAdapterTest, EmitForParentWiresTheNamelessParentMember) {
   // entry could never reach it. The member-addressed arm sends by
   // pid, so the reply lands on the real remote incarnation.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Boot\nevent Pong\n"
-              "agent A {\n"
-              "  on Boot { emit Pong{} for parent }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Boot\nevent Pong\n"
+                             "agent A {\n"
+                             "  on Boot { emit Pong{} for parent }\n"
+                             "}");
   ASSERT_TRUE(image);
 
   const ActorPid parentPid{"node0", "parentid", 1, 2};
@@ -2084,8 +1998,8 @@ TEST(VagentAdapterTest, EmitForParentWiresTheNamelessParentMember) {
 
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -2113,8 +2027,8 @@ TEST(VagentAdapterTest, UnmarshalableRemotePayloadFaultsHonestly) {
   const ActorPid peerPid{"node9", "peerid", 2, 7};
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -2130,23 +2044,19 @@ TEST(VagentAdapterTest, UnmarshalableRemotePayloadFaultsHonestly) {
       arena.link(zigzag::rankTail(arena, image->agentCell, outboxDim),
                  outboxDim, DimVector::POS, entry));
   const auto field = [&](std::string_view name, CellRef value) {
-    if (const auto rec =
-            varsRecord(arena, h.ctx.core, entry, name, true))
+    if (const auto rec = varsRecord(arena, h.ctx.core, entry, name, true))
       zigzag::expectWritten(
-          arena.link(*rec, h.ctx.core.dims().values, DimVector::POS,
-                     value));
+          arena.link(*rec, h.ctx.core.dims().values, DimVector::POS, value));
   };
   field("kind", arena.makeCell("emit"));
   field("target", arena.makeCell("Peer"));
   field("id", arena.makeCell("e-marshal"));
   const auto payload = arena.makeCell("Ping");
   const auto refArg  = refCell(arena, h.ctx.core, image->agentCell);
-  zigzag::expectWritten(arena.link(
-      refArg, h.ctx.core.dims().name, DimVector::POS,
-      arena.makeCell("who")));
+  zigzag::expectWritten(arena.link(refArg, h.ctx.core.dims().name,
+                                   DimVector::POS, arena.makeCell("who")));
   zigzag::expectWritten(
-      arena.link(zigzag::rankTail(arena, payload,
-                                  h.ctx.core.dims().step),
+      arena.link(zigzag::rankTail(arena, payload, h.ctx.core.dims().step),
                  h.ctx.core.dims().step, DimVector::POS, refArg));
   field("payload", refCell(arena, h.ctx.core, payload));
 
@@ -2174,8 +2084,8 @@ TEST(VagentAdapterTest, NestedPayloadFaultsHonestly) {
   const ActorPid peerPid{"node9", "peerid", 2, 7};
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -2184,17 +2094,17 @@ TEST(VagentAdapterTest, NestedPayloadFaultsHonestly) {
 
   // Outer{loc: Inner{x: 1}} — the nested head's own arg splices into
   // Outer's step rank at marshal time.
-  auto one   = std::make_unique<Expr>();
-  one->kind  = ExprKind::Integer;
-  one->text  = "1";
-  auto inner = std::make_unique<Expr>();
-  inner->kind = ExprKind::Record;
-  inner->text = "Inner";
+  auto one     = std::make_unique<Expr>();
+  one->kind    = ExprKind::Integer;
+  one->text    = "1";
+  auto inner   = std::make_unique<Expr>();
+  inner->kind  = ExprKind::Record;
+  inner->text  = "Inner";
   inner->names = {"x"};
   inner->children.push_back(std::move(one));
   Expr outer;
-  outer.kind = ExprKind::Record;
-  outer.text = "Outer";
+  outer.kind  = ExprKind::Record;
+  outer.text  = "Outer";
   outer.names = {"loc"};
   outer.children.push_back(std::move(inner));
   const auto payload =
@@ -2207,11 +2117,9 @@ TEST(VagentAdapterTest, NestedPayloadFaultsHonestly) {
       arena.link(zigzag::rankTail(arena, image->agentCell, outboxDim),
                  outboxDim, DimVector::POS, entry));
   const auto field = [&](std::string_view name, CellRef value) {
-    if (const auto rec =
-            varsRecord(arena, h.ctx.core, entry, name, true))
+    if (const auto rec = varsRecord(arena, h.ctx.core, entry, name, true))
       zigzag::expectWritten(
-          arena.link(*rec, h.ctx.core.dims().values, DimVector::POS,
-                     value));
+          arena.link(*rec, h.ctx.core.dims().values, DimVector::POS, value));
   };
   field("kind", arena.makeCell("emit"));
   field("target", arena.makeCell("Peer"));
@@ -2233,23 +2141,22 @@ TEST(VagentAdapterTest, DelegatedDeadlineStagesTheCancelWire) {
   // owes the delegate a best-effort cancel — the drain renders it
   // member-addressed with the achieve's correlation echoed.
   AdapterHarness h;
-  const auto image =
-      h.lower("module demo\nevent Tick\n"
-              "goal Outer() perform\n"
-              "goal Deliver() perform\n"
-              "agent A {\n"
-              "  var peer: Opt<Agent> := none\n"
-              "  on Tick { adopt Outer() }\n"
-              "  plan o for Outer { achieve Deliver() by peer "
-              "within 2s }\n"
-              "}");
+  const auto image = h.lower("module demo\nevent Tick\n"
+                             "goal Outer() perform\n"
+                             "goal Deliver() perform\n"
+                             "agent A {\n"
+                             "  var peer: Opt<Agent> := none\n"
+                             "  on Tick { adopt Outer() }\n"
+                             "  plan o for Outer { achieve Deliver() by peer "
+                             "within 2s }\n"
+                             "}");
   ASSERT_TRUE(image);
   const ActorPid selfPid{"worker", "agent", 1, 1};
   const ActorPid peerPid{"node9", "peerid", 2, 7};
   std::vector<ActorMessage> wire;
   h.adapter.setSendSender(
-      [&wire](WorkerContext &, const ActorMessage &message)
-          -> std::expected<void, ActorError> {
+      [&wire](WorkerContext &,
+              const ActorMessage &message) -> std::expected<void, ActorError> {
         wire.push_back(message);
         return {};
       });
@@ -2276,8 +2183,8 @@ TEST(VagentAdapterTest, DelegatedDeadlineStagesTheCancelWire) {
     sawCancel = true;
     ASSERT_TRUE(m.target);
     EXPECT_EQ(*m.target, peerPid);
-    EXPECT_THAT(m.value, ::testing::HasSubstr("__correlation: \"" + corr +
-                                                "\""));
+    EXPECT_THAT(m.value,
+                ::testing::HasSubstr("__correlation: \"" + corr + "\""));
   }
   EXPECT_TRUE(sawCancel);
   EXPECT_EQ(h.ctx.arena.outstandingMarks(), 0u);

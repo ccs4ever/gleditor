@@ -149,7 +149,7 @@ sweepDimName(zigzag::ArenaManifold &arena, VortexCore &core,
              std::string_view name) {
   const auto filed = core.findDimension(name).has_value() ||
                      arena.dimensionNamed(name).has_value();
-  const auto dim   = resolveDimension(arena, core, name);
+  const auto dim = resolveDimension(arena, core, name);
   if (!dim) return std::unexpected(dim.error());
   return !filed;
 }
@@ -480,8 +480,7 @@ runGenesis(const xanadu::Store &lineage, const xanadu::Store &received,
     return std::unexpected(
         "genesis: the roots record names no image extent — nothing to "
         "bind a lineage against");
-  if (const auto ok =
-          verifyLineageBand(lineage, received, *roots.imageExtent);
+  if (const auto ok = verifyLineageBand(lineage, received, *roots.imageExtent);
       !ok)
     return std::unexpected(ok.error());
 
@@ -538,8 +537,8 @@ runGenesis(const xanadu::Store &lineage, const xanadu::Store &received,
     return std::unexpected(std::format("genesis (c): {}", binds.error()));
   binds->ownModule = roots.ownModule;
   binds->lineage   = MetaLineage{
-      .programRef  = roots.programRoot,
-      .imageExtent = *roots.imageExtent,
+        .programRef  = roots.programRoot,
+        .imageExtent = *roots.imageExtent,
   };
   out.binds = *binds;
 

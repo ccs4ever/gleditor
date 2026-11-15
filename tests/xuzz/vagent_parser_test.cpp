@@ -714,8 +714,7 @@ TEST(VAgentParserTest, ParseCodeBodyParsesSpliceAndStaticInside) {
   EXPECT_EQ(staged->body->children[1]->kind, ExprKind::Static);
   // The inner grammar is the vagent grammar, so a nested code"…" literal
   // parses as an inner literal — escaped one level in the source spelling.
-  auto nested =
-      Parser::parseCodeBody("x + splice code\"n: Int | n + 1\"(x)");
+  auto nested = Parser::parseCodeBody("x + splice code\"n: Int | n + 1\"(x)");
   ASSERT_TRUE(nested) << formatDiagnostic(nested.error());
   ASSERT_EQ(nested->body->kind, ExprKind::Binary);
   const auto &inner = *nested->body->children[1];

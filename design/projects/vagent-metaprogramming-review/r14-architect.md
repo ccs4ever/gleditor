@@ -1,11 +1,11 @@
 # R14 — System Architect critique (v1.13)
 
-Scope: layering/ownership/adapter boundaries; verification of R13-A (`d.captured` dropped,
-endpoint carried as content), the adopted minors (dim enumerations :2788/:3028, replay dedupe
-divergence :1230-1237/:2188-2190, §10.2 (v) `documentId` arm :2833-2837), and new defects in the
-v1.13 deltas only. Re-verified against the tree (`publication.cpp:853-869` `globalKeyOf`,
-`publication.hpp:447` `breakMarkerKey`, `publication.cpp:985-987` sealableOps skip, `:1049-1050`
-identity remap, `store.cpp:1461-1464` `Store::scroll` disengage on `localScroll`/out-of-`externals`,
+Scope: layering/ownership/adapter boundaries; verification of R13-A (`d.captured` dropped, endpoint
+carried as content), the adopted minors (dim enumerations :2788/:3028, replay dedupe divergence
+:1230-1237/:2188-2190, §10.2 (v) `documentId` arm :2833-2837), and new defects in the v1.13 deltas
+only. Re-verified against the tree (`publication.cpp:853-869` `globalKeyOf`, `publication.hpp:447`
+`breakMarkerKey`, `publication.cpp:985-987` sealableOps skip, `:1049-1050` identity remap,
+`store.cpp:1461-1464` `Store::scroll` disengage on `localScroll`/out-of-`externals`,
 `store.cpp:123-135` `Store()` id-less vs 2-arg `documentId` ctor, `publication.cpp:1097`
 `historyFromSeal` `make_unique<Store>()`, `publication.cpp:1113-1128` `restorePublication` passing
 `pub.storeId`, `zigzag/arena_manifold.cpp:1950` `isEphemeral(target) ? real.at(target) : target`,
@@ -13,8 +13,8 @@ identity remap, `store.cpp:1461-1464` `Store::scroll` disengage on `localScroll`
 
 ## R13-A — FIXED, verbatim, and architecturally closed
 
-The fix was adopted as ruled: `d.captured` is gone from every load-bearing site — §1 row `:95`,
-the `ensureDimension` no-marks list `:533`, the §6.1 adapter bindings `:1017-1018`, the head-layout
+The fix was adopted as ruled: `d.captured` is gone from every load-bearing site — §1 row `:95`, the
+`ensureDimension` no-marks list `:533`, the §6.1 adapter bindings `:1017-1018`, the head-layout
 intro `:1024-1025`, the diagram `:1050-1059`, the prose `:1147-1167`, genesis (e) `:2200-2234`,
 §10.1 `:2788`, §14 R12 `:3028`. The only surviving mentions are the change-history paragraphs
 (`:3510-3513`, `:3548-3560`) — correct.
@@ -38,8 +38,8 @@ intro `:1024-1025`, the diagram `:1050-1059`, the prose `:1147-1167`, genesis (e
   dim mint equal-text cells — no shared-cell contention. The program-skeleton-edge violation is
   still refused.
 
-The design now satisfies the rule r13 proposed: **no recipe edge lands on a cell the recipe does
-not own** — every surviving recipe edge (`+d.refFor`, the tuples' `+d.values`, the gated internal
+The design now satisfies the rule r13 proposed: **no recipe edge lands on a cell the recipe does not
+own** — every surviving recipe edge (`+d.refFor`, the tuples' `+d.values`, the gated internal
 `+d.values`, `+d.name` to a fresh name cell) terminates inside the head's own graph. The M14
 mechanism finally has no seam left to relocate to.
 
@@ -65,9 +65,9 @@ mechanism finally has no seam left to relocate to.
   `breakMarkerScroll` compares by `breakMarkerKey` (skip-not-reject `:985-987`, identity-remap
   `:1050` — verified verbatim); out-of-`externals` disengagement fails the compare — fail-closed,
   correct.
-- **Alias wording** — "no session resolver consults the alias — the `d.patch` rediscovery join
-  below and `learn_plan`'s replay dedupe do" (`:1196-1197`); conditional presence stated
-  (`:1225-1228`, `:1742-1745`); join multiplicity + latest-wins-by-`ordinal` (`:1201-1205`).
+- **Alias wording** — "no session resolver consults the alias — the `d.patch` rediscovery join below
+  and `learn_plan`'s replay dedupe do" (`:1196-1197`); conditional presence stated (`:1225-1228`,
+  `:1742-1745`); join multiplicity + latest-wins-by-`ordinal` (`:1201-1205`).
 - **`patch:<n>` equal-text labels** (`:1738-1743`), label-cell `-d.name` direction (`:1763-1764`),
   `label_of`/genesis-transport vs `unlearn`-never-matches split (`:1761-1763`, `:1767-1768`),
   `textOf`-content claim (`:1764-1767`; cite verified), `Patrol`/`demo:Guard.cautious` premise
@@ -85,8 +85,8 @@ program-band cell → "a program-side reference with no record" → the refused 
 (`:1846-1848`) → `learn`'s re-verification rejects a legitimately name-resolvable fragment. This
 bites universally: `dimConstant` emission mints a ref cell for *every* `cells"…"` path dimension
 operand (`:2005-2007`). v1.12 had no such misread — the `+d.name` arm had no endpoint edge at all;
-v1.13 hands `closed` a bogus position unless it checks `+d.name` first. Genesis (e) already uses
-the right discriminator (`+d.name` → `ensureDimension` name arm, `:2204-2206`) — `closed`'s consumer
+v1.13 hands `closed` a bogus position unless it checks `+d.name` first. Genesis (e) already uses the
+right discriminator (`+d.name` → `ensureDimension` name arm, `:2204-2206`) — `closed`'s consumer
 sentence needs the same arm stated. **Fix:** append "— a `+d.name`-bearing (program-side) record's
 endpoint is the named dim, not a cell, and counts as name-resolved" to `:1166-1167` (and align
 `:1863-1864`'s frontier enumeration to say the same).
@@ -136,8 +136,8 @@ same dead-patch drop idiom or left documented."
 
 ## Structural note
 
-The v1.13 delta is the first revision in this review series whose net effect on the recipe graph
-is *fewer* edge classes — every prior M14 patch added a dedicated dim (`+d.ref` → `+d.refFor` →
+The v1.13 delta is the first revision in this review series whose net effect on the recipe graph is
+*fewer* edge classes — every prior M14 patch added a dedicated dim (`+d.ref` → `+d.refFor` →
 `+d.captured`); this one deleted the dim and let content carry it. That is the house-style move
 (more cells, no bit-packing — and no single-occupancy edge where content suffices), and it
 eliminates the collision *class* for external referents rather than moving it one cell over.

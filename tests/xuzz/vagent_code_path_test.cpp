@@ -10,8 +10,8 @@ using namespace xanadu::vagent;
 
 TEST(VAgentCodePathTest, ParsesLabelHeaderAndBodyLikeParseCodeBody) {
   const SourceLocation literal{.line = 12, .column = 4, .offset = 200};
-  auto parsed = parseCodePath("#inc n: Int, b: Bool | if b then n + 1 else n",
-                              literal);
+  auto parsed =
+      parseCodePath("#inc n: Int, b: Bool | if b then n + 1 else n", literal);
   ASSERT_TRUE(parsed) << formatDiagnostic(parsed.error());
   ASSERT_TRUE(parsed->label);
   EXPECT_EQ(*parsed->label, "inc");
@@ -85,8 +85,8 @@ TEST(VAgentCodePathTest, ReturnInsideABodyIsRefused) {
 
 TEST(VAgentCodePathTest, SuspendingStatementsAreRefused) {
   for (const std::string body :
-       {"yield", "await e(x) within 1s", "achieve g(x)",
-        "ask p.q(1) within 1s", "if c then yield else 0"}) {
+       {"yield", "await e(x) within 1s", "achieve g(x)", "ask p.q(1) within 1s",
+        "if c then yield else 0"}) {
     SCOPED_TRACE(body);
     auto parsed = parseCodePath(body, {});
     ASSERT_FALSE(parsed);

@@ -125,6 +125,7 @@ void VQLEngine::clearVariables() noexcept {
   env_.clear();
   functors_.clear();
   putGetLenses_.clear();
+  dynamicViews_.clear();
 }
 
 std::unordered_map<std::string, std::vector<PathStep>>
@@ -159,11 +160,13 @@ void VQLEngine::publishCompilerBindings(
   for (auto &[name, cells] : bindings) {
     nextFunctors.erase(name);
     nextLenses.erase(name);
+    dynamicViews_.namedLenses.erase(name);
     nextEnv[name] = std::move(cells);
   }
   for (auto &[name, steps] : functors) {
     nextEnv.erase(name);
     nextLenses.erase(name);
+    dynamicViews_.namedLenses.erase(name);
     nextFunctors[name] =
         std::make_shared<const std::vector<PathStep>>(std::move(steps));
   }

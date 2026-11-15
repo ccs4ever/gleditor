@@ -33,35 +33,35 @@ persistent numbering — and the step list it writes the construction into canno
   `store->rebuildManifold(version)` inside `receiveValue`/`restorePublication`
   (`mesh_value.cpp:350-351`) and installed as the arena's `const Manifold* base_` at
   `WorkerContext(actor->checkpoint->manifold.get())` (`mesh_actor.cpp:270-271`). `WorkerContext` is
-  non-movable and `base_` is ctor-fixed (`worker_context.hpp:51-63`,
-  `arena_manifold.hpp:259,752`) — by the time any genesis step runs, the persistent numbering is
-  already complete, immutable, and single. There is no second base, no base setter, and no
-  fold-at-offset remap to join a second numbering into it.
+  non-movable and `base_` is ctor-fixed (`worker_context.hpp:51-63`, `arena_manifold.hpp:259,752`) —
+  by the time any genesis step runs, the persistent numbering is already complete, immutable, and
+  single. There is no second base, no base setter, and no fold-at-offset remap to join a second
+  numbering into it.
 - Step (a) says genesis will "re-materialize the program image **into the persistent manifold**
-  first and ref-preserved … *before* the checkpointed state joins the numbering" (`:1574-1580`),
-  and step (b) says "arena overlay — the checkpointed state cells join the persistent numbering
-  above the extent" (`:1582-1584`). Both describe a two-phase persistent-space construction that
-  the real system delivers monolithically, upstream, inside `receiveValue`. If an implementer reads
-  (a) literally and replays the artifact spool into the received manifold (it is owned mutably via
-  `unique_ptr<Manifold>`), the image appends **above** the state — the exact inversion r6 named,
-  now self-inflicted by the fix. If they replay into the arena or via `importValue`, the cells are
+  first and ref-preserved … *before* the checkpointed state joins the numbering" (`:1574-1580`), and
+  step (b) says "arena overlay — the checkpointed state cells join the persistent numbering above
+  the extent" (`:1582-1584`). Both describe a two-phase persistent-space construction that the real
+  system delivers monolithically, upstream, inside `receiveValue`. If an implementer reads (a)
+  literally and replays the artifact spool into the received manifold (it is owned mutably via
+  `unique_ptr<Manifold>`), the image appends **above** the state — the exact inversion r6 named, now
+  self-inflicted by the fix. If they replay into the arena or via `importValue`, the cells are
   `ephemeralBit|dense` (`mesh_value.cpp:481` mints arena cells; `refOf`,
   `arena_manifold.hpp:468-470`) — the doc's own "empty program-side set" case.
 - The only reading consistent with the code *and* the doc's own "the ops-spool indices *are* the
   persistent `CellRef`s" is that the artifact's ops are already inside the agent's checkpointed
   store spool — the store anchored on the artifact at load, the `job.base` pattern
-  (`mesh_jobs.cpp:303-318`: `store = base->store.get()`, `promote` appends state ops above it).
-  That is a **load-time store-format commitment genesis inherits, not a genesis step it performs**
-  — and it is never stated. The sentence equivocates at the load-bearing point: "replay the
-  program artifact's own spool: the image's ops are the spool's low prefix" (`:1576-1577`) — the
-  artifact's own spool contains nothing but image ("low prefix" of what?); only the agent's
-  checkpointed spool has a low prefix and a state suffix, and nothing says the artifact is in it.
-- It contradicts the file's own program-cell descriptions: M8 still says the program's module
-  symbol table, `d.clause` ranks, `+d.grab`/`+d.spin` attachments and `d.vars` slots "are all
-  arena cells" (`:284`) — ephemeral cells, which can never satisfy `ref ≤ E`. And the parent spec
-  states the load model flatly: "Each agent's arena loads its own copy of the compiled program …
-  after spawn and again after every `resume`" (`vagent-agent-language.md` §4.4) — arena-load is
-  precisely the "ephemeral twins" configuration v1.6 relegates to the empty-set arm.
+  (`mesh_jobs.cpp:303-318`: `store = base->store.get()`, `promote` appends state ops above it). That
+  is a **load-time store-format commitment genesis inherits, not a genesis step it performs** — and
+  it is never stated. The sentence equivocates at the load-bearing point: "replay the program
+  artifact's own spool: the image's ops are the spool's low prefix" (`:1576-1577`) — the artifact's
+  own spool contains nothing but image ("low prefix" of what?); only the agent's checkpointed spool
+  has a low prefix and a state suffix, and nothing says the artifact is in it.
+- It contradicts the file's own program-cell descriptions: M8 still says the program's module symbol
+  table, `d.clause` ranks, `+d.grab`/`+d.spin` attachments and `d.vars` slots "are all arena cells"
+  (`:284`) — ephemeral cells, which can never satisfy `ref ≤ E`. And the parent spec states the load
+  model flatly: "Each agent's arena loads its own copy of the compiled program … after spawn and
+  again after every `resume`" (`vagent-agent-language.md` §4.4) — arena-load is precisely the
+  "ephemeral twins" configuration v1.6 relegates to the empty-set arm.
 - M11's "program cells therefore do not checkpoint" (`:349`) now needs the not-promoted-vs-carried
   distinction: under the carried-prefix model the image is never *promoted* (V12 intact — `promote`
   walks the arena only) but it *is* carried in the shipped history — the boundary the whole section
@@ -71,28 +71,28 @@ So: **the ordering dependency between program load and genesis is not yet honest
 statement is one clause at the loader, not a genesis step: "the loader anchors the agent's store on
 the artifact (the `job.base` chaining pattern) or appends the artifact's spool before any state op;
 the shipped history then carries the image as its low prefix; `rebuildManifold` reproduces it
-ref-preserved; genesis asserts the boundary at (c), it does not construct the ordering at (a)."
-Plus the corollary edits: M8's "all arena cells" → persistent base cells the arena reads through
-and shadows; M11's "do not checkpoint" → "not promoted (carried in the shipped history)"; the
+ref-preserved; genesis asserts the boundary at (c), it does not construct the ordering at (a)." Plus
+the corollary edits: M8's "all arena cells" → persistent base cells the arena reads through and
+shadows; M11's "do not checkpoint" → "not promoted (carried in the shipped history)"; the
 `importValue`/sibling-manifold arm's precondition named.
 
 ### 2. MINOR (extent's carrier, bound form and owner unnamed) — RESOLVED in substance; three residual ambiguities demoted to nits
 
-The carrier is named twice consistently — "recorded once at load **on the `programRef` bind
-record** — adapter-side durable state, stable across geneses of the same checkpoint" (`:1315-1317`)
-and "a field on the adapter-side `programRef` bind record" (`:1589-1591`) — and the adapter
-inventory gained the duty: "the `programRef` bind record carries the recorded program-image extent
-field genesis (c) asserts (§6.6)" (`:2082-2083`). Residuals:
+The carrier is named twice consistently — "recorded once at load **on the `programRef` bind record**
+— adapter-side durable state, stable across geneses of the same checkpoint" (`:1315-1317`) and "a
+field on the adapter-side `programRef` bind record" (`:1589-1591`) — and the adapter inventory
+gained the duty: "the `programRef` bind record carries the recorded program-image extent field
+genesis (c) asserts (§6.6)" (`:2082-2083`). Residuals:
 
 - Bound at (c), on a record (d) binds: "this step asserts it" runs a step before
   "`programRef → the program root`" is bound — the record is (d)'s product, so either the field is
   written onto a not-yet-bound record (say so) or the steps want reordering.
-- "Adapter-side durable state" has the wrong durability class for a cold resume: adapter records
-  die with the process. What actually makes the value stable is (i) deterministic re-observation at
-  each load, or (ii) the bind record riding the carried image — and the stability guarantee itself
-  is `programRef` pinning in the continuation (`mesh_actor.cpp:199,215`: resume refuses a grant
-  whose `programRef` differs), which no sentence names. "Stable across geneses of the same
-  checkpoint" undersells it — it is chain-stable because the continuation pins the artifact.
+- "Adapter-side durable state" has the wrong durability class for a cold resume: adapter records die
+  with the process. What actually makes the value stable is (i) deterministic re-observation at each
+  load, or (ii) the bind record riding the carried image — and the stability guarantee itself is
+  `programRef` pinning in the continuation (`mesh_actor.cpp:199,215`: resume refuses a grant whose
+  `programRef` differs), which no sentence names. "Stable across geneses of the same checkpoint"
+  undersells it — it is chain-stable because the continuation pins the artifact.
 - "This step asserts it" still names no comparand; with (a) in place the assert can now be stated
   concretely — "asserts the post-image persistent high-water equals the recorded E".
 
@@ -110,12 +110,12 @@ list it, and `patch:` is gone from the label arm (`:1486-1488`, `:2106`).
 **Problem.** "A program image arriving through `importValue` ingress (ephemeral twins) or a sibling
 manifold reports an empty program-side set by design, not an error." With program-side = ∅ the
 transit-prune never fires; "state-side" degenerates to plain agent-reachability; `closed`'s arm (a)
-then admits a capture link into an ephemeral program cell (it is reachable, unpruned, and not
-itself program-side — the empty set prunes nothing) — so `learn` accepts a fragment that drags the
-entire skeleton into every checkpoint. V12 through the sanctioned path, silently, "by design". And
-this is not a distant corner: under the parent spec's stated load model (program loaded into the
-arena, §4.4), *every* program is this case — the discriminator is vacuous until the load model is
-amended per finding-verdict-1. A safety boundary that reports empty must refuse loudly (a refused
+then admits a capture link into an ephemeral program cell (it is reachable, unpruned, and not itself
+program-side — the empty set prunes nothing) — so `learn` accepts a fragment that drags the entire
+skeleton into every checkpoint. V12 through the sanctioned path, silently, "by design". And this is
+not a distant corner: under the parent spec's stated load model (program loaded into the arena,
+§4.4), *every* program is this case — the discriminator is vacuous until the load model is amended
+per finding-verdict-1. A safety boundary that reports empty must refuse loudly (a refused
 configuration at genesis/`learn`) or name a degraded mode where `closed` means reachability-only —
 silently blessing it is the one arm this section cannot afford.
 
@@ -143,22 +143,20 @@ extent assert and `opcodeMap_` re-point as checks/re-materializations of *sessio
 ### Nits
 
 - **"The pump orders publish ahead of all queued turns while the flag is armed" (`:1538-1540`).**
-  `pumpOne` serves the mailbox and invokes `executor_` (`mesh_actor.cpp:461-476`); it cannot see
-  the adapter-private flag. Either publish runs synchronously inside the flagged turn's `executor_`
-  window — then no pump ordering exists or is needed, and the sentence should say that — or the
-  pump must consult adapter state, a new coupling that contradicts "no new mechanism beyond P4's
-  already-approved wake" (`:1505-1507`, `:2106`). As written it promises a runtime guarantee with
-  no owner.
-- **"Re-`import` the prelude" (`:1575`).** `import`/`importValue` is the ingress verb whose
-  products are the ephemeral twins the same sentence excludes; and the prelude is compiled into
-  the artifact (linked like `std:agent`, `:937-939`), not imported per load. Say "fold the
-  artifact's ops" plainly — the verb matters at exactly the step where a wrong reading produces
-  the empty-set case.
+  `pumpOne` serves the mailbox and invokes `executor_` (`mesh_actor.cpp:461-476`); it cannot see the
+  adapter-private flag. Either publish runs synchronously inside the flagged turn's `executor_`
+  window — then no pump ordering exists or is needed, and the sentence should say that — or the pump
+  must consult adapter state, a new coupling that contradicts "no new mechanism beyond P4's
+  already-approved wake" (`:1505-1507`, `:2106`). As written it promises a runtime guarantee with no
+  owner.
+- **"Re-`import` the prelude" (`:1575`).** `import`/`importValue` is the ingress verb whose products
+  are the ephemeral twins the same sentence excludes; and the prelude is compiled into the artifact
+  (linked like `std:agent`, `:937-939`), not imported per load. Say "fold the artifact's ops"
+  plainly — the verb matters at exactly the step where a wrong reading produces the empty-set case.
 - **M8's keyless memo records (`:292-297`).** A label-less attach cell "has no key to write, so its
-  wrapper never memo-hits and is re-minted per call" — but does a keyless memo *record* still
-  append to the clause's `+d.code` chain per call? If yes, the chain accumulates dead records
-  unboundedly (program-side, dies with the skeleton, but O(n) growth on a reflection hot path);
-  say which.
+  wrapper never memo-hits and is re-minted per call" — but does a keyless memo *record* still append
+  to the clause's `+d.code` chain per call? If yes, the chain accumulates dead records unboundedly
+  (program-side, dies with the skeleton, but O(n) growth on a reflection hot path); say which.
 - **Carrier residuals** (see verdict 2): the (c)-writes-on-(d)'s-record ordering, "adapter-side
   durable" vs re-observed-at-load, and the assert's unnamed comparand.
 
@@ -170,8 +168,8 @@ extent assert and `opcodeMap_` re-point as checks/re-materializations of *sessio
   `vortex_core.cpp:119-127`); label → program-image lookup → `int64(head)`, matching §6.2's new
   "head-valued by construction" (`:1085-1089` — verified `run` derefs `+d.entry` and `+d.values`).
   Call records always qualified, label records always head-valued, user `#label`s colon-free and
-  `src:`/`reify:` label-reserved — the shape test's ambiguity is engineered out on both sides, and
-  a non-resolving qualifier degrades to a dropped patch, never a wrong bind. R6-B closed.
+  `src:`/`reify:` label-reserved — the shape test's ambiguity is engineered out on both sides, and a
+  non-resolving qualifier degrades to a dropped patch, never a wrong bind. R6-B closed.
 - **`code_named` stays `d.code`-only; literal heads take the program-image walk** (`:1655-1660`) —
   the domain split is now consistent end-to-end.
 - **The publish-ordering extension covers my r6 nit** — a queued ready-intention/due-timer wake is
@@ -180,14 +178,14 @@ extent assert and `opcodeMap_` re-point as checks/re-materializations of *sessio
   ahead of (e)/(f)** — intra-step ordering is sound wherever the steps name real genesis work.
 - **The root-exemption clause is well-placed** (`:1335-1336`): under the carried-prefix model the
   agent cell *can* sit at or below E (adapter store writes at spawn precede or interleave the
-  artifact prefix), so "a program-side `agent_cell()` cannot prune the durable set" is the
-  necessary arm — and its presence quietly confirms the authors know below-extent state exists,
-  which makes the unstated store-anchor gap in finding-verdict-1 more conspicuous, not less.
-- **Makefile inventory unchanged and correct** — `VAGENT_FRONTEND_SRCS` line untouched (`:2085-2090`);
-  the only new inventory line is the extent field on the adapter row (`:2082-2083`).
+  artifact prefix), so "a program-side `agent_cell()` cannot prune the durable set" is the necessary
+  arm — and its presence quietly confirms the authors know below-extent state exists, which makes
+  the unstated store-anchor gap in finding-verdict-1 more conspicuous, not less.
+- **Makefile inventory unchanged and correct** — `VAGENT_FRONTEND_SRCS` line untouched
+  (`:2085-2090`); the only new inventory line is the extent field on the adapter row (`:2082-2083`).
 - **Cites re-verified**: `importValue` re-kinds marked cells `OpHandle`-to-local-twin and demotes
-  unmarked `OpHandle` to `None` (`mesh_value.cpp:483-501`); `WorkerContext`'s base is ctor-fixed
-  and non-movable (`worker_context.hpp:51-60`); the grant/continuation pins `programRef`
+  unmarked `OpHandle` to `None` (`mesh_value.cpp:483-501`); `WorkerContext`'s base is ctor-fixed and
+  non-movable (`worker_context.hpp:51-60`); the grant/continuation pins `programRef`
   (`mesh_actor.cpp:199,215-216`) — the stability source the doc should name.
 
 ## Verdict

@@ -196,8 +196,8 @@ Session makeSession(Image &f) {
   EXPECT_TRUE(binds.has_value()) << (binds ? "" : binds.error());
   binds->ownModule = f.sysModule;
   binds->lineage   = MetaLineage{
-      .programRef  = f.programRoot,
-      .imageExtent = f.imageExtent,
+        .programRef  = f.programRoot,
+        .imageExtent = f.imageExtent,
   };
   s.binds = *binds;
   return s;
@@ -328,7 +328,7 @@ TEST(VagentP16Test, OnFlaggedRekindsOnlyMarkedEphemeralPositions) {
                               [&](void) -> std::expected<void, std::string> {
                              ++calls;
                              return {};
-                              });
+                           });
   ASSERT_TRUE(c->onFlagged());
 
   EXPECT_EQ(ar.valueKindOf(eph), xanadu::ValueKind::OpHandle);
@@ -370,8 +370,8 @@ TEST(VagentP16Test, TurnEndPublishesWhileMarkedCellsStandOpHandle) {
   // The publish command's whole point: it runs *inside* the window —
   // observe the re-kinded kind at call time, not the restored one.
   xanadu::ValueKind kindAtPublish = xanadu::ValueKind::Int64;
-  auto c = makeP16Ceremony(ar, co, s.binds,
-                           [&](void) -> std::expected<void, std::string> {
+  auto c                          = makeP16Ceremony(ar, co, s.binds,
+                                                    [&](void) -> std::expected<void, std::string> {
                              kindAtPublish = ar.valueKindOf(marked);
                              return {};
                            });
@@ -406,9 +406,9 @@ TEST(VagentP16Test, PublishRefusalRestoresAndReArms) {
                              ++attempts;
                              if (attempts == 1)
                                return std::unexpected("transient publish "
-                                                      "refusal");
+                                                                  "refusal");
                              return {};
-                                 });
+                           });
   ASSERT_TRUE(c->onFlagged());
   const auto first = c->onFlaggedTurnEnd();
   ASSERT_FALSE(first.has_value());
@@ -694,8 +694,8 @@ TEST(VagentP16Test, LearnCheckpointResumeLearnCheckpointResume) {
   ASSERT_TRUE(binds1.has_value()) << (binds1 ? "" : binds1.error());
   binds1->ownModule = f.sysModule;
   binds1->lineage   = MetaLineage{
-      .programRef  = f.programRoot,
-      .imageExtent = f.imageExtent,
+        .programRef  = f.programRoot,
+        .imageExtent = f.imageExtent,
   };
   MetaRuntime meta1(cycle->context->core, cycle->context->vm, *binds1);
   const auto replaced = meta1.learnWhere(clauseOnRank, f.progHeadB);

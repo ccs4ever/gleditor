@@ -1,11 +1,11 @@
 #include "adapter.hpp"
 
+#include "../scalar.hpp"
+#include "../vortex/worker_context.hpp"
 #include "genesis.hpp"
 #include "meta.hpp"
 #include "percept_codec.hpp"
 #include "records.hpp"
-#include "../scalar.hpp"
-#include "../vortex/worker_context.hpp"
 
 #include <bit>
 #include <format>
@@ -25,18 +25,16 @@ using zigzag::noCell;
 /// static there, so the adapter keeps its own copy; the two must agree
 /// because the mesh's actors_ map and a member's `pid` record are the
 /// same lookup from opposite sides.
-[[nodiscard]] std::string
-renderPid(const mesh::ActorPid &pid) {
+[[nodiscard]] std::string renderPid(const mesh::ActorPid &pid) {
   return std::to_string(pid.node.size()) + ":" + pid.node +
          std::to_string(pid.cursor.size()) + ":" + pid.cursor + ":" +
-         std::to_string(pid.epoch) + ":" +
-         std::to_string(pid.spawnSequence);
+         std::to_string(pid.epoch) + ":" + std::to_string(pid.spawnSequence);
 }
 
 /// renderPid's inverse — a member's durable `pid` record text back
-/// into the mesh identity a wire send needs. `<nlen>:<node><clen>:<cursor>:<epoch>:<seq>`.
-[[nodiscard]] std::optional<mesh::ActorPid>
-parsePid(std::string_view key) {
+/// into the mesh identity a wire send needs.
+/// `<nlen>:<node><clen>:<cursor>:<epoch>:<seq>`.
+[[nodiscard]] std::optional<mesh::ActorPid> parsePid(std::string_view key) {
   const auto field = [&](std::size_t &pos) -> std::optional<std::string_view> {
     const auto colon = key.find(':', pos);
     if (colon == std::string_view::npos) return std::nullopt;
@@ -93,8 +91,8 @@ directoryMembers(zigzag::ArenaManifold &arena,
 /// The member's durable `pid` record — a text cell holding the
 /// rendered mesh key, overwritten per incarnation.
 [[nodiscard]] std::optional<std::string>
-memberPidKey(zigzag::ArenaManifold &arena,
-             zigzag::vortex::VortexCore &core, CellRef member) {
+memberPidKey(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+             CellRef member) {
   const auto rec = varsRecord(arena, core, member, "pid", false);
   if (!rec) return std::nullopt;
   const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
@@ -105,9 +103,9 @@ memberPidKey(zigzag::ArenaManifold &arena,
 /// The member cell @p member's `$parent` record names — the scalar-ref
 /// convention every vars-bound member rides. noCell for a top-level
 /// member.
-[[nodiscard]] CellRef
-parentMember(zigzag::ArenaManifold &arena,
-             zigzag::vortex::VortexCore &core, CellRef member) {
+[[nodiscard]] CellRef parentMember(zigzag::ArenaManifold &arena,
+                                   zigzag::vortex::VortexCore &core,
+                                   CellRef member) {
   const auto rec = varsRecord(arena, core, member, "$parent", false);
   if (!rec) return noCell;
   const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
@@ -119,15 +117,14 @@ parentMember(zigzag::ArenaManifold &arena,
 /// The +d.step/+d.name field envelope a fault payload carries —
 /// `occurrence.<name>` on an `on EffectFailed` handler reads these
 /// children back. The executor's own raise path mints the same shape.
-void replyField(zigzag::ArenaManifold &arena,
-                zigzag::vortex::VortexCore &core, CellRef payload,
-                std::string_view name, std::string_view text) {
+void replyField(zigzag::ArenaManifold &arena, zigzag::vortex::VortexCore &core,
+                CellRef payload, std::string_view name, std::string_view text) {
   const auto value = arena.makeCell(text);
   zigzag::expectWritten(
       arena.link(zigzag::rankTail(arena, payload, core.dims().step),
                  core.dims().step, DimVector::POS, value));
-  zigzag::expectWritten(arena.link(value, core.dims().name,
-                                 DimVector::POS, arena.makeCell(name)));
+  zigzag::expectWritten(arena.link(value, core.dims().name, DimVector::POS,
+                                   arena.makeCell(name)));
 }
 
 } // namespace
@@ -152,21 +149,20 @@ VagentAdapter *VagentAdapter::setSendSender(SendSender sender) {
 }
 
 std::string VagentAdapter::stageSend(
-    zigzag::vortex::WorkerContext &ctx, CellRef sender,
-    CellRef targetMember, std::string_view percept,
-    const std::vector<std::pair<std::string,
-                                zigzag::vortex::CellValue>> &fields,
+    zigzag::vortex::WorkerContext &ctx, CellRef sender, CellRef targetMember,
+    std::string_view percept,
+    const std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
+        &fields,
     std::string_view id) const {
-  auto &arena = ctx.arena;
-  auto &core  = ctx.core;
+  auto &arena       = ctx.arena;
+  auto &core        = ctx.core;
   const auto outbox = core.findOrMintDimension("d.outbox");
-  const auto position = std::ranges::to<std::vector>(
-                            zigzag::rankAfter(arena, sender, outbox))
-                            .size();
+  const auto position =
+      std::ranges::to<std::vector>(zigzag::rankAfter(arena, sender, outbox))
+          .size();
   const auto entry = arena.makeCell();
-  zigzag::expectWritten(
-      arena.link(zigzag::rankTail(arena, sender, outbox), outbox,
-                 DimVector::POS, entry));
+  zigzag::expectWritten(arena.link(zigzag::rankTail(arena, sender, outbox),
+                                   outbox, DimVector::POS, entry));
   const auto outField = [&](std::string_view name, CellRef value) {
     if (const auto rec = varsRecord(arena, core, entry, name, true))
       zigzag::expectWritten(
@@ -189,16 +185,15 @@ std::string VagentAdapter::stageSend(
               const auto c = arena.makeCell(std::format("{}", v));
               if constexpr (std::is_same_v<T, bool>) {
                 zigzag::expectWritten(arena.setValueBits(
-                    c, xanadu::ValueKind::Bool,
-                    static_cast<std::uint64_t>(v)));
+                    c, xanadu::ValueKind::Bool, static_cast<std::uint64_t>(v)));
               } else if constexpr (std::is_same_v<T, std::int64_t>) {
-                zigzag::expectWritten(arena.setValueBits(
-                    c, xanadu::ValueKind::Int64,
-                    std::bit_cast<std::uint64_t>(v)));
+                zigzag::expectWritten(
+                    arena.setValueBits(c, xanadu::ValueKind::Int64,
+                                       std::bit_cast<std::uint64_t>(v)));
               } else {
-                zigzag::expectWritten(arena.setValueBits(
-                    c, xanadu::ValueKind::Double,
-                    xanadu::canonicalDoubleBits(v)));
+                zigzag::expectWritten(
+                    arena.setValueBits(c, xanadu::ValueKind::Double,
+                                       xanadu::canonicalDoubleBits(v)));
               }
               return c;
             }
@@ -207,19 +202,17 @@ std::string VagentAdapter::stageSend(
       zigzag::expectWritten(
           arena.link(zigzag::rankTail(arena, payload, core.dims().step),
                      core.dims().step, DimVector::POS, cell));
-      zigzag::expectWritten(arena.link(cell, core.dims().name,
-                                     DimVector::POS,
-                                     arena.makeCell(field)));
+      zigzag::expectWritten(arena.link(cell, core.dims().name, DimVector::POS,
+                                       arena.makeCell(field)));
     }
     outField("payload", refCell(arena, core, payload));
   }
   const auto requestId = std::string{id};
-  outField("id", arena.makeCell(requestId.empty()
-                                    ? std::format("send:{}:{}",
-                                                  targetMember, position)
-                                    : requestId));
-  return requestId.empty() ? std::format("send:{}:{}", targetMember,
-                                         position)
+  outField("id", arena.makeCell(
+                     requestId.empty()
+                         ? std::format("send:{}:{}", targetMember, position)
+                         : requestId));
+  return requestId.empty() ? std::format("send:{}:{}", targetMember, position)
                            : requestId;
 }
 
@@ -245,7 +238,7 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
     if (const auto index = memberIndex(ctx, *member))
       turn.pid.spawnSequence = *index + 1;
   } else {
-    const auto members = directoryMembers(arena, core);
+    const auto members  = directoryMembers(arena, core);
     const auto anyNoted = std::ranges::any_of(members, [&](CellRef m) {
       return memberPidKey(arena, core, m).has_value();
     });
@@ -258,8 +251,7 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
     }
   }
 
-  if (exec.message &&
-      exec.message->type == MessageType::ActorDown) {
+  if (exec.message && exec.message->type == MessageType::ActorDown) {
     // A monitored member's down arrives as a mailbox message; the
     // percept the language dispatches is ChildDown, so the raw
     // message is consumed here — journaling it as a generic
@@ -273,12 +265,11 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
         // ChildStopping; the shared dedupe collapses whichever report
         // arrives second.
         const auto &reason = exec.message->reason;
-        const auto cause =
-            reason == "stopped" ? std::string_view{"stop"}
-            : reason == "stop" || reason == "terminate" ||
-                    reason == "lease" || reason == "init"
-                ? std::string_view{reason}
-                : std::string_view{};
+        const auto cause   = reason == "stopped" ? std::string_view{"stop"}
+                             : reason == "stop" || reason == "terminate" ||
+                                   reason == "lease" || reason == "init"
+                                 ? std::string_view{reason}
+                                 : std::string_view{};
         if (!cause.empty())
           executor_.childStopping(arena, core, *self, *dead, cause);
         else
@@ -287,8 +278,7 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
     turn.message.reset();
   }
 
-  if (exec.message && self &&
-      exec.message->type == MessageType::ActorSend &&
+  if (exec.message && self && exec.message->type == MessageType::ActorSend &&
       exec.message->source) {
     // The wire's fielded-percept arm: `value` parses as
     // `Name{f: v, …}` — the codec the remote drain arm renders and
@@ -314,13 +304,13 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
           for (const CellRef dir :
                zigzag::rankAfter(arena, core.home(), dirs)) {
             zigzag::expectWritten(
-                arena.link(zigzag::rankTail(arena, dir, agents),
-                           agents, DimVector::POS, fresh));
+                arena.link(zigzag::rankTail(arena, dir, agents), agents,
+                           DimVector::POS, fresh));
             break;
           }
-          zigzag::expectWritten(
-              arena.link(fresh, core.dims().name, DimVector::POS,
-                         arena.makeCell(movedName)));
+          zigzag::expectWritten(arena.link(fresh, core.dims().name,
+                                           DimVector::POS,
+                                           arena.makeCell(movedName)));
           noteMemberPid(ctx, fresh, *exec.message->source);
           executor_.moved(arena, core, *self, fresh);
           // A moved parent arrives as the same cursor under a new
@@ -329,26 +319,25 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
           // name rebind nothing to find. Rename $parentPid to the new
           // incarnation so the next genesis rebinds through it, and
           // swing the $parent scalar now.
-          if (const auto pp = varsRecord(arena, core, *self, "$parentPid",
-                                         false))
-            if (const auto pv = arena.linked(*pp, core.dims().values,
-                                             DimVector::POS))
+          if (const auto pp =
+                  varsRecord(arena, core, *self, "$parentPid", false))
+            if (const auto pv =
+                    arena.linked(*pp, core.dims().values, DimVector::POS))
               if (const auto old = parsePid(arena.textOf(*pv));
                   old && old->cursor == exec.message->source->cursor) {
-                zigzag::expectWritten(arena.unlink(
-                    *pp, core.dims().values, DimVector::POS));
+                zigzag::expectWritten(
+                    arena.unlink(*pp, core.dims().values, DimVector::POS));
                 zigzag::expectWritten(arena.link(
                     *pp, core.dims().values, DimVector::POS,
                     arena.makeCell(renderPid(*exec.message->source))));
-                if (const auto prec = varsRecord(arena, core, *self,
-                                                 "$parent", true)) {
-                  if (arena.linked(*prec, core.dims().values,
-                                   DimVector::POS))
+                if (const auto prec =
+                        varsRecord(arena, core, *self, "$parent", true)) {
+                  if (arena.linked(*prec, core.dims().values, DimVector::POS))
                     zigzag::expectWritten(arena.unlink(
                         *prec, core.dims().values, DimVector::POS));
-                  zigzag::expectWritten(arena.link(
-                      *prec, core.dims().values, DimVector::POS,
-                      refCell(arena, core, fresh)));
+                  zigzag::expectWritten(
+                      arena.link(*prec, core.dims().values, DimVector::POS,
+                                 refCell(arena, core, fresh)));
                 }
               }
         }
@@ -358,9 +347,8 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
         // pid must be the member $parent records. Anyone else's stop
         // is consumed and dropped — no refuse kind is defined for it.
         const auto parent = parentMember(arena, core, *self);
-        if (parent != noCell &&
-            memberPidKey(arena, core, parent) ==
-                renderPid(*exec.message->source)) {
+        if (parent != noCell && memberPidKey(arena, core, parent) ==
+                                    renderPid(*exec.message->source)) {
           executor_.stoppedByParent(arena, core, *self);
           // §4.5's announcement returns over the same arm — the
           // parent hears ChildStopping{cause:"stop"} from the
@@ -379,8 +367,7 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
           if (field == "cause")
             if (const auto *text = std::get_if<std::string>(&value))
               cause = *text;
-        if (const auto child =
-                memberForPid(ctx, *exec.message->source))
+        if (const auto child = memberForPid(ctx, *exec.message->source))
           executor_.childStopping(arena, core, *self, *child,
                                   cause.empty() ? "stop" : cause);
         turn.message.reset();
@@ -393,9 +380,7 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
         // and the wire source maps to the member delivery records as
         // the belief's +d.source.
         std::string kind, correlation;
-        std::vector<
-            std::pair<std::string, zigzag::vortex::CellValue>>
-            fields;
+        std::vector<std::pair<std::string, zigzag::vortex::CellValue>> fields;
         for (const auto &f : spec->fields) {
           const auto text = std::get_if<std::string>(&f.second);
           if (f.first == "__kind") {
@@ -410,9 +395,9 @@ VagentAdapter::operator()(const mesh::ActorExecution &exec,
         }
         const auto sender =
             memberForPid(ctx, *exec.message->source).value_or(noCell);
-        executor_.injectPercept(arena, core, *self, spec->name,
-                                fields, exec.message->requestId,
-                                kind, correlation, sender);
+        executor_.injectPercept(arena, core, *self, spec->name, fields,
+                                exec.message->requestId, kind, correlation,
+                                sender);
         turn.message.reset();
       }
     }
@@ -449,30 +434,29 @@ VagentAdapter::genesis(const mesh::ActorGenesis &genesis,
       // The agent's own module is the first +d.stdlib member — the
       // same default the turn's bind mint resolves bare names
       // against.
-      for (const CellRef module : zigzag::rankAfter(
-               arena, programRoot, core.dims().stdlib)) {
+      for (const CellRef module :
+           zigzag::rankAfter(arena, programRoot, core.dims().stdlib)) {
         roots.ownModule = module;
         break;
       }
-      if (const auto rec = varsRecord(arena, core, programRoot,
-                                    "imageRecord", false))
+      if (const auto rec =
+              varsRecord(arena, core, programRoot, "imageRecord", false))
         if (const auto v =
                 arena.linked(*rec, core.dims().values, DimVector::POS))
           roots.imageRecord = *v;
-      if (const auto rec = varsRecord(arena, core, programRoot,
-                                    "imageExtent", false))
+      if (const auto rec =
+              varsRecord(arena, core, programRoot, "imageExtent", false))
         if (const auto v =
                 arena.linked(*rec, core.dims().values, DimVector::POS))
           if (const auto extent = arena.asInt64(*v); extent && *extent > 0)
             roots.imageExtent = static_cast<std::uint32_t>(*extent);
       if (roots.imageRecord != noCell && roots.imageExtent.has_value()) {
-        const auto &received = genesis.transported != nullptr
-                                   ? *genesis.transported
-                                   : *lineage;
+        const auto &received =
+            genesis.transported != nullptr ? *genesis.transported : *lineage;
         // A refusal here is the pairwise comparand failing closed —
         // the incarnation never notes a pid it cannot stand behind.
-        if (const auto outcome = runGenesis(*lineage, received, arena,
-                                            core, ctx.vm, roots);
+        if (const auto outcome =
+                runGenesis(*lineage, received, arena, core, ctx.vm, roots);
             !outcome)
           return std::unexpected(mesh::ActorError::ExecutionFailed);
       }
@@ -496,17 +480,14 @@ VagentAdapter::genesis(const mesh::ActorGenesis &genesis,
       parent            = arena.makeCell();
       const auto dirs   = core.findOrMintDimension("d.dirs");
       const auto agents = core.findOrMintDimension("d.agents");
-      for (const CellRef dir :
-           zigzag::rankAfter(arena, core.home(), dirs)) {
-        zigzag::expectWritten(
-            arena.link(zigzag::rankTail(arena, dir, agents), agents,
-                       DimVector::POS, parent));
+      for (const CellRef dir : zigzag::rankAfter(arena, core.home(), dirs)) {
+        zigzag::expectWritten(arena.link(zigzag::rankTail(arena, dir, agents),
+                                         agents, DimVector::POS, parent));
         break;
       }
       noteMemberPid(ctx, parent, *genesis.request->source);
     }
-    if (const auto rec =
-            varsRecord(arena, core, self, "$parentPid", true))
+    if (const auto rec = varsRecord(arena, core, self, "$parentPid", true))
       zigzag::expectWritten(
           arena.link(*rec, core.dims().values, DimVector::POS,
                      arena.makeCell(renderPid(*genesis.request->source))));
@@ -516,21 +497,18 @@ VagentAdapter::genesis(const mesh::ActorGenesis &genesis,
   // member the text survived. A moved parent keeps this pointing at
   // the old incarnation until Moved{name}'s peer rebind reaches it —
   // member naming on the wire is the deferred half.
-  if (const auto rec =
-          varsRecord(arena, core, self, "$parentPid", false))
-    if (const auto v =
-            arena.linked(*rec, core.dims().values, DimVector::POS))
-      if (const auto parentPid =
-              parsePid(arena.textOf(*v)))
+  if (const auto rec = varsRecord(arena, core, self, "$parentPid", false))
+    if (const auto v = arena.linked(*rec, core.dims().values, DimVector::POS))
+      if (const auto parentPid = parsePid(arena.textOf(*v)))
         if (const auto parent = memberForPid(ctx, *parentPid))
           if (const auto prec =
                   varsRecord(arena, core, self, "$parent", true)) {
             if (arena.linked(*prec, core.dims().values, DimVector::POS))
-              zigzag::expectWritten(arena.unlink(
-                  *prec, core.dims().values, DimVector::POS));
-            zigzag::expectWritten(
-                arena.link(*prec, core.dims().values, DimVector::POS,
-                           refCell(arena, core, *parent)));
+              zigzag::expectWritten(
+                  arena.unlink(*prec, core.dims().values, DimVector::POS));
+            zigzag::expectWritten(arena.link(*prec, core.dims().values,
+                                             DimVector::POS,
+                                             refCell(arena, core, *parent)));
           }
 
   if (genesis.transported != nullptr) {
@@ -545,17 +523,14 @@ VagentAdapter::genesis(const mesh::ActorGenesis &genesis,
     if (const auto n = arena.linked(self, core.dims().name))
       selfName = std::string{arena.textOf(*n)};
     std::vector<CellRef> targets;
-    if (const auto parent = parentMember(arena, core, self);
-        parent != noCell)
+    if (const auto parent = parentMember(arena, core, self); parent != noCell)
       targets.push_back(parent);
     for (const CellRef peer : directoryMembers(arena, core))
-      if (parentMember(arena, core, peer) == self)
-        targets.push_back(peer);
+      if (parentMember(arena, core, peer) == self) targets.push_back(peer);
     for (const CellRef target : targets)
       if (const auto key = memberPidKey(arena, core, target);
           key && key != selfKey)
-        stageSend(ctx, self, target, "Moved",
-                  {{"name", selfName}},
+        stageSend(ctx, self, target, "Moved", {{"name", selfName}},
                   std::format("moved:{}", target));
   }
   return {};
@@ -563,8 +538,8 @@ VagentAdapter::genesis(const mesh::ActorGenesis &genesis,
 
 void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
                           CellRef member) const {
-  auto &arena = ctx.arena;
-  auto &core  = ctx.core;
+  auto &arena        = ctx.arena;
+  auto &core         = ctx.core;
   const auto selfKey = memberPidKey(arena, core, member);
   // §3.7's remote arm: a member whose `pid` record names another
   // incarnation is wire-reachable — the send rides the same
@@ -573,7 +548,7 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
   // requestId carries the target's key so one broadcast can't
   // collide with itself across members.
   const auto remoteSend = [&](const OutboxEntry &entry,
-                             const std::string &targetKey) {
+                              const std::string &targetKey) {
     if (entry.cell == noCell ||
         varsRecord(arena, core, entry.cell, "dispatched", false))
       return;
@@ -594,8 +569,7 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
     // receiver strips before the percept lands: `__kind` keeps
     // tell/untell's belief effect and `__correlation` keeps an ask's
     // request id so the reply wakes the parked wait.
-    const auto percept =
-        entry.percept.empty() ? entry.payload : entry.percept;
+    const auto percept = entry.percept.empty() ? entry.payload : entry.percept;
     PerceptSpec spec{.name = percept};
     if (entry.payloadCell != noCell) {
       // The flat Name{f: v} codec admits only named scalar fields.
@@ -607,28 +581,22 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
       // nothing off-node. Any of them renders a corrupt percept —
       // refuse the send honestly instead, the same deliveryFailed
       // arm transport faults take.
-      const auto relocation =
-          core.findOrMintDimension("d.mesh.relocation");
-      const auto marshal = core.findOrMintDimension("d.marshal");
+      const auto relocation = core.findOrMintDimension("d.mesh.relocation");
+      const auto marshal    = core.findOrMintDimension("d.marshal");
       for (const CellRef child :
-           zigzag::rankAfter(arena, entry.payloadCell,
-                             core.dims().step)) {
+           zigzag::rankAfter(arena, entry.payloadCell, core.dims().step)) {
         const auto refMarked = [&] {
-          const auto r =
-              arena.linked(child, relocation, DimVector::POS);
+          const auto r = arena.linked(child, relocation, DimVector::POS);
           return r && arena.textOf(*r) == "cell";
         };
         if (!arena.linked(child, core.dims().name) ||
-            arena.linked(child, marshal, DimVector::POS) ||
-            refMarked()) {
-          executor_.deliveryFailed(arena, core, entry,
-                                   "unmarshalable");
+            arena.linked(child, marshal, DimVector::POS) || refMarked()) {
+          executor_.deliveryFailed(arena, core, entry, "unmarshalable");
           return;
         }
       }
       for (const CellRef child :
-           zigzag::rankAfter(arena, entry.payloadCell,
-                             core.dims().step)) {
+           zigzag::rankAfter(arena, entry.payloadCell, core.dims().step)) {
         const auto n = arena.linked(child, core.dims().name);
         if (!n) continue;
         zigzag::vortex::CellValue v;
@@ -646,10 +614,9 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
     // Only the kinds `deliver` routes into +d.inbox change what the
     // receiver does — send/emit/stop all arrive as percepts either
     // way, so `__kind` there would be wire noise.
-    if (entry.kind == "tell" || entry.kind == "untell" ||
-        entry.kind == "ask" || entry.kind == "achieve" ||
-        entry.kind == "refuse" || entry.kind == "outcome" ||
-        entry.kind == "cancel")
+    if (entry.kind == "tell" || entry.kind == "untell" || entry.kind == "ask" ||
+        entry.kind == "achieve" || entry.kind == "refuse" ||
+        entry.kind == "outcome" || entry.kind == "cancel")
       spec.fields.emplace_back("__kind", entry.kind);
     if (!entry.correlation.empty())
       spec.fields.emplace_back("__correlation", entry.correlation);
@@ -666,32 +633,29 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
     }
     if (const auto rec =
             varsRecord(arena, core, entry.cell, "dispatched", true))
-      zigzag::expectWritten(
-          arena.link(*rec, core.dims().values, DimVector::POS,
-                     arena.makeCell("1")));
+      zigzag::expectWritten(arena.link(*rec, core.dims().values, DimVector::POS,
+                                       arena.makeCell("1")));
   };
   for (const auto &entry : VagentExecutor::drainOutbox(arena, core, member)) {
     if (entry.targetMember != noCell) {
       // Member-addressed entries bypass name routing entirely — the
       // target's pid record decides wire-vs-local.
-      if (const auto targetKey =
-              memberPidKey(arena, core, entry.targetMember);
+      if (const auto targetKey = memberPidKey(arena, core, entry.targetMember);
           targetKey && targetKey != selfKey) {
         remoteSend(entry, *targetKey);
       } else {
         const auto percept =
             entry.percept.empty() ? entry.payload : entry.percept;
-        executor_.deliver(
-            arena, core,
-            Delivery{.agent        = entry.targetMember,
-                     .percept      = percept,
-                     .id           = entry.id,
-                     .kind         = entry.kind,
-                     .payloadCell  = entry.payloadCell,
-                     .correlation  = entry.correlation,
-                     .sender       = entry.sender,
-                     .delegator    = entry.delegator,
-                     .fault        = entry.fault});
+        executor_.deliver(arena, core,
+                          Delivery{.agent       = entry.targetMember,
+                                   .percept     = percept,
+                                   .id          = entry.id,
+                                   .kind        = entry.kind,
+                                   .payloadCell = entry.payloadCell,
+                                   .correlation = entry.correlation,
+                                   .sender      = entry.sender,
+                                   .delegator   = entry.delegator,
+                                   .fault       = entry.fault});
       }
       continue;
     }
@@ -708,14 +672,12 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
       if (const auto rec =
               varsRecord(arena, core, entry.cell, "dispatched", true))
         zigzag::expectWritten(arena.link(*rec, core.dims().values,
-                                       DimVector::POS,
-                                       arena.makeCell("1")));
+                                         DimVector::POS, arena.makeCell("1")));
       if (entry.kind != "effect") continue;
 
       zigzag::CellRef result = noCell;
       std::string fault;
-      if (const auto fn = natives_.find(entry.capacity + "." +
-                                        entry.payload);
+      if (const auto fn = natives_.find(entry.capacity + "." + entry.payload);
           fn != natives_.end()) {
         if (auto out = fn->second(ctx, entry.sender, entry.payloadCell))
           result = *out;
@@ -724,16 +686,15 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
       } else {
         fault = "unbound";
       }
-      Delivery reply{.agent        = entry.sender,
-                     .percept      = fault.empty() ? "EffectDone"
-                                                  : "EffectFailed",
-                     .id           = entry.id + ":effect",
-                     .kind         = "effect",
-                     .payloadCell  = noCell,
-                     .correlation  = entry.id,
-                     .sender       = entry.sender,
-                     .delegator    = noCell,
-                     .fault        = fault};
+      Delivery reply{.agent   = entry.sender,
+                     .percept = fault.empty() ? "EffectDone" : "EffectFailed",
+                     .id      = entry.id + ":effect",
+                     .kind    = "effect",
+                     .payloadCell = noCell,
+                     .correlation = entry.id,
+                     .sender      = entry.sender,
+                     .delegator   = noCell,
+                     .fault       = fault};
       if (fault.empty()) {
         reply.payloadCell = result;
       } else {
@@ -767,14 +728,12 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
       const auto sent = spawnSender_(ctx, entry.payloadCell, entry.id);
       if (const auto rec =
               varsRecord(arena, core, entry.cell, "dispatched", true))
-        zigzag::expectWritten(
-            arena.link(*rec, core.dims().values, DimVector::POS,
-                       arena.makeCell("1")));
+        zigzag::expectWritten(arena.link(*rec, core.dims().values,
+                                         DimVector::POS, arena.makeCell("1")));
       // A send that can't even leave is the refusal's synchronous
       // half — the asynchronous one arrives through spawnOutcome.
       if (!sent)
-        executor_.spawnFailed(arena, core, entry.sender,
-                              entry.payloadCell);
+        executor_.spawnFailed(arena, core, entry.sender, entry.payloadCell);
       continue;
     }
     const auto deliveries =
@@ -794,8 +753,7 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
       // record naming another incarnation turns the delivery into a
       // wire send; the requestId's target key keeps a broadcast to
       // two remote members from colliding on the wire's dedupe.
-      if (const auto targetKey =
-              memberPidKey(arena, core, delivery.agent);
+      if (const auto targetKey = memberPidKey(arena, core, delivery.agent);
           targetKey && targetKey != selfKey) {
         remoteSend(entry, *targetKey);
       } else {
@@ -808,12 +766,11 @@ void VagentAdapter::drain(zigzag::vortex::WorkerContext &ctx,
 void VagentAdapter::noteMemberPid(zigzag::vortex::WorkerContext &ctx,
                                   CellRef member,
                                   const mesh::ActorPid &pid) const {
-  const auto rec =
-      varsRecord(ctx.arena, ctx.core, member, "pid", true);
+  const auto rec = varsRecord(ctx.arena, ctx.core, member, "pid", true);
   if (!rec) return;
-  zigzag::expectWritten(
-      ctx.arena.link(*rec, ctx.core.dims().values, DimVector::POS,
-                     ctx.arena.makeCell(renderPid(pid))));
+  zigzag::expectWritten(ctx.arena.link(*rec, ctx.core.dims().values,
+                                       DimVector::POS,
+                                       ctx.arena.makeCell(renderPid(pid))));
 }
 
 std::optional<CellRef>
@@ -829,8 +786,8 @@ std::optional<CellRef>
 VagentAdapter::memberNamed(zigzag::vortex::WorkerContext &ctx,
                            std::string_view name) const {
   for (const CellRef member : directoryMembers(ctx.arena, ctx.core))
-    if (const auto n = ctx.arena.linked(member, ctx.core.dims().name,
-                                        DimVector::POS))
+    if (const auto n =
+            ctx.arena.linked(member, ctx.core.dims().name, DimVector::POS))
       if (ctx.arena.textOf(*n) == name) return member;
   return std::nullopt;
 }
@@ -886,16 +843,13 @@ VagentAdapter::nextDeadline(zigzag::vortex::WorkerContext &ctx,
     const auto parked = [&](std::string_view flag) {
       const auto rec = varsRecord(arena, core, intention, flag, false);
       if (!rec) return false;
-      const auto v = arena.linked(*rec, core.dims().values,
-                                  DimVector::POS);
+      const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
       return v && arena.asInt64(*v).value_or(0) != 0;
     };
     if (!parked("waiting") && !parked("delegated")) continue;
-    const auto rec =
-        varsRecord(arena, core, intention, "awaitDeadline", false);
+    const auto rec = varsRecord(arena, core, intention, "awaitDeadline", false);
     if (!rec) continue;
-    const auto v = arena.linked(*rec, core.dims().values,
-                                DimVector::POS);
+    const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
     if (!v) continue;
     const auto deadline = arena.asInt64(*v);
     if (!deadline) continue;
@@ -905,10 +859,9 @@ VagentAdapter::nextDeadline(zigzag::vortex::WorkerContext &ctx,
 }
 
 void VagentAdapter::sendPercept(
-    zigzag::vortex::WorkerContext &ctx, CellRef member,
-    std::string_view name,
-    const std::vector<std::pair<std::string,
-                                zigzag::vortex::CellValue>> &fields,
+    zigzag::vortex::WorkerContext &ctx, CellRef member, std::string_view name,
+    const std::vector<std::pair<std::string, zigzag::vortex::CellValue>>
+        &fields,
     std::string_view id) const {
   executor_.injectPercept(ctx.arena, ctx.core, member, name, fields, id);
 }
@@ -918,8 +871,7 @@ bool VagentAdapter::pendingWork(zigzag::vortex::WorkerContext &ctx,
   auto &arena = ctx.arena;
   auto &core  = ctx.core;
   for (const char *name : {"d.pending", "d.inbox"})
-    if (!zigzag::rankAfter(arena, member,
-                           core.findOrMintDimension(name))
+    if (!zigzag::rankAfter(arena, member, core.findOrMintDimension(name))
              .empty())
       return true;
   return false;
@@ -928,28 +880,24 @@ bool VagentAdapter::pendingWork(zigzag::vortex::WorkerContext &ctx,
 void VagentAdapter::noteSpawnRequest(zigzag::vortex::WorkerContext &ctx,
                                      CellRef member,
                                      std::string_view requestId) const {
-  const auto rec = varsRecord(ctx.arena, ctx.core, member,
-                              "spawnRequest", true);
+  const auto rec =
+      varsRecord(ctx.arena, ctx.core, member, "spawnRequest", true);
   if (!rec) return;
-  zigzag::expectWritten(
-      ctx.arena.link(*rec, ctx.core.dims().values, DimVector::POS,
-                     ctx.arena.makeCell(requestId)));
+  zigzag::expectWritten(ctx.arena.link(*rec, ctx.core.dims().values,
+                                       DimVector::POS,
+                                       ctx.arena.makeCell(requestId)));
 }
 
 void VagentAdapter::spawnOutcome(
-    zigzag::vortex::WorkerContext &ctx,
-    const mesh::ActorMessage &request,
-    const std::expected<mesh::ActorPid, mesh::ActorError> &result)
-    const {
-  auto &arena = ctx.arena;
-  auto &core  = ctx.core;
+    zigzag::vortex::WorkerContext &ctx, const mesh::ActorMessage &request,
+    const std::expected<mesh::ActorPid, mesh::ActorError> &result) const {
+  auto &arena        = ctx.arena;
+  auto &core         = ctx.core;
   const auto members = directoryMembers(arena, core);
   for (const CellRef member : members) {
-    const auto rec =
-        varsRecord(arena, core, member, "spawnRequest", false);
+    const auto rec = varsRecord(arena, core, member, "spawnRequest", false);
     if (!rec) continue;
-    const auto v = arena.linked(*rec, core.dims().values,
-                                DimVector::POS);
+    const auto v = arena.linked(*rec, core.dims().values, DimVector::POS);
     if (!v || arena.textOf(*v) != request.requestId) continue;
     if (result) {
       // The grant's target is the child's real mesh identity —

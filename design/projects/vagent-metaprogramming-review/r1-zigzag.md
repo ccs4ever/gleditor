@@ -5,8 +5,9 @@ Store–Slice convergence.
 
 Reviewed against `apps/common/xanadu/zigzag/arena_manifold.{hpp,cpp}`, `manifold.hpp`,
 `vortex/vortex_vm.cpp`, `vortex/vortex_core.{hpp,cpp}`, `vortex/mesh_value.cpp`,
-`vagent/compiler.cpp`, `design/store-slice-convergence.md` (R1–R12), `design/vagent-agent-language.md`
-(V10–V12, §5.1, §5.7) and `design/vortex-hyperstructural-runtime.md`.
+`vagent/compiler.cpp`, `design/store-slice-convergence.md` (R1–R12),
+`design/vagent-agent-language.md` (V10–V12, §5.1, §5.7) and
+`design/vortex-hyperstructural-runtime.md`.
 
 The one fact everything hangs on, verified in code: `ArenaManifold::link(from, dim, dir, to)`
 maintains the reciprocal-edge invariant by *eviction* — it computes `displacedUs` (from's old
@@ -32,26 +33,26 @@ more, incompatible roles:
   op with `bindOutput` (`compiler.cpp:537-545`). If the wing was occupied it is silently orphaned;
   if it was not, `outputsOf(entry)` now walks `rank(H, d.step)` — the head's unrelated step chain —
   as if it were operand slots. The stated head layout corrupts the graph it names at emission time.
-- **Clause→test attach** (§6.3 `graft_where`, `graft_plan`; spec §5.7): `link(clause, grab, POS,
-  testEntry)` sets `testEntry −d.grab = clause`, evicting (a) the fragment head's `+d.grab → entry`
-  edge — the head is *decapitated*: `run` (§6.2: "jump to `c`'s entry op", found via the head's
-  `+d.grab`) can no longer reach the entry — and (b) the entry's output wing, as above. After
-  `learn_where(plan_named("Guard.cautious"), code"…")` (§9.2), the recorded head `H` reaches only
-  its descriptor and label.
+- **Clause→test attach** (§6.3 `graft_where`, `graft_plan`; spec §5.7):
+  `link(clause, grab, POS, testEntry)` sets `testEntry −d.grab = clause`, evicting (a) the fragment
+  head's `+d.grab → entry` edge — the head is *decapitated*: `run` (§6.2: "jump to `c`'s entry op",
+  found via the head's `+d.grab`) can no longer reach the entry — and (b) the entry's output wing,
+  as above. After `learn_where(plan_named("Guard.cautious"), code"…")` (§9.2), the recorded head `H`
+  reaches only its descriptor and label.
 - **Patch→head** (§6.6): `patch +d.grab → H` writes `H −d.grab = patch`; a second patch naming the
   same head (two `learn_*`s sharing one `Code`, or `learn_plan` reusing a body fragment) evicts the
   first patch's `+d.grab` — the earlier patch silently loses its fragment.
 
 The same eviction on `+d.spin`: `graft_body`/`learn_plan` on a `Code` already installed elsewhere —
-`link(C2, spin, POS, bodyEntry)` clears `C1`'s `+d.spin` (`displacedIt`), so the first learned clause
-loses its body. The doc never says a fragment is single-installation; `Code` values are passed
-freely and §8.5 reifies precisely because sharing is assumed elsewhere.
+`link(C2, spin, POS, bodyEntry)` clears `C1`'s `+d.spin` (`displacedIt`), so the first learned
+clause loses its body. The doc never says a fragment is single-installation; `Code` values are
+passed freely and §8.5 reifies precisely because sharing is assumed elsewhere.
 
 This also falsifies §6.6/§4.5's reachability claim *both ways*. `promote` walks edges **both
 directions** (`discover(edge.pos); discover(edge.neg)`, `arena_manifold.cpp:1781-1783`). If the
 graft decapitates `H`, the patch's `+d.grab→head` no longer reaches the graph — the fragment is
-unreachable from state and absent from the checkpoint (V12 stands for program cells). If instead
-the head→graph edge survives *and* the graph is installed, the bidirectional walk goes
+unreachable from state and absent from the checkpoint (V12 stands for program cells). If instead the
+head→graph edge survives *and* the graph is installed, the bidirectional walk goes
 `patch → H → entry →(−d.grab/−d.spin)→ clause → goal → module → home`: **the whole program skeleton
 is dragged into the checkpoint — precisely the failure V12 exists to prevent and the M11 amendment
 claims to scope away.** The only consistent `learn` is: graft a *copy*, keep the *original*
@@ -63,8 +64,8 @@ points (`clause +d.grab → H`, `clause +d.spin → H` or its entry; heads have 
 evicted). (b) Move the head→entry edge off `+d.grab`: a dedicated data-minted dim (`d.entry`,
 adapter-minted by the same V10 mechanism as `d.code`/`d.patch`) or `+d.step`/`+d.spin` following the
 `attachPipeline` idiom (`vortex_core.cpp:438-441` — a non-op cell pointing into a stream is already
-how param pipelines head a chain). (c) Put `patch→head` on a dim disjoint from the attach edge.
-(d) State the rule: a `Code` denotes one installation; graft consumes it (or `graft_*` reifies
+how param pipelines head a chain). (c) Put `patch→head` on a dim disjoint from the attach edge. (d)
+State the rule: a `Code` denotes one installation; graft consumes it (or `graft_*` reifies
 internally); `learn_*` always keeps an uninstalled closed fragment for the patch.
 
 ### 2. BLOCKING — a promoted fragment graph is dead on arrival: operand cells are not link-reachable and wing slots are verbatim Int64 (§4.5, §6.6, M11, §12)
@@ -81,7 +82,7 @@ ref-boxes (`vortex_vm.cpp:706-707`). Two consequences the doc misses:
    are state-side binding cells"); a fragment's internal literal/reference cells are also outside
    references, to non-state cells, so no `code"…"`-born fragment is closed in the link-reachability
    sense `promote` implements.
-2. **Int64 bits promote verbatim** (`store.makeScalarCell(out.version, from.asInt64(arena)…)`,
+1. **Int64 bits promote verbatim** (`store.makeScalarCell(out.version, from.asInt64(arena)…)`,
    `arena_manifold.cpp:1934-1936`) and `importValue` likewise copies value bits verbatim,
    translating only `ValueKind::OpHandle` relocation handles (`mesh_value.cpp:483-491` vs.
    `:494-502`). After `resume`, every wing slot and every `Jump`/`Call`/`Branch`/`Choice` target in
@@ -96,11 +97,11 @@ referent.
 **Fix options, pick and price one.** (a) Emit fragment operand slots and `reference()` targets as
 `OpHandle`/relocation-handle cells — the one value kind `promote` and `importValue` *do* translate
 (`arena_manifold.cpp:1759-1763, 1947-1951`; `mesh_value.cpp:494-502`). That is a change to emission
-code (`compileFragment` new code at minimum; `bindInput`/`reference()` if shared — register as
-P16 beside P15). (b) Admit `learn` cannot carry executable graphs and have the patch carry a
-re-emission recipe — but "recompile at load" is refused in §11, so this means re-defining the patch
-as a *builder fragment*, which has the same Int64 problem. (c) Narrow `learn` to session scope and
-say so. As specified, M11 cannot work.
+code (`compileFragment` new code at minimum; `bindInput`/`reference()` if shared — register as P16
+beside P15). (b) Admit `learn` cannot carry executable graphs and have the patch carry a re-emission
+recipe — but "recompile at load" is refused in §11, so this means re-defining the patch as a
+*builder fragment*, which has the same Int64 problem. (c) Narrow `learn` to session scope and say
+so. As specified, M11 cannot work.
 
 ### 3. MAJOR — `d.synapse` topology cannot represent fan-in, and its endpoint encoding is unspecified (§2 synapse, §6.1 `sprout_synapse`, §8.1, §8.3)
 
@@ -152,27 +153,26 @@ content/value through `masterOf`; a "copy" that aliases is not a copy).
 
 ### 6. MINOR — source provenance is a coordinate string, not a transclusion (§5.1, §6.7, M1 price)
 
-`+d.name → "src:demo:12:4"` serializes a source position into scalar text. It is not a
-transclusion: the fragment's source bytes are not addressed, and nothing states that the program
-artifact or any scroll stores the `code"…"` body the coordinates name. §12 honestly disclaims
-source recoverability, but the purist contract deserves the sharper statement: the label is a
-*name* requiring an external source map; if the artifact sealed the literal body as a span (or the
-source file is itself a stored scroll), the label could be a `GlobalSpan`-style reference rather
-than a string. Record which.
+`+d.name → "src:demo:12:4"` serializes a source position into scalar text. It is not a transclusion:
+the fragment's source bytes are not addressed, and nothing states that the program artifact or any
+scroll stores the `code"…"` body the coordinates name. §12 honestly disclaims source recoverability,
+but the purist contract deserves the sharper statement: the label is a *name* requiring an external
+source map; if the artifact sealed the literal body as a span (or the source file is itself a stored
+scroll), the label could be a `GlobalSpan`-style reference rather than a string. Record which.
 
 ### 7. MINOR — descriptor type identity is stringly-typed (§5.2, §5.4, §6.1, §7.2)
 
 Parameter/result types are stored as type-name strings (`"Int"`) on `+d.values`. There is no
 canonical form (`Code<Int>` nesting, qualified names, renamed types across incarnations), so the
 runtime descriptor comparison in §7.2 compares surface text — a small foreign serialization inside
-cells, mildly at odds with M1's no-side-representation spirit (defensible: type cells vs. names is
-a real trade — argue it rather than assume it).
+cells, mildly at odds with M1's no-side-representation spirit (defensible: type cells vs. names is a
+real trade — argue it rather than assume it).
 
 ### 8. MINOR — `learn_plan`'s patch records one `+d.grab→head` for a two-fragment graft (§6.6, §6.1 patch row)
 
-`learn_plan(goal, name, test, body)` installs two fragments; the patch shape `{ordinal, target
-descriptor, +d.grab→head, +d.name→label}` names one head. Which head rides the patch — test, body,
-or a record cell chaining both (e.g., `+d.step`)? Genesis replay needs both.
+`learn_plan(goal, name, test, body)` installs two fragments; the patch shape
+`{ordinal, target descriptor, +d.grab→head, +d.name→label}` names one head. Which head rides the
+patch — test, body, or a record cell chaining both (e.g., `+d.step`)? Genesis replay needs both.
 
 ### 9. MINOR — `validate`'s "seen-set like `Linked`'s" has no Vortex mechanism named (§7.2)
 
@@ -195,13 +195,13 @@ Say which; "bounded, cycle-guarded" is asserted, not priced.
 ## Verified accurate
 
 Citations checked and correct: `mintOpcode`/`opcodeMap_`/`getOpcodeKind` ceiling
-(`vortex_vm.cpp:73-114`), `setCursorOpcode` trailed PC (`:131-146`), structural ops
-(`:616-836`), `Linked` seen-set (`:699-701`), `New` already-used refusal (`:736-743`), `Choice`
-op-target enforcement (`:1150-1158`), trail/shadow machinery (`arena_manifold.cpp:1506-1610`),
-`compact()` refusal under marks (`arena_manifold.hpp:670-679`), `cells"…"` subset
-(`cell_path.cpp:147-183`), `ensureDimension`/V10 discipline, R5/R6/R7/R8/R12 reconciliations (§14) —
-all sound. `discard`'s last-mark trail clear matches P13 (`arena_manifold.cpp:1606-1608`). The
-prune predecessor→successor idiom is exactly the one link call that exploits the eviction rule
-correctly (`insertIntoRank`, `arena_manifold.cpp:1423-1439`).
+(`vortex_vm.cpp:73-114`), `setCursorOpcode` trailed PC (`:131-146`), structural ops (`:616-836`),
+`Linked` seen-set (`:699-701`), `New` already-used refusal (`:736-743`), `Choice` op-target
+enforcement (`:1150-1158`), trail/shadow machinery (`arena_manifold.cpp:1506-1610`), `compact()`
+refusal under marks (`arena_manifold.hpp:670-679`), `cells"…"` subset (`cell_path.cpp:147-183`),
+`ensureDimension`/V10 discipline, R5/R6/R7/R8/R12 reconciliations (§14) — all sound. `discard`'s
+last-mark trail clear matches P13 (`arena_manifold.cpp:1606-1608`). The prune predecessor→successor
+idiom is exactly the one link call that exploits the eviction rule correctly (`insertIntoRank`,
+`arena_manifold.cpp:1423-1439`).
 
 VERDICT: NOT CONVERGED
