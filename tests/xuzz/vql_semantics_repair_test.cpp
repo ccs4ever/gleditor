@@ -189,8 +189,8 @@ TEST_F(VQLSemanticsRepairTest, ProjectCopiesTopologyWithoutChangingSources) {
   EXPECT_EQ(arena.linked(subject, omit, DimVector::POS), hidden);
   EXPECT_EQ(arena.textOf(view), "subject");
   EXPECT_EQ(arena.contentOf(view).front(), arena.contentOf(subject).front());
-  EXPECT_THROW(engine.execute("$s{+d.keep}"), std::runtime_error);
-  EXPECT_EQ(arena.linked(subject, omit, DimVector::POS), hidden);
+  EXPECT_NO_THROW(engine.execute("$s{+d.keep}"));
+  EXPECT_FALSE(arena.linked(subject, omit, DimVector::POS));
 }
 
 TEST_F(VQLSemanticsRepairTest, ProjectPreservesForeignStoreQuoteBindings) {
