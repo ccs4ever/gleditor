@@ -255,8 +255,9 @@ TEST(PublishedVocabulariesTest, adoptingAVocabularyDoesNotFileEveryTerm) {
   // d.quotes-sel), but does NOT file placeholders for any of the 20 foreign
   // terms
   EXPECT_EQ(bobFoldAfter.refusedOps(), 0U);
+  const auto aliceFold = alice.store->rebuildManifold(alice.head);
   for (const auto &termCell : terms) {
-    const auto slot = alice.store->rebuildManifold(alice.head).slot(termCell);
+    const auto slot = aliceFold.slot(termCell);
     ASSERT_TRUE(slot.has_value());
     const GlobalOpRef gRef{
         .scroll   = alice.scrollKey,
@@ -275,7 +276,8 @@ TEST(PublishedVocabulariesTest, usingAPublishedTermMakesItALocalDimension) {
                                             std::nullopt, "Rel", terms);
   alice.head     = rel.version;
 
-  const auto aSlot = alice.store->rebuildManifold(alice.head).slot(tSupports);
+  const auto aliceFold = alice.store->rebuildManifold(alice.head);
+  const auto aSlot     = aliceFold.slot(tSupports);
   ASSERT_TRUE(aSlot.has_value());
   const GlobalOpRef termRef{
       .scroll   = alice.scrollKey,
@@ -316,7 +318,8 @@ TEST(PublishedVocabulariesTest, filingOneTermTwiceReusesItsPlaceholder) {
                                             std::nullopt, "Rel", terms);
   alice.head     = rel.version;
 
-  const auto aSlot = alice.store->rebuildManifold(alice.head).slot(tSupports);
+  const auto aliceFold = alice.store->rebuildManifold(alice.head);
+  const auto aSlot     = aliceFold.slot(tSupports);
   ASSERT_TRUE(aSlot.has_value());
   const GlobalOpRef termRef{
       .scroll   = alice.scrollKey,
@@ -398,8 +401,8 @@ TEST(PublishedVocabulariesTest, sharedPublishedIdentityBindsAcrossStores) {
                                              std::nullopt, "Rel", terms);
   vocabStore.head = rel.version;
 
-  const auto vSlot =
-      vocabStore.store->rebuildManifold(vocabStore.head).slot(tSupports);
+  const auto vocabFold = vocabStore.store->rebuildManifold(vocabStore.head);
+  const auto vSlot     = vocabFold.slot(tSupports);
   ASSERT_TRUE(vSlot.has_value());
   const GlobalOpRef termRef{
       .scroll   = vocabStore.scrollKey,
@@ -452,7 +455,8 @@ TEST(PublishedVocabulariesTest, renamingATermPreservesItsIdentity) {
                                              std::nullopt, "Rel 1", terms);
   alice.head      = rel1.version;
 
-  const auto aSlot = alice.store->rebuildManifold(alice.head).slot(tSupports);
+  const auto aliceFold = alice.store->rebuildManifold(alice.head);
+  const auto aSlot     = aliceFold.slot(tSupports);
   ASSERT_TRUE(aSlot.has_value());
   const GlobalOpRef termRef{
       .scroll   = alice.scrollKey,
@@ -504,7 +508,8 @@ TEST(PublishedVocabulariesTest, replacingATermDoesNotHijackExistingBindings) {
                                              std::nullopt, "Rel 1", terms1);
   alice.head      = rel1.version;
 
-  const auto slot1 = alice.store->rebuildManifold(alice.head).slot(tSupports1);
+  const auto aliceFold1 = alice.store->rebuildManifold(alice.head);
+  const auto slot1      = aliceFold1.slot(tSupports1);
   ASSERT_TRUE(slot1.has_value());
   const GlobalOpRef termRef1{
       .scroll   = alice.scrollKey,
@@ -524,7 +529,8 @@ TEST(PublishedVocabulariesTest, replacingATermDoesNotHijackExistingBindings) {
                                              rel1.releaseCell, "Rel 2", terms2);
   alice.head      = rel2.version;
 
-  const auto slot2 = alice.store->rebuildManifold(alice.head).slot(tSupports2);
+  const auto aliceFold2 = alice.store->rebuildManifold(alice.head);
+  const auto slot2      = aliceFold2.slot(tSupports2);
   ASSERT_TRUE(slot2.has_value());
   const GlobalOpRef termRef2{
       .scroll   = alice.scrollKey,

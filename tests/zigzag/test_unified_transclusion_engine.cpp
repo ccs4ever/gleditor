@@ -691,11 +691,12 @@ TEST(UnifiedTransclusionEngineTest,
   const auto italicCell = rig.engine.addCell("Italic cell");
   const auto spans      = rig.engine.manifold().contentOf(italicCell);
   ASSERT_FALSE(spans.empty());
+  const std::vector<xanadu::PrimediaSpan> italicSpans(spans.begin(),
+                                                      spans.end());
 
   xanadu::Link italicLink;
   italicLink.type = xanadu::LinkType::Format;
-  italicLink.left =
-      std::vector<xanadu::PrimediaSpan>(spans.begin(), spans.end());
+  italicLink.left = italicSpans;
   italicLink.right.push_back(
       xanadu::vocabularySpanFor(xanadu::FormatAttribute::Italic));
   rig.store.addLink(rig.engine.head(), italicLink);
@@ -740,7 +741,7 @@ TEST(UnifiedTransclusionEngineTest,
   // 4) Adding a new format link properly triggers full format rescan
   xanadu::Link boldLink;
   boldLink.type = xanadu::LinkType::Format;
-  boldLink.left = std::vector<xanadu::PrimediaSpan>(spans.begin(), spans.end());
+  boldLink.left = italicSpans;
   boldLink.right.push_back(
       xanadu::vocabularySpanFor(xanadu::FormatAttribute::Bold));
   rig.store.addLink(rig.engine.head(), boldLink);

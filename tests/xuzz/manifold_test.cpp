@@ -889,8 +889,9 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
 
 TEST(ManifoldTest, aSpliceKeepsTheAddressesItDidNotTouch) {
   Slice slice;
-  const auto cell   = slice.cell("the quick brown fox");
-  const auto before = slice.store.rebuildManifold(slice.at).contentOf(cell);
+  const auto cell           = slice.cell("the quick brown fox");
+  const auto beforeManifold = slice.store.rebuildManifold(slice.at);
+  const auto before         = beforeManifold.contentOf(cell);
   ASSERT_EQ(before.size(), 1U);
   const auto original = before.front();
 

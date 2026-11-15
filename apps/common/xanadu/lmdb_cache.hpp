@@ -222,10 +222,11 @@ public:
 
     if (mdb_get(txn, dbi_pieces_, &k, &v) == MDB_SUCCESS &&
         v.mv_size >= sizeof(TextHeader)) {
-      const auto *hdr = static_cast<const TextHeader *>(v.mv_data);
+      TextHeader hdr{};
+      std::memcpy(&hdr, v.mv_data, sizeof(TextHeader));
       const char *text_ptr =
           static_cast<const char *>(v.mv_data) + sizeof(TextHeader);
-      out.assign(text_ptr, hdr->length);
+      out.assign(text_ptr, hdr.length);
       mdb_txn_abort(txn);
       return true;
     }
@@ -751,8 +752,9 @@ public:
 
     while (mdb_cursor_get(cursor, &k, &v, MDB_NEXT) == MDB_SUCCESS) {
       if (v.mv_size >= sizeof(TextHeader)) {
-        const auto *hdr = static_cast<const TextHeader *>(v.mv_data);
-        if (0 == hdr->ref_count) {
+        TextHeader hdr{};
+        std::memcpy(&hdr, v.mv_data, sizeof(TextHeader));
+        if (0 == hdr.ref_count) {
           mdb_cursor_del(cursor, 0);
           evicted++;
         }
