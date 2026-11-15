@@ -423,7 +423,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
     if (xanadu::StructureKind::Reserved == kind) {
       return refuse(FoldRefusal::InvalidMakeKind);
     }
-    if (byRef.contains(opIndex) || structureBirths_.contains(opIndex)) {
+    if (byRef.contains(opIndex)) {
       return refuse(FoldRefusal::DuplicateCell);
     }
 
@@ -443,12 +443,16 @@ Manifold::applyStructure(const std::uint32_t opIndex,
           return refuse(FoldRefusal::UnknownSubject);
         }
       }
-      structureBirths_.emplace(opIndex, StructureBirthInfo{
-                                            .opIndex     = opIndex,
-                                            .kind        = kind,
-                                            .containerOp = node.sourceOpIndex,
-                                            .nameSpan    = node.span(),
-                                        });
+      const auto [_, inserted] = structureBirths_.try_emplace(
+          opIndex, StructureBirthInfo{
+                       .opIndex     = opIndex,
+                       .kind        = kind,
+                       .containerOp = node.sourceOpIndex,
+                       .nameSpan    = node.span(),
+                   });
+      if (!inserted) {
+        return refuse(FoldRefusal::DuplicateCell);
+      }
       return {};
     }
 
@@ -459,12 +463,16 @@ Manifold::applyStructure(const std::uint32_t opIndex,
         return refuse(FoldRefusal::UnknownSubject);
       }
     }
-    structureBirths_.emplace(opIndex, StructureBirthInfo{
-                                          .opIndex = opIndex,
-                                          .kind = xanadu::StructureKind::Cell,
-                                          .containerOp = node.sourceOpIndex,
-                                          .nameSpan    = node.span(),
-                                      });
+    const auto [_, inserted] = structureBirths_.try_emplace(
+        opIndex, StructureBirthInfo{
+                     .opIndex     = opIndex,
+                     .kind        = xanadu::StructureKind::Cell,
+                     .containerOp = node.sourceOpIndex,
+                     .nameSpan    = node.span(),
+                 });
+    if (!inserted) {
+      return refuse(FoldRefusal::DuplicateCell);
+    }
 
     const auto dense = static_cast<std::uint32_t>(slots.size());
     // The empty runs start at the arenas' tails, so this cell's first link and

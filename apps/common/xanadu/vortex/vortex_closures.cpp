@@ -754,8 +754,11 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
         capture.push_back(cell);
       });
     }
-    auto priorReferences                    = cellReferences_;
-    auto priorCursorPC                      = cursorPC_;
+    auto priorReferences      = cellReferences_;
+    const auto priorCursorIt  = cursorPC_.find(cursor);
+    const bool hadPriorCursor = priorCursorIt != cursorPC_.end();
+    const auto priorCursorVal =
+        hadPriorCursor ? priorCursorIt->second : std::nullopt;
     const auto priorValuesCreated           = closureValuesCreated_;
     const auto priorEnvironmentCellsCreated = closureEnvironmentCellsCreated_;
     try {
@@ -769,7 +772,10 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
       return {};
     } catch (const std::exception &error) {
       cellReferences_.swap(priorReferences);
-      cursorPC_.swap(priorCursorPC);
+      if (hadPriorCursor)
+        cursorPC_[cursor] = priorCursorVal;
+      else
+        cursorPC_.erase(cursor);
       closureValuesCreated_           = priorValuesCreated;
       closureEnvironmentCellsCreated_ = priorEnvironmentCellsCreated;
       return fail(error.what());
@@ -855,8 +861,11 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
       return fail("CheckClosureCall snapshot limit exceeded");
     for (std::size_t index = 0; index < snapshotRecords; ++index)
       arena.consumeWork();
-    auto priorReferences = cellReferences_;
-    auto priorCursorPC   = cursorPC_;
+    auto priorReferences      = cellReferences_;
+    const auto priorCursorIt  = cursorPC_.find(cursor);
+    const bool hadPriorCursor = priorCursorIt != cursorPC_.end();
+    const auto priorCursorVal =
+        hadPriorCursor ? priorCursorIt->second : std::nullopt;
     try {
       zigzag::ArenaSavepoint savepoint(arena);
       writeCellReferences(outputs,
@@ -866,7 +875,10 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
       return {};
     } catch (const std::exception &error) {
       cellReferences_.swap(priorReferences);
-      cursorPC_.swap(priorCursorPC);
+      if (hadPriorCursor)
+        cursorPC_[cursor] = priorCursorVal;
+      else
+        cursorPC_.erase(cursor);
       return fail(error.what());
     }
   }

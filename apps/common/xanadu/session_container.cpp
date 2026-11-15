@@ -435,7 +435,7 @@ static_assert(sizeof(TarHeader) == 512, "TarHeader must be exactly 512 bytes");
 
 void formatTarHeader(TarHeader &header, std::string_view name, std::size_t size,
                      std::uint64_t mtime) {
-  std::memset(&header, 0, sizeof(header));
+  header                 = TarHeader{};
   const auto copyNameLen = std::min(name.size(), sizeof(header.name) - 1);
   std::memcpy(header.name, name.data(), copyNameLen);
   std::snprintf(header.mode, sizeof(header.mode), "%07o", 0644);

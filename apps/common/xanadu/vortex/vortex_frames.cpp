@@ -396,15 +396,24 @@ ExecutionResult VortexVM::invokeFramePrepared(
   ActivationFrame frame(descriptorCell, nextActivationId_, guardBaseline);
   frame.returnOpcode = continuation;
   frame.parentResultSlots.assign(resultSlots.begin(), resultSlots.end());
-  frame.resultPorts               = descriptor.resultPorts;
-  bool committed                  = false;
-  auto previousReferences         = cellReferences_;
-  auto previousStreams            = streams_;
-  auto previousIterators          = iterators_;
-  auto previousStreamSlots        = streamSlots_;
-  auto previousIteratorSlots      = iteratorSlots_;
-  auto previousFrames             = activationFrames_;
-  auto previousCursorPC           = cursorPC_;
+  frame.resultPorts          = descriptor.resultPorts;
+  bool committed             = false;
+  auto previousReferences    = cellReferences_;
+  auto previousStreams       = streams_;
+  auto previousIterators     = iterators_;
+  auto previousStreamSlots   = streamSlots_;
+  auto previousIteratorSlots = iteratorSlots_;
+  auto previousFrames        = activationFrames_;
+  const auto priorCursorIt   = cursorPC_.find(cursor);
+  const bool hadPriorCursor  = priorCursorIt != cursorPC_.end();
+  const auto priorCursorVal =
+      hadPriorCursor ? priorCursorIt->second : std::nullopt;
+  const auto restoreCursorPC = [&] {
+    if (hadPriorCursor)
+      cursorPC_[cursor] = priorCursorVal;
+    else
+      cursorPC_.erase(cursor);
+  };
   const auto previousStreamCursor = streamCursor_;
   if (std::ranges::any_of(descriptor.argumentPorts,
                           [](const FramePort &port) {
@@ -429,7 +438,7 @@ ExecutionResult VortexVM::invokeFramePrepared(
     streamSlots_.swap(previousStreamSlots);
     iteratorSlots_.swap(previousIteratorSlots);
     activationFrames_.swap(previousFrames);
-    cursorPC_.swap(previousCursorPC);
+    restoreCursorPC();
     streamCursor_ = previousStreamCursor;
     return fail(error.what());
   }
@@ -481,7 +490,7 @@ ExecutionResult VortexVM::invokeFramePrepared(
       streamSlots_.swap(previousStreamSlots);
       iteratorSlots_.swap(previousIteratorSlots);
       activationFrames_.swap(previousFrames);
-      cursorPC_.swap(previousCursorPC);
+      restoreCursorPC();
       streamCursor_ = previousStreamCursor;
       zigzag::expectMarkOrder(arena.release(mark));
       return fail(error.what());
@@ -613,15 +622,24 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
     results.push_back({port.kind, std::move(cells)});
   }
 
-  auto previousGuardScopes        = guardScopes_;
-  auto previousGuards             = guardStacks_;
-  auto previousReferences         = cellReferences_;
-  auto previousStreams            = streams_;
-  auto previousIterators          = iterators_;
-  auto previousStreamSlots        = streamSlots_;
-  auto previousIteratorSlots      = iteratorSlots_;
-  auto previousFrames             = activationFrames_;
-  auto previousCursorPC           = cursorPC_;
+  auto previousGuardScopes   = guardScopes_;
+  auto previousGuards        = guardStacks_;
+  auto previousReferences    = cellReferences_;
+  auto previousStreams       = streams_;
+  auto previousIterators     = iterators_;
+  auto previousStreamSlots   = streamSlots_;
+  auto previousIteratorSlots = iteratorSlots_;
+  auto previousFrames        = activationFrames_;
+  const auto priorCursorIt   = cursorPC_.find(cursor);
+  const bool hadPriorCursor  = priorCursorIt != cursorPC_.end();
+  const auto priorCursorVal =
+      hadPriorCursor ? priorCursorIt->second : std::nullopt;
+  const auto restoreCursorPC = [&] {
+    if (hadPriorCursor)
+      cursorPC_[cursor] = priorCursorVal;
+    else
+      cursorPC_.erase(cursor);
+  };
   const auto previousStreamCursor = streamCursor_;
   zigzag::Mark mark;
   try {
@@ -688,7 +706,7 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
     streamSlots_.swap(previousStreamSlots);
     iteratorSlots_.swap(previousIteratorSlots);
     activationFrames_.swap(previousFrames);
-    cursorPC_.swap(previousCursorPC);
+    restoreCursorPC();
     streamCursor_ = previousStreamCursor;
     return fail(error.what());
   }

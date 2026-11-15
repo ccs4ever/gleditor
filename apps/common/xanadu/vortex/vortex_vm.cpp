@@ -1930,8 +1930,6 @@ ExecutionResult VortexVM::executeGuardOpcode(const OpcodeKind kind,
   auto &arena              = core_.arena();
   const auto advanceCursor = [this, &arena,
                               cursor](const std::optional<CellRef> next) {
-    auto nextCursorPC    = cursorPC_;
-    nextCursorPC[cursor] = next;
     zigzag::ArenaSavepoint savepoint(arena);
     if (arena.contains(cursor)) {
       if (next) {
@@ -1943,7 +1941,7 @@ ExecutionResult VortexVM::executeGuardOpcode(const OpcodeKind kind,
             arena.setValueBits(cursor, xanadu::ValueKind::None, 0));
       }
     }
-    cursorPC_.swap(nextCursorPC);
+    cursorPC_[cursor] = next;
     savepoint.commit();
   };
   const auto inputs  = core_.inputsOf(opcode);
@@ -2165,8 +2163,6 @@ ExecutionResult VortexVM::executeMutationScopeOpcode(const OpcodeKind kind,
       return fail("mutation-scope opcodes do not support parameter pipelines");
 
   const auto advance = [&] {
-    auto nextPC    = cursorPC_;
-    nextPC[cursor] = continuation;
     zigzag::ArenaSavepoint savepoint(arena);
     if (arena.contains(cursor)) {
       if (continuation)
@@ -2177,7 +2173,7 @@ ExecutionResult VortexVM::executeMutationScopeOpcode(const OpcodeKind kind,
         zigzag::expectWritten(
             arena.setValueBits(cursor, xanadu::ValueKind::None, 0));
     }
-    cursorPC_.swap(nextPC);
+    cursorPC_[cursor] = continuation;
     savepoint.commit();
   };
   const auto validOutput = [&](const CellRef output) {

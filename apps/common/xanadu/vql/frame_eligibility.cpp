@@ -1760,8 +1760,8 @@ analyzeFrameEligibility(const QueryExpression &query,
         budget.tick(1);
         ordinaryFunctorFormals.insert(index);
       }
-      auto callSites = std::move(scanner).takeCallSites();
       bool readOnly  = scanner.readOnlyCandidate();
+      auto callSites = std::move(scanner).takeCallSites();
       for (auto &callSite : callSites) {
         if (names.contains(callSite.callee)) {
           budget.tick(1);

@@ -277,6 +277,8 @@ std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
   unpinned.shapePredicates.clear();
   unpinned.rangeClamp  = std::nullopt;
   unpinned.derefMaster = false;
+  const auto keptStream =
+      step.yieldMode == YieldMode::Keep ? stream : std::vector<CellRef>{};
   std::vector<CellRef> stepped =
       compileSteps(std::span{&unpinned, 1}, std::move(stream), hasContext);
 
@@ -304,7 +306,7 @@ std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
   }
 
   if (step.yieldMode == YieldMode::Keep) {
-    return stream;
+    return keptStream;
   }
 
   std::vector<CellRef> nextStream = {resultStream};
