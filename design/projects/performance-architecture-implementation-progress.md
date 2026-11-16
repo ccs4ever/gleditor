@@ -11,7 +11,7 @@ reviewers; acceptance is based on current code and recorded checks.
 | ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | M0 baseline/observability | In progress | Ordinary `-O3 -g` full build passed. Complete control `make test` passed, including 842 library, 4380 Xuzz, 268 ZigZag, 12 additional tests and 5 network tests. Independent M0/probe reviews converged for the frozen corpus recipe. All 36 split probe cases and both corpus smoke reports passed; full control backend comparison passed. Fine-grained telemetry listed below remains open. |
 | M1 release ThinLTO+PGO    | Complete    | Four Clang modes built and passed16 held-out timing blocks each;512 separate perf samples usable. Combined full tests/backends passed;41 focused tests and formatting passed. Independent C++ performance review converged; scoped results and pre-existing lint failure recorded below.                                                                                                       |
-| M2 P3/P4                  | In progress | P3 ThinLTO baseline/candidate builds and 21-workload comparisons passed; fresh PGO comparison and separate P4 experiment pending                                                                                                                                                                                                                                                               |
+| M2 P3/P4                  | In progress | P3 converged in ThinLTO and independently trained ThinLTO+PGO comparisons; separate P4 accessor experiment pending                                                                                                                                                                                                                                                                             |
 | M3 P2                     | Pending     | No runtime lookup changes yet                                                                                                                                                                                                                                                                                                                                                                  |
 | M4 P5                     | Pending     | No operand container changes yet                                                                                                                                                                                                                                                                                                                                                               |
 | M5a-c P1                  | Pending     | No VM trail/container changes yet                                                                                                                                                                                                                                                                                                                                                              |
@@ -264,3 +264,52 @@ fresh ThinLTO+PGO generation/train/merge/release and repeated validation of the 
 running; profiles from M1 are not reused. P3 release acceptance and the separate P4 accessor
 experiment remain open. M3/M4/M5 drafts are isolated under `/tmp` and are not production
 implementations.
+
+### P3 fresh release comparison and convergence
+
+Both unchanged-guard and guarded-link variants completed independent ThinLTO+PGO generation,
+30-workload training (279 profile outputs each), merge, full release build and 21-workload
+validation. Each then passed 21 held-out timing blocks with seven measured repetitions plus a
+warmup, separate allocation/count passes, and 168 hardware samples with usable cycles/instructions
+and unchanged identities. The exact compiler/features/manifest match after normalizing only the
+verified profile input path/digest; profiles are distinct and source-bound.
+
+The new baseline fingerprint is `9e170b22501d4863851b99a316accea8e355c54ef8d2610fd362628ef0036c03`:
+both variants now retain the same formatted probe and regression tests, with only the production
+guard changed. Candidate fingerprint remains
+`09da6e1b74a0cd90328882713f3591b03f6f84285552aa903871c9530a930873`. Profile SHA-256 values are
+`97538820c6a18171dffd87597a940a7e104582d3a4522dde0c366c2562768d59` (baseline) and
+`d7e367d88026c34aff8b38137f05a3d3c6c6e6e261a43d6009acd8c251aea6a5` (candidate).
+
+Candidate/baseline traversal median ratios and independent-block 95% bootstrap intervals are:
+
+- Local cells: 0.836 (0.767–0.866).
+- Ordinary quote occurrences: 0.748 (0.745–0.779).
+- Canonical proxies: 0.826 (0.806–0.939).
+- Base fallback: 1.017 (0.959–1.046), inconclusive.
+- ExternRef quotes: 0.984 (0.411–1.027), inconclusive.
+
+No interval among the 21 workloads establishes a regression. This does not prove equivalence or a
+universal application gain. Xuzz/test text grew by 55,024 bytes (about 0.75%); retain that cost
+rather than assuming a speed improvement is free. Both profile-use stages took about 14 minutes with
+parallel builds; these are observed stage costs, not clean-build comparisons. Maximum child RSS is
+not aggregate process-tree memory.
+
+Independent Luna C++ review converged for P3. Production code and initial measurements are committed
+as `0c029b60`. The parent restored that source/profile/compiler/tool combination, rebuilt three
+focused targets, and verified all three binary hashes exactly match the accepted candidate archive.
+The restored PGO test binary passed all 161 arena/manifold/dimension/spool/Store-lookup tests. An
+initial restore attempt mistakenly started Make before copying the correct profile; the fatal stale
+profile diagnostic rejected it. That failed attempt is excluded from successful evidence. The
+corrected restore passed and is recorded separately.
+
+Release reports are under `build/performance/variants/m2-p3-{baseline,candidate}-pgo/`; analysis is
+`build/performance/iterations/m2-p3-pgo-analysis.json`. The committed
+[PGO review](performance-architecture-implementation-review/iteration-02-p3-pgo-review.md) and
+[raw evidence](performance-architecture-implementation-review/iteration-02-p3-pgo-evidence.jsonl)
+preserve the scoped result. P3 is complete; P4 and M3–M6 remain open.
+
+For P4, actual disassembly of the exact restored candidate probe records no direct spool uint32
+accessor calls, 55 references to `Manifold::slot` and 117 to `ArenaManifold::slot` before header
+inlining. This is an executable-specific call-reference inventory, not a per-call inlining ratio.
+The accessor patch remains separate and has not been applied.
