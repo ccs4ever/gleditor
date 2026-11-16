@@ -482,6 +482,87 @@ PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
 DEBUG_OPTS := -O3 -g
 endif
+
+# Release performance variants share build/; mode and profile identity join
+# the ordinary flag stamp below so switching variants cannot reuse stale code.
+PERF_MODE ?= control
+PERF_PROFILE ?=
+PERF_PROFILE_DIGEST ?= $(if $(PERF_PROFILE),$(shell python3 tools/release_profile.py digest --path "$(PERF_PROFILE)"),none)
+ifeq ($(PERF_MODE),thinlto)
+ifneq ($(CXX_IS_CLANG),1)
+$(error PERF_MODE=thinlto requires Clang; use PERF_MODE=lto for the GCC portability alternative)
+endif
+override CXXFLAGS += -flto=thin
+override LDFLAGS += -flto=thin -fuse-ld=lld
+else ifeq ($(PERF_MODE),lto)
+ifeq ($(CXX_IS_CLANG),1)
+$(error PERF_MODE=lto is the GCC portability alternative; use PERF_MODE=thinlto with Clang)
+endif
+override CXXFLAGS += -flto
+override LDFLAGS += -flto
+else ifeq ($(PERF_MODE),pgo-generate)
+ifeq ($(CXX_IS_CLANG),1)
+override CXXFLAGS += -O3 -g -fprofile-instr-generate
+override LDFLAGS += -fprofile-instr-generate
+else
+override CXXFLAGS += -O3 -g -fprofile-generate=build/performance/gcc-profile
+override LDFLAGS += -fprofile-generate=build/performance/gcc-profile
+endif
+else ifeq ($(PERF_MODE),thinlto-pgo-generate)
+ifneq ($(CXX_IS_CLANG),1)
+$(error PERF_MODE=thinlto-pgo-generate requires Clang; use PERF_MODE=lto-pgo-generate for GCC)
+endif
+override CXXFLAGS += -O3 -g -flto=thin -fprofile-instr-generate
+override LDFLAGS += -flto=thin -fprofile-instr-generate -fuse-ld=lld
+else ifeq ($(PERF_MODE),lto-pgo-generate)
+ifeq ($(CXX_IS_CLANG),1)
+$(error PERF_MODE=lto-pgo-generate is the GCC portability alternative)
+endif
+override CXXFLAGS += -O3 -g -flto -fprofile-generate=build/performance/gcc-profile
+override LDFLAGS += -flto -fprofile-generate=build/performance/gcc-profile
+else ifeq ($(PERF_MODE),pgo-use)
+ifeq ($(strip $(PERF_PROFILE)),)
+$(error PERF_PROFILE is required for PERF_MODE=pgo-use)
+endif
+ifeq ($(wildcard $(PERF_PROFILE)),)
+$(error PERF_PROFILE does not exist: $(PERF_PROFILE))
+endif
+ifeq ($(CXX_IS_CLANG),1)
+override CXXFLAGS += -O3 -g -fprofile-instr-use=$(PERF_PROFILE)
+override LDFLAGS += -fprofile-instr-use=$(PERF_PROFILE)
+override CXXFLAGS += -Wno-error=profile-instr-unprofiled
+else
+override CXXFLAGS += -O3 -g -fprofile-use=$(PERF_PROFILE)
+override LDFLAGS += -fprofile-use=$(PERF_PROFILE)
+endif
+else ifeq ($(PERF_MODE),thinlto-pgo-use)
+ifeq ($(strip $(PERF_PROFILE)),)
+$(error PERF_PROFILE is required for PERF_MODE=thinlto-pgo-use)
+endif
+ifeq ($(wildcard $(PERF_PROFILE)),)
+$(error PERF_PROFILE does not exist: $(PERF_PROFILE))
+endif
+ifneq ($(CXX_IS_CLANG),1)
+$(error PERF_MODE=thinlto-pgo-use requires Clang; use PERF_MODE=lto-pgo-use for GCC)
+endif
+override CXXFLAGS += -O3 -g -flto=thin -fprofile-instr-use=$(PERF_PROFILE)
+override LDFLAGS += -flto=thin -fprofile-instr-use=$(PERF_PROFILE) -fuse-ld=lld
+override CXXFLAGS += -Wno-error=profile-instr-unprofiled
+else ifeq ($(PERF_MODE),lto-pgo-use)
+ifeq ($(strip $(PERF_PROFILE)),)
+$(error PERF_PROFILE is required for PERF_MODE=lto-pgo-use)
+endif
+ifeq ($(wildcard $(PERF_PROFILE)),)
+$(error PERF_PROFILE does not exist: $(PERF_PROFILE))
+endif
+ifeq ($(CXX_IS_CLANG),1)
+$(error PERF_MODE=lto-pgo-use is the GCC portability alternative)
+endif
+override CXXFLAGS += -flto -O3 -g -fprofile-use=$(PERF_PROFILE)
+override LDFLAGS += -flto -fprofile-use=$(PERF_PROFILE)
+else ifneq ($(PERF_MODE),control)
+$(error Unknown PERF_MODE '$(PERF_MODE)')
+endif
 # -fPIC everywhere rather than only for the library's objects. A shared library
 # requires it; a program does not, but compiling the two trees differently
 # would mean two object directories and two sets of rules for one flag whose
@@ -710,6 +791,9 @@ XUDU_TEST_OBJS  := $(XUZZ_TEST_OBJS)
 SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
 UI_TEXT_BASELINE_OBJS := $(call obj,tools/ui-text-baseline.cpp)
 VQL_RANK_BENCH_OBJS := $(call obj,tools/vql-rank-benchmark.cpp)
+PERF_PROBE_OBJS := $(call obj,tools/performance-probe.cpp)
+PERF_PROBE_COUNT_OBJ := $(OBJDIR)/tools/performance-probe-counts.o
+PERF_PROBE_COUNT_CXXFLAGS := $(filter-out -fprofile-instr-generate -fprofile-instr-use=% -fprofile-generate% -fprofile-use%,$(CXXFLAGS))
 LINK_STRESS_OBJS := $(call obj,tools/render-link-stress.cpp)
 VQUERYC_SRCS    := $(shell find apps/vqueryc -name '*.cpp' 2>/dev/null)
 VQUERYC_OBJS    := $(call obj,$(VQUERYC_SRCS))
@@ -808,7 +892,8 @@ ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
 	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) $(VLACE_OBJS) $(VLACEC_OBJS) $(VICON_OBJS) $(VICONC_OBJS) $(VAGENT_OBJS) \
-	$(UI_TEXT_BASELINE_OBJS) $(VQL_RANK_BENCH_OBJS) $(LINK_STRESS_OBJS) $(SPIKE_OBJS))
+	$(UI_TEXT_BASELINE_OBJS) $(VQL_RANK_BENCH_OBJS) $(PERF_PROBE_OBJS) \
+	$(PERF_PROBE_COUNT_OBJ) $(LINK_STRESS_OBJS) $(SPIKE_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
 JFILES := $(sort $(patsubst %.o,%.j,$(ALL_OBJS)))
@@ -898,7 +983,7 @@ FLAGSTAMP := $(OBJDIR)/.buildflags
 .PHONY: FORCE
 FORCE:
 $(FLAGSTAMP): FORCE | $(OBJDIR)/
-	@sig='$(CXXFLAGS) $(LDFLAGS)'; 	[ "`cat $@ 2>/dev/null`" = "$$sig" ] || printf '%s' "$$sig" > $@
+	@sig='$(CXXFLAGS) $(LDFLAGS) PERF_MODE=$(PERF_MODE) PERF_PROFILE_DIGEST=$(PERF_PROFILE_DIGEST) COMPILER=$(shell $(REAL_CXX) --version 2>/dev/null | head -1) TARGET=$(shell $(REAL_CXX) -dumpmachine 2>/dev/null)'; 	[ "`cat $@ 2>/dev/null`" = "$$sig" ] || printf '%s' "$$sig" > $@
 $(ALL_OBJS): $(FLAGSTAMP)
 
 $(OBJDIR)/apps/gleditor/main.o $(OBJDIR)/apps/gleditor/main.dep: $(OBJDIR)/src/config.h
@@ -907,8 +992,11 @@ $(OBJDIR)/apps/xuzz/main.o $(OBJDIR)/apps/xuzz/main.dep: $(OBJDIR)/src/config.h
 # The SPIR-V the Vulkan backend loads is produced from the same portable shader
 # bodies the GL backends compile at runtime, and through the same preamble
 # generator, so the two forms cannot drift apart.
-$(OBJDIR)/shader_assemble: tools/shader_assemble.cpp src/render/shader_source.cpp src/render/backend.cpp | $(OBJDIR)/
-	$(CXX) $(CXXFLAGS) -o $@ $^
+shader_assemble: $(OBJDIR)/shader_assemble
+.PHONY: shader_assemble
+
+$(OBJDIR)/shader_assemble: tools/shader_assemble.cpp src/render/shader_source.cpp src/render/backend.cpp $(FLAGSTAMP) | $(OBJDIR)/
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(filter %.cpp,$^)
 
 assets/shaders/vulkan/%.spv: assets/shaders/%.glsl $(OBJDIR)/shader_assemble
 	@[ -n "$(GLSLANG)" ] || { echo "neither glslangValidator nor glslang found on PATH; install glslang-tools (Debian) or glslang (Fedora, Arch)" >&2; exit 1; }
@@ -918,6 +1006,26 @@ assets/shaders/vulkan/%.spv: assets/shaders/%.glsl $(OBJDIR)/shader_assemble
 
 shaders: $(SPIRV)
 .PHONY: shaders
+
+.PHONY: perf-pgo-generate perf-pgo-train perf-pgo-merge perf-release
+perf-pgo-generate:
+	tools/release-profile.sh generate --mode thinlto-pgo
+perf-pgo-train:
+	tools/release-profile.sh train --mode thinlto-pgo
+perf-pgo-merge:
+	tools/release-profile.sh merge --mode thinlto-pgo
+perf-release:
+	tools/release-profile.sh release --mode thinlto-pgo
+
+# Read-only flag expansion used by the profile driver to verify that compiler
+# and installed-feature inputs still match before a stage changes build mode.
+.PHONY: perf-print-flags
+perf-print-flags:
+	$(info __PERF_FLAGS_BEGIN__)
+	$(info $(CXXFLAGS))
+	$(info $(LDFLAGS))
+	$(info __PERF_FLAGS_END__)
+	@:
 
 # -- the library --------------------------------------------------------------
 
@@ -1121,6 +1229,16 @@ fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire fuzz_session_package 
 .PHONY: xudu-swarm-peer
 xudu-swarm-peer: $(OBJDIR)/xudu-swarm-peer
 $(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
+.PHONY: performance-probe
+performance-probe: $(OBJDIR)/performance-probe
+$(OBJDIR)/performance-probe: $(PERF_PROBE_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
+.PHONY: performance-probe-counts
+performance-probe-counts: $(OBJDIR)/performance-probe-counts
+$(OBJDIR)/performance-probe-counts: $(PERF_PROBE_COUNT_OBJ) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o $(OBJDIR)/src/enfilade/layoutfilade.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: generate-seed-corpora
@@ -1919,6 +2037,22 @@ $(OBJDIR)/%.dep: %.cpp Makefile
 $(OBJDIR)/%.j: %.cpp
 	$(REAL_CXX) -MJ $@ $(CXXFLAGS) -E $< > /dev/null
 
+# Allocation probes replace global operator new in their own translation unit.
+# Keep that translation unit out of PGO generation/use so counter collection
+# cannot create or consume a mismatched probe-main profile; the selected-mode
+# engine objects remain the same ones linked into the regular applications.
+$(PERF_PROBE_COUNT_OBJ): tools/performance-probe.cpp Makefile $(FLAGSTAMP)
+	$(REAL_CXX) $(PERF_PROBE_COUNT_CXXFLAGS) -DGLEDITOR_PERF_ALLOC_PROBE=1 -c -o $@ $<
+
+$(OBJDIR)/tools/performance-probe-counts.dep: tools/performance-probe.cpp Makefile
+	$(REAL_CXX) -MM -MP -MT $(PERF_PROBE_COUNT_OBJ) \
+	  -MT $(OBJDIR)/tools/performance-probe-counts.j -MT $@ \
+	  $(PERF_PROBE_COUNT_CXXFLAGS) -DGLEDITOR_PERF_ALLOC_PROBE=1 $< > $@
+
+$(OBJDIR)/tools/performance-probe-counts.j: tools/performance-probe.cpp Makefile
+	$(REAL_CXX) -MJ $@ $(PERF_PROBE_COUNT_CXXFLAGS) \
+	  -DGLEDITOR_PERF_ALLOC_PROBE=1 -E $< > /dev/null
+
 # Same three rules as above, for the one vendored C source this tree
 # compiles (thirdparty/zstd/contrib/seekable_format, see LIB_SRCS_C). Uses
 # $(CC) and $(ZSTD_SEEKABLE_CFLAGS) rather than $(CXX)/$(CXXFLAGS): almost
@@ -1958,7 +2092,12 @@ $(OBJDIR)/compile_commands.json: $(JFILES)
 # all.
 ifeq (,$(filter clean dist,$(MAKECMDGOALS)))
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
+ifneq (,$(filter perf-print-flags,$(MAKECMDGOALS)))
+# The profile driver only queries expanded variables; do not remake included
+# dependency files while answering this metadata request.
+else
 include $(DEPS)
+endif
 endif
 endif
 

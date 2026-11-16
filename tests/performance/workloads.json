@@ -1,0 +1,1127 @@
+{
+  "version": 1,
+  "warmups": 1,
+  "repetitions": 7,
+  "training_weight_policy": "positive integer multiplier of measured repetitions; validation repetitions are explicit and unweighted",
+  "input_identity_kind": "CLI corpus files and generated probe scenario parameters are hashed; test-source dependencies are identified separately",
+  "corpus_identity_claim": "CLI train and validation inputs are distinct files, and generated probes use distinct seeds; source-only GoogleTest workloads have synthetic or embedded data and make no held-out corpus claim",
+  "environment_policy": "fresh isolated XDG data, config, and cache directories per warmup and measured sample",
+  "probe_measurement_policy": "primary timing commands use --measure timing; optional --collect-counters runs separate --measure allocations commands after timing. The counter pass is off by default and is excluded from primary wall-time and peak-RSS samples.",
+  "workloads": [
+    {
+      "id": "gleditor_test_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/gleditor_test",
+        "--gtest_list_tests"
+      ],
+      "inputs": [],
+      "dependencies": [],
+      "scenario": "gtest entrypoint list startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "test executable entrypoint profile coverage"
+      ]
+    },
+    {
+      "id": "shader_assemble_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "artifact_file",
+      "command": [
+        "build/shader_assemble",
+        "opengl",
+        "vert",
+        "assets/shaders/beam.vert.glsl",
+        "{artifact_dir}/beam.vert.glsl"
+      ],
+      "inputs": [
+        "assets/shaders/beam.vert.glsl"
+      ],
+      "dependencies": [
+        "tools/shader_assemble.cpp"
+      ],
+      "required_artifacts": [
+        "{artifact_dir}/beam.vert.glsl"
+      ],
+      "scenario": "build helper invocation for entrypoint profile coverage, not a representative rendering workload",
+      "covers": [
+        "shader assembly entrypoint"
+      ]
+    },
+    {
+      "id": "store_dump_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/store-dump",
+        "--help"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/store-dump.cpp"
+      ],
+      "scenario": "store dump help startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "swarm_peer_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/xudu-swarm-peer",
+        "--help"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/xudu-swarm-peer.cpp"
+      ],
+      "scenario": "swarm peer help startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "vagent_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vagent",
+        "--help"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "apps/vagent/main.cpp"
+      ],
+      "scenario": "Vagent help startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "viconc_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/viconc",
+        "--help"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "apps/viconc/main.cpp"
+      ],
+      "scenario": "Vicon compiler help startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "vicon_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vicon",
+        "--help"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "apps/vicon/main.cpp"
+      ],
+      "scenario": "Vicon runner help startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "vlacec_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vlacec",
+        "--help"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "apps/vlacec/main.cpp"
+      ],
+      "scenario": "Vlace compiler help startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "vlace_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vlace",
+        "--help"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "apps/vlace/main.cpp"
+      ],
+      "scenario": "Vlace runner help startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "vplc_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vplc",
+        "--help"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "apps/vplc/main.cpp"
+      ],
+      "scenario": "VPL compiler help startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "vquery_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vquery",
+        "--help"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "apps/vquery/main.cpp"
+      ],
+      "scenario": "vquery runner help startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "vqueryc_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vqueryc",
+        "--help"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "apps/vqueryc/main.cpp"
+      ],
+      "scenario": "vquery compiler help startup; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "xuzz_headless_entrypoint_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/xuzz",
+        "--headless"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "apps/xuzz/main.cpp",
+        "apps/xuzz/cli.cpp",
+        "apps/xuzz/view_coordinator.cpp",
+        "apps/xuzz/xuzz_app.cpp"
+      ],
+      "scenario": "real headless Xuzz startup against isolated fresh user state; entrypoint profile coverage, not a representative workload",
+      "covers": [
+        "entrypoint profile coverage",
+        "CLI startup"
+      ]
+    },
+    {
+      "id": "vpl_iota_train",
+      "split": "train",
+      "weight": 2,
+      "command": [
+        "build/xuzz_test",
+        "--gtest_fail_if_no_test_selected",
+        "--gtest_filter=VplIotaTest.*"
+      ],
+      "result_format": "gtest_json",
+      "inputs": [],
+      "dependencies": [
+        "tests/xuzz/vpl_lower_iota_test.cpp"
+      ],
+      "scenario": "VplIotaTest suite; generated array and slice inputs are authored in the test source",
+      "covers": [
+        "VPL array construction",
+        "slice structure operations"
+      ]
+    },
+    {
+      "id": "rank_walk_train",
+      "split": "train",
+      "weight": 1,
+      "command": [
+        "build/zigzag_test",
+        "--gtest_fail_if_no_test_selected",
+        "--gtest_filter=RankWalkTest.*"
+      ],
+      "result_format": "gtest_json",
+      "inputs": [],
+      "dependencies": [
+        "tests/zigzag/rank_walk_test.cpp"
+      ],
+      "scenario": "RankWalkTest suite; in-memory synthetic rank graphs are authored in the test source",
+      "covers": [
+        "rank traversal",
+        "nested and cyclic rank walks"
+      ]
+    },
+    {
+      "id": "vortex_stream_train",
+      "split": "train",
+      "weight": 1,
+      "command": [
+        "build/xuzz_test",
+        "--gtest_fail_if_no_test_selected",
+        "--gtest_filter=VortexStreamTest.*"
+      ],
+      "result_format": "gtest_json",
+      "inputs": [],
+      "dependencies": [
+        "tests/xuzz/vortex_stream_test.cpp"
+      ],
+      "scenario": "VortexStreamTest suite; stream and rank inputs are authored in the test source",
+      "covers": [
+        "stream accumulation",
+        "iterator and rank iteration",
+        "choice snapshots"
+      ]
+    },
+    {
+      "id": "vql_destructure_validation",
+      "split": "validation",
+      "weight": 1,
+      "command": [
+        "build/xuzz_test",
+        "--gtest_fail_if_no_test_selected",
+        "--gtest_filter=VQLDestructureLoopFrameTest.*"
+      ],
+      "result_format": "gtest_json",
+      "inputs": [],
+      "dependencies": [
+        "tests/xuzz/vql_destructure_loop_frames_test.cpp"
+      ],
+      "scenario": "VQLDestructureLoopFrameTest suite; source programs and records are authored in the test source",
+      "covers": [
+        "VQL execution",
+        "nested loops",
+        "runtime frames"
+      ]
+    },
+    {
+      "id": "store_projection_validation",
+      "split": "validation",
+      "weight": 1,
+      "command": [
+        "build/zigzag_test",
+        "--gtest_fail_if_no_test_selected",
+        "--gtest_filter=ZzXuduConvergenceTest.*"
+      ],
+      "result_format": "gtest_json",
+      "inputs": [],
+      "dependencies": [
+        "tests/zigzag/test_xudu_convergence.cpp"
+      ],
+      "scenario": "ZzXuduConvergenceTest suite; operation stores and cell graphs are created by test code",
+      "covers": [
+        "store projection",
+        "structure replay",
+        "cell links"
+      ]
+    },
+    {
+      "id": "vprolog_validation",
+      "split": "validation",
+      "weight": 1,
+      "command": [
+        "build/xuzz_test",
+        "--gtest_fail_if_no_test_selected",
+        "--gtest_filter=VPrologCompilerTest.*"
+      ],
+      "result_format": "gtest_json",
+      "inputs": [],
+      "dependencies": [
+        "tests/xuzz/vprolog_compiler_test.cpp"
+      ],
+      "scenario": "VPrologCompilerTest suite; facts and queries are authored in the test source",
+      "covers": [
+        "VProlog compilation",
+        "logic runtime",
+        "recursive rules"
+      ]
+    },
+    {
+      "id": "vicon_validation",
+      "split": "validation",
+      "weight": 1,
+      "command": [
+        "build/xuzz_test",
+        "--gtest_fail_if_no_test_selected",
+        "--gtest_filter=ViconDriverTest.*"
+      ],
+      "result_format": "gtest_json",
+      "inputs": [],
+      "dependencies": [
+        "tests/xuzz/vicon_driver_test.cpp"
+      ],
+      "scenario": "ViconDriverTest suite; expressions and expected sequences are authored in the test source",
+      "covers": [
+        "Vicon array evaluation",
+        "resumable iteration"
+      ]
+    },
+    {
+      "id": "vlace_validation",
+      "split": "validation",
+      "weight": 1,
+      "command": [
+        "build/xuzz_test",
+        "--gtest_fail_if_no_test_selected",
+        "--gtest_filter=VlaceE2ETest.*"
+      ],
+      "result_format": "gtest_json",
+      "inputs": [],
+      "dependencies": [
+        "tests/xuzz/vlace_e2e_test.cpp"
+      ],
+      "scenario": "VlaceE2ETest suite; programs are authored in the test source",
+      "covers": [
+        "VLace compile and run",
+        "lazy streams",
+        "data constructors"
+      ]
+    },
+    {
+      "id": "vagent_validation",
+      "split": "validation",
+      "weight": 1,
+      "command": [
+        "build/xuzz_test",
+        "--gtest_fail_if_no_test_selected",
+        "--gtest_filter=VAgentParserTest.*"
+      ],
+      "result_format": "gtest_json",
+      "inputs": [],
+      "dependencies": [
+        "tests/xuzz/vagent_parser_test.cpp"
+      ],
+      "scenario": "VAgentParserTest suite; input specifications are authored in the test source",
+      "covers": [
+        "VAgent parsing",
+        "typed plans and control flow"
+      ]
+    },
+    {
+      "id": "editor_layout_validation",
+      "split": "validation",
+      "weight": 1,
+      "command": [
+        "build/gleditor_test",
+        "--gtest_fail_if_no_test_selected",
+        "--gtest_filter=TextLayoutTest.*"
+      ],
+      "result_format": "gtest_json",
+      "inputs": [],
+      "dependencies": [
+        "tests/lib/text_layout.cpp"
+      ],
+      "scenario": "TextLayoutTest suite; test strings are authored in the test source",
+      "covers": [
+        "plain editor text layout",
+        "shaping and line breaking"
+      ]
+    },
+    {
+      "id": "vpl_file_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vpl",
+        "--headless",
+        "--file",
+        "{input}"
+      ],
+      "inputs": [
+        "tests/performance/corpus/train/array.vpl"
+      ],
+      "dependencies": [],
+      "scenario": "VPL file executes a 64-element one-dimensional iota",
+      "stdout_contains": [
+        "1 2 3 4 5",
+        "62 63 64"
+      ],
+      "covers": [
+        "VPL CLI",
+        "array construction"
+      ]
+    },
+    {
+      "id": "vpl_file_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vpl",
+        "--headless",
+        "--file",
+        "{input}"
+      ],
+      "inputs": [
+        "tests/performance/corpus/validation/array.vpl"
+      ],
+      "dependencies": [],
+      "scenario": "VPL file executes a held-out 96-element one-dimensional iota",
+      "stdout_contains": [
+        "1 2 3 4 5",
+        "94 95 96"
+      ],
+      "covers": [
+        "VPL CLI",
+        "array construction"
+      ]
+    },
+    {
+      "id": "vprolog_file_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vprolog",
+        "--headless",
+        "{input}",
+        "--eval",
+        "parent(ada, X)."
+      ],
+      "inputs": [
+        "tests/performance/corpus/train/facts.pl"
+      ],
+      "dependencies": [],
+      "scenario": "consult four training facts and query ada's children",
+      "stdout_contains": [
+        "X = bob",
+        "X = chris"
+      ],
+      "covers": [
+        "VProlog CLI",
+        "fact consultation",
+        "query execution"
+      ]
+    },
+    {
+      "id": "vprolog_file_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "exit_status",
+      "command": [
+        "build/vprolog",
+        "--headless",
+        "{input}",
+        "--eval",
+        "parent(ivy, X)."
+      ],
+      "inputs": [
+        "tests/performance/corpus/validation/facts.pl"
+      ],
+      "dependencies": [],
+      "scenario": "consult five held-out facts and query ivy's children",
+      "stdout_contains": [
+        "X = kai",
+        "X = luis"
+      ],
+      "covers": [
+        "VProlog CLI",
+        "fact consultation",
+        "query execution"
+      ]
+    },
+    {
+      "id": "editor_render_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "artifact_file",
+      "command": [
+        "build/gleditor",
+        "--strict-diagnostics",
+        "--profile",
+        "--screenshot",
+        "{artifact_dir}/screen.png",
+        "{input}"
+      ],
+      "inputs": [
+        "tests/performance/corpus/train/editor.txt"
+      ],
+      "dependencies": [],
+      "required_artifacts": [
+        "{artifact_dir}/screen.png"
+      ],
+      "scenario": "headless profile and screenshot of the training text corpus",
+      "covers": [
+        "plain editor layout",
+        "backend rendering",
+        "screenshot artifact"
+      ]
+    },
+    {
+      "id": "editor_render_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "artifact_file",
+      "command": [
+        "build/gleditor",
+        "--strict-diagnostics",
+        "--profile",
+        "--screenshot",
+        "{artifact_dir}/screen.png",
+        "{input}"
+      ],
+      "inputs": [
+        "tests/performance/corpus/validation/editor.txt"
+      ],
+      "dependencies": [],
+      "required_artifacts": [
+        "{artifact_dir}/screen.png"
+      ],
+      "scenario": "headless profile and screenshot of a distinct held-out text corpus",
+      "covers": [
+        "plain editor layout",
+        "backend rendering",
+        "screenshot artifact"
+      ]
+    },
+    {
+      "id": "probe_arena_links_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-links",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3101,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-links",
+        "--size",
+        "128",
+        "--seed",
+        "3101",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 128-cell arena link graph, seed 3101",
+      "covers": [
+        "arena link traversal",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-links",
+        "--size",
+        "128",
+        "--seed",
+        "3101",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_fold_text_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "fold-text",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3102,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "fold-text",
+        "--size",
+        "128",
+        "--seed",
+        "3102",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated Xanadoc with 128 text insertions, seed 3102",
+      "covers": [
+        "text operation fold",
+        "byRef useful-entry density",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "fold-text",
+        "--size",
+        "128",
+        "--seed",
+        "3102",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_fold_structure_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "fold-structure",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3103,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "fold-structure",
+        "--size",
+        "128",
+        "--seed",
+        "3103",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated structure operations, 128 work items, seed 3103",
+      "covers": [
+        "structure operation fold",
+        "wing arity",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "fold-structure",
+        "--size",
+        "128",
+        "--seed",
+        "3103",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_fold_branch_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "fold-branch",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3104,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "fold-branch",
+        "--size",
+        "128",
+        "--seed",
+        "3104",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 128 sibling leaves, fold one selected leaf and scan the global operation range, seed 3104",
+      "covers": [
+        "branch replay",
+        "byRef lookup",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "fold-branch",
+        "--size",
+        "128",
+        "--seed",
+        "3104",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_operands_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "operands",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3105,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "operands",
+        "--size",
+        "128",
+        "--seed",
+        "3105",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated operand arities with 128 samples, seed 3105",
+      "covers": [
+        "operand arity and spill distribution",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "operands",
+        "--size",
+        "128",
+        "--seed",
+        "3105",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_vm_snapshots_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "vm-snapshots",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3106,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "vm-snapshots",
+        "--size",
+        "128",
+        "--seed",
+        "3106",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 128-choice VM snapshot workload, seed 3106",
+      "covers": [
+        "choice snapshot copies",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "vm-snapshots",
+        "--size",
+        "128",
+        "--seed",
+        "3106",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_arena_links_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-links",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9101,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-links",
+        "--size",
+        "144",
+        "--seed",
+        "9101",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "held-out generated 144-cell arena link graph, seed 9101",
+      "covers": [
+        "arena link traversal",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-links",
+        "--size",
+        "144",
+        "--seed",
+        "9101",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_fold_text_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "fold-text",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9102,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "fold-text",
+        "--size",
+        "144",
+        "--seed",
+        "9102",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "held-out generated Xanadoc with 144 text insertions, seed 9102",
+      "covers": [
+        "text operation fold",
+        "byRef useful-entry density",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "fold-text",
+        "--size",
+        "144",
+        "--seed",
+        "9102",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_fold_structure_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "fold-structure",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9103,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "fold-structure",
+        "--size",
+        "144",
+        "--seed",
+        "9103",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "held-out generated structure operations, 144 work items, seed 9103",
+      "covers": [
+        "structure operation fold",
+        "wing arity",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "fold-structure",
+        "--size",
+        "144",
+        "--seed",
+        "9103",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_fold_branch_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "fold-branch",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9104,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "fold-branch",
+        "--size",
+        "144",
+        "--seed",
+        "9104",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "held-out 144 sibling leaves, fold one selected leaf and scan the global operation range, seed 9104",
+      "covers": [
+        "branch replay",
+        "byRef lookup",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "fold-branch",
+        "--size",
+        "144",
+        "--seed",
+        "9104",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_operands_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "operands",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9105,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "operands",
+        "--size",
+        "144",
+        "--seed",
+        "9105",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "held-out generated operand arities with 144 samples, seed 9105",
+      "covers": [
+        "operand arity and spill distribution",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "operands",
+        "--size",
+        "144",
+        "--seed",
+        "9105",
+        "--measure",
+        "allocations"
+      ]
+    },
+    {
+      "id": "probe_vm_snapshots_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "vm-snapshots",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9106,
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "vm-snapshots",
+        "--size",
+        "144",
+        "--seed",
+        "9106",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "held-out generated 144-choice VM snapshot workload, seed 9106",
+      "covers": [
+        "choice snapshot copies",
+        "allocation count and bytes"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "vm-snapshots",
+        "--size",
+        "144",
+        "--seed",
+        "9106",
+        "--measure",
+        "allocations"
+      ]
+    }
+  ]
+}

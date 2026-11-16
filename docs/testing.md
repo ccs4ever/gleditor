@@ -95,3 +95,61 @@ native/fallback variants still require separate configurations. GLSL uses a C++ 
 approximation. The [live coverage audit](../design/projects/doxygen-coverage-audit.md) records the
 measured results, negative checks and remaining limits; file coverage does not prove an exhaustive
 compiler AST.
+
+## Profile guided release pipeline
+
+The default build remains the ordinary `-O3 -g` control. Use these serial Make stages to produce a
+profile guided release; each stage may build in parallel internally, but the pipeline holds one lock
+for a single shared `build/` tree:
+
+```sh
+make -j$(nproc) perf-pgo-generate
+make -j$(nproc) perf-pgo-train
+make -j$(nproc) perf-pgo-merge
+make -j$(nproc) perf-release
+```
+
+The default Clang path probes ThinLTO with LLD and LLVM instrumentation profiling before building.
+Training runs the `train` split from `tests/performance/workloads.json` headlessly and retains raw
+profiles under `build/performance/raw/`. Merge writes a profile and provenance manifest atomically;
+release refuses a missing, modified, stale-source, stale-compiler, or changed-feature profile
+instead of falling back to an ordinary build. Stage state and final binary digests are under
+`build/performance/`. A stale lock or an interrupted stage must be inspected before removing its
+lock file and restarting. GCC uses its own full LTO and GCC PGO profile directory as a portability
+alternative; it is not ThinLTO. The existing `make profile` coverage workflow remains separate and
+continues to use coverage mapping.
+
+The PGO pipeline merges raw LLVM profiles without `-sparse`. LLVM documents that `-sparse` removes
+function records with zero execution count and may inhibit PGO optimization; keeping those records
+lets the compiler distinguish cold functions from missing profile data. See the
+[LLVM merge documentation](https://llvm.org/docs/CommandGuide/llvm-profdata.html).
+
+The training split runs every executable entry point in the release target set (`all`, the shader
+assembler, the swarm peer used by `make test`, and the performance probes) at least once. App help
+and headless-startup records are labeled entrypoint coverage only; they are not representative
+workload evidence. This keeps same-named `main` functions from different executables available by
+their respective CFG hashes in the merged profile. Profile-use builds keep
+`-Wprofile-instr-out-of-date` fatal. Clang's `-Wprofile-instr-unprofiled` remains visible as a
+warning for wholly cold translation units. The profile-use build log and release artifact report
+list those translation units; a warning does not count as workload coverage.
+
+For isolated flag inspection, `PERF_MODE=control`, `thinlto`, `pgo-generate`,
+`thinlto-pgo-generate`, `pgo-use`, and `thinlto-pgo-use` select the build modes. Profile-use modes
+require `PERF_PROFILE`. These share `build/` and update its normal `.buildflags` identity, so build
+variants must not be built concurrently. `make perf-release` is the supported profile-use entry
+point because it verifies provenance before invoking Make.
+
+To run the test suite against the already-built profile-use release, pass the matching mode and
+merged profile to Make explicitly; a bare `make test` selects the ordinary control mode and would
+rebuild the shared outputs:
+
+```sh
+make -j$(nproc) test PERF_MODE=thinlto-pgo-use \
+  PERF_PROFILE=build/performance/release.profdata
+```
+
+The provenance and refusal checks can be run without building the project:
+
+```sh
+python3 -m unittest tests/performance/test_release_profile.py
+```

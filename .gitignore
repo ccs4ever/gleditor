@@ -82,3 +82,11 @@ assets/shaders/vulkan/*.spv
 
 # Local run artifacts from VQL stage/spike sessions.
 /output/
+
+# Python performance-tool/test bytecode caches.
+__pycache__/
+*.pyc
+
+# Instrumentation profiles are generated build artifacts.
+*.profraw
+*.profdata

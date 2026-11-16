@@ -1,0 +1,10 @@
+Held-out layout sample uses different text and paragraph lengths.
+
+ZigZag's cells form ranks through dimensions; a reader can move among those
+cells without writing into the document or slice being visited. This corpus
+includes a separate wrapping pattern and uncommon characters: 0123456789,
+Ångström, crème brûlée, 東京, and a long unbroken token:
+interoperabilitywithoutlossofidentityoraddressability.
+
+Every operation remains immutable after storage. Replay creates the current
+manifold, and branching preserves the previous version.

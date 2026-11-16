@@ -1,0 +1,9 @@
+Training corpus, text-heavy layout sample.
+
+Nelson's hypertext links documents by the strands of text they share. This file
+is longer than a screen and mixes punctuation, wide words, and repeated phrases
+to exercise wrapping, line breaking, and glyph shaping.
+
+The quick brown fox jumps over the lazy dog. Pack my box with five dozen
+liquor jugs. Sphinx of black quartz, judge my vow. Καλημέρα κόσμε — naïve
+façade, ﬁ ligature, שלום עולם.
