@@ -658,3 +658,12 @@ unnecessary.
 This is one corrective iteration, not a fourth storage representation or a final retention ruling.
 Its implementation and tests must be reviewed before root integration. Known versus unknown hints
 must remain distinct through copy/move and failed advance; no zero-value sentinel is introduced.
+
+The first experiment checkpoint is committed as `384bc24f` (documentation/evidence only; root
+experimental implementation remains uncommitted). An archive audit then found A's original
+`source-evaluated.patch` contained only tracked changes, omitting its new helper files. The complete
+A patch was reconstructed from its eleven hash-verified source-backup files against `3142aac4`.
+Applying it to a fresh baseline copy reproduced every recorded file SHA-256. The tracked-only
+original is retained locally as `source-evaluated-tracked-only.patch`; the review patch now contains
+the complete reconstructable source. This repairs archival completeness without changing the
+measured binaries or their results.
