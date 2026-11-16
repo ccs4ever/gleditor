@@ -219,6 +219,11 @@ semantic refusals retain their existing accounting. Run text/branch/structure-he
 Retain reserved unordered maps where dense/flat costs do not justify replacement; publish the
 selected policy. No persistent layout changes or sample regeneration should be needed.
 
+**M3 outcome:** C2 retained (dense/presence/overflow `byRef`, PMR unordered births, known/unknown
+ancestry hint, small `applyStructure` dispatch). The accepted policy and costs, including the
+`fold-branch` fixed-cost caveat, are recorded in proposal §2.2. The first-touch explanation is
+supported but unproven. The review is a self-review because independent reviewers were unavailable.
+
 ## 8. M4: Operand buffers and consumers (P5)
 
 1. Add engine-private `OperandList` in `vortex/operand_list.hpp` using the repository cpp26 wrapper:

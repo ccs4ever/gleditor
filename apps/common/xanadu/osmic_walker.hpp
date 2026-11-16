@@ -76,12 +76,15 @@ public:
   // (potentially many times), so std::forward-ing either here would move
   // from it on the first call and leave later calls operating on a
   // moved-from callable.
-  template <typename NodeAccessor, OsmicVisitor Visitor>
-  static bool walkPathCustom(
+  template <typename NodeAccessor, OsmicVisitor Visitor, typename BeforeVisit>
+  static bool walkPathCustomWithCount(
       const std::uint32_t fromAncestor, const std::uint32_t toDescendant,
       NodeAccessor &&getNode, // NOLINT(cppcoreguidelines-missing-std-forward)
-      Visitor &&visitor) {    // NOLINT(cppcoreguidelines-missing-std-forward)
-    if (fromAncestor == toDescendant || 0 == toDescendant) {
+      Visitor &&visitor,      // NOLINT(cppcoreguidelines-missing-std-forward)
+      BeforeVisit
+          &&beforeVisit) { // NOLINT(cppcoreguidelines-missing-std-forward)
+    if (fromAncestor == toDescendant) {
+      beforeVisit(0);
       return true;
     }
 
@@ -112,6 +115,8 @@ public:
     if (curr != fromAncestor) {
       return false; // fromAncestor is not on the ancestral line of toDescendant
     }
+
+    beforeVisit(count);
 
     // Iterate backwards through the recorded indices to visit them in forward
     // chronological order (ancestor -> descendant) without an explicit reverse
@@ -154,6 +159,16 @@ public:
     return true;
   }
 
+  template <typename NodeAccessor, OsmicVisitor Visitor>
+  static bool walkPathCustom(
+      const std::uint32_t fromAncestor, const std::uint32_t toDescendant,
+      NodeAccessor &&getNode, // NOLINT(cppcoreguidelines-missing-std-forward)
+      Visitor &&visitor) {    // NOLINT(cppcoreguidelines-missing-std-forward)
+    return walkPathCustomWithCount(
+        fromAncestor, toDescendant, std::forward<NodeAccessor>(getNode),
+        std::forward<Visitor>(visitor), [](std::size_t) {});
+  }
+
   /**
    * @brief Walk the forward path from @p fromAncestor to @p toDescendant in
    *        @p spool.
@@ -176,6 +191,23 @@ public:
                             const std::uint32_t targetIndex,
                             Visitor &&visitor) {
     return walkPath(spool, 0, targetIndex, std::forward<Visitor>(visitor));
+  }
+
+  /**
+   * @brief Walk one ancestry path and report its exact length before visiting.
+   *
+   * The count comes from the path buffer already collected by the walker, so
+   * callers can seed path-sized replay state without a second ancestry walk.
+   */
+  template <OsmicVisitor Visitor, typename BeforeVisit>
+  static bool walkAncestralWithCount(const SegmentedOpsSpool &spool,
+                                     const std::uint32_t targetIndex,
+                                     BeforeVisit &&beforeVisit,
+                                     Visitor &&visitor) {
+    return walkPathCustomWithCount(
+        0, targetIndex,
+        [&spool](const std::uint32_t idx) { return spool.get(idx); },
+        std::forward<Visitor>(visitor), std::forward<BeforeVisit>(beforeVisit));
   }
 
   /**

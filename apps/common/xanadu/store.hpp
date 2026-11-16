@@ -33,6 +33,7 @@
 #include <functional>
 #include <iosfwd>
 #include <map>
+#include <memory_resource>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -1372,6 +1373,7 @@ public:
   void adoptOpRecords(const std::vector<OpRecord> &records);
 
 private:
+  friend struct StoreTestAccess;
   friend class enfilade::Chronofilade;
   friend class OsmicWalker;
   /// Apply one recorded op to @p onto. The single replay path: everything that
@@ -1463,6 +1465,7 @@ private:
   /// this -- a parallel std::map<MicroversionId, Op> used to answer most of
   /// them, holding the same operations a second time at about twice the size
   /// and three heap allocations apiece.
+  std::pmr::memory_resource *lookupResource_{std::pmr::get_default_resource()};
   SegmentedOpsSpool opsSpool;
   std::map<zigzag::CellRef, Link> linkTable;
   /// The first two cells minted, which is what genesis mints. Derived from the

@@ -667,3 +667,104 @@ Applying it to a fresh baseline copy reproduced every recorded file SHA-256. The
 original is retained locally as `source-evaluated-tracked-only.patch`; the review patch now contains
 the complete reconstructable source. This repairs archival completeness without changing the
 measured binaries or their results.
+
+C2 was integrated as `e1c4f517ec68554d8833753b902f5d94ca3978e535e37a4c8e4c7f9449d65bd6`. Before that
+integration, a fresh P3 ThinLTO probe pair was built from exact source `09da6e1b...` with matching
+original flags and runtime libraries. Its two executable hashes differed from the old archive (both
+files were 16 bytes larger, with equal `.text` sizes; exact cause not established). The initial
+bitwise-reproduction archive check therefore refused it. The new probes then passed ten functional
+smoke invocations and were archived with their actual new identities as a fresh control under
+`m3-p3-baseline-thinlto`; original timing records were not relabeled as new data.
+
+The full C2 build passed in 736.31 seconds, but focused tests passed only 204/206, so performance
+collection did not start. Both failures were invalid fixture assumptions. The unknown-hint test
+advanced an empty manifold straight to a child of slice genesis, provoking `UnknownSubject` before
+resource allocation; it now replays actual genesis without assigning a hint before the one-step
+advance. The chain preflight test forced hint 1, which now places op 2 in sparse overflow and leaves
+capacity for op 8192; it now uses the unknown-hint policy so low keys are dense and 8192 requires
+the first overflow allocation. Root corrected these tests, with independent confirmation.
+
+An additional code-quality audit found two API issues before the rerun: prepared-token fields
+allowed callers to rewrite key/offset/node/allocator invariants, and the counted walk inherited an
+incorrect success shortcut for a nonzero ancestor and target zero. The isolated C2-r2 draft will
+make tokens opaque owner-constructed capabilities, retain allocation-free publication tests, and
+cover the unreachable-zero walker boundary. A dead geometric helper and its mirror-only test are
+also being removed. Root will rebuild after these header changes settle; no C2 performance result or
+acceptance is claimed.
+
+### Corrected C2 runtime and ThinLTO result
+
+The fixture/token/walker corrections were integrated as
+`b8f95f7f66d79e64c165c6bf6028311e2ca5d667de24a9cb848a91d732bae912`. Its full build passed in 716.94
+seconds and focused tests passed 208/208. The first full Xuzz run had one
+`ForeignRunDragCreatesAReaderOwnedStore` failure at `scaledBounds`, with 4,427 passes. The same case
+passed both isolated repeats without a source change. A complete unchanged-source rerun then passed
+4,428 Xuzz tests (28 skipped, 12 disabled) and all 268 ZigZag tests. The initial failure log/JSON
+remain preserved; its cause is not established. The original capture image was overwritten by the
+isolated repeats, so no initial-image diagnosis is claimed. The subsequent rerun driver preserves
+that fixture workspace if another failure occurs.
+
+C2's 21-case pilot, seven-run timings, 168 hardware samples and 252-sample interleaved comparison
+all passed with source/artifact identities unchanged. Reports are under `m3-hybrid-unordered-c2` and
+`comparisons/m3-c2-thinlto-interleaved`. The public dispatch is 164 bytes with three register pushes
+and no large stack subtraction; the heavy implementation remains separate. No noinline attribute was
+needed in this compiler output.
+
+Against the fresh P3 ThinLTO control, text ratios were 1.164 [1.080, 1.493] at 144 operations, 0.910
+[0.818, 0.965] at 1,000 and 0.853 [0.757, 0.964] at 10,000. Branch ratios were 1.282 / 0.944 / 1.121
+with intervals crossing one; the 10,000 interval was wide. Structure at 1,000 was 0.948 \[0.930,
+0.968\], with the other structure intervals crossing one. All five link cohort intervals crossed
+one. The clear large text/branch regressions of the first C arm are no longer demonstrated here, but
+small cold text still has a measured cost. No aggregate or universal improvement is inferred from
+these exploratory shared-host intervals.
+
+The C++ re-review found one remaining API hazard: default move assignment of an owning PMR node
+token can violate allocator requirements when both tokens use different resources. The final
+correction destroys the destination and reconstructs it through the noexcept move constructor, with
+a self-assignment guard. A two-resource ownership test passed normal and ASan/UBSan checks (13
+prepared-map tests), and the expert confirmed the fix. This change was prepared separately while the
+b8 runtime/timing source stayed frozen, then applied after that experiment ended.
+
+Final C2 source is `b413cd256f60ec0549d0a8fa3b181026272a059357391ac8e9463f8689f5cf65`. A fresh
+source-bound C2 PGO arm is now generating in
+`build/performance/variants/m3-hybrid-unordered-c2-pgo/`; driver PID 2499794 and follow-through PID
+2499795 are recorded for process ownership, not as evidence of completion. The source backup and
+complete patch were captured before generation. Retention still awaits that source's own profile,
+held-out validation, full runtime checks, paired comparison and final expert review. M3 remains
+open; M4 has not been integrated.
+
+## Usage-limit handoff
+
+The owner requested a restart prompt. The continuation contract, exact source identities, remaining
+gates, isolated M4/M5 drafts and durable draft archives are recorded in
+`design/projects/resume-performance-architecture-implementation.md`. M3 remains open.
+
+During handoff, C2 PGO generation through timing/hardware collection finished; both recorded driver
+processes exited. Hardware collection reports 168 samples and no counter failures, but its identity
+guard failed with `source or artifact identity changed during collection`. The follow-through
+stopped at that assertion before full runtime, paired and held-out gates. Diagnose the report's
+before/after identities first; preserve failed evidence and do not bypass the guard. No intentional
+source edit occurred during handoff. The cause has not been investigated.
+
+## M3 closure (C2 retained)
+
+The identity failure was diagnosed: the hardware tool's identity is
+`git status --untracked-files=all` plus file hashes, and the handoff archives written into `design/`
+during collection added 7 dirty entries. The 20 source entries, both artifact manifests and the code
+fingerprint (`b413cd256f60ec0549d0a8fa3b181026272a059357391ac8e9463f8689f5cf65`) were unchanged. The
+failed report is preserved as `hardware.failed-identity-drift*.json`. Only the hardware step was
+repeated, with no repository writes, and it passed (168 samples, 21 workloads, no counter failures).
+
+Follow-through then passed: full Xuzz 4469 tests with 0 failures and 12 disabled, full ZigZag 268
+tests with 0 failures, the 252-sample paired comparison, the 21-case held-out analysis and the
+disassembly. Evidence is archived in `iteration-03-c2-evidence.jsonl`.
+
+The review is a self-review because Luna agents were unavailable
+(`iteration-03-c2-final-expert-review.md`). The paired PGO result is mixed: `fold-text` 10k and
+`fold-structure` 144 improve, and `fold-branch` carries a fixed +1.9 to +3.7 µs on a 3-cell
+single-shot kernel. A bounded diagnostic ruled out allocation counts and found +2 page faults in
+`operator new` and `std::pmr::get_default_resource()`. This is consistent with a first-touch cost
+but unproven, and not measured in a resident editor. No fix was attempted.
+
+The owner chose to retain C2 after that diagnostic. Policy and costs are in proposal §2.2. M3 is
+committed. M4 is next, and M5 and M6 remain unfinished.

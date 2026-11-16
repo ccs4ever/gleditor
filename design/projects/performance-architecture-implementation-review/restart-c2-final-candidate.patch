@@ -1,0 +1,3312 @@
+diff --git a/apps/common/xanadu/osmic_walker.hpp b/apps/common/xanadu/osmic_walker.hpp
+index 6bd5abc9..d1fc583e 100644
+--- a/apps/common/xanadu/osmic_walker.hpp
++++ b/apps/common/xanadu/osmic_walker.hpp
+@@ -76,12 +76,15 @@ public:
+   // (potentially many times), so std::forward-ing either here would move
+   // from it on the first call and leave later calls operating on a
+   // moved-from callable.
+-  template <typename NodeAccessor, OsmicVisitor Visitor>
+-  static bool walkPathCustom(
++  template <typename NodeAccessor, OsmicVisitor Visitor, typename BeforeVisit>
++  static bool walkPathCustomWithCount(
+       const std::uint32_t fromAncestor, const std::uint32_t toDescendant,
+       NodeAccessor &&getNode, // NOLINT(cppcoreguidelines-missing-std-forward)
+-      Visitor &&visitor) {    // NOLINT(cppcoreguidelines-missing-std-forward)
+-    if (fromAncestor == toDescendant || 0 == toDescendant) {
++      Visitor &&visitor,      // NOLINT(cppcoreguidelines-missing-std-forward)
++      BeforeVisit
++          &&beforeVisit) { // NOLINT(cppcoreguidelines-missing-std-forward)
++    if (fromAncestor == toDescendant) {
++      beforeVisit(0);
+       return true;
+     }
+ 
+@@ -113,6 +116,8 @@ public:
+       return false; // fromAncestor is not on the ancestral line of toDescendant
+     }
+ 
++    beforeVisit(count);
++
+     // Iterate backwards through the recorded indices to visit them in forward
+     // chronological order (ancestor -> descendant) without an explicit reverse
+     // pass.
+@@ -154,6 +159,16 @@ public:
+     return true;
+   }
+ 
++  template <typename NodeAccessor, OsmicVisitor Visitor>
++  static bool walkPathCustom(
++      const std::uint32_t fromAncestor, const std::uint32_t toDescendant,
++      NodeAccessor &&getNode, // NOLINT(cppcoreguidelines-missing-std-forward)
++      Visitor &&visitor) {    // NOLINT(cppcoreguidelines-missing-std-forward)
++    return walkPathCustomWithCount(
++        fromAncestor, toDescendant, std::forward<NodeAccessor>(getNode),
++        std::forward<Visitor>(visitor), [](std::size_t) {});
++  }
++
+   /**
+    * @brief Walk the forward path from @p fromAncestor to @p toDescendant in
+    *        @p spool.
+@@ -178,6 +193,23 @@ public:
+     return walkPath(spool, 0, targetIndex, std::forward<Visitor>(visitor));
+   }
+ 
++  /**
++   * @brief Walk one ancestry path and report its exact length before visiting.
++   *
++   * The count comes from the path buffer already collected by the walker, so
++   * callers can seed path-sized replay state without a second ancestry walk.
++   */
++  template <OsmicVisitor Visitor, typename BeforeVisit>
++  static bool walkAncestralWithCount(const SegmentedOpsSpool &spool,
++                                     const std::uint32_t targetIndex,
++                                     BeforeVisit &&beforeVisit,
++                                     Visitor &&visitor) {
++    return walkPathCustomWithCount(
++        0, targetIndex,
++        [&spool](const std::uint32_t idx) { return spool.get(idx); },
++        std::forward<Visitor>(visitor), std::forward<BeforeVisit>(beforeVisit));
++  }
++
+   /**
+    * @brief Fold operations from @p fromAncestor to @p toDescendant onto
+    *        @p state.
+diff --git a/apps/common/xanadu/store.cpp b/apps/common/xanadu/store.cpp
+index 1ddeb797..c84e72aa 100644
+--- a/apps/common/xanadu/store.cpp
++++ b/apps/common/xanadu/store.cpp
+@@ -527,13 +527,20 @@ Store::rebuildResolved(const MicroversionId &version,
+ 
+ zigzag::Manifold
+ Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
+-  zigzag::Manifold folded;
++  zigzag::Manifold folded(lookupResource_);
+   folded.setStore(const_cast<Store *>(this));
+-  OsmicWalker::walkAncestral(
+-      opsSpool, index, [&folded](std::uint32_t idx, const CompactOpNode &node) {
+-        // A cold fold keeps going past a refusal: the manifold counts it in
+-        // refusedOps(), which is where a caller checking honesty looks.
+-        std::ignore = folded.applyStructure(idx, node);
++  OsmicWalker::walkAncestralWithCount(
++      opsSpool, index,
++      [&folded](const std::size_t pathCount) {
++        folded.setOpCountHint(pathCount);
++      },
++      [&folded](std::uint32_t idx, const CompactOpNode &node) {
++        // Semantic refusals remain counted and non-fatal. Lookup exhaustion
++        // aborts the walk so a partial manifold cannot escape.
++        const auto result = folded.applyStructure(idx, node);
++        if (!result &&
++            result.error() == zigzag::FoldRefusal::LookupCapacityUnavailable)
++          throw zigzag::ManifoldCapacityUnavailable(idx);
+       });
+   // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
+   // the cost of a manifold that was just loaded rather than a best case.
+@@ -548,13 +555,22 @@ zigzag::Manifold Store::rebuildManifold(const MicroversionId &version) const {
+   }
+   // Nothing filed under this name: fold the longest recorded prefix of it, for
+   // the same reason rebuild() replays one.
+-  zigzag::Manifold folded;
++  zigzag::Manifold folded(lookupResource_);
+   folded.setStore(const_cast<Store *>(this));
+-  for (const auto &step : version.path()) {
++  const auto path       = version.path();
++  std::size_t pathCount = 0;
++  for (const auto &step : path) {
++    if (opsSpool.get(step) != nullptr) ++pathCount;
++  }
++  folded.setOpCountHint(pathCount);
++  for (const auto &step : path) {
+     if (const auto *const node = opsSpool.get(step); nullptr != node) {
+       // As above: refusals are counted, not fatal to the fold.
+-      std::ignore =
+-          folded.applyStructure(opsSpool.indexOf(step).value(), *node);
++      const auto opIndex = opsSpool.indexOf(step).value();
++      const auto result  = folded.applyStructure(opIndex, *node);
++      if (!result &&
++          result.error() == zigzag::FoldRefusal::LookupCapacityUnavailable)
++        throw zigzag::ManifoldCapacityUnavailable(opIndex);
+     }
+   }
+   folded.compact();
+diff --git a/apps/common/xanadu/store.hpp b/apps/common/xanadu/store.hpp
+index 5bab16e6..b4952c0b 100644
+--- a/apps/common/xanadu/store.hpp
++++ b/apps/common/xanadu/store.hpp
+@@ -33,6 +33,7 @@
+ #include <functional>
+ #include <iosfwd>
+ #include <map>
++#include <memory_resource>
+ #include <optional>
+ #include <ranges>
+ #include <string>
+@@ -1372,6 +1373,7 @@ public:
+   void adoptOpRecords(const std::vector<OpRecord> &records);
+ 
+ private:
++  friend struct StoreTestAccess;
+   friend class enfilade::Chronofilade;
+   friend class OsmicWalker;
+   /// Apply one recorded op to @p onto. The single replay path: everything that
+@@ -1463,6 +1465,7 @@ private:
+   /// this -- a parallel std::map<MicroversionId, Op> used to answer most of
+   /// them, holding the same operations a second time at about twice the size
+   /// and three heap allocations apiece.
++  std::pmr::memory_resource *lookupResource_{std::pmr::get_default_resource()};
+   SegmentedOpsSpool opsSpool;
+   std::map<zigzag::CellRef, Link> linkTable;
+   /// The first two cells minted, which is what genesis mints. Derived from the
+diff --git a/apps/common/xanadu/zigzag/manifold.cpp b/apps/common/xanadu/zigzag/manifold.cpp
+index cb8b22e5..1ebc441a 100644
+--- a/apps/common/xanadu/zigzag/manifold.cpp
++++ b/apps/common/xanadu/zigzag/manifold.cpp
+@@ -18,6 +18,9 @@ namespace zigzag {
+ 
+ Manifold::Manifold() = default;
+ 
++Manifold::Manifold(std::pmr::memory_resource *lookupResource)
++    : byRef(lookupResource), structureBirths_(lookupResource) {}
++
+ Manifold::~Manifold() {
+   if (store_ != nullptr) {
+     store_->detachManifold(this);
+@@ -128,9 +131,7 @@ Manifold::denseOf(const CellRef ref) const noexcept {
+   if (noCell == ref || isEphemeral(ref)) {
+     return std::nullopt;
+   }
+-  const auto found = byRef.find(ref);
+-  return found == byRef.end() ? std::nullopt
+-                              : std::optional<std::uint32_t>{found->second};
++  return byRef.find(ref);
+ }
+ 
+ SlotRef Manifold::slot(const CellRef ref) const noexcept {
+@@ -320,26 +321,89 @@ FoldResult Manifold::spliceContent(const std::uint32_t dense,
+ FoldResult
+ Manifold::applyStructure(const std::uint32_t opIndex,
+                          const xanadu::CompactOpNode &node) noexcept {
+-  foldedThrough_ = std::max(opIndex, foldedThrough_);
++  if (opIndex == 0) return refuse(FoldRefusal::InvalidOperationIndex);
++  if (node.kind != xanadu::OpKind::Structure) {
++    if (byRef.empty()) {
++      foldedThrough_ = std::max(foldedThrough_, opIndex);
++      return {};
++    }
++    const auto dense = denseOf(xanadu::contextOf(node));
++    if (!dense) {
++      foldedThrough_ = std::max(foldedThrough_, opIndex);
++      return {};
++    }
++    return applyStructureImpl(opIndex, node, dense);
++  }
++  return applyStructureImpl(opIndex, node, std::nullopt);
++}
++
++FoldResult Manifold::applyStructureImpl(
++    const std::uint32_t opIndex, const xanadu::CompactOpNode &node,
++    const std::optional<std::uint32_t> resolvedCellDense) noexcept {
++  struct FoldPositionGuard {
++    std::uint32_t &position;
++    std::uint32_t op;
++    bool commit{true};
++    ~FoldPositionGuard() {
++      if (commit) position = std::max(op, position);
++    }
++  } foldPosition{foldedThrough_, opIndex};
++  const auto prepareRef = [this](std::uint32_t op)
++      -> std::expected<
++          std::optional<detail::ManifoldOpIndexMap::PreparedInsert>,
++          FoldRefusal> {
++    if (byRef.contains(op))
++      return std::optional<detail::ManifoldOpIndexMap::PreparedInsert>{};
++    auto prepared = byRef.prepareInsert(op);
++    if (!prepared)
++      return std::unexpected{FoldRefusal::LookupCapacityUnavailable};
++    return std::optional<detail::ManifoldOpIndexMap::PreparedInsert>{
++        std::move(*prepared)};
++  };
++  const auto commitRef = [this](auto &prepared, std::uint32_t op,
++                                std::uint32_t dense) noexcept {
++    return !prepared || byRef.commitInsert(std::move(*prepared), op, dense);
++  };
++  const auto requireRefCommit = [&commitRef](auto &prepared, std::uint32_t op,
++                                             std::uint32_t dense) noexcept {
++    if (!commitRef(prepared, op, dense)) std::terminate();
++  };
++  const auto prepareBirth = [this](std::uint32_t op)
++      -> std::expected<
++          detail::PreparedU32UnorderedMap<StructureBirthInfo>::PreparedInsert,
++          FoldRefusal> {
++    auto prepared = structureBirths_.prepareInsert(op);
++    if (!prepared) {
++      if (prepared.error() == detail::LookupPrepareFailure::AlreadyPresent)
++        return std::unexpected{FoldRefusal::DuplicateCell};
++      return std::unexpected{FoldRefusal::LookupCapacityUnavailable};
++    }
++    return std::move(*prepared);
++  };
++  const auto lookupFailure = [&]() -> FoldResult {
++    foldPosition.commit = false;
++    return std::unexpected{FoldRefusal::LookupCapacityUnavailable};
++  };
+ 
+   if (xanadu::OpKind::Structure != node.kind) {
+-    const auto ctx       = xanadu::contextOf(node);
+-    const auto cellDense = denseOf(ctx);
+-    if (cellDense.has_value()) {
+-      const auto d = *cellDense;
++    if (resolvedCellDense.has_value()) {
++      const auto cellDense = resolvedCellDense;
++      const auto d         = *cellDense;
+       if (xanadu::OpKind::PageBreak == node.kind) {
+         return refuse(FoldRefusal::WrongContextKind);
+       }
+       if (xanadu::scratchScroll == node.span().scroll) {
+         return refuse(FoldRefusal::ScratchAddress);
+       }
++      auto refToken = prepareRef(opIndex);
++      if (!refToken) return lookupFailure();
+       if (xanadu::OpKind::Insert == node.kind) {
+         if (const auto result = spliceContent(d, node.at, 0, node.span());
+             !result) {
+           return refuse(result.error());
+         }
+         slots[d].lastOp = opIndex;
+-        byRef.emplace(opIndex, d);
++        requireRefCommit(*refToken, opIndex, d);
+         return {};
+       }
+       if (xanadu::OpKind::Delete == node.kind) {
+@@ -349,7 +413,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+           return refuse(result.error());
+         }
+         slots[d].lastOp = opIndex;
+-        byRef.emplace(opIndex, d);
++        requireRefCommit(*refToken, opIndex, d);
+         return {};
+       }
+       if (xanadu::OpKind::Transclude == node.kind) {
+@@ -381,7 +445,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+           }
+         }
+         slots[d].lastOp = opIndex;
+-        byRef.emplace(opIndex, d);
++        requireRefCommit(*refToken, opIndex, d);
+         return {};
+       }
+       if (xanadu::OpKind::Rearrange == node.kind) {
+@@ -395,11 +459,11 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+           return refuse(result.error());
+         }
+         slots[d].lastOp = opIndex;
+-        byRef.emplace(opIndex, d);
++        requireRefCommit(*refToken, opIndex, d);
+         return {};
+       }
+       slots[d].lastOp = opIndex;
+-      byRef.emplace(opIndex, d);
++      requireRefCommit(*refToken, opIndex, d);
+       return {};
+     }
+     return {};
+@@ -443,16 +507,18 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+           return refuse(FoldRefusal::UnknownSubject);
+         }
+       }
+-      const auto [_, inserted] = structureBirths_.try_emplace(
+-          opIndex, StructureBirthInfo{
+-                       .opIndex     = opIndex,
+-                       .kind        = kind,
+-                       .containerOp = node.sourceOpIndex,
+-                       .nameSpan    = node.span(),
+-                   });
+-      if (!inserted) {
+-        return refuse(FoldRefusal::DuplicateCell);
++      auto birthToken = prepareBirth(opIndex);
++      if (!birthToken) {
++        if (birthToken.error() == FoldRefusal::LookupCapacityUnavailable)
++          return lookupFailure();
++        return refuse(birthToken.error());
+       }
++      const StructureBirthInfo info{.opIndex     = opIndex,
++                                    .kind        = kind,
++                                    .containerOp = node.sourceOpIndex,
++                                    .nameSpan    = node.span()};
++      if (!structureBirths_.commitInsert(std::move(*birthToken), info))
++        std::terminate();
+       return {};
+     }
+ 
+@@ -463,20 +529,24 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+         return refuse(FoldRefusal::UnknownSubject);
+       }
+     }
+-    const auto [_, inserted] = structureBirths_.try_emplace(
+-        opIndex, StructureBirthInfo{
+-                     .opIndex     = opIndex,
+-                     .kind        = xanadu::StructureKind::Cell,
+-                     .containerOp = node.sourceOpIndex,
+-                     .nameSpan    = node.span(),
+-                 });
+-    if (!inserted) {
+-      return refuse(FoldRefusal::DuplicateCell);
++    auto birthToken = prepareBirth(opIndex);
++    if (!birthToken) {
++      if (birthToken.error() == FoldRefusal::LookupCapacityUnavailable)
++        return lookupFailure();
++      return refuse(birthToken.error());
+     }
++    auto refToken = prepareRef(opIndex);
++    if (!refToken) return lookupFailure();
+ 
+     const auto dense = static_cast<std::uint32_t>(slots.size());
+     // The empty runs start at the arenas' tails, so this cell's first link and
+     // first span are appends in place rather than relocations.
++    const StructureBirthInfo info{.opIndex     = opIndex,
++                                  .kind        = xanadu::StructureKind::Cell,
++                                  .containerOp = node.sourceOpIndex,
++                                  .nameSpan    = node.span()};
++    if (!structureBirths_.commitInsert(std::move(*birthToken), info))
++      std::terminate();
+     slots.push_back(CellSlot{
+         .spanOffset  = static_cast<std::uint32_t>(content.size()),
+         .spanCount   = 0,
+@@ -489,7 +559,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+         .flags     = 0,
+         .valueBits = node.value,
+     });
+-    byRef.emplace(opIndex, dense);
++    requireRefCommit(*refToken, opIndex, dense);
+     if (!node.span().empty()) {
+       const auto only = node.span();
+       if (const auto result = setContent(
+@@ -555,6 +625,9 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+       }
+     }
+ 
++    auto refToken = prepareRef(opIndex);
++    if (!refToken) return lookupFailure();
++
+     // A link is one edge shared by two cells, so setting it breaks whatever
+     // each end was holding: the invariant this maintains is that
+     // linked(a, d, dir) == b exactly when linked(b, d, -dir) == a. zzcore's
+@@ -576,7 +649,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+     setOneSide(d, dim, dir, to);
+ 
+     slots[d].lastOp = opIndex;
+-    byRef.emplace(opIndex, d);
++    requireRefCommit(*refToken, opIndex, d);
+     dimsCacheStale = true;
+     return {};
+   }
+@@ -586,7 +659,9 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+     if (!dense.has_value()) {
+       return refuse(FoldRefusal::UnknownSubject);
+     }
+-    const auto d = *dense;
++    const auto d  = *dense;
++    auto refToken = prepareRef(opIndex);
++    if (!refToken) return lookupFailure();
+     if (const auto result = spliceContent(d, node.at, node.length, node.span());
+         !result) {
+       return refuse(result.error());
+@@ -595,7 +670,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+     cell.valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags));
+     cell.valueBits = node.value;
+     cell.lastOp    = opIndex;
+-    byRef.emplace(opIndex, d);
++    requireRefCommit(*refToken, opIndex, d);
+     return {};
+   }
+ 
+@@ -609,6 +684,8 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+     // make the fold depend on the order two branches were folded in.
+     const auto restated = node.span();
+     const auto d        = *dense;
++    auto refToken       = prepareRef(opIndex);
++    if (!refToken) return lookupFailure();
+     if (const auto result = setContent(
+             d, restated.empty()
+                    ? std::span<const xanadu::PrimediaSpan>{}
+@@ -620,7 +697,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+     cell.valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags));
+     cell.valueBits = node.value;
+     cell.lastOp    = opIndex;
+-    byRef.emplace(opIndex, d);
++    requireRefCommit(*refToken, opIndex, d);
+     return {};
+   }
+   }
+@@ -637,6 +714,11 @@ Manifold *Manifold::advanceOrRefold(const xanadu::Store &store,
+   if (stepped) {
+     return this;
+   }
++  if (stepped.error().kind == AdvanceError::Kind::Refused &&
++      stepped.error().refusal == FoldRefusal::LookupCapacityUnavailable) {
++    const auto index = store.segmentedOps().indexOf(version);
++    throw ManifoldCapacityUnavailable(index.value_or(0));
++  }
+   GLEDITOR_LOG_DEBUG("zigzag.manifold", "folding {} afresh: {}", version.str(),
+                      AdvanceError::Kind::Refused == stepped.error().kind
+                          ? toString(stepped.error().refusal)
+@@ -661,11 +743,19 @@ AdvanceResult Manifold::advance(const xanadu::Store &store,
+     return std::unexpected{
+         AdvanceError{.kind = AdvanceError::Kind::MissingNode}};
+   }
+-  return applyStructure(*index, *node)
+-      .transform_error([](const FoldRefusal why) {
+-        return AdvanceError{.kind    = AdvanceError::Kind::Refused,
+-                            .refusal = why};
+-      });
++  const auto previousHint = byRef.opCountHint();
++  if (previousHint &&
++      *previousHint != std::numeric_limits<std::size_t>::max()) {
++    byRef.setOpCountHint(*previousHint + 1U);
++  }
++  auto folded = applyStructure(*index, *node);
++  if (!folded && folded.error() == FoldRefusal::LookupCapacityUnavailable) {
++    // Restore the exact known/unknown policy state on resource refusal.
++    byRef.setOpCountHint(previousHint);
++  }
++  return folded.transform_error([](const FoldRefusal why) {
++    return AdvanceError{.kind = AdvanceError::Kind::Refused, .refusal = why};
++  });
+ }
+ 
+ Manifold *Manifold::compact() {
+diff --git a/apps/common/xanadu/zigzag/manifold.hpp b/apps/common/xanadu/zigzag/manifold.hpp
+index cfe29707..0b9f2b4c 100644
+--- a/apps/common/xanadu/zigzag/manifold.hpp
++++ b/apps/common/xanadu/zigzag/manifold.hpp
+@@ -22,8 +22,10 @@
+ #include <expected>
+ #include <limits>
+ #include <map>
++#include <memory_resource>
+ #include <optional>
+ #include <span>
++#include <stdexcept>
+ #include <string>
+ #include <string_view>
+ #include <type_traits>
+@@ -39,6 +41,8 @@
+ #include "common/xanadu/ops.hpp"
+ #include "common/xanadu/spool.hpp"
+ #include "common/xanadu/zigzag/dim_vector.hpp"
++#include "common/xanadu/zigzag/manifold_lookup.hpp"
++#include "common/xanadu/zigzag/prepared_u32_unordered_map.hpp"
+ 
+ namespace xanadu {
+ class Store;
+@@ -231,7 +235,9 @@ enum class FoldRefusal : std::uint8_t {
+                     ///< Slice/Xanadoc Make
+   WrongContextKind, ///< Operation applied to an incompatible context kind (e.g.
+                     ///< PageBreak on Cell)
+-  ContentRunTooLong, ///< A cell's content count does not fit CellSlot
++  ContentRunTooLong,         ///< A cell's content count does not fit CellSlot
++  LookupCapacityUnavailable, ///< Lookup storage could not be prepared
++  InvalidOperationIndex,     ///< Operation zero cannot name a fold step
+ };
+ 
+ [[nodiscard]] constexpr std::string_view
+@@ -257,6 +263,10 @@ toString(const FoldRefusal refusal) noexcept {
+     return "wrong context kind";
+   case FoldRefusal::ContentRunTooLong:
+     return "content run too long";
++  case FoldRefusal::LookupCapacityUnavailable:
++    return "lookup capacity unavailable";
++  case FoldRefusal::InvalidOperationIndex:
++    return "invalid operation index";
+   }
+   return "unknown refusal";
+ }
+@@ -276,6 +286,19 @@ struct AdvanceError {
+ };
+ 
+ /// The outcome of folding or stepping: nothing on success, the reason if not.
++class ManifoldCapacityUnavailable final : public std::exception {
++public:
++  explicit ManifoldCapacityUnavailable(std::uint32_t opIndex = 0) noexcept
++      : opIndex_(opIndex) {}
++  [[nodiscard]] std::uint32_t opIndex() const noexcept { return opIndex_; }
++  [[nodiscard]] const char *what() const noexcept override {
++    return "manifold lookup capacity unavailable";
++  }
++
++private:
++  std::uint32_t opIndex_;
++};
++
+ using FoldResult    = std::expected<void, FoldRefusal>;
+ using AdvanceResult = std::expected<void, AdvanceError>;
+ 
+@@ -385,6 +408,7 @@ using SlotRef = gleditor::cpp26::optional<const CellSlot &>;
+ class Manifold {
+ public:
+   Manifold();
++  explicit Manifold(std::pmr::memory_resource *lookupResource);
+   ~Manifold();
+   Manifold(const Manifold &other);
+   Manifold &operator=(const Manifold &other);
+@@ -783,7 +807,9 @@ public:
+    * cannot make sense of: a SetLink or SetValue whose subject chain does not
+    * reach a cell this manifold holds, a second MakeCell at one index, or --
+    * R8's boundary as a bit rather than a convention -- a link whose target or
+-   * dimension isEphemeral(). Each refusal bumps refusedOps().
++   * dimension isEphemeral(). Authored semantic refusals bump refusedOps(); a
++   * lookup-capacity refusal leaves the logical fold position and counters
++   * unchanged so the caller can retry or abort.
+    *
+    * Anything that is not OpKind::Structure is ignored -- and answers success,
+    * since there was nothing to refuse -- so a caller may hand over every node
+@@ -851,7 +877,11 @@ private:
+       bool legacyMode) const;
+ 
+   friend struct ManifoldTestAccess;
+-
++  friend class xanadu::Store;
++  Manifold *setOpCountHint(std::size_t hint) noexcept {
++    byRef.setOpCountHint(hint);
++    return this;
++  }
+   /// Count @p why and hand it back as the fold's answer.
+   FoldResult refuse(const FoldRefusal why) noexcept {
+     refusedOps_++;
+@@ -882,6 +912,9 @@ private:
+   FoldResult spliceContent(std::uint32_t dense, std::uint64_t at,
+                            std::uint64_t removing,
+                            const xanadu::PrimediaSpan &inserted);
++  FoldResult
++  applyStructureImpl(std::uint32_t opIndex, const xanadu::CompactOpNode &node,
++                     std::optional<std::uint32_t> resolvedCellDense) noexcept;
+ 
+   std::vector<CellSlot> slots;
+   /// The CSR arena. A cell's run is grown in place when it is the arena's
+@@ -900,7 +933,7 @@ private:
+   std::size_t liveContent{0};
+   /// Operation index -> dense id, for every operation in a cell's chain and
+   /// not only for its birth op -- see slot().
+-  std::unordered_map<CellRef, std::uint32_t> byRef;
++  detail::ManifoldOpIndexMap byRef;
+   /// Live entries in @ref links. The difference against links.size() is the
+   /// dead runs compact() would reclaim.
+   std::size_t liveLinks{0};
+@@ -911,7 +944,7 @@ private:
+   std::uint32_t refusedOps_{0};
+   std::vector<CellRef> externalCells_;
+   std::uint32_t unresolvedExternals_{0};
+-  std::unordered_map<std::uint32_t, StructureBirthInfo> structureBirths_;
++  detail::PreparedU32UnorderedMap<StructureBirthInfo> structureBirths_;
+ 
+   /// dimensions() is a rank walk, and a span has to point at something.
+   mutable std::vector<DimRef> dimsCache;
+diff --git a/tests/xuzz/manifold_test.cpp b/tests/xuzz/manifold_test.cpp
+index a562033c..0e5dcb3e 100644
+--- a/tests/xuzz/manifold_test.cpp
++++ b/tests/xuzz/manifold_test.cpp
+@@ -19,6 +19,7 @@
+ #include <iostream>
+ #include <limits>
+ #include <memory>
++#include <memory_resource>
+ #include <optional>
+ #include <span>
+ #include <stdexcept>
+@@ -31,6 +32,7 @@
+ #include "common/xanadu/link_layout.hpp"
+ #include "common/xanadu/microversion.hpp"
+ #include "common/xanadu/ops.hpp"
++#include "common/xanadu/osmic_walker.hpp"
+ #include "common/xanadu/provenance.hpp"
+ #include "common/xanadu/store.hpp"
+ #include "common/xanadu/user_permascroll.hpp"
+@@ -42,6 +44,25 @@ namespace zigzag {
+ 
+ /// Seed one representable maximum-size run without building quadratic history.
+ struct ManifoldTestAccess {
++  static std::optional<std::uint32_t> denseOf(const Manifold &manifold,
++                                              CellRef ref) {
++    return manifold.denseOf(ref);
++  }
++  static void setOpCountHint(Manifold &manifold, std::size_t hint) {
++    manifold.setOpCountHint(hint);
++  }
++  static std::optional<std::size_t> opCountHint(const Manifold &manifold) {
++    return manifold.byRef.opCountHint();
++  }
++  static std::size_t byRefDenseCapacity(const Manifold &manifold) {
++    return manifold.byRef.denseValueCapacity();
++  }
++  static bool hasByRef(const Manifold &manifold, std::uint32_t op) {
++    return manifold.byRef.contains(op);
++  }
++  static std::size_t birthCapacity(const Manifold &manifold) {
++    return manifold.structureBirths_.capacity();
++  }
+   static bool
+   seedMaxContentRun(Manifold &manifold, const CellRef cell,
+                     const std::span<const xanadu::PrimediaSpan> spans) {
+@@ -55,8 +76,50 @@ struct ManifoldTestAccess {
+ 
+ } // namespace zigzag
+ 
++namespace xanadu {
++struct StoreTestAccess {
++  static void setLookupResource(Store &store,
++                                std::pmr::memory_resource *resource) {
++    store.lookupResource_ = resource;
++  }
++};
++} // namespace xanadu
++
+ namespace {
+ 
++class FailingLookupResource final : public std::pmr::memory_resource {
++public:
++  void failAfter(std::size_t successfulAllocations) noexcept {
++    remaining_ = successfulAllocations;
++    failing_   = true;
++  }
++  void allowAllocations() noexcept { failing_ = false; }
++  [[nodiscard]] std::size_t allocations() const noexcept {
++    return allocations_;
++  }
++
++private:
++  void *do_allocate(std::size_t bytes, std::size_t alignment) override {
++    ++allocations_;
++    if (failing_) {
++      if (remaining_ == 0) throw std::bad_alloc{};
++      --remaining_;
++    }
++    return std::pmr::new_delete_resource()->allocate(bytes, alignment);
++  }
++  void do_deallocate(void *p, std::size_t bytes,
++                     std::size_t alignment) override {
++    std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
++  }
++  bool
++  do_is_equal(const std::pmr::memory_resource &other) const noexcept override {
++    return this == &other;
++  }
++  std::size_t remaining_{0};
++  std::size_t allocations_{0};
++  bool failing_{false};
++};
++
+ using xanadu::Link;
+ using xanadu::LinkType;
+ using xanadu::MicroversionId;
+@@ -118,6 +181,318 @@ struct Slice {
+   }
+ };
+ 
++TEST(ManifoldTest, lookupAllocationFailuresLeaveMakeCellFoldStateUntouched) {
++  xanadu::CompactOpNode node{};
++  node.kind  = xanadu::OpKind::Structure;
++  node.flags = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
++
++  std::size_t allocationPoints = 0;
++  {
++    FailingLookupResource resource;
++    Manifold manifold(&resource);
++    ASSERT_TRUE(manifold.applyStructure(1, node));
++    allocationPoints = resource.allocations();
++  }
++  ASSERT_GT(allocationPoints, 0U);
++
++  // Count this variant's actual PMR requests, then fail each request ordinal.
++  for (std::size_t failAt = 0; failAt < allocationPoints; ++failAt) {
++    FailingLookupResource resource;
++    Manifold manifold(&resource);
++    resource.failAfter(failAt);
++    const auto refused = manifold.applyStructure(1, node);
++    ASSERT_FALSE(refused) << "allocation " << failAt;
++    EXPECT_EQ(refused.error(), zigzag::FoldRefusal::LookupCapacityUnavailable);
++    EXPECT_EQ(manifold.foldedThrough(), 0U);
++    EXPECT_EQ(manifold.refusedOps(), 0U);
++    EXPECT_EQ(manifold.cellCount(), 0U);
++    EXPECT_EQ(manifold.structureBirth(1), std::nullopt);
++
++    resource.allowAllocations();
++    ASSERT_TRUE(manifold.applyStructure(1, node));
++    Manifold expected;
++    ASSERT_TRUE(expected.applyStructure(1, node));
++    EXPECT_TRUE(manifold.equivalentTo(expected));
++    EXPECT_EQ(manifold.foldedThrough(), 1U);
++    ASSERT_EQ(manifold.cellCount(), 1U);
++    EXPECT_EQ(zigzag::ManifoldTestAccess::denseOf(manifold, 1), 0U);
++    EXPECT_TRUE(manifold.structureBirth(1).has_value());
++  }
++}
++
++TEST(ManifoldTest, DenseGrowthFailurePreservesExistingLookupEntries) {
++  xanadu::CompactOpNode first{};
++  first.kind  = xanadu::OpKind::Structure;
++  first.flags = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
++  xanadu::CompactOpNode later = first;
++
++  std::size_t allocationPoints = 0;
++  {
++    FailingLookupResource resource;
++    Manifold manifold(&resource);
++    ASSERT_TRUE(manifold.applyStructure(1, first));
++    const auto before = resource.allocations();
++    ASSERT_TRUE(manifold.applyStructure(100, later));
++    allocationPoints = resource.allocations() - before;
++  }
++  ASSERT_GT(allocationPoints, 0U);
++
++  for (std::size_t failAt = 0; failAt < allocationPoints; ++failAt) {
++    FailingLookupResource resource;
++    Manifold manifold(&resource);
++    ASSERT_TRUE(manifold.applyStructure(1, first));
++    resource.failAfter(failAt);
++    const auto refused = manifold.applyStructure(100, later);
++    ASSERT_FALSE(refused) << "allocation " << failAt;
++    EXPECT_EQ(refused.error(), zigzag::FoldRefusal::LookupCapacityUnavailable);
++    EXPECT_EQ(manifold.foldedThrough(), 1U);
++    EXPECT_EQ(manifold.cellCount(), 1U);
++    EXPECT_TRUE(manifold.structureBirth(1).has_value());
++    EXPECT_EQ(manifold.structureBirth(100), std::nullopt);
++    EXPECT_TRUE(zigzag::ManifoldTestAccess::hasByRef(manifold, 1));
++    EXPECT_FALSE(zigzag::ManifoldTestAccess::hasByRef(manifold, 100));
++
++    resource.allowAllocations();
++    ASSERT_TRUE(manifold.applyStructure(100, later));
++    Manifold expected;
++    ASSERT_TRUE(expected.applyStructure(1, first));
++    ASSERT_TRUE(expected.applyStructure(100, later));
++    EXPECT_TRUE(manifold.equivalentTo(expected));
++  }
++}
++
++TEST(ManifoldTest, advanceAndAdvanceOrRefoldPropagateLookupCapacityFailure) {
++  for (const bool useRefold : {false, true}) {
++    FailingLookupResource resource;
++    Slice slice;
++    const auto first = slice.cell("first");
++    (void)first;
++    xanadu::StoreTestAccess::setLookupResource(slice.store, &resource);
++    auto manifold           = slice.store.rebuildManifold(slice.at);
++    const auto beforeFolded = manifold.foldedThrough();
++    const auto beforeCells  = manifold.cellCount();
++    const auto beforeHint   = zigzag::ManifoldTestAccess::opCountHint(manifold);
++    const auto base         = slice.at;
++    (void)slice.store.makeCell(base, "unrelated sibling");
++    const auto next = slice.store.makeCell(base, "capacity");
++    // Each new birth stages a node, so failure is reached without filling
++    // implementation-specific bucket capacity.
++    resource.failAfter(0);
++    if (useRefold) {
++      EXPECT_THROW(manifold.advanceOrRefold(slice.store, next),
++                   zigzag::ManifoldCapacityUnavailable);
++    } else {
++      const auto result = manifold.advance(slice.store, next);
++      ASSERT_FALSE(result);
++      EXPECT_EQ(result.error().kind, zigzag::AdvanceError::Kind::Refused);
++      EXPECT_EQ(result.error().refusal,
++                zigzag::FoldRefusal::LookupCapacityUnavailable);
++    }
++    EXPECT_EQ(manifold.foldedThrough(), beforeFolded);
++    EXPECT_EQ(manifold.cellCount(), beforeCells);
++    EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), beforeHint);
++    EXPECT_EQ(manifold.refusedOps(), 0U);
++    resource.allowAllocations();
++    if (useRefold) {
++      ASSERT_EQ(manifold.advanceOrRefold(slice.store, next), &manifold);
++    } else {
++      ASSERT_TRUE(manifold.advance(slice.store, next));
++    }
++    if (beforeHint) {
++      const auto nextHint =
++          *beforeHint == std::numeric_limits<std::size_t>::max()
++              ? *beforeHint
++              : *beforeHint + 1U;
++      EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold),
++                std::optional<std::size_t>{nextHint});
++      EXPECT_GT(slice.store.opCount(), nextHint);
++    } else {
++      EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold),
++                std::nullopt);
++    }
++  }
++}
++
++TEST(ManifoldTest,
++     StoreRebuildThrowsInsteadOfReturningPartialFoldOnLookupFailure) {
++  FailingLookupResource resource;
++  Slice slice;
++  const auto cell           = slice.cell("stored");
++  const auto unknownPrefix  = slice.at.next();
++  const auto expectedFull   = slice.store.rebuildManifold(slice.at);
++  const auto expectedPrefix = slice.store.rebuildManifold(unknownPrefix);
++  ASSERT_TRUE(expectedFull.contains(cell));
++
++  xanadu::StoreTestAccess::setLookupResource(slice.store, &resource);
++  resource.failAfter(0);
++  EXPECT_THROW((void)slice.store.rebuildManifold(slice.at),
++               zigzag::ManifoldCapacityUnavailable);
++  EXPECT_THROW((void)slice.store.rebuildManifold(unknownPrefix),
++               zigzag::ManifoldCapacityUnavailable);
++
++  resource.allowAllocations();
++  const auto retriedFull   = slice.store.rebuildManifold(slice.at);
++  const auto retriedPrefix = slice.store.rebuildManifold(unknownPrefix);
++  EXPECT_TRUE(retriedFull.equivalentTo(expectedFull));
++  EXPECT_TRUE(retriedFull.contains(cell));
++  EXPECT_TRUE(retriedPrefix.equivalentTo(expectedPrefix));
++  EXPECT_EQ(retriedFull.refusedOps(), expectedFull.refusedOps());
++  EXPECT_EQ(retriedPrefix.refusedOps(), expectedPrefix.refusedOps());
++}
++
++TEST(ManifoldTest, advanceTracksLinearAncestryCount) {
++  Slice slice;
++  (void)slice.cell("first");
++  auto manifold      = slice.store.rebuildManifold(slice.at);
++  auto expectedCount = slice.store.opsFor(slice.at).size();
++  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), expectedCount);
++
++  for (int i = 0; i < 4; ++i) {
++    const auto next = slice.store.makeCell(slice.at, "next");
++    ASSERT_TRUE(manifold.advance(slice.store, next));
++    slice.at = next;
++    ++expectedCount;
++    EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), expectedCount);
++    EXPECT_EQ(expectedCount, slice.store.opsFor(slice.at).size());
++  }
++}
++
++TEST(ManifoldTest, coldBranchHintIgnoresSiblingOperations) {
++  Slice slice;
++  const auto fork                      = slice.at;
++  constexpr std::uint32_t siblingCount = 8200;
++  for (std::uint32_t i = 0; i < siblingCount; ++i)
++    (void)slice.store.makeCell(fork, "sibling");
++
++  const auto lateBranch = slice.store.makeCell(fork, "late branch");
++  const auto lateIndex = slice.store.segmentedOps().indexOf(lateBranch).value();
++  ASSERT_GT(lateIndex, 8192U);
++
++  const auto folded    = slice.store.rebuildManifold(lateBranch);
++  const auto pathCount = slice.store.opsFor(lateBranch).size();
++  EXPECT_LT(pathCount, 16U);
++  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(folded), pathCount);
++  EXPECT_GT(zigzag::ManifoldTestAccess::byRefDenseCapacity(folded), 0U);
++  EXPECT_LT(zigzag::ManifoldTestAccess::birthCapacity(folded),
++            slice.store.opCount());
++  EXPECT_TRUE(zigzag::ManifoldTestAccess::hasByRef(folded, lateIndex));
++  EXPECT_TRUE(folded.equivalentTo(slice.store.rebuildManifold(lateBranch)));
++
++  const auto unknownSuffix = lateBranch.next();
++  const auto prefix        = slice.store.rebuildManifold(unknownSuffix);
++  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(prefix),
++            slice.store.opsFor(unknownSuffix).size());
++  EXPECT_EQ(prefix.foldedThrough(), lateIndex);
++}
++
++TEST(ManifoldTest, IgnoredTextOperationAdvancesWithoutLookupAllocation) {
++  FailingLookupResource resource;
++  Manifold manifold(&resource);
++  xanadu::CompactOpNode text{};
++  text.kind          = xanadu::OpKind::Insert;
++  text.sourceOpIndex = 77U; // no authored cell is present in this manifold
++  text.setSpan(xanadu::PrimediaSpan{
++      .scroll = xanadu::scratchScroll, .start = 0, .length = 1});
++  resource.failAfter(0);
++
++  ASSERT_TRUE(manifold.applyStructure(5U, text));
++  EXPECT_EQ(resource.allocations(), 0U);
++  EXPECT_EQ(manifold.foldedThrough(), 5U);
++  EXPECT_EQ(manifold.refusedOps(), 0U);
++  EXPECT_EQ(manifold.cellCount(), 0U);
++
++  const auto invalid = manifold.applyStructure(0U, text);
++  ASSERT_FALSE(invalid);
++  EXPECT_EQ(invalid.error(), zigzag::FoldRefusal::InvalidOperationIndex);
++  EXPECT_EQ(manifold.foldedThrough(), 5U);
++  EXPECT_EQ(resource.allocations(), 0U);
++}
++
++TEST(ManifoldTest, UnknownHintRemainsUnknownAfterResourceRefusalAndRetry) {
++  FailingLookupResource resource;
++  Slice slice;
++  const auto next = slice.store.makeCell(slice.at, "unknown hint");
++  Manifold manifold(&resource);
++  manifold.setStore(&slice.store);
++  const auto genesis = slice.store.segmentedOps().indexOf(slice.at);
++  ASSERT_TRUE(genesis);
++  ASSERT_TRUE(xanadu::OsmicWalker::walkAncestral(
++      slice.store.segmentedOps(), *genesis,
++      [&manifold](std::uint32_t op, const xanadu::CompactOpNode &node) {
++        return manifold.applyStructure(op, node).has_value();
++      }));
++  const auto beforeFolded = manifold.foldedThrough();
++  ASSERT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), std::nullopt);
++
++  resource.failAfter(0);
++  const auto failed = manifold.advance(slice.store, next);
++  ASSERT_FALSE(failed);
++  EXPECT_EQ(failed.error().refusal,
++            zigzag::FoldRefusal::LookupCapacityUnavailable);
++  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), std::nullopt);
++  EXPECT_EQ(manifold.foldedThrough(), beforeFolded);
++
++  resource.allowAllocations();
++  ASSERT_TRUE(manifold.advance(slice.store, next));
++  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), std::nullopt);
++}
++
++TEST(ManifoldTest, zeroOperationIndexIsRefusedBeforeLookupArithmetic) {
++  Manifold manifold;
++  xanadu::CompactOpNode node{};
++  node.kind         = xanadu::OpKind::Structure;
++  node.flags        = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
++  const auto result = manifold.applyStructure(0, node);
++  ASSERT_FALSE(result);
++  EXPECT_EQ(result.error(), zigzag::FoldRefusal::InvalidOperationIndex);
++  EXPECT_EQ(manifold.foldedThrough(), 0U);
++  EXPECT_EQ(manifold.refusedOps(), 1U);
++  EXPECT_EQ(manifold.cellCount(), 0U);
++}
++
++TEST(ManifoldTest, lookupFailurePreflightsTextAndStructureChainMutations) {
++  enum class Operation { Insert, SetLink, Splice, SetValue };
++  for (const auto operation : {Operation::Insert, Operation::SetLink,
++                               Operation::Splice, Operation::SetValue}) {
++    FailingLookupResource resource;
++    Manifold manifold(&resource);
++    xanadu::CompactOpNode make{};
++    make.kind  = xanadu::OpKind::Structure;
++    make.flags = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
++    ASSERT_TRUE(manifold.applyStructure(1, make));
++    ASSERT_TRUE(manifold.applyStructure(2, make));
++    const auto before = *manifold.slot(1);
++    xanadu::CompactOpNode node{};
++    node.sourceOpIndex = 1;
++    if (operation == Operation::Insert) {
++      node.kind = xanadu::OpKind::Insert;
++      node.setSpan(PrimediaSpan{.scroll = 0, .start = 0, .length = 1});
++    } else {
++      node.kind = xanadu::OpKind::Structure;
++      if (operation == Operation::SetLink) {
++        node.flags  = xanadu::structureFlags(StructureVerb::SetLink);
++        node.linkId = 2;
++      } else if (operation == Operation::Splice) {
++        node.flags = xanadu::structureFlags(StructureVerb::Splice);
++      } else {
++        node.flags = xanadu::structureFlags(StructureVerb::SetValue);
++      }
++    }
++    resource.failAfter(0);
++    const auto failed = manifold.applyStructure(8192, node);
++    ASSERT_FALSE(failed);
++    EXPECT_EQ(failed.error(), zigzag::FoldRefusal::LookupCapacityUnavailable);
++    EXPECT_EQ(manifold.foldedThrough(), 2U);
++    EXPECT_EQ(manifold.refusedOps(), 0U);
++    EXPECT_EQ(*manifold.slot(1), before);
++    EXPECT_EQ(zigzag::ManifoldTestAccess::denseOf(manifold, 8192),
++              std::nullopt);
++    resource.allowAllocations();
++    ASSERT_TRUE(manifold.applyStructure(8192, node));
++    EXPECT_EQ(zigzag::ManifoldTestAccess::denseOf(manifold, 8192), 0U);
++  }
++}
++
+ TEST(ManifoldTest, missingNeighboursStayOptionalThroughTraversal) {
+   static_assert(!std::is_convertible_v<zigzag::OptionalCell, CellRef>);
+   Slice slice;
+diff --git a/apps/common/xanadu/zigzag/prepared_u32_unordered_map.hpp b/apps/common/xanadu/zigzag/prepared_u32_unordered_map.hpp
+new file mode 100644
+index 00000000..f1fcc0d4
+--- /dev/null
++++ b/apps/common/xanadu/zigzag/prepared_u32_unordered_map.hpp
+@@ -0,0 +1,218 @@
++#ifndef XANADU_ZIGZAG_PREPARED_U32_UNORDERED_MAP_HPP
++#define XANADU_ZIGZAG_PREPARED_U32_UNORDERED_MAP_HPP
++
++#include "common/xanadu/zigzag/lookup_prepare_failure.hpp"
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <limits>
++#include <memory>
++#include <memory_resource>
++#include <new>
++#include <stdexcept>
++#include <type_traits>
++#include <unordered_map>
++#include <utility>
++
++namespace zigzag::detail {
++
++/// PMR unordered-map control with prepared nodes for allocation-free
++/// publication.
++template <typename Value> class PreparedU32UnorderedMap {
++  using Map = std::pmr::unordered_map<std::uint32_t, Value>;
++
++  static_assert(std::is_nothrow_default_constructible_v<Value>);
++  static_assert(std::is_nothrow_copy_assignable_v<Value>);
++
++public:
++  using key_type       = std::uint32_t;
++  using mapped_type    = Value;
++  using value_type     = typename Map::value_type;
++  using iterator       = typename Map::iterator;
++  using const_iterator = typename Map::const_iterator;
++  using node_type      = typename Map::node_type;
++  using PrepareFailure = LookupPrepareFailure;
++
++  class PreparedInsert {
++  public:
++    PreparedInsert(PreparedInsert &&) noexcept = default;
++    PreparedInsert &operator=(PreparedInsert &&other) noexcept {
++      if (this != &other) {
++        std::destroy_at(this);
++        std::construct_at(this, std::move(other));
++      }
++      return *this;
++    }
++    PreparedInsert(const PreparedInsert &)            = delete;
++    PreparedInsert &operator=(const PreparedInsert &) = delete;
++
++  private:
++    friend class PreparedU32UnorderedMap<Value>;
++    PreparedInsert(const PreparedU32UnorderedMap *owner,
++                   const std::uint64_t generation, const std::uint32_t key,
++                   node_type &&node) noexcept
++        : owner_(owner), generation_(generation), key_(key),
++          node_(std::move(node)) {}
++
++    const PreparedU32UnorderedMap *owner_;
++    std::uint64_t generation_;
++    std::uint32_t key_;
++    node_type node_;
++  };
++
++  explicit PreparedU32UnorderedMap(
++      std::pmr::memory_resource *resource = std::pmr::get_default_resource())
++      : resource_(resource == nullptr ? std::pmr::get_default_resource()
++                                      : resource),
++        entries_(resource_) {}
++
++  PreparedU32UnorderedMap(const PreparedU32UnorderedMap &other)
++      : resource_(other.resource_),
++        entries_(other.entries_, typename Map::allocator_type{resource_}),
++        generation_(other.generation_), reservedFor_(other.entries_.size()) {}
++
++  PreparedU32UnorderedMap &operator=(const PreparedU32UnorderedMap &other) {
++    if (this == &other) return *this;
++    Map replacement(other.entries_, typename Map::allocator_type{resource_});
++    entries_.swap(replacement);
++    reservedFor_ = entries_.size();
++    ++generation_;
++    return *this;
++  }
++
++  PreparedU32UnorderedMap(PreparedU32UnorderedMap &&other) noexcept
++      : resource_(other.resource_), entries_(std::move(other.entries_)),
++        generation_(other.generation_ + 1U),
++        reservedFor_(std::exchange(other.reservedFor_, 0)) {
++    ++other.generation_;
++  }
++
++  PreparedU32UnorderedMap &operator=(PreparedU32UnorderedMap &&other) noexcept {
++    if (this != &other) {
++      const auto nextGeneration = generation_ + 1U;
++      this->~PreparedU32UnorderedMap();
++      std::construct_at(this, std::move(other));
++      generation_ = nextGeneration;
++    }
++    return *this;
++  }
++
++  [[nodiscard]] iterator begin() noexcept { return entries_.begin(); }
++  [[nodiscard]] iterator end() noexcept { return entries_.end(); }
++  [[nodiscard]] const_iterator begin() const noexcept {
++    return entries_.begin();
++  }
++  [[nodiscard]] const_iterator end() const noexcept { return entries_.end(); }
++  [[nodiscard]] const_iterator cbegin() const noexcept { return begin(); }
++  [[nodiscard]] const_iterator cend() const noexcept { return end(); }
++  [[nodiscard]] iterator find(const std::uint32_t key) noexcept {
++    return entries_.find(key);
++  }
++  [[nodiscard]] const_iterator find(const std::uint32_t key) const noexcept {
++    return entries_.find(key);
++  }
++  [[nodiscard]] bool contains(const std::uint32_t key) const noexcept {
++    return entries_.contains(key);
++  }
++  [[nodiscard]] std::size_t size() const noexcept { return entries_.size(); }
++  [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }
++  [[nodiscard]] std::size_t capacity() const noexcept {
++    return entries_.bucket_count();
++  }
++  [[nodiscard]] float maxLoadFactor() const noexcept {
++    return entries_.max_load_factor();
++  }
++
++  /// Reserve a total-entry upper bound without changing logical contents.
++  [[nodiscard]] std::expected<PreparedU32UnorderedMap *, PrepareFailure>
++  reserveFor(const std::size_t totalEntries) noexcept {
++    if (totalEntries <= reservedFor_ || totalEntries <= entries_.size() ||
++        static_cast<long double>(totalEntries) <=
++            static_cast<long double>(entries_.bucket_count()) *
++                entries_.max_load_factor())
++      return this;
++    if (totalEntries > entries_.max_size())
++      return std::unexpected{PrepareFailure::CapacityOverflow};
++    const auto current = reservedFor_;
++    const auto geometric =
++        current == 0
++            ? totalEntries
++            : std::min(entries_.max_size(), current > entries_.max_size() / 2U
++                                                ? entries_.max_size()
++                                                : current * 2U);
++    const auto target = std::max(totalEntries, geometric);
++    try {
++      entries_.reserve(target);
++      reservedFor_ = target;
++      return this;
++    } catch (const std::bad_alloc &) {
++      return std::unexpected{PrepareFailure::AllocationUnavailable};
++    } catch (const std::length_error &) {
++      return std::unexpected{PrepareFailure::CapacityOverflow};
++    }
++  }
++
++  [[nodiscard]] std::expected<PreparedInsert, PrepareFailure>
++  prepareInsert(const std::uint32_t key) noexcept {
++    if (key == 0) return std::unexpected{PrepareFailure::InvalidOperationIndex};
++    if (entries_.contains(key))
++      return std::unexpected{PrepareFailure::AlreadyPresent};
++    if (entries_.size() == entries_.max_size())
++      return std::unexpected{PrepareFailure::CapacityOverflow};
++
++    try {
++      // Inserting and immediately extracting in this destination map grows
++      // its buckets for the pending node. That exact capacity is retained for
++      // the allocation-free commit, including when insertion triggers rehash.
++      auto [it, inserted] = entries_.try_emplace(key, Value{});
++      if (!inserted) return std::unexpected{PrepareFailure::AlreadyPresent};
++      auto node = entries_.extract(it);
++      ++generation_;
++      return PreparedInsert(this, generation_, key, std::move(node));
++    } catch (const std::bad_alloc &) {
++      return std::unexpected{PrepareFailure::AllocationUnavailable};
++    } catch (const std::length_error &) {
++      return std::unexpected{PrepareFailure::CapacityOverflow};
++    }
++  }
++
++  /// Publish the same-resource node into capacity proven by its preparation.
++  [[nodiscard]] bool commitInsert(PreparedInsert &&token,
++                                  const Value &value) noexcept {
++    if (token.owner_ != this || token.generation_ != generation_ ||
++        token.key_ == 0 || token.node_.empty() ||
++        token.node_.key() != token.key_)
++      return false;
++    token.node_.mapped() = value;
++    try {
++      auto result = entries_.insert(std::move(token.node_));
++      if (!result.inserted) {
++        token.node_ = std::move(result.node);
++        return false;
++      }
++    } catch (...) {
++      // Callers treat failure after successful preflight as an invariant break.
++      return false;
++    }
++    ++generation_;
++    return true;
++  }
++
++  friend bool operator==(const PreparedU32UnorderedMap &left,
++                         const PreparedU32UnorderedMap &right) {
++    return left.entries_ == right.entries_;
++  }
++
++private:
++  std::pmr::memory_resource *resource_;
++  Map entries_;
++  std::uint64_t generation_{0};
++  // Preserve explicit reservations when later calls ask for a smaller bound.
++  std::size_t reservedFor_{0};
++};
++
++} // namespace zigzag::detail
++
++#endif // XANADU_ZIGZAG_PREPARED_U32_UNORDERED_MAP_HPP
+diff --git a/apps/common/xanadu/zigzag/lookup_prepare_failure.hpp b/apps/common/xanadu/zigzag/lookup_prepare_failure.hpp
+new file mode 100644
+index 00000000..00b6ba66
+--- /dev/null
++++ b/apps/common/xanadu/zigzag/lookup_prepare_failure.hpp
+@@ -0,0 +1,17 @@
++#ifndef XANADU_ZIGZAG_LOOKUP_PREPARE_FAILURE_HPP
++#define XANADU_ZIGZAG_LOOKUP_PREPARE_FAILURE_HPP
++
++#include <cstdint>
++
++namespace zigzag::detail {
++
++enum class LookupPrepareFailure : std::uint8_t {
++  AlreadyPresent,
++  InvalidOperationIndex,
++  CapacityOverflow,
++  AllocationUnavailable,
++};
++
++} // namespace zigzag::detail
++
++#endif // XANADU_ZIGZAG_LOOKUP_PREPARE_FAILURE_HPP
+diff --git a/apps/common/xanadu/zigzag/flat_u32_map.hpp b/apps/common/xanadu/zigzag/flat_u32_map.hpp
+new file mode 100644
+index 00000000..40d3ea6b
+--- /dev/null
++++ b/apps/common/xanadu/zigzag/flat_u32_map.hpp
+@@ -0,0 +1,468 @@
++/**
++ * @file flat_u32_map.hpp
++ * @brief Engine-private open-addressed map for arbitrary uint32 keys.
++ *
++ * Occupancy is stored separately from keys and values, so every uint32 key is
++ * eligible as a key. Manifold's caller separately refuses operation index
++ * zero before using its dense op-index mapping.
++ */
++#ifndef ZIGZAG_FLAT_U32_MAP_HPP
++#define ZIGZAG_FLAT_U32_MAP_HPP
++
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <iterator>
++#include <limits>
++#include <memory>
++#include <memory_resource>
++#include <optional>
++#include <stdexcept>
++#include <type_traits>
++#include <utility>
++#include <vector>
++
++namespace zigzag::detail {
++
++enum class FlatU32MapPrepareFailure : std::uint8_t {
++  AlreadyPresent,
++  CapacityOverflow,
++  AllocationUnavailable,
++};
++
++template <class Value> class FlatU32Map {
++public:
++  using value_type = std::pair<const std::uint32_t, Value>;
++
++private:
++  static_assert(std::is_nothrow_default_constructible_v<Value>,
++                "empty buckets need an allocation-free default value");
++  static_assert(std::is_trivially_copyable_v<Value>,
++                "prepared insertion and rehash require allocation-free values");
++  static_assert(std::is_nothrow_copy_constructible_v<Value>);
++  static_assert(std::is_nothrow_move_constructible_v<value_type>);
++  static_assert(std::is_nothrow_destructible_v<value_type>);
++
++  enum class State : std::uint8_t { Empty, Occupied, Deleted };
++  static constexpr std::size_t statesPerByte = 4;
++
++  template <bool IsConst> class BasicIterator {
++    using Map = std::conditional_t<IsConst, const FlatU32Map, FlatU32Map>;
++
++  public:
++    using difference_type   = std::ptrdiff_t;
++    using value_type        = FlatU32Map::value_type;
++    using iterator_concept  = std::forward_iterator_tag;
++    using iterator_category = std::forward_iterator_tag;
++    using reference =
++        std::conditional_t<IsConst, const value_type &, value_type &>;
++    using pointer =
++        std::conditional_t<IsConst, const value_type *, value_type *>;
++
++    BasicIterator() = default;
++
++    template <bool OtherConst>
++      requires(IsConst && !OtherConst)
++    BasicIterator(const BasicIterator<OtherConst> &other) noexcept
++        : map_(other.map_), index_(other.index_) {}
++
++    [[nodiscard]] reference operator*() const noexcept {
++      return map_->entries_[index_];
++    }
++
++    [[nodiscard]] pointer operator->() const noexcept {
++      return &map_->entries_[index_];
++    }
++
++    BasicIterator &operator++() noexcept {
++      ++index_;
++      skipEmpty();
++      return *this;
++    }
++
++    BasicIterator operator++(int) noexcept {
++      auto previous = *this;
++      ++*this;
++      return previous;
++    }
++
++    template <bool OtherConst>
++    [[nodiscard]] bool
++    operator==(const BasicIterator<OtherConst> &other) const noexcept {
++      return map_ == other.map_ && index_ == other.index_;
++    }
++
++  private:
++    friend class FlatU32Map;
++    template <bool> friend class BasicIterator;
++
++    BasicIterator(Map *map, const std::size_t index) noexcept
++        : map_(map), index_(index) {
++      skipEmpty();
++    }
++
++    void skipEmpty() noexcept {
++      while (map_ != nullptr && index_ < map_->entries_.size() &&
++             map_->stateAt(index_) != State::Occupied) {
++        ++index_;
++      }
++    }
++
++    Map *map_{nullptr};
++    std::size_t index_{0};
++  };
++
++public:
++  using iterator       = BasicIterator<false>;
++  using const_iterator = BasicIterator<true>;
++
++  /// A capability to commit one insertion without allocation. Any intervening
++  /// logical mutation or rehash invalidates it; commitInsert then returns
++  /// false.
++  class PreparedInsert {
++    friend class FlatU32Map;
++    const FlatU32Map *owner_{nullptr};
++    std::uint64_t generation_{0};
++    std::size_t slot_{0};
++    std::uint32_t key_{0};
++
++    PreparedInsert(const FlatU32Map *owner, const std::uint64_t generation,
++                   const std::size_t slot, const std::uint32_t key) noexcept
++        : owner_(owner), generation_(generation), slot_(slot), key_(key) {}
++
++  public:
++    PreparedInsert(const PreparedInsert &)                = default;
++    PreparedInsert &operator=(const PreparedInsert &)     = default;
++    PreparedInsert(PreparedInsert &&) noexcept            = default;
++    PreparedInsert &operator=(PreparedInsert &&) noexcept = default;
++  };
++
++  explicit FlatU32Map(
++      std::pmr::memory_resource *resource = std::pmr::get_default_resource())
++      : resource_(resource == nullptr ? std::pmr::get_default_resource()
++                                      : resource),
++        entries_(resource_), states_(resource_) {}
++
++  FlatU32Map(const FlatU32Map &other) : FlatU32Map(other, other.resource_) {}
++
++  FlatU32Map(const FlatU32Map &other, std::pmr::memory_resource *resource)
++      : FlatU32Map(other,
++                   resource == nullptr ? std::pmr::get_default_resource()
++                                       : resource,
++                   CloneTag{}) {}
++
++  FlatU32Map &operator=(const FlatU32Map &other) {
++    if (this == &other) {
++      return *this;
++    }
++    FlatU32Map replacement(other, resource_, CloneTag{});
++    entries_.swap(replacement.entries_);
++    states_.swap(replacement.states_);
++    size_    = replacement.size_;
++    deleted_ = replacement.deleted_;
++    ++generation_;
++    return *this;
++  }
++
++  FlatU32Map(FlatU32Map &&other) noexcept
++      : resource_(other.resource_), entries_(resource_), states_(resource_),
++        size_(std::exchange(other.size_, 0)),
++        deleted_(std::exchange(other.deleted_, 0)),
++        generation_(other.generation_ + 1U) {
++    ++other.generation_;
++    entries_.swap(other.entries_);
++    states_.swap(other.states_);
++  }
++
++  FlatU32Map &operator=(FlatU32Map &&other) noexcept {
++    if (this != &other) {
++      const auto nextGeneration = generation_ + 1U;
++      this->~FlatU32Map();
++      std::construct_at(this, std::move(other));
++      generation_ = nextGeneration;
++    }
++    return *this;
++  }
++
++  [[nodiscard]] std::size_t size() const noexcept { return size_; }
++  [[nodiscard]] bool empty() const noexcept { return size_ == 0; }
++  [[nodiscard]] std::size_t capacity() const noexcept {
++    return entries_.size();
++  }
++  [[nodiscard]] static constexpr std::size_t
++  maxLiveEntries(const std::size_t capacity) noexcept {
++    return (capacity / 3U) * 2U + ((capacity % 3U) * 2U) / 3U;
++  }
++
++  [[nodiscard]] iterator begin() noexcept { return {this, 0}; }
++  [[nodiscard]] iterator end() noexcept { return {this, entries_.size()}; }
++  [[nodiscard]] const_iterator begin() const noexcept { return {this, 0}; }
++  [[nodiscard]] const_iterator end() const noexcept {
++    return {this, entries_.size()};
++  }
++  [[nodiscard]] const_iterator cbegin() const noexcept { return begin(); }
++  [[nodiscard]] const_iterator cend() const noexcept { return end(); }
++
++  [[nodiscard]] iterator find(const std::uint32_t key) noexcept {
++    const auto index = findExisting(key);
++    return {this, index.value_or(entries_.size())};
++  }
++
++  [[nodiscard]] const_iterator find(const std::uint32_t key) const noexcept {
++    const auto index = findExisting(key);
++    return {this, index.value_or(entries_.size())};
++  }
++
++  [[nodiscard]] bool contains(const std::uint32_t key) const noexcept {
++    return findExisting(key).has_value();
++  }
++
++  /// Ensure insertion can be committed without allocation. Rehash constructs
++  /// replacement arrays before swapping, so failure preserves live entries.
++  [[nodiscard]] std::expected<PreparedInsert, FlatU32MapPrepareFailure>
++  prepareInsert(const std::uint32_t key) noexcept {
++    if (findExisting(key)) {
++      return std::unexpected{FlatU32MapPrepareFailure::AlreadyPresent};
++    }
++    if (!ensureInsertCapacity()) {
++      return std::unexpected{preparationFailure_};
++    }
++    const auto position = insertionPosition(key);
++    if (!position) {
++      return std::unexpected{FlatU32MapPrepareFailure::CapacityOverflow};
++    }
++    return PreparedInsert{this, generation_, *position, key};
++  }
++
++  /// Insert a prepared key without allocation. Value is allocation-free.
++  [[nodiscard]] bool commitInsert(PreparedInsert &&prepared,
++                                  const Value &value) noexcept {
++    if (prepared.owner_ != this || prepared.generation_ != generation_ ||
++        prepared.slot_ >= entries_.size()) {
++      return false;
++    }
++    const auto state = stateAt(prepared.slot_);
++    if (state == State::Occupied ||
++        (state == State::Deleted && deleted_ == 0)) {
++      return false;
++    }
++    std::destroy_at(&entries_[prepared.slot_]);
++    std::construct_at(&entries_[prepared.slot_], prepared.key_, value);
++    if (state == State::Deleted) {
++      --deleted_;
++    }
++    setState(prepared.slot_, State::Occupied);
++    ++size_;
++    ++generation_;
++    prepared.owner_ = nullptr;
++    return true;
++  }
++
++  [[nodiscard]] bool erase(const std::uint32_t key) noexcept {
++    const auto found = findExisting(key);
++    if (!found) {
++      return false;
++    }
++    std::destroy_at(&entries_[*found]);
++    std::construct_at(&entries_[*found]);
++    setState(*found, State::Deleted);
++    --size_;
++    ++deleted_;
++    ++generation_;
++    return true;
++  }
++
++  /// Clear live entries while retaining the allocation for reuse.
++  void clear() noexcept {
++    for (std::size_t index = 0; index < entries_.size(); ++index) {
++      if (stateAt(index) == State::Occupied) {
++        std::destroy_at(&entries_[index]);
++        std::construct_at(&entries_[index]);
++      }
++      setState(index, State::Empty);
++    }
++    size_    = 0;
++    deleted_ = 0;
++    ++generation_;
++  }
++
++  friend bool operator==(const FlatU32Map &left, const FlatU32Map &right) {
++    if (left.size_ != right.size_) {
++      return false;
++    }
++    for (const auto &[key, value] : left) {
++      const auto found = right.find(key);
++      if (found == right.end() || found->second != value) {
++        return false;
++      }
++    }
++    return true;
++  }
++
++private:
++  struct CloneTag {};
++  FlatU32Map(const FlatU32Map &other, std::pmr::memory_resource *resource,
++             CloneTag)
++      : resource_(resource),
++        entries_(other.entries_,
++                 std::pmr::polymorphic_allocator<value_type>{resource_}),
++        states_(other.states_,
++                std::pmr::polymorphic_allocator<std::uint8_t>{resource_}),
++        size_(other.size_), deleted_(other.deleted_),
++        generation_(other.generation_) {}
++
++  [[nodiscard]] static std::size_t hash(const std::uint32_t key) noexcept {
++    auto value = static_cast<std::uint64_t>(key) + 0x9e3779b97f4a7c15ULL;
++    value      = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
++    value      = (value ^ (value >> 27U)) * 0x94d049bb133111ebULL;
++    return static_cast<std::size_t>(value ^ (value >> 31U));
++  }
++
++  [[nodiscard]] static constexpr std::size_t
++  stateBytes(const std::size_t capacity) noexcept {
++    return (capacity + statesPerByte - 1U) / statesPerByte;
++  }
++
++  [[nodiscard]] State stateAt(const std::size_t index) const noexcept {
++    const auto byteIndex = index / statesPerByte;
++    const auto shift     = (index % statesPerByte) * 2U;
++    return static_cast<State>((states_[byteIndex] >> shift) & 0x3U);
++  }
++
++  void setState(const std::size_t index, const State state) noexcept {
++    const auto byteIndex = index / statesPerByte;
++    const auto shift     = (index % statesPerByte) * 2U;
++    const auto mask      = static_cast<std::uint8_t>(0x3U << shift);
++    states_[byteIndex]   = static_cast<std::uint8_t>(
++        (states_[byteIndex] & static_cast<std::uint8_t>(~mask)) |
++        (static_cast<std::uint8_t>(state) << shift));
++  }
++
++  [[nodiscard]] std::optional<std::size_t>
++  findExisting(const std::uint32_t key) const noexcept {
++    if (entries_.empty()) {
++      return std::nullopt;
++    }
++    const auto mask = entries_.size() - 1U;
++    auto position   = hash(key) & mask;
++    for (std::size_t probes = 0; probes < entries_.size(); ++probes) {
++      const auto state = stateAt(position);
++      if (state == State::Empty) {
++        return std::nullopt;
++      }
++      if (state == State::Occupied && entries_[position].first == key) {
++        return position;
++      }
++      position = (position + 1U) & mask;
++    }
++    return std::nullopt;
++  }
++
++  [[nodiscard]] std::optional<std::size_t>
++  insertionPosition(const std::uint32_t key) const noexcept {
++    if (entries_.empty()) {
++      return std::nullopt;
++    }
++    const auto mask = entries_.size() - 1U;
++    auto position   = hash(key) & mask;
++    std::optional<std::size_t> firstDeleted;
++    for (std::size_t probes = 0; probes < entries_.size(); ++probes) {
++      const auto state = stateAt(position);
++      if (state == State::Deleted && !firstDeleted) {
++        firstDeleted = position;
++      } else if (state == State::Empty) {
++        return firstDeleted.value_or(position);
++      }
++      position = (position + 1U) & mask;
++    }
++    return firstDeleted;
++  }
++
++  [[nodiscard]] bool ensureInsertCapacity() noexcept {
++    preparationFailure_ = FlatU32MapPrepareFailure::CapacityOverflow;
++    auto target         = entries_.size();
++    if (target == 0) {
++      return rehash(initialCapacity);
++    }
++    const auto maximum = maxLiveEntries(target);
++    if (size_ + deleted_ >= maximum) {
++      if (size_ < maximum) {
++        // Room remains after removing tombstones; rebuild at the same size.
++      } else {
++        do {
++          if (target > std::numeric_limits<std::size_t>::max() / 2U) {
++            return false;
++          }
++          target *= 2U;
++        } while (size_ >= maxLiveEntries(target));
++      }
++    } else if (deleted_ > target / 4U) {
++      // Rebuild in place-sized storage to shorten tombstone probe chains.
++    } else {
++      return true;
++    }
++    return rehash(target);
++  }
++
++  [[nodiscard]] bool rehash(const std::size_t capacity) noexcept {
++    try {
++      std::pmr::vector<value_type> replacementEntries{
++          std::pmr::polymorphic_allocator<value_type>{resource_}};
++      std::pmr::vector<std::uint8_t> replacementStates{
++          std::pmr::polymorphic_allocator<std::uint8_t>{resource_}};
++      if (capacity > replacementEntries.max_size() ||
++          stateBytes(capacity) > replacementStates.max_size()) {
++        preparationFailure_ = FlatU32MapPrepareFailure::CapacityOverflow;
++        return false;
++      }
++      replacementEntries.resize(capacity);
++      replacementStates.resize(stateBytes(capacity), 0);
++      for (std::size_t source = 0; source < entries_.size(); ++source) {
++        if (stateAt(source) != State::Occupied) {
++          continue;
++        }
++        const auto key  = entries_[source].first;
++        const auto mask = capacity - 1U;
++        auto position   = hash(key) & mask;
++        while (((replacementStates[position / statesPerByte] >>
++                 ((position % statesPerByte) * 2U)) &
++                0x3U) != static_cast<std::uint8_t>(State::Empty)) {
++          position = (position + 1U) & mask;
++        }
++        std::destroy_at(&replacementEntries[position]);
++        std::construct_at(&replacementEntries[position], key,
++                          entries_[source].second);
++        const auto shift = (position % statesPerByte) * 2U;
++        replacementStates[position / statesPerByte] |=
++            static_cast<std::uint8_t>(static_cast<std::uint8_t>(State::Occupied)
++                                      << shift);
++      }
++      entries_.swap(replacementEntries);
++      states_.swap(replacementStates);
++      deleted_ = 0;
++      ++generation_;
++      return true;
++    } catch (const std::bad_alloc &) {
++      preparationFailure_ = FlatU32MapPrepareFailure::AllocationUnavailable;
++      return false;
++    } catch (const std::length_error &) {
++      preparationFailure_ = FlatU32MapPrepareFailure::CapacityOverflow;
++      return false;
++    }
++  }
++
++  static constexpr std::size_t initialCapacity = 8;
++
++  std::pmr::memory_resource *resource_;
++  std::pmr::vector<value_type> entries_;
++  std::pmr::vector<std::uint8_t> states_;
++  std::size_t size_{0};
++  std::size_t deleted_{0};
++  std::uint64_t generation_{0};
++  FlatU32MapPrepareFailure preparationFailure_{
++      FlatU32MapPrepareFailure::CapacityOverflow};
++};
++
++} // namespace zigzag::detail
++
++#endif // ZIGZAG_FLAT_U32_MAP_HPP
+diff --git a/apps/common/xanadu/zigzag/manifold_lookup.hpp b/apps/common/xanadu/zigzag/manifold_lookup.hpp
+new file mode 100644
+index 00000000..ad466856
+--- /dev/null
++++ b/apps/common/xanadu/zigzag/manifold_lookup.hpp
+@@ -0,0 +1,257 @@
++#ifndef ZIGZAG_MANIFOLD_LOOKUP_HPP
++#define ZIGZAG_MANIFOLD_LOOKUP_HPP
++
++#include "common/xanadu/zigzag/flat_u32_map.hpp"
++#include "common/xanadu/zigzag/lookup_prepare_failure.hpp"
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <limits>
++#include <memory>
++#include <memory_resource>
++#include <optional>
++#include <utility>
++#include <vector>
++
++namespace zigzag::detail {
++
++inline constexpr std::size_t minimumDenseOpCountHint = 4096U;
++
++/// Operation-index mapping: bounded dense storage plus sparse overflow.
++class ManifoldOpIndexMap {
++public:
++  using PrepareFailure = LookupPrepareFailure;
++  class PreparedInsert {
++  public:
++    PreparedInsert(PreparedInsert &&) noexcept            = default;
++    PreparedInsert &operator=(PreparedInsert &&) noexcept = default;
++    PreparedInsert(const PreparedInsert &)                = delete;
++    PreparedInsert &operator=(const PreparedInsert &)     = delete;
++
++  private:
++    friend class ManifoldOpIndexMap;
++    PreparedInsert(
++        const ManifoldOpIndexMap *owner, const std::uint64_t generation,
++        const std::uint32_t op, const bool dense, const std::size_t offset,
++        std::optional<FlatU32Map<std::uint32_t>::PreparedInsert> &&overflow)
++        : owner_(owner), generation_(generation), op_(op), dense_(dense),
++          offset_(offset), overflow_(std::move(overflow)) {}
++
++    const ManifoldOpIndexMap *owner_;
++    std::uint64_t generation_;
++    std::uint32_t op_;
++    bool dense_;
++    std::size_t offset_;
++    std::optional<FlatU32Map<std::uint32_t>::PreparedInsert> overflow_;
++  };
++
++  explicit ManifoldOpIndexMap(
++      std::pmr::memory_resource *resource = std::pmr::get_default_resource())
++      : resource_(resource == nullptr ? std::pmr::get_default_resource()
++                                      : resource),
++        values_(resource_), present_(resource_), overflow_(resource_) {}
++
++  ManifoldOpIndexMap(const ManifoldOpIndexMap &other)
++      : resource_(other.resource_),
++        values_(other.values_,
++                std::pmr::polymorphic_allocator<std::uint32_t>{resource_}),
++        present_(other.present_,
++                 std::pmr::polymorphic_allocator<std::uint8_t>{resource_}),
++        overflow_(other.overflow_), opCountHint_(other.opCountHint_),
++        size_(other.size_), allocationFailure_(other.allocationFailure_),
++        generation_(other.generation_) {}
++  ManifoldOpIndexMap &operator=(const ManifoldOpIndexMap &other) {
++    if (this == &other) return *this;
++    std::pmr::vector<std::uint32_t> values(
++        other.values_,
++        std::pmr::polymorphic_allocator<std::uint32_t>{resource_});
++    std::pmr::vector<std::uint8_t> present(
++        other.present_,
++        std::pmr::polymorphic_allocator<std::uint8_t>{resource_});
++    FlatU32Map<std::uint32_t> overflow(other.overflow_, resource_);
++    values_.swap(values);
++    present_.swap(present);
++    overflow_          = std::move(overflow);
++    opCountHint_       = other.opCountHint_;
++    size_              = other.size_;
++    allocationFailure_ = other.allocationFailure_;
++    ++generation_;
++    return *this;
++  }
++  ManifoldOpIndexMap(ManifoldOpIndexMap &&other) noexcept
++      : resource_(other.resource_), values_(std::move(other.values_)),
++        present_(std::move(other.present_)),
++        overflow_(std::move(other.overflow_)), opCountHint_(other.opCountHint_),
++        size_(std::exchange(other.size_, 0)),
++        allocationFailure_(other.allocationFailure_),
++        generation_(other.generation_ + 1U) {
++    ++other.generation_;
++  }
++  ManifoldOpIndexMap &operator=(ManifoldOpIndexMap &&other) noexcept {
++    if (this != &other) {
++      const auto nextGeneration = generation_ + 1U;
++      this->~ManifoldOpIndexMap();
++      std::construct_at(this, std::move(other));
++      generation_ = nextGeneration;
++    }
++    return *this;
++  }
++
++  [[nodiscard]] std::optional<std::size_t> opCountHint() const noexcept {
++    return opCountHint_;
++  }
++  ManifoldOpIndexMap *setOpCountHint(std::optional<std::size_t> hint) noexcept {
++    if (opCountHint_ != hint) {
++      opCountHint_ = hint;
++      ++generation_;
++    }
++    return this;
++  }
++  [[nodiscard]] std::optional<std::uint32_t>
++  find(std::uint32_t op) const noexcept {
++    if (op == 0) return std::nullopt;
++    const auto offset = static_cast<std::size_t>(op - 1U);
++    if (offset < values_.size() && isPresent(offset)) return values_[offset];
++    const auto it = overflow_.find(op);
++    return it == overflow_.end() ? std::nullopt
++                                 : std::optional<std::uint32_t>{it->second};
++  }
++  [[nodiscard]] bool contains(std::uint32_t op) const noexcept {
++    return find(op).has_value();
++  }
++  [[nodiscard]] std::size_t size() const noexcept { return size_; }
++  [[nodiscard]] bool empty() const noexcept { return size_ == 0; }
++  [[nodiscard]] std::size_t denseValueCapacity() const noexcept {
++    return values_.size();
++  }
++  [[nodiscard]] std::size_t densePresenceBytes() const noexcept {
++    return present_.size();
++  }
++  [[nodiscard]] std::size_t overflowBucketCapacity() const noexcept {
++    return overflow_.capacity();
++  }
++
++  [[nodiscard]] std::expected<PreparedInsert, PrepareFailure>
++  prepareInsert(std::uint32_t op) noexcept {
++    if (op == 0) return std::unexpected{PrepareFailure::InvalidOperationIndex};
++    if (contains(op)) return std::unexpected{PrepareFailure::AlreadyPresent};
++    const auto bound = denseBound();
++    if (!bound) return std::unexpected{bound.error()};
++    const auto offset = static_cast<std::size_t>(op - 1U);
++    if (static_cast<std::uint64_t>(op) < *bound) {
++      if (offset >= values_.size() && !grow(offset + 1U))
++        return std::unexpected{allocationFailure_};
++      ++generation_;
++      return PreparedInsert(this, generation_, op, true, offset, std::nullopt);
++    }
++    auto token = overflow_.prepareInsert(op);
++    if (!token) return std::unexpected{mapFailure(token.error())};
++    ++generation_;
++    return PreparedInsert(
++        this, generation_, op, false, 0,
++        std::optional<FlatU32Map<std::uint32_t>::PreparedInsert>{
++            std::move(*token)});
++  }
++  [[nodiscard]] bool commitInsert(PreparedInsert &&token, std::uint32_t op,
++                                  std::uint32_t value) noexcept {
++    if (token.owner_ != this || token.generation_ != generation_ ||
++        token.op_ != op)
++      return false;
++    if (token.dense_) {
++      if (token.offset_ >= values_.size() || isPresent(token.offset_))
++        return false;
++      values_[token.offset_] = value;
++      setPresent(token.offset_);
++    } else {
++      if (!token.overflow_ ||
++          !overflow_.commitInsert(std::move(*token.overflow_), value))
++        return false;
++    }
++    ++size_;
++    ++generation_;
++    return true;
++  }
++  bool emplace(std::uint32_t op, std::uint32_t value) noexcept {
++    if (contains(op)) return false;
++    auto prepared = prepareInsert(op);
++    return prepared && commitInsert(std::move(*prepared), op, value);
++  }
++  friend bool operator==(const ManifoldOpIndexMap &a,
++                         const ManifoldOpIndexMap &b) noexcept {
++    if (a.size_ != b.size_) return false;
++    for (std::size_t offset = 0; offset < a.values_.size(); ++offset) {
++      if (a.isPresent(offset)) {
++        const auto op = static_cast<std::uint32_t>(offset + 1U);
++        if (b.find(op) != a.values_[offset]) return false;
++      }
++    }
++    for (const auto &[op, value] : a.overflow_) {
++      if (b.find(op) != value) return false;
++    }
++    return true;
++  }
++
++private:
++  [[nodiscard]] std::expected<std::uint64_t, PrepareFailure>
++  denseBound() const noexcept {
++    const auto n = opCountHint_.value_or(minimumDenseOpCountHint);
++    if (static_cast<std::uint64_t>(n) >
++        std::numeric_limits<std::uint64_t>::max() / 2U)
++      return std::unexpected{PrepareFailure::CapacityOverflow};
++    return static_cast<std::uint64_t>(2U) * static_cast<std::uint64_t>(n);
++  }
++  static PrepareFailure mapFailure(FlatU32MapPrepareFailure reason) noexcept {
++    return reason == FlatU32MapPrepareFailure::AllocationUnavailable
++               ? PrepareFailure::AllocationUnavailable
++               : PrepareFailure::CapacityOverflow;
++  }
++  bool grow(std::size_t count) noexcept {
++    allocationFailure_ = PrepareFailure::CapacityOverflow;
++    if (count > std::numeric_limits<std::size_t>::max() / sizeof(std::uint32_t))
++      return false;
++    try {
++      std::pmr::vector<std::uint32_t> values(resource_);
++      std::pmr::vector<std::uint8_t> present(resource_);
++      const auto current = values_.size();
++      const auto doubled =
++          current == 0 ? std::size_t{64}
++          : current > std::numeric_limits<std::size_t>::max() / 2U
++              ? std::numeric_limits<std::size_t>::max()
++              : current * 2U;
++      const auto grown = std::max(count, doubled);
++      if (grown > std::numeric_limits<std::size_t>::max() - 7U) return false;
++      values.resize(grown);
++      present.resize((grown + 7U) / 8U);
++      std::copy(values_.begin(), values_.end(), values.begin());
++      std::copy(present_.begin(), present_.end(), present.begin());
++      values_.swap(values);
++      present_.swap(present);
++      ++generation_;
++      return true;
++    } catch (const std::bad_alloc &) {
++      allocationFailure_ = PrepareFailure::AllocationUnavailable;
++    } catch (const std::length_error &) {
++      allocationFailure_ = PrepareFailure::CapacityOverflow;
++    }
++    return false;
++  }
++  bool isPresent(std::size_t offset) const noexcept {
++    return (present_[offset / 8U] & (1U << (offset % 8U))) != 0;
++  }
++  void setPresent(std::size_t offset) noexcept {
++    present_[offset / 8U] |= static_cast<std::uint8_t>(1U << (offset % 8U));
++  }
++  std::pmr::memory_resource *resource_;
++  std::pmr::vector<std::uint32_t> values_;
++  std::pmr::vector<std::uint8_t> present_;
++  FlatU32Map<std::uint32_t> overflow_;
++  std::optional<std::size_t> opCountHint_;
++  std::size_t size_{0};
++  PrepareFailure allocationFailure_{PrepareFailure::CapacityOverflow};
++  std::uint64_t generation_{0};
++};
++
++} // namespace zigzag::detail
++#endif
+diff --git a/tests/xuzz/prepared_u32_unordered_map_test.cpp b/tests/xuzz/prepared_u32_unordered_map_test.cpp
+new file mode 100644
+index 00000000..a38c81d0
+--- /dev/null
++++ b/tests/xuzz/prepared_u32_unordered_map_test.cpp
+@@ -0,0 +1,370 @@
++#include <gtest/gtest.h>
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <limits>
++#include <memory_resource>
++#include <new>
++#include <optional>
++#include <type_traits>
++#include <utility>
++
++#include "common/xanadu/zigzag/prepared_u32_unordered_map.hpp"
++
++namespace {
++
++class FailingResource final : public std::pmr::memory_resource {
++public:
++  void failAfter(const std::size_t successful) noexcept {
++    remaining_ = successful;
++    attempts_  = 0;
++    failing_   = true;
++  }
++  void allow() noexcept { failing_ = false; }
++  [[nodiscard]] std::size_t attempts() const noexcept { return attempts_; }
++
++private:
++  void *do_allocate(const std::size_t bytes,
++                    const std::size_t alignment) override {
++    ++attempts_;
++    if (failing_) {
++      if (remaining_ == 0) throw std::bad_alloc{};
++      --remaining_;
++    }
++    return std::pmr::new_delete_resource()->allocate(bytes, alignment);
++  }
++  void do_deallocate(void *ptr, const std::size_t bytes,
++                     const std::size_t alignment) override {
++    std::pmr::new_delete_resource()->deallocate(ptr, bytes, alignment);
++  }
++  [[nodiscard]] bool
++  do_is_equal(const std::pmr::memory_resource &other) const noexcept override {
++    return this == &other;
++  }
++  std::size_t remaining_{0};
++  std::size_t attempts_{0};
++  bool failing_{false};
++};
++
++class OwnershipResource final : public std::pmr::memory_resource {
++public:
++  void failAllocations() noexcept { failAllocations_ = true; }
++  [[nodiscard]] bool ownershipIntact() const noexcept {
++    return ownershipIntact_;
++  }
++
++private:
++  void *do_allocate(const std::size_t bytes,
++                    const std::size_t alignment) override {
++    if (failAllocations_) throw std::bad_alloc{};
++    void *const allocation =
++        std::pmr::new_delete_resource()->allocate(bytes, alignment);
++    if (allocationCount_ == allocations_.size()) std::terminate();
++    allocations_[allocationCount_++] = allocation;
++    return allocation;
++  }
++  void do_deallocate(void *ptr, const std::size_t bytes,
++                     const std::size_t alignment) override {
++    bool found = false;
++    for (std::size_t i = 0; i < allocationCount_; ++i) {
++      if (allocations_[i] == ptr) {
++        allocations_[i] = nullptr;
++        found           = true;
++        break;
++      }
++    }
++    ownershipIntact_ &= found;
++    std::pmr::new_delete_resource()->deallocate(ptr, bytes, alignment);
++  }
++  [[nodiscard]] bool
++  do_is_equal(const std::pmr::memory_resource &other) const noexcept override {
++    return this == &other;
++  }
++
++  std::array<void *, 64> allocations_{};
++  std::size_t allocationCount_{0};
++  bool ownershipIntact_{true};
++  bool failAllocations_{false};
++};
++
++using Map = zigzag::detail::PreparedU32UnorderedMap<std::uint32_t>;
++static_assert(!std::is_aggregate_v<Map::PreparedInsert>);
++static_assert(!std::is_copy_constructible_v<Map::PreparedInsert>);
++static_assert(std::is_move_constructible_v<Map::PreparedInsert>);
++
++bool insert(Map &map, const std::uint32_t key, const std::uint32_t value) {
++  auto prepared = map.prepareInsert(key);
++  return prepared && map.commitInsert(std::move(*prepared), value);
++}
++
++std::size_t prepareAllocationCount(const std::size_t existingEntries) {
++  FailingResource resource;
++  Map map(&resource);
++  for (std::size_t i = 1; i <= existingEntries; ++i) {
++    if (!insert(map, static_cast<std::uint32_t>(i),
++                static_cast<std::uint32_t>(i * 10U)))
++      return 0U;
++  }
++  const auto before = resource.attempts();
++  const auto token =
++      map.prepareInsert(static_cast<std::uint32_t>(existingEntries + 1U));
++  return token ? resource.attempts() - before : 0U;
++}
++
++std::size_t entriesBeforeNextBucketGrowth() {
++  Map map;
++  std::size_t count = 0;
++  while (static_cast<float>(map.size() + 1U) <=
++         static_cast<float>(map.capacity()) * map.maxLoadFactor()) {
++    ++count;
++    if (!insert(map, static_cast<std::uint32_t>(count),
++                static_cast<std::uint32_t>(count * 10U)))
++      return 0U;
++  }
++  return count;
++}
++
++std::size_t copyAssignmentAllocationCount() {
++  FailingResource destinationResource;
++  FailingResource sourceResource;
++  Map destination(&destinationResource);
++  Map source(&sourceResource);
++  if (!insert(destination, 1, 11) || !insert(source, 2, 22) ||
++      !insert(source, 3, 33))
++    return 0U;
++  destinationResource.failAfter(std::numeric_limits<std::size_t>::max());
++  destination = source;
++  return destinationResource.attempts();
++}
++
++TEST(PreparedU32UnorderedMapTest, PreparedTokensAreOpaqueAndOwnerBound) {
++  FailingResource firstResource;
++  FailingResource secondResource;
++  Map first(&firstResource);
++  Map second(&secondResource);
++  auto token = first.prepareInsert(7);
++  ASSERT_TRUE(token);
++  EXPECT_FALSE(second.commitInsert(std::move(*token), 70));
++  EXPECT_TRUE(second.empty());
++  ASSERT_TRUE(first.commitInsert(std::move(*token), 70));
++  ASSERT_NE(first.find(7), first.end());
++  EXPECT_EQ(first.find(7)->second, 70U);
++}
++
++TEST(PreparedU32UnorderedMapTest,
++     MoveAssignmentReleasesNodeWithOriginalResource) {
++  OwnershipResource firstResource;
++  OwnershipResource secondResource;
++  Map first(&firstResource);
++  Map second(&secondResource);
++  auto firstToken  = first.prepareInsert(1);
++  auto secondToken = second.prepareInsert(2);
++  ASSERT_TRUE(firstToken);
++  ASSERT_TRUE(secondToken);
++
++  firstResource.failAllocations();
++  secondResource.failAllocations();
++  *firstToken = std::move(*secondToken);
++
++  EXPECT_FALSE(first.commitInsert(std::move(*firstToken), 10));
++  ASSERT_TRUE(second.commitInsert(std::move(*firstToken), 20));
++  EXPECT_FALSE(second.commitInsert(std::move(*secondToken), 30));
++  EXPECT_EQ(second.find(2)->second, 20U);
++  EXPECT_TRUE(firstResource.ownershipIntact());
++  EXPECT_TRUE(secondResource.ownershipIntact());
++}
++
++TEST(PreparedU32UnorderedMapTest, PreparationPreservesColdReservation) {
++  FailingResource resource;
++  Map map(&resource);
++  ASSERT_TRUE(map.reserveFor(128));
++  const auto buckets = map.capacity();
++  for (std::uint32_t key = 1; key <= 4; ++key) {
++    auto prepared = map.prepareInsert(key);
++    ASSERT_TRUE(prepared);
++    EXPECT_EQ(map.capacity(), buckets);
++    resource.failAfter(0);
++    ASSERT_TRUE(map.commitInsert(std::move(*prepared), key * 10));
++    EXPECT_EQ(resource.attempts(), 0U);
++    resource.allow();
++  }
++  EXPECT_EQ(map.capacity(), buckets);
++}
++
++TEST(PreparedU32UnorderedMapTest, IncrementalGrowthPreservesEntries) {
++  Map map;
++  constexpr std::uint32_t entries = 512U;
++  for (std::uint32_t key = 1; key <= entries; ++key)
++    ASSERT_TRUE(insert(map, key, key * 10));
++
++  EXPECT_EQ(map.size(), entries);
++  for (std::uint32_t key = 1; key <= entries; ++key) {
++    const auto found = map.find(key);
++    ASSERT_NE(found, map.end());
++    EXPECT_EQ(found->second, key * 10);
++  }
++}
++
++TEST(PreparedU32UnorderedMapTest, PrepareExtractsAndCommitAllocatesNothing) {
++  FailingResource resource;
++  Map map(&resource);
++  for (std::uint32_t key = 1; key <= 512U; ++key) {
++    auto prepared = map.prepareInsert(key);
++    ASSERT_TRUE(prepared);
++    EXPECT_EQ(map.size(), static_cast<std::size_t>(key - 1U));
++    EXPECT_FALSE(map.contains(key));
++    resource.failAfter(0);
++    ASSERT_TRUE(map.commitInsert(std::move(*prepared), key * 10U));
++    EXPECT_EQ(resource.attempts(), 0U);
++    resource.allow();
++    EXPECT_EQ(map.size(), static_cast<std::size_t>(key));
++    EXPECT_EQ(map.find(key)->second, key * 10U);
++  }
++}
++
++TEST(PreparedU32UnorderedMapTest,
++     CommitAfterRehashPreparationAllocatesNothing) {
++  FailingResource resource;
++  Map map(&resource);
++  const auto existingEntries = entriesBeforeNextBucketGrowth();
++  ASSERT_GT(existingEntries, 0U);
++  for (std::size_t i = 1; i <= existingEntries; ++i)
++    ASSERT_TRUE(insert(map, static_cast<std::uint32_t>(i),
++                       static_cast<std::uint32_t>(i * 10U)));
++  const auto oldBuckets = map.capacity();
++  auto prepared =
++      map.prepareInsert(static_cast<std::uint32_t>(existingEntries + 1U));
++  ASSERT_TRUE(prepared);
++  EXPECT_GT(map.capacity(), oldBuckets);
++  EXPECT_EQ(map.size(), existingEntries);
++  EXPECT_FALSE(map.contains(static_cast<std::uint32_t>(existingEntries + 1U)));
++  resource.failAfter(0);
++  ASSERT_TRUE(map.commitInsert(std::move(*prepared), 0x1234U));
++  EXPECT_EQ(resource.attempts(), 0U);
++  EXPECT_EQ(map.find(static_cast<std::uint32_t>(existingEntries + 1U))->second,
++            0x1234U);
++}
++
++TEST(PreparedU32UnorderedMapTest,
++     AllocationFailuresPreserveFirstAndRehashMaps) {
++  const auto growthPoint = entriesBeforeNextBucketGrowth();
++  ASSERT_GT(growthPoint, 0U);
++  for (const auto existingEntries : {std::size_t{0}, growthPoint}) {
++    const auto allocationPoints = prepareAllocationCount(existingEntries);
++    ASSERT_GT(allocationPoints, 0U);
++    for (std::size_t failAt = 0; failAt < allocationPoints; ++failAt) {
++      FailingResource resource;
++      Map map(&resource);
++      for (std::size_t i = 1; i <= existingEntries; ++i)
++        ASSERT_TRUE(insert(map, static_cast<std::uint32_t>(i),
++                           static_cast<std::uint32_t>(i * 10U)));
++      const auto oldBuckets = map.capacity();
++      resource.failAfter(failAt);
++      const auto result =
++          map.prepareInsert(static_cast<std::uint32_t>(existingEntries + 1U));
++      ASSERT_FALSE(result) << "existing=" << existingEntries
++                           << " allocation=" << failAt;
++      EXPECT_EQ(result.error(), Map::PrepareFailure::AllocationUnavailable);
++      EXPECT_EQ(map.size(), existingEntries);
++      EXPECT_GE(map.capacity(), oldBuckets);
++      for (std::size_t i = 1; i <= existingEntries; ++i)
++        EXPECT_EQ(map.find(static_cast<std::uint32_t>(i))->second, i * 10U);
++
++      resource.allow();
++      ASSERT_TRUE(insert(map, static_cast<std::uint32_t>(existingEntries + 1U),
++                         0x1234U));
++      EXPECT_EQ(
++          map.find(static_cast<std::uint32_t>(existingEntries + 1U))->second,
++          0x1234U);
++    }
++  }
++}
++
++TEST(PreparedU32UnorderedMapTest, DuplicatePrepareDoesNotReplaceOldValue) {
++  Map map;
++  ASSERT_TRUE(insert(map, 9, 5));
++  auto duplicate = map.prepareInsert(9);
++  ASSERT_FALSE(duplicate);
++  EXPECT_EQ(duplicate.error(), Map::PrepareFailure::AlreadyPresent);
++  EXPECT_EQ(map.find(9)->second, 5U);
++}
++
++TEST(PreparedU32UnorderedMapTest,
++     MoveInvalidatesTokensAndMovedFromCanBeReused) {
++  Map source;
++  auto old = source.prepareInsert(1);
++  ASSERT_TRUE(old);
++  Map moved(std::move(source));
++  EXPECT_FALSE(source.commitInsert(std::move(*old), 11));
++  auto fresh = source.prepareInsert(1);
++  ASSERT_TRUE(fresh);
++  EXPECT_TRUE(source.commitInsert(std::move(*fresh), 12));
++  EXPECT_EQ(source.find(1)->second, 12U);
++  EXPECT_TRUE(moved.empty());
++}
++
++TEST(PreparedU32UnorderedMapTest, MoveAssignmentInvalidatesBothTokenOwners) {
++  Map destination;
++  auto staleDestination = destination.prepareInsert(3);
++  ASSERT_TRUE(staleDestination);
++  Map source;
++  auto staleSource = source.prepareInsert(4);
++  ASSERT_TRUE(staleSource);
++
++  destination = std::move(source);
++  EXPECT_FALSE(destination.commitInsert(std::move(*staleDestination), 33));
++  EXPECT_FALSE(source.commitInsert(std::move(*staleSource), 44));
++  auto fresh = source.prepareInsert(4);
++  ASSERT_TRUE(fresh);
++  EXPECT_TRUE(source.commitInsert(std::move(*fresh), 45));
++  EXPECT_EQ(source.find(4)->second, 45U);
++}
++
++TEST(PreparedU32UnorderedMapTest, ZeroKeyIsRejectedBeforeMapMutation) {
++  Map map;
++  const auto result = map.prepareInsert(0);
++  ASSERT_FALSE(result);
++  EXPECT_EQ(result.error(), Map::PrepareFailure::InvalidOperationIndex);
++  EXPECT_TRUE(map.empty());
++}
++
++TEST(PreparedU32UnorderedMapTest, CopyAssignmentUsesDestinationResource) {
++  FailingResource destinationResource;
++  Map destination(&destinationResource);
++  {
++    FailingResource sourceResource;
++    Map source(&sourceResource);
++    ASSERT_TRUE(insert(source, 2, 22));
++    destination = source;
++  }
++  for (std::uint32_t key = 3; key < 30; ++key)
++    ASSERT_TRUE(insert(destination, key, key * 10));
++  EXPECT_EQ(destination.find(2)->second, 22U);
++  EXPECT_EQ(destination.find(29)->second, 290U);
++}
++
++TEST(PreparedU32UnorderedMapTest, CopyAssignmentFailurePreservesDestination) {
++  const auto allocationPoints = copyAssignmentAllocationCount();
++  ASSERT_GT(allocationPoints, 0U);
++  for (std::size_t failAt = 0; failAt < allocationPoints; ++failAt) {
++    FailingResource destinationResource;
++    Map destination(&destinationResource);
++    ASSERT_TRUE(insert(destination, 1, 11));
++
++    FailingResource sourceResource;
++    Map source(&sourceResource);
++    ASSERT_TRUE(insert(source, 2, 22));
++    ASSERT_TRUE(insert(source, 3, 33));
++
++    destinationResource.failAfter(failAt);
++    EXPECT_THROW(destination = source, std::bad_alloc);
++    destinationResource.allow();
++    ASSERT_EQ(destination.size(), 1U);
++    EXPECT_EQ(destination.find(1)->second, 11U);
++    EXPECT_EQ(destination.find(2), destination.end());
++    EXPECT_EQ(source.find(3)->second, 33U);
++  }
++}
++
++} // namespace
+diff --git a/tests/xuzz/flat_cell_map_test.cpp b/tests/xuzz/flat_cell_map_test.cpp
+new file mode 100644
+index 00000000..b8bcdcad
+--- /dev/null
++++ b/tests/xuzz/flat_cell_map_test.cpp
+@@ -0,0 +1,322 @@
++#include <concepts>
++#include <cstddef>
++#include <cstdint>
++#include <iterator>
++#include <limits>
++#include <memory_resource>
++#include <new>
++#include <optional>
++#include <ranges>
++#include <type_traits>
++#include <utility>
++
++#include <gtest/gtest.h>
++
++#include "common/xanadu/zigzag/flat_u32_map.hpp"
++#include "common/xanadu/zigzag/manifold.hpp"
++
++namespace {
++
++class FailOnceResource final : public std::pmr::memory_resource {
++public:
++  void failAfter(const std::size_t successfulAllocations) noexcept {
++    remainingBeforeFailure_ = successfulAllocations;
++  }
++
++  void denyAllocations(const bool deny) noexcept { denyAllocations_ = deny; }
++  [[nodiscard]] std::size_t allocationAttempts() const noexcept {
++    return allocationAttempts_;
++  }
++
++private:
++  void *do_allocate(const std::size_t bytes,
++                    const std::size_t alignment) override {
++    ++allocationAttempts_;
++    if (denyAllocations_) {
++      throw std::bad_alloc{};
++    }
++    if (remainingBeforeFailure_) {
++      if (*remainingBeforeFailure_ == 0) {
++        remainingBeforeFailure_.reset();
++        throw std::bad_alloc{};
++      }
++      --*remainingBeforeFailure_;
++    }
++    return std::pmr::new_delete_resource()->allocate(bytes, alignment);
++  }
++
++  void do_deallocate(void *const pointer, const std::size_t bytes,
++                     const std::size_t alignment) override {
++    std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
++  }
++
++  [[nodiscard]] bool
++  do_is_equal(const std::pmr::memory_resource &other) const noexcept override {
++    return this == &other;
++  }
++
++  std::optional<std::size_t> remainingBeforeFailure_;
++  std::size_t allocationAttempts_{0};
++  bool denyAllocations_{false};
++};
++
++using zigzag::StructureBirthInfo;
++using zigzag::detail::FlatU32Map;
++using zigzag::detail::FlatU32MapPrepareFailure;
++
++static_assert(std::forward_iterator<FlatU32Map<std::uint32_t>::iterator>);
++static_assert(std::forward_iterator<FlatU32Map<std::uint32_t>::const_iterator>);
++static_assert(sizeof(FlatU32Map<StructureBirthInfo>::value_type) == 48);
++
++StructureBirthInfo birth(const std::uint32_t op) {
++  return StructureBirthInfo{.opIndex     = op,
++                            .kind        = xanadu::StructureKind::Cell,
++                            .containerOp = 0,
++                            .nameSpan    = {}};
++}
++
++template <class Value, class Input>
++bool insert(FlatU32Map<Value> &map, const std::uint32_t key, Input &&input) {
++  const Value value = static_cast<Value>(std::forward<Input>(input));
++  auto prepared     = map.prepareInsert(key);
++  return prepared && map.commitInsert(std::move(*prepared), value);
++}
++
++TEST(FlatU32MapTest, StoresEveryUint32KeyWithExplicitOccupancy) {
++  FlatU32Map<std::uint32_t> map;
++  ASSERT_TRUE(insert(map, 0, 0));
++  ASSERT_TRUE(insert(map, std::numeric_limits<std::uint32_t>::max(), 9));
++
++  ASSERT_TRUE(map.contains(0));
++  ASSERT_EQ(map.find(0)->second, 0U);
++  ASSERT_EQ(map.find(std::numeric_limits<std::uint32_t>::max())->second, 9U);
++  EXPECT_FALSE(map.contains(1));
++  EXPECT_LE(map.size(),
++            FlatU32Map<std::uint32_t>::maxLiveEntries(map.capacity()));
++}
++
++TEST(FlatU32MapTest, EraseReusesTombstonesAndInvalidatesPreparedTokens) {
++  FlatU32Map<std::uint32_t> map;
++  ASSERT_TRUE(insert(map, 11, 22));
++  auto stale = map.prepareInsert(33);
++  ASSERT_TRUE(stale);
++
++  ASSERT_TRUE(map.erase(11));
++  EXPECT_FALSE(map.erase(11));
++  EXPECT_FALSE(map.commitInsert(std::move(*stale), 44));
++  ASSERT_TRUE(insert(map, 33, 44));
++  EXPECT_FALSE(map.contains(11));
++  EXPECT_EQ(map.find(33)->second, 44U);
++
++  map.clear();
++  EXPECT_TRUE(map.empty());
++  EXPECT_FALSE(map.contains(33));
++  EXPECT_TRUE(insert(map, 0, 0));
++}
++
++TEST(FlatU32MapTest, MoveInvalidatesPreparedTokenBeforeMovedFromReuse) {
++  FlatU32Map<std::uint32_t> source;
++  auto stale = source.prepareInsert(42);
++  ASSERT_TRUE(stale);
++  FlatU32Map<std::uint32_t> moved(std::move(source));
++
++  auto fresh = source.prepareInsert(42);
++  ASSERT_TRUE(fresh);
++  EXPECT_FALSE(source.commitInsert(std::move(*stale), 99));
++  ASSERT_TRUE(source.commitInsert(std::move(*fresh), 77));
++  EXPECT_TRUE(source.contains(42));
++  EXPECT_EQ(source.find(42)->second, 77U);
++  EXPECT_FALSE(moved.contains(42));
++}
++
++TEST(FlatU32MapTest, MoveAssignmentInvalidatesSourceTokensBeforeReuse) {
++  FlatU32Map<std::uint32_t> source;
++  auto stale = source.prepareInsert(21);
++  ASSERT_TRUE(stale);
++  FlatU32Map<std::uint32_t> target;
++  target = std::move(source);
++
++  auto fresh = source.prepareInsert(21);
++  ASSERT_TRUE(fresh);
++  EXPECT_FALSE(source.commitInsert(std::move(*stale), 99));
++  ASSERT_TRUE(source.commitInsert(std::move(*fresh), 55));
++  EXPECT_EQ(source.find(21)->second, 55U);
++  EXPECT_FALSE(target.contains(21));
++}
++
++TEST(FlatU32MapTest, CopyMoveAndEqualityIgnoreBucketOrder) {
++  FlatU32Map<StructureBirthInfo> left;
++  FlatU32Map<StructureBirthInfo> right;
++  ASSERT_TRUE(insert(left, 7, birth(7)));
++  ASSERT_TRUE(insert(left, 9001, birth(9001)));
++  ASSERT_TRUE(insert(right, 9001, birth(9001)));
++  ASSERT_TRUE(insert(right, 7, birth(7)));
++  EXPECT_TRUE(left == right);
++
++  auto copied = left;
++  EXPECT_TRUE(copied == left);
++  FlatU32Map<StructureBirthInfo> assigned;
++  assigned = right;
++  EXPECT_TRUE(assigned == right);
++  ASSERT_TRUE(copied.erase(7));
++  EXPECT_FALSE(copied == left);
++  ASSERT_TRUE(insert(copied, 7, birth(7)));
++  EXPECT_TRUE(copied == left);
++
++  FlatU32Map<StructureBirthInfo> moved;
++  moved = std::move(copied);
++  EXPECT_TRUE(moved == left);
++  EXPECT_TRUE(copied.empty());
++  EXPECT_TRUE(insert(copied, 0, birth(0)));
++}
++
++TEST(FlatU32MapTest, MutableAndConstIteratorsExposeRealPairReferences) {
++  FlatU32Map<std::uint32_t> map;
++  ASSERT_TRUE(insert(map, 4, 10));
++  ASSERT_TRUE(insert(map, 8, 20));
++
++  for (auto &[key, value] : map) {
++    static_assert(std::is_const_v<std::remove_reference_t<decltype(key)>>);
++    static_assert(!std::is_const_v<std::remove_reference_t<decltype(value)>>);
++    value += key;
++  }
++  auto mutableIt = map.find(4);
++  ASSERT_NE(mutableIt, map.end());
++  mutableIt->second = 99;
++  EXPECT_EQ(mutableIt->first, 4U);
++  EXPECT_EQ(mutableIt->second, 99U);
++
++  const auto &constMap = map;
++  for (const auto &[key, value] : constMap) {
++    static_assert(std::is_const_v<std::remove_reference_t<decltype(key)>>);
++    static_assert(std::is_const_v<std::remove_reference_t<decltype(value)>>);
++    EXPECT_NE(key, 0U);
++    EXPECT_NE(value, 0U);
++  }
++  const auto constIt = constMap.find(8);
++  ASSERT_NE(constIt, constMap.end());
++  EXPECT_EQ(constIt->first, 8U);
++  EXPECT_EQ(constIt->second, 28U);
++  EXPECT_EQ(std::ranges::distance(map), 2);
++}
++
++TEST(FlatU32MapTest, PreparedCommitDoesNotAllocate) {
++  FailOnceResource resource;
++  FlatU32Map<std::uint32_t> map{&resource};
++  auto prepared = map.prepareInsert(42);
++  ASSERT_TRUE(prepared);
++  const auto attemptsBeforeCommit = resource.allocationAttempts();
++
++  resource.denyAllocations(true);
++  ASSERT_TRUE(map.commitInsert(std::move(*prepared), 84));
++  EXPECT_EQ(resource.allocationAttempts(), attemptsBeforeCommit);
++  resource.denyAllocations(false);
++  EXPECT_EQ(map.find(42)->second, 84U);
++}
++
++TEST(FlatU32MapTest, GrowthAllocationFailurePreservesLogicalContents) {
++  for (std::size_t failAfter = 0; failAfter < 2; ++failAfter) {
++    FailOnceResource resource;
++    FlatU32Map<std::uint32_t> map{&resource};
++    for (std::uint32_t key = 0; key < 5; ++key) {
++      ASSERT_TRUE(insert(map, key, key * 3U));
++    }
++    ASSERT_EQ(map.size(), 5U);
++    const auto oldCapacity = map.capacity();
++    ASSERT_EQ(oldCapacity, 8U);
++
++    resource.failAfter(failAfter);
++    const auto failed = map.prepareInsert(77);
++    ASSERT_FALSE(failed);
++    EXPECT_EQ(failed.error(), FlatU32MapPrepareFailure::AllocationUnavailable);
++    EXPECT_EQ(map.size(), 5U);
++    EXPECT_EQ(map.capacity(), oldCapacity);
++    for (std::uint32_t key = 0; key < 5; ++key) {
++      ASSERT_TRUE(map.contains(key));
++      EXPECT_EQ(map.find(key)->second, key * 3U);
++    }
++    EXPECT_FALSE(map.contains(77));
++
++    ASSERT_TRUE(insert(map, 77, 231));
++    EXPECT_EQ(map.size(), 6U);
++    EXPECT_TRUE(map.contains(77));
++  }
++}
++
++TEST(FlatU32MapTest, TombstoneCleanupFailurePreservesLogicalContents) {
++  for (std::size_t failAfter = 0; failAfter < 2; ++failAfter) {
++    FailOnceResource resource;
++    FlatU32Map<std::uint32_t> map{&resource};
++    for (std::uint32_t key = 0; key < 5; ++key) {
++      ASSERT_TRUE(insert(map, key, key + 10U));
++    }
++    ASSERT_TRUE(map.erase(0));
++    ASSERT_EQ(map.size(), 4U);
++    const auto oldCapacity = map.capacity();
++
++    resource.failAfter(failAfter);
++    const auto failed = map.prepareInsert(77);
++    ASSERT_FALSE(failed);
++    EXPECT_EQ(failed.error(), FlatU32MapPrepareFailure::AllocationUnavailable);
++    EXPECT_EQ(map.size(), 4U);
++    EXPECT_EQ(map.capacity(), oldCapacity);
++    EXPECT_FALSE(map.contains(0));
++    for (std::uint32_t key = 1; key < 5; ++key) {
++      ASSERT_TRUE(map.contains(key));
++      EXPECT_EQ(map.find(key)->second, key + 10U);
++    }
++    ASSERT_TRUE(insert(map, 77, 87));
++  }
++}
++
++TEST(FlatU32MapTest, CopyConstructionAllocationFailureKeepsSourceUsable) {
++  for (std::size_t failAfter = 0; failAfter < 2; ++failAfter) {
++    FailOnceResource resource;
++    FlatU32Map<std::uint32_t> source{&resource};
++    ASSERT_TRUE(insert(source, 5, 15));
++    ASSERT_TRUE(insert(source, 6, 18));
++
++    resource.failAfter(failAfter);
++    bool allocationFailed = false;
++    try {
++      const FlatU32Map<std::uint32_t> copy{source};
++      (void)copy;
++    } catch (const std::bad_alloc &) {
++      allocationFailed = true;
++    }
++    EXPECT_TRUE(allocationFailed);
++    ASSERT_EQ(source.size(), 2U);
++    EXPECT_EQ(source.find(5)->second, 15U);
++    EXPECT_EQ(source.find(6)->second, 18U);
++  }
++}
++
++TEST(FlatU32MapTest, CopyAssignmentFailureLeavesTargetUnchanged) {
++  FlatU32Map<std::uint32_t> source;
++  ASSERT_TRUE(insert(source, 100, 200));
++  ASSERT_TRUE(insert(source, 101, 201));
++
++  FailOnceResource resource;
++  FlatU32Map<std::uint32_t> target{&resource};
++  ASSERT_TRUE(insert(target, 1, 2));
++  ASSERT_TRUE(insert(target, 3, 4));
++  resource.failAfter(1); // entries allocation succeeds; state allocation fails
++
++  EXPECT_THROW(target = source, std::bad_alloc);
++  EXPECT_EQ(target.size(), 2U);
++  ASSERT_TRUE(target.contains(1));
++  EXPECT_EQ(target.find(1)->second, 2U);
++  ASSERT_TRUE(target.contains(3));
++  EXPECT_EQ(target.find(3)->second, 4U);
++  EXPECT_FALSE(target.contains(100));
++}
++
++TEST(FlatU32MapTest, DuplicatePrepareIsDistinctFromCapacityFailure) {
++  FlatU32Map<std::uint32_t> map;
++  ASSERT_TRUE(insert(map, 3, 8));
++  const auto duplicate = map.prepareInsert(3);
++  ASSERT_FALSE(duplicate);
++  EXPECT_EQ(duplicate.error(), FlatU32MapPrepareFailure::AlreadyPresent);
++}
++
++} // namespace
+diff --git a/tests/xuzz/manifold_lookup_test.cpp b/tests/xuzz/manifold_lookup_test.cpp
+new file mode 100644
+index 00000000..2ca0e2fd
+--- /dev/null
++++ b/tests/xuzz/manifold_lookup_test.cpp
+@@ -0,0 +1,370 @@
++#include <gtest/gtest.h>
++
++#include <array>
++#include <cstddef>
++#include <cstdint>
++#include <functional>
++#include <limits>
++#include <memory_resource>
++#include <new>
++#include <optional>
++#include <stdexcept>
++#include <type_traits>
++#include <utility>
++#include <vector>
++
++#include "common/xanadu/osmic_walker.hpp"
++#include "common/xanadu/zigzag/manifold_lookup.hpp"
++
++namespace {
++
++static_assert(
++    !std::is_aggregate_v<zigzag::detail::ManifoldOpIndexMap::PreparedInsert>);
++static_assert(!std::is_copy_constructible_v<
++              zigzag::detail::ManifoldOpIndexMap::PreparedInsert>);
++static_assert(std::is_move_constructible_v<
++              zigzag::detail::ManifoldOpIndexMap::PreparedInsert>);
++
++TEST(OsmicWalkerCountTest, EmptyPathReportsZeroBeforeReturning) {
++  bool called       = false;
++  const auto walked = xanadu::OsmicWalker::walkPathCustomWithCount(
++      0, 0,
++      [](std::uint32_t) -> const xanadu::CompactOpNode * {
++        ADD_FAILURE() << "empty path must not read a node";
++        return nullptr;
++      },
++      [](std::uint32_t, const xanadu::CompactOpNode &) {
++        ADD_FAILURE() << "empty path must not visit a node";
++      },
++      [&called](const std::size_t count) {
++        called = true;
++        EXPECT_EQ(count, 0U);
++      });
++  EXPECT_TRUE(walked);
++  EXPECT_TRUE(called);
++
++  called = false;
++  EXPECT_TRUE(xanadu::OsmicWalker::walkPathCustomWithCount(
++      2, 2,
++      [](std::uint32_t) -> const xanadu::CompactOpNode * {
++        ADD_FAILURE() << "equal endpoints must not read a node";
++        return nullptr;
++      },
++      [](std::uint32_t, const xanadu::CompactOpNode &) {
++        ADD_FAILURE() << "equal endpoints must not visit a node";
++      },
++      [&called](const std::size_t count) {
++        called = true;
++        EXPECT_EQ(count, 0U);
++      }));
++  EXPECT_TRUE(called);
++}
++
++TEST(OsmicWalkerCountTest, ValidPathCountArrivesBeforeVisitor) {
++  std::array<xanadu::CompactOpNode, 4> nodes{};
++  nodes[1].parentIndex = 0;
++  nodes[2].parentIndex = 1;
++  nodes[3].parentIndex = 2;
++  std::vector<std::uint32_t> visits;
++  std::size_t callbackCount = 0;
++  const auto walked         = xanadu::OsmicWalker::walkPathCustomWithCount(
++      0, 3,
++      [&nodes](const std::uint32_t index) -> const xanadu::CompactOpNode         *{
++        return index < nodes.size() ? &nodes[index] : nullptr;
++      },
++      [&visits](const std::uint32_t index, const xanadu::CompactOpNode &) {
++        visits.push_back(index);
++      },
++      [&callbackCount, &visits](const std::size_t count) {
++        callbackCount = count;
++        EXPECT_TRUE(visits.empty());
++      });
++  EXPECT_TRUE(walked);
++  EXPECT_EQ(callbackCount, 3U);
++  EXPECT_EQ(visits, (std::vector<std::uint32_t>{1, 2, 3}));
++}
++
++TEST(OsmicWalkerCountTest, InvalidAncestryDoesNotReportCountOrVisit) {
++  std::array<xanadu::CompactOpNode, 4> nodes{};
++  nodes[1].parentIndex = 0;
++  nodes[2].parentIndex = 1;
++  nodes[3].parentIndex = 2;
++  bool callbackCalled  = false;
++  std::vector<std::uint32_t> visits;
++  const auto walked = xanadu::OsmicWalker::walkPathCustomWithCount(
++      9, 3,
++      [&nodes](const std::uint32_t index) -> const xanadu::CompactOpNode * {
++        return index < nodes.size() ? &nodes[index] : nullptr;
++      },
++      [&visits](const std::uint32_t index, const xanadu::CompactOpNode &) {
++        visits.push_back(index);
++      },
++      [&callbackCalled](std::size_t) { callbackCalled = true; });
++  EXPECT_FALSE(walked);
++  EXPECT_FALSE(callbackCalled);
++  EXPECT_TRUE(visits.empty());
++}
++
++TEST(OsmicWalkerCountTest, NonzeroToZeroIsInvalidWithoutCallbacks) {
++  bool countCalled = false;
++  std::vector<std::uint32_t> visits;
++  const auto walked = xanadu::OsmicWalker::walkPathCustomWithCount(
++      2, 0,
++      [](std::uint32_t) -> const xanadu::CompactOpNode * {
++        ADD_FAILURE() << "invalid ancestry must not read a node";
++        return nullptr;
++      },
++      [&visits](std::uint32_t index, const xanadu::CompactOpNode &) {
++        visits.push_back(index);
++      },
++      [&countCalled](std::size_t) { countCalled = true; });
++  EXPECT_FALSE(walked);
++  EXPECT_FALSE(countCalled);
++  EXPECT_TRUE(visits.empty());
++}
++
++TEST(OsmicWalkerCountTest, ThrowingCountCallbackPrecedesAnyVisitorEffect) {
++  std::array<xanadu::CompactOpNode, 2> nodes{};
++  nodes[1].parentIndex = 0;
++  bool visited         = false;
++  EXPECT_THROW(
++      xanadu::OsmicWalker::walkPathCustomWithCount(
++          0, 1,
++          [&nodes](const std::uint32_t index) -> const xanadu::CompactOpNode * {
++            return &nodes[index];
++          },
++          [&visited](std::uint32_t, const xanadu::CompactOpNode &) {
++            visited = true;
++          },
++          [](std::size_t) { throw std::runtime_error("stop before visit"); }),
++      std::runtime_error);
++  EXPECT_FALSE(visited);
++}
++
++class FailingResource final : public std::pmr::memory_resource {
++public:
++  void failAfter(std::size_t successfulAllocations) noexcept {
++    remaining_ = successfulAllocations;
++    attempts_  = 0;
++    failing_   = true;
++  }
++  void allow() noexcept { failing_ = false; }
++  [[nodiscard]] std::size_t attempts() const noexcept { return attempts_; }
++
++private:
++  void *do_allocate(std::size_t bytes, std::size_t alignment) override {
++    ++attempts_;
++    if (failing_) {
++      if (remaining_ == 0) throw std::bad_alloc{};
++      --remaining_;
++    }
++    return std::pmr::new_delete_resource()->allocate(bytes, alignment);
++  }
++  void do_deallocate(void *pointer, std::size_t bytes,
++                     std::size_t alignment) override {
++    std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
++  }
++  bool
++  do_is_equal(const std::pmr::memory_resource &other) const noexcept override {
++    return this == &other;
++  }
++
++  std::size_t remaining_{0};
++  std::size_t attempts_{0};
++  bool failing_{false};
++};
++
++using zigzag::detail::LookupPrepareFailure;
++using zigzag::detail::ManifoldOpIndexMap;
++
++TEST(ManifoldOpIndexMapTest, MapsZeroValuesAndArbitraryHighOperationKeys) {
++  ManifoldOpIndexMap map;
++  auto dense = map.prepareInsert(8191);
++  ASSERT_TRUE(dense);
++  ASSERT_TRUE(map.commitInsert(std::move(*dense), 8191, 0));
++  auto high = map.prepareInsert(8192);
++  ASSERT_TRUE(high);
++  ASSERT_TRUE(map.commitInsert(std::move(*high), 8192, 0));
++  auto next = map.prepareInsert(8193);
++  ASSERT_TRUE(next);
++  ASSERT_TRUE(map.commitInsert(std::move(*next), 8193, 17));
++
++  EXPECT_EQ(map.find(8192), 0U);
++  EXPECT_EQ(map.find(8193), 17U);
++  EXPECT_EQ(map.find(0), std::nullopt);
++  EXPECT_EQ(map.find(8191), 0U);
++  EXPECT_EQ(map.find(8190), std::nullopt);
++  const auto zero = map.prepareInsert(0);
++  ASSERT_FALSE(zero);
++  EXPECT_EQ(zero.error(), LookupPrepareFailure::InvalidOperationIndex);
++  auto copy = map;
++  EXPECT_TRUE(copy == map);
++  ManifoldOpIndexMap moved(std::move(copy));
++  EXPECT_TRUE(moved == map);
++}
++
++TEST(ManifoldOpIndexMapTest, HintChangesDoNotLoseExistingMappings) {
++  ManifoldOpIndexMap map;
++  map.setOpCountHint(1);
++  auto first = map.prepareInsert(8192);
++  ASSERT_TRUE(first);
++  ASSERT_TRUE(map.commitInsert(std::move(*first), 8192, 12));
++
++  map.setOpCountHint(5000);
++  auto second = map.prepareInsert(8193);
++  ASSERT_TRUE(second);
++  ASSERT_TRUE(map.commitInsert(std::move(*second), 8193, 13));
++  EXPECT_EQ(map.find(8192), 12U);
++  EXPECT_EQ(map.find(8193), 13U);
++}
++
++TEST(ManifoldOpIndexMapTest, UnknownFallbackDiffersFromKnownShortPath) {
++  ManifoldOpIndexMap unknown;
++  EXPECT_EQ(unknown.opCountHint(), std::nullopt);
++  auto unknownToken = unknown.prepareInsert(1);
++  ASSERT_TRUE(unknownToken);
++  ASSERT_TRUE(unknown.commitInsert(std::move(*unknownToken), 1, 11));
++  EXPECT_GT(unknown.denseValueCapacity(), 0U);
++
++  ManifoldOpIndexMap knownZero;
++  knownZero.setOpCountHint(0U);
++  EXPECT_EQ(knownZero.opCountHint(), std::optional<std::size_t>{0U});
++  auto zeroToken = knownZero.prepareInsert(1);
++  ASSERT_TRUE(zeroToken);
++  ASSERT_TRUE(knownZero.commitInsert(std::move(*zeroToken), 1, 12));
++  EXPECT_EQ(knownZero.denseValueCapacity(), 0U);
++  EXPECT_EQ(knownZero.find(1), 12U);
++
++  ManifoldOpIndexMap knownShort;
++  knownShort.setOpCountHint(1U);
++  auto shortToken = knownShort.prepareInsert(3);
++  ASSERT_TRUE(shortToken);
++  ASSERT_TRUE(knownShort.commitInsert(std::move(*shortToken), 3, 13));
++  EXPECT_EQ(knownShort.denseValueCapacity(), 0U);
++}
++
++TEST(ManifoldOpIndexMapTest, PreparedTokensAreOpaqueAndOwnerBound) {
++  FailingResource firstResource;
++  FailingResource secondResource;
++  ManifoldOpIndexMap first(&firstResource);
++  ManifoldOpIndexMap second(&secondResource);
++  auto token = first.prepareInsert(1);
++  ASSERT_TRUE(token);
++  EXPECT_FALSE(second.commitInsert(std::move(*token), 1, 99));
++  EXPECT_TRUE(second.empty());
++  EXPECT_FALSE(first.commitInsert(std::move(*token), 2, 99));
++  ASSERT_TRUE(first.commitInsert(std::move(*token), 1, 17));
++  EXPECT_EQ(first.find(1), 17U);
++}
++
++TEST(ManifoldOpIndexMapTest, MoveInvalidatesStaleAndAllowsFreshToken) {
++  ManifoldOpIndexMap source;
++  source.setOpCountHint(1);
++  auto stale = source.prepareInsert(1);
++  ASSERT_TRUE(stale);
++  ManifoldOpIndexMap moved(std::move(source));
++  auto fresh = source.prepareInsert(1);
++  ASSERT_TRUE(fresh);
++  EXPECT_FALSE(source.commitInsert(std::move(*stale), 1, 99));
++  ASSERT_TRUE(source.commitInsert(std::move(*fresh), 1, 7));
++  EXPECT_EQ(source.find(1), 7U);
++  EXPECT_FALSE(moved.contains(1));
++}
++
++TEST(ManifoldOpIndexMapTest, MoveAssignmentInvalidatesBothOwnersTokens) {
++  ManifoldOpIndexMap destination;
++  destination.setOpCountHint(1);
++  auto staleDestination = destination.prepareInsert(1);
++  ASSERT_TRUE(staleDestination);
++  ManifoldOpIndexMap source;
++  source.setOpCountHint(1);
++  auto staleSource = source.prepareInsert(2);
++  ASSERT_TRUE(staleSource);
++  destination = std::move(source);
++
++  EXPECT_FALSE(destination.commitInsert(std::move(*staleDestination), 1, 99));
++  auto freshDestination = destination.prepareInsert(1);
++  ASSERT_TRUE(freshDestination);
++  ASSERT_TRUE(destination.commitInsert(std::move(*freshDestination), 1, 8));
++  auto freshSource = source.prepareInsert(2);
++  ASSERT_TRUE(freshSource);
++  EXPECT_FALSE(source.commitInsert(std::move(*staleSource), 2, 99));
++  ASSERT_TRUE(source.commitInsert(std::move(*freshSource), 2, 9));
++  EXPECT_EQ(destination.find(1), 8U);
++  EXPECT_EQ(source.find(2), 9U);
++}
++
++TEST(ManifoldOpIndexMapTest,
++     CopyAssignmentKeepsDestinationResourceAfterSourceDies) {
++  FailingResource destinationResource;
++  ManifoldOpIndexMap destination(&destinationResource);
++  {
++    FailingResource sourceResource;
++    ManifoldOpIndexMap source(&sourceResource);
++    source.setOpCountHint(1);
++    auto dense = source.prepareInsert(1);
++    ASSERT_TRUE(dense);
++    ASSERT_TRUE(source.commitInsert(std::move(*dense), 1, 5));
++    auto sparse = source.prepareInsert(8192);
++    ASSERT_TRUE(sparse);
++    ASSERT_TRUE(source.commitInsert(std::move(*sparse), 8192, 6));
++    destination = source;
++  }
++
++  EXPECT_EQ(destination.find(1), 5U);
++  EXPECT_EQ(destination.find(8192), 6U);
++  for (std::uint32_t op = 8193; op < 8300; ++op) {
++    auto prepared = destination.prepareInsert(op);
++    ASSERT_TRUE(prepared);
++    ASSERT_TRUE(destination.commitInsert(std::move(*prepared), op, op));
++  }
++}
++
++std::size_t opIndexMapCopyAssignmentAllocationCount() {
++  FailingResource destinationResource;
++  FailingResource sourceResource;
++  ManifoldOpIndexMap destination(&destinationResource);
++  ManifoldOpIndexMap source(&sourceResource);
++  destination.setOpCountHint(1);
++  source.setOpCountHint(1);
++  auto old = destination.prepareInsert(1);
++  if (!old || !destination.commitInsert(std::move(*old), 1, 9)) return 0U;
++  auto dense = source.prepareInsert(1);
++  if (!dense || !source.commitInsert(std::move(*dense), 1, 17)) return 0U;
++  auto sparse = source.prepareInsert(8192);
++  if (!sparse || !source.commitInsert(std::move(*sparse), 8192, 18)) return 0U;
++  destinationResource.failAfter(std::numeric_limits<std::size_t>::max());
++  destination = source;
++  return destinationResource.attempts();
++}
++
++TEST(ManifoldOpIndexMapTest, CopyAssignmentFailurePreservesDestinationEntries) {
++  const auto allocationPoints = opIndexMapCopyAssignmentAllocationCount();
++  ASSERT_GT(allocationPoints, 0U);
++  for (std::size_t failAt = 0; failAt < allocationPoints; ++failAt) {
++    FailingResource destinationResource;
++    ManifoldOpIndexMap destination(&destinationResource);
++    auto old = destination.prepareInsert(1);
++    ASSERT_TRUE(old);
++    ASSERT_TRUE(destination.commitInsert(std::move(*old), 1, 9));
++
++    FailingResource sourceResource;
++    ManifoldOpIndexMap source(&sourceResource);
++    source.setOpCountHint(1);
++    auto dense = source.prepareInsert(1);
++    ASSERT_TRUE(dense);
++    ASSERT_TRUE(source.commitInsert(std::move(*dense), 1, 17));
++    auto sparse = source.prepareInsert(8192);
++    ASSERT_TRUE(sparse);
++    ASSERT_TRUE(source.commitInsert(std::move(*sparse), 8192, 18));
++
++    destinationResource.failAfter(failAt);
++    EXPECT_THROW(destination = source, std::bad_alloc);
++    destinationResource.allow();
++    EXPECT_EQ(destination.find(1), 9U);
++    EXPECT_EQ(destination.find(8192), std::nullopt);
++    EXPECT_EQ(source.find(8192), 18U);
++  }
++}
++
++} // namespace
+diff --git a/tools/lookup_memory_probe.cpp b/tools/lookup_memory_probe.cpp
+new file mode 100644
+index 00000000..0123e31d
+--- /dev/null
++++ b/tools/lookup_memory_probe.cpp
+@@ -0,0 +1,222 @@
++#include "common/xanadu/zigzag/manifold.hpp"
++#include "common/xanadu/zigzag/manifold_lookup.hpp"
++
++#include <algorithm>
++#include <charconv>
++#include <cstddef>
++#include <cstdint>
++#include <cstdlib>
++#include <iostream>
++#include <map>
++#include <memory_resource>
++#include <string_view>
++#include <unordered_map>
++#include <vector>
++
++namespace {
++
++class CountingResource final : public std::pmr::memory_resource {
++public:
++  [[nodiscard]] std::size_t currentBytes() const noexcept { return current_; }
++  [[nodiscard]] std::size_t peakBytes() const noexcept { return peak_; }
++  void resetPeak() noexcept { peak_ = current_; }
++
++private:
++  void *do_allocate(std::size_t bytes, std::size_t alignment) override {
++    void *const pointer =
++        std::pmr::new_delete_resource()->allocate(bytes, alignment);
++    bool inserted = false;
++    try {
++      inserted = allocations_.emplace(pointer, bytes).second;
++    } catch (...) {
++      std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
++      throw;
++    }
++    if (!inserted) {
++      std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
++      throw std::bad_alloc{};
++    }
++    current_ += bytes;
++    peak_ = std::max(peak_, current_);
++    return pointer;
++  }
++  void do_deallocate(void *pointer, std::size_t bytes,
++                     std::size_t alignment) override {
++    const auto it = allocations_.find(pointer);
++    if (it != allocations_.end()) {
++      bytes = it->second;
++      current_ -= it->second;
++      allocations_.erase(it);
++    }
++    std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
++  }
++  bool
++  do_is_equal(const std::pmr::memory_resource &other) const noexcept override {
++    return this == &other;
++  }
++
++  // The ledger intentionally uses the default allocator, outside the measured
++  // PMR resource, so observing allocations does not recursively observe itself.
++  std::map<void *, std::size_t> allocations_;
++  std::size_t current_{0};
++  std::size_t peak_{0};
++};
++
++std::vector<std::uint32_t> keysFor(const std::string_view pattern,
++                                   const std::size_t requested,
++                                   std::uint32_t &hint) {
++  std::vector<std::uint32_t> keys;
++  const auto count = pattern == "sparse-in-dense"
++                         ? std::min<std::size_t>(requested, 4096U)
++                     : pattern.starts_with("sparse-branch-")
++                         ? std::min<std::size_t>(requested, 3U)
++                         : requested;
++  keys.reserve(count);
++  if (pattern == "sequential") {
++    hint = static_cast<std::uint32_t>(count);
++    for (std::size_t i = 1; i <= count; ++i)
++      keys.push_back(static_cast<std::uint32_t>(i));
++  } else if (pattern == "clustered") {
++    for (std::size_t i = 0; i < count; ++i) {
++      keys.push_back(
++          static_cast<std::uint32_t>(1U + (i / 16U) * 1024U + (i % 16U)));
++    }
++    hint = static_cast<std::uint32_t>(count);
++  } else if (pattern == "sparse-in-dense") {
++    hint = 4096U;
++    for (std::size_t i = 0; i < count; ++i) {
++      keys.push_back(
++          static_cast<std::uint32_t>(1U + ((i + 1U) * 8190U) / (count + 1U)));
++    }
++  } else if (pattern == "sparse-high") {
++    hint = 4096U;
++    for (std::size_t i = 0; i < count; ++i)
++      keys.push_back(0x80000000U + static_cast<std::uint32_t>(2U * i));
++  } else if (pattern.starts_with("sparse-branch-")) {
++    hint = pattern == "sparse-branch-global-hint-10k" ? 10'000U : 148U;
++    constexpr std::uint32_t branchKeys[]{1U, 5'000U, 9'999U};
++    for (std::size_t i = 0; i < count; ++i) keys.push_back(branchKeys[i]);
++  }
++  return keys;
++}
++
++void measureByRef(const std::string_view pattern, const std::size_t requested) {
++  std::uint32_t hint = 0;
++  const auto keys    = keysFor(pattern, requested, hint);
++  CountingResource denseResource;
++  zigzag::detail::ManifoldOpIndexMap dense(&denseResource);
++  dense.setOpCountHint(hint);
++  for (const auto key : keys) {
++    auto token = dense.prepareInsert(key);
++    if (!token || !dense.commitInsert(std::move(*token), key, key ^ 0x55U))
++      std::abort();
++  }
++  std::cout << "byRef," << pattern << ',' << keys.size() << ',' << hint << ','
++            << dense.size() << ',' << dense.denseValueCapacity() << ','
++            << dense.densePresenceBytes() << ','
++            << dense.overflowBucketCapacity() << ','
++            << denseResource.currentBytes() << ',' << denseResource.peakBytes()
++            << ',';
++
++  CountingResource unorderedResource;
++  std::pmr::unordered_map<std::uint32_t, std::uint32_t> unordered{
++      &unorderedResource};
++  for (const auto key : keys) unordered.emplace(key, key ^ 0x55U);
++  std::cout << unordered.bucket_count() << ','
++            << unorderedResource.currentBytes() << ','
++            << unorderedResource.peakBytes() << ',';
++  CountingResource reservedResource;
++  std::pmr::unordered_map<std::uint32_t, std::uint32_t> reserved{
++      &reservedResource};
++  reserved.reserve(keys.size());
++  for (const auto key : keys) reserved.emplace(key, key ^ 0x55U);
++  std::cout << reserved.bucket_count() << ',' << reservedResource.currentBytes()
++            << ',' << reservedResource.peakBytes() << '\n';
++}
++
++void measureBirths(const std::string_view pattern,
++                   const std::size_t requested) {
++  std::uint32_t ignoredHint = 0;
++  const auto keys           = keysFor(pattern, requested, ignoredHint);
++  CountingResource preparedResource;
++  zigzag::detail::PreparedU32UnorderedMap<zigzag::StructureBirthInfo> prepared{
++      &preparedResource};
++  for (const auto key : keys) {
++    auto token = prepared.prepareInsert(key);
++    const zigzag::StructureBirthInfo value{
++        .opIndex     = key,
++        .kind        = xanadu::StructureKind::Cell,
++        .containerOp = 0,
++        .nameSpan    = {},
++    };
++    if (!token || !prepared.commitInsert(std::move(*token), value))
++      std::abort();
++  }
++  std::cout << "births-prepared," << pattern << ',' << keys.size() << ','
++            << (keys.empty() ? 0U : keys.back()) << ',' << prepared.size()
++            << ',' << prepared.capacity() << ",0,"
++            << sizeof(zigzag::StructureBirthInfo) << ','
++            << preparedResource.currentBytes() << ','
++            << preparedResource.peakBytes() << ',';
++
++  CountingResource unorderedResource;
++  std::pmr::unordered_map<std::uint32_t, zigzag::StructureBirthInfo> unordered{
++      &unorderedResource};
++  for (const auto key : keys) {
++    unordered.emplace(key, zigzag::StructureBirthInfo{
++                               .opIndex     = key,
++                               .kind        = xanadu::StructureKind::Cell,
++                               .containerOp = 0,
++                               .nameSpan    = {},
++                           });
++  }
++  std::cout << unordered.bucket_count() << ','
++            << unorderedResource.currentBytes() << ','
++            << unorderedResource.peakBytes() << ',';
++  CountingResource reservedResource;
++  std::pmr::unordered_map<std::uint32_t, zigzag::StructureBirthInfo> reserved{
++      &reservedResource};
++  reserved.reserve(keys.size());
++  for (const auto key : keys) {
++    reserved.emplace(key, zigzag::StructureBirthInfo{
++                              .opIndex     = key,
++                              .kind        = xanadu::StructureKind::Cell,
++                              .containerOp = 0,
++                              .nameSpan    = {},
++                          });
++  }
++  std::cout << reserved.bucket_count() << ',' << reservedResource.currentBytes()
++            << ',' << reservedResource.peakBytes() << '\n';
++}
++
++} // namespace
++
++int main(int argc, char **argv) {
++  std::size_t count = 100'000U;
++  if (argc > 2) {
++    std::cerr << "usage: lookup_memory_probe [count<=1000000]\n";
++    return 2;
++  }
++  if (argc == 2) {
++    const std::string_view arg{argv[1]};
++    const auto [end, error] =
++        std::from_chars(arg.data(), arg.data() + arg.size(), count);
++    if (error != std::errc{} || end != arg.data() + arg.size() || count == 0 ||
++        count > 1'000'000U) {
++      std::cerr << "count must be in [1, 1000000]\n";
++      return 2;
++    }
++  }
++  std::cout
++      << "kind,pattern,requested_or_live,hint_or_max_key,live,primary_capacity,"
++         "secondary_bytes_or_staging_buckets,overflow_or_mapped_value_bytes,"
++         "current_"
++         "bytes,peak_bytes,unordered_buckets,unordered_current,unordered_peak,"
++         "reserved_buckets,reserved_current,reserved_peak\n";
++  for (const auto pattern :
++       {"sequential", "clustered", "sparse-in-dense", "sparse-high",
++        "sparse-branch-local-hint", "sparse-branch-global-hint-10k"}) {
++    measureByRef(pattern, count);
++    measureBirths(pattern, count);
++  }
++}

@@ -527,13 +527,20 @@ Store::rebuildResolved(const MicroversionId &version,
 
 zigzag::Manifold
 Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
-  zigzag::Manifold folded;
+  zigzag::Manifold folded(lookupResource_);
   folded.setStore(const_cast<Store *>(this));
-  OsmicWalker::walkAncestral(
-      opsSpool, index, [&folded](std::uint32_t idx, const CompactOpNode &node) {
-        // A cold fold keeps going past a refusal: the manifold counts it in
-        // refusedOps(), which is where a caller checking honesty looks.
-        std::ignore = folded.applyStructure(idx, node);
+  OsmicWalker::walkAncestralWithCount(
+      opsSpool, index,
+      [&folded](const std::size_t pathCount) {
+        folded.setOpCountHint(pathCount);
+      },
+      [&folded](std::uint32_t idx, const CompactOpNode &node) {
+        // Semantic refusals remain counted and non-fatal. Lookup exhaustion
+        // aborts the walk so a partial manifold cannot escape.
+        const auto result = folded.applyStructure(idx, node);
+        if (!result &&
+            result.error() == zigzag::FoldRefusal::LookupCapacityUnavailable)
+          throw zigzag::ManifoldCapacityUnavailable(idx);
       });
   // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
   // the cost of a manifold that was just loaded rather than a best case.
@@ -548,13 +555,22 @@ zigzag::Manifold Store::rebuildManifold(const MicroversionId &version) const {
   }
   // Nothing filed under this name: fold the longest recorded prefix of it, for
   // the same reason rebuild() replays one.
-  zigzag::Manifold folded;
+  zigzag::Manifold folded(lookupResource_);
   folded.setStore(const_cast<Store *>(this));
-  for (const auto &step : version.path()) {
+  const auto path       = version.path();
+  std::size_t pathCount = 0;
+  for (const auto &step : path) {
+    if (opsSpool.get(step) != nullptr) ++pathCount;
+  }
+  folded.setOpCountHint(pathCount);
+  for (const auto &step : path) {
     if (const auto *const node = opsSpool.get(step); nullptr != node) {
       // As above: refusals are counted, not fatal to the fold.
-      std::ignore =
-          folded.applyStructure(opsSpool.indexOf(step).value(), *node);
+      const auto opIndex = opsSpool.indexOf(step).value();
+      const auto result  = folded.applyStructure(opIndex, *node);
+      if (!result &&
+          result.error() == zigzag::FoldRefusal::LookupCapacityUnavailable)
+        throw zigzag::ManifoldCapacityUnavailable(opIndex);
     }
   }
   folded.compact();

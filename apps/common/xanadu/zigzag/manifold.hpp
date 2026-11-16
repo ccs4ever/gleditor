@@ -22,8 +22,10 @@
 #include <expected>
 #include <limits>
 #include <map>
+#include <memory_resource>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -39,6 +41,8 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
+#include "common/xanadu/zigzag/manifold_lookup.hpp"
+#include "common/xanadu/zigzag/prepared_u32_unordered_map.hpp"
 
 namespace xanadu {
 class Store;
@@ -231,7 +235,9 @@ enum class FoldRefusal : std::uint8_t {
                     ///< Slice/Xanadoc Make
   WrongContextKind, ///< Operation applied to an incompatible context kind (e.g.
                     ///< PageBreak on Cell)
-  ContentRunTooLong, ///< A cell's content count does not fit CellSlot
+  ContentRunTooLong,         ///< A cell's content count does not fit CellSlot
+  LookupCapacityUnavailable, ///< Lookup storage could not be prepared
+  InvalidOperationIndex,     ///< Operation zero cannot name a fold step
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -257,6 +263,10 @@ toString(const FoldRefusal refusal) noexcept {
     return "wrong context kind";
   case FoldRefusal::ContentRunTooLong:
     return "content run too long";
+  case FoldRefusal::LookupCapacityUnavailable:
+    return "lookup capacity unavailable";
+  case FoldRefusal::InvalidOperationIndex:
+    return "invalid operation index";
   }
   return "unknown refusal";
 }
@@ -276,6 +286,19 @@ struct AdvanceError {
 };
 
 /// The outcome of folding or stepping: nothing on success, the reason if not.
+class ManifoldCapacityUnavailable final : public std::exception {
+public:
+  explicit ManifoldCapacityUnavailable(std::uint32_t opIndex = 0) noexcept
+      : opIndex_(opIndex) {}
+  [[nodiscard]] std::uint32_t opIndex() const noexcept { return opIndex_; }
+  [[nodiscard]] const char *what() const noexcept override {
+    return "manifold lookup capacity unavailable";
+  }
+
+private:
+  std::uint32_t opIndex_;
+};
+
 using FoldResult    = std::expected<void, FoldRefusal>;
 using AdvanceResult = std::expected<void, AdvanceError>;
 
@@ -385,6 +408,7 @@ using SlotRef = gleditor::cpp26::optional<const CellSlot &>;
 class Manifold {
 public:
   Manifold();
+  explicit Manifold(std::pmr::memory_resource *lookupResource);
   ~Manifold();
   Manifold(const Manifold &other);
   Manifold &operator=(const Manifold &other);
@@ -783,7 +807,9 @@ public:
    * cannot make sense of: a SetLink or SetValue whose subject chain does not
    * reach a cell this manifold holds, a second MakeCell at one index, or --
    * R8's boundary as a bit rather than a convention -- a link whose target or
-   * dimension isEphemeral(). Each refusal bumps refusedOps().
+   * dimension isEphemeral(). Authored semantic refusals bump refusedOps(); a
+   * lookup-capacity refusal leaves the logical fold position and counters
+   * unchanged so the caller can retry or abort.
    *
    * Anything that is not OpKind::Structure is ignored -- and answers success,
    * since there was nothing to refuse -- so a caller may hand over every node
@@ -851,7 +877,11 @@ private:
       bool legacyMode) const;
 
   friend struct ManifoldTestAccess;
-
+  friend class xanadu::Store;
+  Manifold *setOpCountHint(std::size_t hint) noexcept {
+    byRef.setOpCountHint(hint);
+    return this;
+  }
   /// Count @p why and hand it back as the fold's answer.
   FoldResult refuse(const FoldRefusal why) noexcept {
     refusedOps_++;
@@ -882,6 +912,9 @@ private:
   FoldResult spliceContent(std::uint32_t dense, std::uint64_t at,
                            std::uint64_t removing,
                            const xanadu::PrimediaSpan &inserted);
+  FoldResult
+  applyStructureImpl(std::uint32_t opIndex, const xanadu::CompactOpNode &node,
+                     std::optional<std::uint32_t> resolvedCellDense) noexcept;
 
   std::vector<CellSlot> slots;
   /// The CSR arena. A cell's run is grown in place when it is the arena's
@@ -900,7 +933,7 @@ private:
   std::size_t liveContent{0};
   /// Operation index -> dense id, for every operation in a cell's chain and
   /// not only for its birth op -- see slot().
-  std::unordered_map<CellRef, std::uint32_t> byRef;
+  detail::ManifoldOpIndexMap byRef;
   /// Live entries in @ref links. The difference against links.size() is the
   /// dead runs compact() would reclaim.
   std::size_t liveLinks{0};
@@ -911,7 +944,7 @@ private:
   std::uint32_t refusedOps_{0};
   std::vector<CellRef> externalCells_;
   std::uint32_t unresolvedExternals_{0};
-  std::unordered_map<std::uint32_t, StructureBirthInfo> structureBirths_;
+  detail::PreparedU32UnorderedMap<StructureBirthInfo> structureBirths_;
 
   /// dimensions() is a rank walk, and a span has to point at something.
   mutable std::vector<DimRef> dimsCache;

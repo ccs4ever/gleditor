@@ -1,0 +1,715 @@
+--- a/apps/common/xanadu/vortex/vortex_core.hpp
++++ b/apps/common/xanadu/vortex/vortex_core.hpp
+@@ -22,6 +22,7 @@
+ #include <variant>
+ #include <vector>
+ 
++#include "common/xanadu/vortex/operand_list.hpp"
+ #include "common/xanadu/zigzag/arena_manifold.hpp"
+ 
+ namespace zigzag::vortex {
+@@ -283,8 +284,8 @@
+   [[nodiscard]] std::function<CellRef()> cloneGenerator(CellRef source);
+ 
+   // -- Dual-Wing Calling Convention -------------------------------------------
+-  [[nodiscard]] std::vector<CellRef> inputsOf(CellRef opcode) const;
+-  [[nodiscard]] std::vector<CellRef> outputsOf(CellRef opcode) const;
++  [[nodiscard]] OperandList inputsOf(CellRef opcode) const;
++  [[nodiscard]] OperandList outputsOf(CellRef opcode) const;
+   void bindInput(CellRef opcode, CellRef operand);
+   void bindOutput(CellRef opcode, CellRef target);
+ 
+@@ -322,8 +323,7 @@
+   [[nodiscard]] std::optional<DimRef>
+   baseDimensionNamed(std::string_view name) const;
+   /// The operands on @p opcode's input (POS) or output (NEG) wing.
+-  [[nodiscard]] std::vector<CellRef> wingOf(CellRef opcode,
+-                                            DimVector side) const;
++  [[nodiscard]] OperandList wingOf(CellRef opcode, DimVector side) const;
+   /// The conditions on @p opcode's pre (NEG) or post (POS) contract rank.
+   [[nodiscard]] std::vector<CellRef> contractOf(CellRef opcode,
+                                                 DimVector side) const;
+--- a/apps/common/xanadu/vortex/vortex_core.cpp
++++ b/apps/common/xanadu/vortex/vortex_core.cpp
+@@ -379,8 +379,8 @@
+                                   : arena_.base()->dimensionNamed(name);
+ }
+ 
+-std::vector<CellRef> VortexCore::wingOf(const CellRef opcode,
+-                                        const DimVector side) const {
++OperandList VortexCore::wingOf(const CellRef opcode,
++                               const DimVector side) const {
+   // A wing slot holds either an operand reference -- an Int64 naming a cell
+   // the arena can reach -- or is itself the operand, read through its master.
+   const auto operand = [this](const CellRef slot) {
+@@ -393,15 +393,18 @@
+   };
+   const auto first = arena_.linked(opcode, dims_.grab, side);
+   if (!first) return {};
+-  return zigzag::rank(arena_, *first, dims_.step) |
+-         std::views::transform(operand) | std::ranges::to<std::vector>();
+-}
+-
+-std::vector<CellRef> VortexCore::inputsOf(CellRef opcode) const {
++  OperandList result;
++  for (const CellRef slot : zigzag::rank(arena_, *first, dims_.step) |
++                                std::views::transform(operand))
++    result.push_back(slot);
++  return result;
++}
++
++OperandList VortexCore::inputsOf(CellRef opcode) const {
+   return wingOf(opcode, DimVector::POS);
+ }
+ 
+-std::vector<CellRef> VortexCore::outputsOf(CellRef opcode) const {
++OperandList VortexCore::outputsOf(CellRef opcode) const {
+   return wingOf(opcode, DimVector::NEG);
+ }
+ 
+--- a/apps/common/xanadu/vortex/vortex_vm.hpp
++++ b/apps/common/xanadu/vortex/vortex_vm.hpp
+@@ -789,8 +789,8 @@
+   [[nodiscard]] std::optional<std::uint64_t>
+   currentActivationId(CellRef cursor) const;
+   [[nodiscard]] CellRef runtimeSlot(CellRef slot) const;
+-  [[nodiscard]] std::vector<CellRef> inputsOf(CellRef opcode) const;
+-  [[nodiscard]] std::vector<CellRef> outputsOf(CellRef opcode) const;
++  [[nodiscard]] OperandList inputsOf(CellRef opcode) const;
++  [[nodiscard]] OperandList outputsOf(CellRef opcode) const;
+   ExecutionResult prepareTypeContract(OpcodeKind kind, CellRef opcode);
+   ExecutionResult executeResumeInit(CellRef opcode,
+                                     const std::vector<CellValue> &inputs,
+--- a/apps/common/xanadu/vortex/vortex_vm.cpp
++++ b/apps/common/xanadu/vortex/vortex_vm.cpp
+@@ -11,6 +11,7 @@
+ #include <iostream>
+ #include <limits>
+ #include <ranges>
++#include <span>
+ #include <stdexcept>
+ #include <string>
+ #include <tuple>
+@@ -210,7 +211,7 @@
+ }
+ 
+ std::optional<CellRef> resolveCell(
+-    const std::vector<CellRef> &inCells, const std::vector<CellValue> &inputs,
++    std::span<const CellRef> inCells, const std::vector<CellValue> &inputs,
+     const std::unordered_map<CellRef, std::optional<CellRef>> &cellReferences,
+     const std::size_t idx, const ArenaManifold &arena) {
+   if (idx < inCells.size()) {
+@@ -1742,7 +1743,7 @@
+           "stream and iterator registers cannot run in parameter pipelines");
+     }
+ 
+-    std::vector<CellRef> inCells = inputsOf(*pipeOp);
++    auto inCells = inputsOf(*pipeOp);
+     std::vector<CellValue> inVals;
+     if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
+         kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
+@@ -1804,7 +1805,7 @@
+       }
+     }
+ 
+-    std::vector<CellRef> outCells = outputsOf(*pipeOp);
++    auto outCells = outputsOf(*pipeOp);
+     if ((kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
+          kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
+          kind == OpcodeKind::ClearCellRefs || publishesLogicReference(kind)) &&
+@@ -1889,7 +1890,7 @@
+       kind == OpcodeKind::BeginMutationGroup ||
+       kind == OpcodeKind::EndMutationGroup)
+     throw std::invalid_argument("guard opcodes cannot run as conditions");
+-  std::vector<CellRef> inCells = inputsOf(actualClause);
++  auto inCells = inputsOf(actualClause);
+   std::vector<CellValue> inVals;
+   if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
+       kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
+@@ -2935,7 +2936,7 @@
+     break;
+   }
+   case OpcodeKind::Link: {
+-    std::vector<CellRef> inCells = inputsOf(opcode);
++    auto inCells = inputsOf(opcode);
+     if (inCells.size() >= 3 || inputs.size() >= 3) {
+       const auto c =
+           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+@@ -2960,7 +2961,7 @@
+     break;
+   }
+   case OpcodeKind::Break: {
+-    std::vector<CellRef> inCells = inputsOf(opcode);
++    auto inCells = inputsOf(opcode);
+     if (inCells.size() >= 3 || inputs.size() >= 3) {
+       const auto c =
+           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+@@ -2983,8 +2984,8 @@
+     // subject, which is how a stored traversal result feeds a later step.
+     // With a filter pair, a member must have its own link on filterDim to be
+     // included.
+-    std::vector<CellRef> inCells  = core_.inputsOf(opcode);
+-    std::vector<CellRef> outCells = core_.outputsOf(opcode);
++    auto inCells  = core_.inputsOf(opcode);
++    auto outCells = core_.outputsOf(opcode);
+     if (inCells.size() >= 3 || inputs.size() >= 3) {
+       auto subject =
+           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+@@ -3312,8 +3313,8 @@
+     break;
+   }
+   case OpcodeKind::New: {
+-    std::vector<CellRef> inCells  = inputsOf(opcode);
+-    std::vector<CellRef> outCells = outputsOf(opcode);
++    auto inCells  = inputsOf(opcode);
++    auto outCells = outputsOf(opcode);
+     if (inCells.size() >= 3 || inputs.size() >= 3) {
+       auto c = resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+       DimRef d = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
+@@ -3359,7 +3360,7 @@
+     break;
+   }
+   case OpcodeKind::Value: {
+-    std::vector<CellRef> inCells = inputsOf(opcode);
++    auto inCells = inputsOf(opcode);
+     if (!inCells.empty() || !inputs.empty()) {
+       const auto c =
+           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+@@ -3393,7 +3394,7 @@
+     break;
+   }
+   case OpcodeKind::Splice: {
+-    std::vector<CellRef> inCells = inputsOf(opcode);
++    auto inCells = inputsOf(opcode);
+     if (inCells.size() >= 4 || inputs.size() >= 4) {
+       const auto c =
+           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+@@ -3417,8 +3418,8 @@
+     break;
+   }
+   case OpcodeKind::Clone: {
+-    std::vector<CellRef> inCells  = inputsOf(opcode);
+-    std::vector<CellRef> outCells = outputsOf(opcode);
++    auto inCells  = inputsOf(opcode);
++    auto outCells = outputsOf(opcode);
+     if (!inCells.empty() || !inputs.empty()) {
+       const auto c =
+           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+@@ -3698,7 +3699,7 @@
+     break;
+   }
+   case OpcodeKind::Unify: {
+-    std::vector<CellRef> inCells = inputsOf(opcode);
++    auto inCells = inputsOf(opcode);
+     const auto a =
+         resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+     const auto b =
+@@ -3716,7 +3717,7 @@
+     break;
+   }
+   case OpcodeKind::IsVar: {
+-    std::vector<CellRef> inCells = inputsOf(opcode);
++    auto inCells = inputsOf(opcode);
+     const auto c =
+         resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+     if (c) {
+@@ -3750,7 +3751,7 @@
+         functor = std::to_string(toInt(inputs[0]));
+       }
+     }
+-    std::vector<CellRef> inCells = inputsOf(opcode);
++    auto inCells = inputsOf(opcode);
+     std::vector<CellRef> args;
+     std::size_t maxArgs = std::max(inCells.size(), inputs.size());
+     for (std::size_t i = 1; i < maxArgs; ++i) {
+@@ -3773,7 +3774,7 @@
+     break;
+   }
+   case OpcodeKind::Deref: {
+-    std::vector<CellRef> inCells = inputsOf(opcode);
++    auto inCells = inputsOf(opcode);
+     const auto c =
+         resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
+     if (c) {
+--- a/apps/common/xanadu/vortex/vortex_frames.cpp
++++ b/apps/common/xanadu/vortex/vortex_frames.cpp
+@@ -323,13 +323,13 @@
+                                                             : found->second;
+ }
+ 
+-std::vector<CellRef> VortexVM::inputsOf(const CellRef opcode) const {
++OperandList VortexVM::inputsOf(const CellRef opcode) const {
+   auto slots = core_.inputsOf(opcode);
+   for (auto &slot : slots) slot = runtimeSlot(slot);
+   return slots;
+ }
+ 
+-std::vector<CellRef> VortexVM::outputsOf(const CellRef opcode) const {
++OperandList VortexVM::outputsOf(const CellRef opcode) const {
+   auto slots = core_.outputsOf(opcode);
+   for (auto &slot : slots) slot = runtimeSlot(slot);
+   return slots;
+--- a/apps/common/xanadu/vortex/vortex_stdlib.cpp
++++ b/apps/common/xanadu/vortex/vortex_stdlib.cpp
+@@ -915,7 +915,7 @@
+   }
+ 
+   // Fallback: Bind directly to opcode input wings
+-  std::vector<CellRef> inCells = core_.inputsOf(fnOp);
++  auto inCells = core_.inputsOf(fnOp);
+   for (std::size_t i = 0; i < std::min(args.size(), inCells.size()); ++i) {
+     core_.writeValue(inCells[i], 0, std::nullopt, args[i]);
+   }
+@@ -924,7 +924,7 @@
+   if (!execRes.success) {
+     return {};
+   }
+-  std::vector<CellRef> outCells = core_.outputsOf(fnOp);
++  auto outCells = core_.outputsOf(fnOp);
+   std::vector<CellValue> results;
+   results.reserve(outCells.size());
+   for (CellRef outCell : outCells) {
+--- a/apps/common/xanadu/vql/compiler.cpp
++++ b/apps/common/xanadu/vql/compiler.cpp
+@@ -1389,7 +1389,7 @@
+     }
+ 
+     // Inputs
+-    std::vector<CellRef> inCells = core_.inputsOf(cur);
++    auto inCells = core_.inputsOf(cur);
+     if (!inCells.empty()) {
+       out << " in: [";
+       for (std::size_t i = 0; i < inCells.size(); ++i) {
+@@ -1407,7 +1407,7 @@
+     }
+ 
+     // Outputs
+-    std::vector<CellRef> outCells = core_.outputsOf(cur);
++    auto outCells = core_.outputsOf(cur);
+     if (!outCells.empty()) {
+       out << " -> out: [";
+       for (std::size_t i = 0; i < outCells.size(); ++i) {
+--- a/apps/common/xanadu/vpl/compiler.cpp
++++ b/apps/common/xanadu/vpl/compiler.cpp
+@@ -1338,7 +1338,7 @@
+     }
+ 
+     // Inputs
+-    std::vector<CellRef> inCells = core_.inputsOf(cur);
++    auto inCells = core_.inputsOf(cur);
+     if (!inCells.empty()) {
+       out << " in: [";
+       for (std::size_t i = 0; i < inCells.size(); ++i) {
+@@ -1358,7 +1358,7 @@
+     }
+ 
+     // Outputs
+-    std::vector<CellRef> outCells = core_.outputsOf(cur);
++    auto outCells = core_.outputsOf(cur);
+     if (!outCells.empty()) {
+       out << " -> out: [";
+       for (std::size_t i = 0; i < outCells.size(); ++i) {
+--- a/tests/xuzz/vortex_core_test.cpp
++++ b/tests/xuzz/vortex_core_test.cpp
+@@ -350,12 +350,12 @@
+   // Bind outCell as output destination
+   h.core.bindOutput(addOp, outCell);
+ 
+-  std::vector<CellRef> ins = h.core.inputsOf(addOp);
++  auto ins = h.core.inputsOf(addOp);
+   ASSERT_EQ(ins.size(), 2u);
+   EXPECT_EQ(ins[0], outCell);
+   EXPECT_EQ(ins[1], outCell);
+ 
+-  std::vector<CellRef> outs = h.core.outputsOf(addOp);
++  auto outs = h.core.outputsOf(addOp);
+   ASSERT_EQ(outs.size(), 1u);
+   EXPECT_EQ(outs[0], outCell);
+ 
+@@ -365,6 +365,23 @@
+ 
+   // Snapshot-before-write ensures 10 + 10 = 20
+   EXPECT_EQ(h.core.render(outCell), CellValue(static_cast<std::int64_t>(20)));
++}
++
++TEST(VortexCoreTest, OperandWingsPreserveOrderAcrossInlineAndSpillSizes) {
++  TestHarness h;
++  for (const std::size_t count : {0U, 8U, 9U, 128U}) {
++    const CellRef op = h.vm.mintOpcode(OpcodeKind::Nop);
++    std::vector<CellRef> expected;
++    expected.reserve(count);
++    for (std::size_t i = 0; i < count; ++i) {
++      const CellRef operand = h.arena.makeCell();
++      expected.push_back(operand);
++      h.core.bindInput(op, operand);
++    }
++    const auto actual = h.core.inputsOf(op);
++    ASSERT_EQ(actual.size(), expected.size());
++    for (std::size_t i = 0; i < count; ++i) EXPECT_EQ(actual[i], expected[i]);
++  }
+ }
+ 
+ TEST(VortexCoreTest, ParameterPipelinesAlongDSpin) {
+--- a/apps/common/xanadu/vortex/operand_list.hpp
++++ b/apps/common/xanadu/vortex/operand_list.hpp
+@@ -0,0 +1,181 @@
++/**
++ * @file operand_list.hpp
++ * @brief Vortex's eight-inline operand sequence with an unbounded spill.
++ */
++#ifndef COMMON_XANADU_VORTEX_OPERAND_LIST_HPP
++#define COMMON_XANADU_VORTEX_OPERAND_LIST_HPP
++
++#include <gleditor/cpp26_inplace_vector.hpp>
++
++#include <algorithm>
++#include <cstddef>
++#include <iterator>
++#include <memory>
++#include <ranges>
++#include <span>
++#include <type_traits>
++#include <utility>
++#include <vector>
++
++#include "common/xanadu/zigzag/dim_vector.hpp"
++
++namespace zigzag::vortex {
++
++/**
++ * @brief Contiguous small operand sequence used by the Vortex core.
++ *
++ * The allocator parameter exists so the spill's allocation-failure guarantee
++ * can be tested without replacing global allocation in the test executable.
++ * Production uses the default allocator through OperandList.
++ */
++template <class Allocator = std::allocator<CellRef>> class BasicOperandList {
++  static_assert(std::is_empty_v<Allocator>);
++  static_assert(std::is_nothrow_copy_constructible_v<Allocator>);
++  static_assert(std::allocator_traits<Allocator>::is_always_equal::value);
++
++  using Inline = gleditor::cpp26::inplace_vector<CellRef, 8>;
++  using Spill  = std::vector<CellRef, Allocator>;
++
++public:
++  using value_type      = CellRef;
++  using size_type       = std::size_t;
++  using difference_type = std::ptrdiff_t;
++  using reference       = CellRef &;
++  using const_reference = const CellRef &;
++  using iterator        = typename std::span<CellRef>::iterator;
++  using const_iterator  = typename std::span<const CellRef>::iterator;
++
++  BasicOperandList() = default;
++
++  BasicOperandList(const BasicOperandList &other)
++      : inline_(other.inline_), spill_(other.spill_) {}
++
++  BasicOperandList(BasicOperandList &&other) noexcept(
++      std::is_nothrow_move_constructible_v<Inline> &&
++      std::is_nothrow_move_constructible_v<Spill>)
++      : inline_(std::move(other.inline_)), spill_(std::move(other.spill_)) {
++    other.resetMovedFrom();
++  }
++
++  BasicOperandList &operator=(const BasicOperandList &other) {
++    if (this == &other) return *this;
++    if (other.usesSpill()) {
++      Spill copied(other.spill_); // allocate before changing this object
++      inline_.clear();
++      spill_ = std::move(copied);
++    } else {
++      inline_ = other.inline_;
++      resetSpill();
++    }
++    return *this;
++  }
++
++  BasicOperandList &operator=(BasicOperandList &&other) noexcept(
++      std::is_nothrow_move_assignable_v<Inline> &&
++      std::is_nothrow_move_assignable_v<Spill>) {
++    if (this == &other) return *this;
++    inline_ = std::move(other.inline_);
++    spill_  = std::move(other.spill_);
++    other.resetMovedFrom();
++    return *this;
++  }
++
++  [[nodiscard]] bool empty() const noexcept { return size() == 0; }
++  [[nodiscard]] size_type size() const noexcept {
++    return usesSpill() ? spill_.size() : inline_.size();
++  }
++
++  [[nodiscard]] CellRef *data() noexcept {
++    return usesSpill() ? spill_.data() : inline_.data();
++  }
++  [[nodiscard]] const CellRef *data() const noexcept {
++    return usesSpill() ? spill_.data() : inline_.data();
++  }
++
++  [[nodiscard]] std::span<CellRef> span() noexcept { return {data(), size()}; }
++  [[nodiscard]] std::span<const CellRef> span() const noexcept {
++    return {data(), size()};
++  }
++
++  [[nodiscard]] iterator begin() noexcept { return span().begin(); }
++  [[nodiscard]] iterator end() noexcept { return span().end(); }
++  [[nodiscard]] const_iterator begin() const noexcept { return span().begin(); }
++  [[nodiscard]] const_iterator end() const noexcept { return span().end(); }
++  [[nodiscard]] const_iterator cbegin() const noexcept { return begin(); }
++  [[nodiscard]] const_iterator cend() const noexcept { return end(); }
++
++  [[nodiscard]] reference operator[](const size_type index) noexcept {
++    return data()[index];
++  }
++  [[nodiscard]] const_reference
++  operator[](const size_type index) const noexcept {
++    return data()[index];
++  }
++  [[nodiscard]] reference front() noexcept { return data()[0]; }
++  [[nodiscard]] const_reference front() const noexcept { return data()[0]; }
++  [[nodiscard]] reference back() noexcept { return data()[size() - 1]; }
++  [[nodiscard]] const_reference back() const noexcept {
++    return data()[size() - 1];
++  }
++
++  void push_back(CellRef value) {
++    if (usesSpill()) {
++      spill_.push_back(value);
++    } else if (inline_.size() < inlineCapacity) {
++      inline_.push_back(value);
++    } else {
++      spillPrefixAndAppend(value);
++    }
++  }
++
++  void clear() noexcept {
++    if (usesSpill())
++      spill_.clear();
++    else
++      inline_.clear();
++  }
++
++  friend bool operator==(const BasicOperandList &left,
++                         const BasicOperandList &right) {
++    return std::ranges::equal(left.span(), right.span());
++  }
++
++  static constexpr size_type inlineCapacity = 8;
++
++private:
++  [[nodiscard]] bool usesSpill() const noexcept {
++    // The first spill always reserves at least nine cells. Capacity is the
++    // state bit, so this keeps the production object to inline storage +
++    // vector.
++    return spill_.capacity() != 0;
++  }
++
++  void spillPrefixAndAppend(const CellRef value) {
++    Spill next(spill_.get_allocator());
++    next.reserve(inlineCapacity + 1);
++    next.insert(next.end(), std::make_move_iterator(inline_.begin()),
++                std::make_move_iterator(inline_.end()));
++    next.push_back(value);
++    spill_.swap(next);
++    inline_.clear();
++  }
++
++  void resetSpill() noexcept {
++    Spill empty(spill_.get_allocator());
++    spill_.swap(empty);
++  }
++
++  void resetMovedFrom() noexcept {
++    inline_.clear();
++    resetSpill();
++  }
++
++  Inline inline_;
++  Spill spill_;
++};
++
++using OperandList = BasicOperandList<>;
++
++} // namespace zigzag::vortex
++
++#endif // COMMON_XANADU_VORTEX_OPERAND_LIST_HPP
+--- a/tests/xuzz/operand_list_test.cpp
++++ b/tests/xuzz/operand_list_test.cpp
+@@ -0,0 +1,147 @@
++#include <gtest/gtest.h>
++
++#include <cstddef>
++#include <cstdint>
++#include <memory>
++#include <new>
++#include <ranges>
++#include <type_traits>
++#include <vector>
++
++#include "common/xanadu/vortex/operand_list.hpp"
++
++namespace {
++
++template <class T> struct FailingAllocator {
++  using value_type                      = T;
++  static inline bool failNextAllocation = false;
++
++  FailingAllocator() noexcept = default;
++  template <class U> FailingAllocator(const FailingAllocator<U> &) noexcept {}
++
++  [[nodiscard]] T *allocate(const std::size_t count) {
++    if (failNextAllocation) {
++      failNextAllocation = false;
++      throw std::bad_alloc{};
++    }
++    return std::allocator<T>{}.allocate(count);
++  }
++
++  void deallocate(T *memory, const std::size_t count) noexcept {
++    std::allocator<T>{}.deallocate(memory, count);
++  }
++
++  template <class U>
++  bool operator==(const FailingAllocator<U> &) const noexcept {
++    return true;
++  }
++};
++
++using TestOperandList =
++    zigzag::vortex::BasicOperandList<FailingAllocator<zigzag::CellRef>>;
++static_assert(std::ranges::contiguous_range<zigzag::vortex::OperandList>);
++static_assert(std::ranges::sized_range<zigzag::vortex::OperandList>);
++
++TEST(OperandListTest, SupportsInlineBoundarySpillAndLargeWings) {
++  for (const std::size_t count : {0U, 8U, 9U, 1024U}) {
++    zigzag::vortex::OperandList operands;
++    for (std::size_t i = 0; i < count; ++i)
++      operands.push_back(static_cast<zigzag::CellRef>(i + 10));
++
++    ASSERT_EQ(operands.size(), count);
++    EXPECT_EQ(operands.empty(), count == 0);
++    for (std::size_t i = 0; i < count; ++i) EXPECT_EQ(operands[i], i + 10);
++    if (count != 0) {
++      EXPECT_EQ(operands.front(), 10U);
++      EXPECT_EQ(operands.back(), count + 9U);
++    }
++    auto view = operands.span();
++    EXPECT_EQ(view.size(), count);
++    if (count > 1) {
++      view[1] = 777;
++      EXPECT_EQ(operands[1], 777U);
++    }
++  }
++}
++
++TEST(OperandListTest, CopyAndMovePreserveBothRepresentationsAndSourceValidity) {
++  zigzag::vortex::OperandList inlineValues;
++  for (zigzag::CellRef value = 0; value < 8; ++value)
++    inlineValues.push_back(value);
++  auto inlineCopy = inlineValues;
++  EXPECT_EQ(inlineCopy, inlineValues);
++  auto inlineMove = std::move(inlineCopy);
++  EXPECT_EQ(inlineMove, inlineValues);
++  EXPECT_TRUE(inlineCopy.empty());
++  inlineCopy.push_back(81);
++  EXPECT_EQ(inlineCopy.front(), 81U);
++
++  zigzag::vortex::OperandList spilledValues;
++  for (zigzag::CellRef value = 0; value < 64; ++value)
++    spilledValues.push_back(value + 100);
++  auto spilledCopy = spilledValues;
++  EXPECT_EQ(spilledCopy, spilledValues);
++  auto spilledMove = std::move(spilledCopy);
++  EXPECT_EQ(spilledMove, spilledValues);
++  EXPECT_TRUE(spilledCopy.empty());
++  spilledCopy.push_back(999);
++  EXPECT_EQ(spilledCopy.front(), 999U);
++
++  inlineMove = spilledValues;
++  EXPECT_EQ(inlineMove, spilledValues);
++  inlineMove = std::move(inlineCopy);
++  ASSERT_EQ(inlineMove.size(), 1U);
++  EXPECT_EQ(inlineMove.front(), 81U);
++  EXPECT_TRUE(inlineCopy.empty());
++}
++
++TEST(OperandListTest, SpilledCopyAssignmentFailurePreservesInlineDestination) {
++  TestOperandList source;
++  for (std::uint32_t value = 0; value < 12; ++value)
++    source.push_back(value + 100);
++
++  TestOperandList destination;
++  destination.push_back(7);
++  destination.push_back(8);
++  destination.push_back(9);
++
++  FailingAllocator<std::uint32_t>::failNextAllocation = true;
++  EXPECT_THROW(destination = source, std::bad_alloc);
++  ASSERT_EQ(destination.size(), 3U);
++  EXPECT_EQ(destination[0], 7U);
++  EXPECT_EQ(destination[1], 8U);
++  EXPECT_EQ(destination[2], 9U);
++
++  destination = source;
++  EXPECT_EQ(destination.size(), source.size());
++  for (std::size_t i = 0; i < source.size(); ++i)
++    EXPECT_EQ(destination[i], source[i]);
++}
++
++TEST(OperandListTest, NinthElementAllocationFailureLeavesInlinePrefixIntact) {
++  TestOperandList operands;
++  for (std::uint32_t value = 0; value < 8; ++value)
++    operands.push_back(value + 20);
++
++  FailingAllocator<std::uint32_t>::failNextAllocation = true;
++  EXPECT_THROW(operands.push_back(28), std::bad_alloc);
++  ASSERT_EQ(operands.size(), 8U);
++  for (std::size_t i = 0; i < 8; ++i) EXPECT_EQ(operands[i], i + 20);
++
++  operands.push_back(28);
++  ASSERT_EQ(operands.size(), 9U);
++  EXPECT_EQ(operands.back(), 28U);
++  operands.clear();
++  EXPECT_TRUE(operands.empty());
++  operands.push_back(91);
++  ASSERT_EQ(operands.size(), 1U);
++  EXPECT_EQ(operands.front(), 91U);
++}
++
++TEST(OperandListTest, HasNoImplicitVectorConversionAndMeetsTargetSize) {
++  static_assert(!std::is_convertible_v<zigzag::vortex::OperandList,
++                                       std::vector<zigzag::CellRef>>);
++  EXPECT_EQ(sizeof(zigzag::vortex::OperandList), 64U);
++}
++
++} // namespace
+--- a/tests/xuzz/vql_conformance_test.cpp
++++ b/tests/xuzz/vql_conformance_test.cpp
+@@ -79,8 +79,9 @@
+   VQLCompiler compiler(core, vm);
+   const auto compiled = compiler.compile(example("home.vql"));
+   ASSERT_TRUE(compiled.success) << compiled.errorMessage;
+-  EXPECT_EQ(core.inputsOf(compiled.generatedOpcodes.back()),
+-            std::vector<zigzag::CellRef>{core.home()});
++  const auto inputs = core.inputsOf(compiled.generatedOpcodes.back());
++  ASSERT_EQ(inputs.size(), 1U);
++  EXPECT_EQ(inputs.front(), core.home());
+ }
+ 
+ TEST(VQLConformanceTest, CompiledCreationPreservesExistingRankAtExecution) {
+--- a/tests/xuzz/vortex_foreign_mask_export_test.cpp
++++ b/tests/xuzz/vortex_foreign_mask_export_test.cpp
+@@ -145,8 +145,10 @@
+   ASSERT_EQ(secondMaskInputs.size(), 4U);
+   const CellRef firstOwnerSlot  = firstMaskInputs.front();
+   const CellRef secondOwnerSlot = secondMaskInputs.front();
+-  ASSERT_EQ(core.outputsOf(*copy),
+-            (std::vector<CellRef>{firstOwnerSlot, secondOwnerSlot}));
++  const auto copyOutputs        = core.outputsOf(*copy);
++  ASSERT_EQ(copyOutputs.size(), 2U);
++  EXPECT_EQ(copyOutputs[0], firstOwnerSlot);
++  EXPECT_EQ(copyOutputs[1], secondOwnerSlot);
+   EXPECT_TRUE(core.inputsOf(*copy).empty());
+ 
+   const auto axis = arena.dimensionNamed("d.foreign-axis");

@@ -269,6 +269,31 @@ these two maps.
   still pays for committed/initialized pages. Keep the sparse fallback until those results justify
   the dense policy and U-P2 threshold.
 
+**Selected policy (M3 outcome, C2):** `byRef` uses dense storage with a presence bitmap plus a
+sparse overflow table; `structureBirths_` stays a PMR `std::unordered_map`, with node preparation
+through destination `try_emplace` followed by `extract`. Unordered births were chosen on measured
+cost, not on principle: flat births saved allocation calls but requested about 101 MB current and
+152 MB peak PMR bytes at one million rows, against about 64 MB for the unordered map. These are
+allocation requests, not resident memory.
+
+- **Ancestry count hint:** an `optional<size_t>` separates "unknown" from "known zero". A known
+  count uses the tight bound `opIndex < 2 * n`. An unknown count (raw callers) keeps the 4096 floor.
+  `advance` increments a known count only and restores the exact optional if the fold is refused for
+  resource reasons. Overflow stays searchable after the hint changes.
+- **Costs, recorded rather than hidden:** `Manifold` grows from 296 B to 488 B (+192 B fixed). A
+  three-key fixture (`1, 5000, 9999`, known count 148) takes 330 B of lookup storage. A deliberately
+  inflated known hint of 10,000 takes 41,250 B current and 61,875 B peak PMR bytes. That is a sizing
+  control, not the unknown-count fallback.
+- **Measured effect (PGO, paired against P3, exploratory unadjusted intervals):** `fold-text` 10k
+  0.853 [0.74, 0.88] and `fold-structure` 144 0.946 [0.93, 0.96] improve. `fold-branch` is slower by
+  a fixed +1.9 to +3.7 µs on a 3-cell, single-shot kernel (ratios 1.29 to 1.63). Allocation counts
+  do not explain it. Whole-process counters show +2 page faults, with the extra fault attribution in
+  `operator new` and `std::pmr::get_default_resource()`. This is consistent with a first-touch cost
+  in a fresh process but is not proven, and it has not been measured in a resident editor. See
+  `design/projects/performance-architecture-implementation-review/iteration-03-c2-final-expert-review.md`.
+- **Fallback:** the P3 source remains the accepted prior state. No persistent format or fixture
+  change is involved. The tables are derived state in the xanadu engine only.
+
 ______________________________________________________________________
 
 ### §2.3 P3: Proxy-first fast path in `ArenaManifold::linked`

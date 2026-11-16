@@ -1,0 +1,1108 @@
+--- a/apps/common/xanadu/vortex/vortex_vm.hpp
++++ b/apps/common/xanadu/vortex/vortex_vm.hpp
+@@ -27,6 +27,7 @@
+ 
+ #include <gleditor/cpp26.hpp>
+ 
++#include "common/xanadu/vortex/reversible_cell_map.hpp"
+ #include "common/xanadu/vortex/vortex_core.hpp"
+ 
+ namespace xanadu {
+@@ -380,7 +381,7 @@
+ };
+ using RuntimeGuardRef   = std::shared_ptr<const RuntimeGuard>;
+ using RuntimeGuardStack = std::shared_ptr<const std::vector<RuntimeGuardRef>>;
+-using GuardStackMap     = std::unordered_map<CellRef, RuntimeGuardStack>;
++using GuardStackMap     = detail::ReversibleCellMap<RuntimeGuardStack>;
+ 
+ struct GuardScope {
+   CellRef token;
+@@ -392,7 +393,7 @@
+       : token(marker), guardBaseline(baseline), ownerActivation(owner) {}
+ };
+ using GuardScopeStack = std::shared_ptr<const std::vector<GuardScope>>;
+-using GuardScopeMap   = std::unordered_map<CellRef, GuardScopeStack>;
++using GuardScopeMap   = detail::ReversibleCellMap<GuardScopeStack>;
+ 
+ struct MutationGroup {
+   MutationGroup(std::uint64_t identity, std::uint64_t checkpointIdentity,
+@@ -414,7 +415,7 @@
+   std::vector<RuntimeGuardRef> participants;
+ };
+ using MutationGroupStack = std::shared_ptr<const std::vector<MutationGroup>>;
+-using MutationGroupMap   = std::unordered_map<CellRef, MutationGroupStack>;
++using MutationGroupMap   = detail::ReversibleCellMap<MutationGroupStack>;
+ 
+ struct PendingGuardCheck {
+   CellRef checkOpcode;
+@@ -429,7 +430,7 @@
+         nextIndex(next), ownerActivation(owner) {}
+ };
+ using PendingGuardMap =
+-    std::unordered_map<CellRef, std::shared_ptr<const PendingGuardCheck>>;
++    detail::ReversibleCellMap<std::shared_ptr<const PendingGuardCheck>>;
+ 
+ // Both bounds include the caller prefix while any scope is open. Depth caps
+ // all outstanding choices, including ordinary choices nested inside a scope.
+@@ -448,7 +449,7 @@
+   GreaterEqual = 5,
+ };
+ 
+-using CellReferenceMap = std::unordered_map<CellRef, std::optional<CellRef>>;
++using CellReferenceMap = detail::ReversibleCellMap<std::optional<CellRef>>;
+ 
+ struct RankIteratorState {
+   std::optional<CellRef> current;
+@@ -468,13 +469,13 @@
+ 
+ using IteratorState = std::variant<RankIteratorState, SequenceIteratorState>;
+ using StreamMap =
+-    std::unordered_map<CellRef, std::shared_ptr<std::vector<CellRef>>>;
+-using IteratorMap = std::unordered_map<CellRef, std::shared_ptr<IteratorState>>;
++    detail::ReversibleCellMap<std::shared_ptr<std::vector<CellRef>>>;
++using IteratorMap = detail::ReversibleCellMap<std::shared_ptr<IteratorState>>;
+ 
+ enum class ClosedIteratorState : std::uint8_t { Unavailable, Exhausted };
+ 
+ struct RuntimeBindingSnapshot {
+-  CellReferenceMap cellReferences;
++  std::unordered_map<CellRef, std::optional<CellRef>> cellReferences;
+   std::unordered_map<CellRef, std::vector<CellRef>> streams;
+   std::unordered_map<CellRef, ClosedIteratorState> iterators;
+ };
+@@ -515,7 +516,9 @@
+   std::vector<FramePort> resultPorts;
+ };
+ 
+-using ActivationStack = std::vector<std::shared_ptr<const ActivationFrame>>;
++using ActivationStack    = std::vector<std::shared_ptr<const ActivationFrame>>;
++using ActivationFrameMap = detail::ReversibleCellMap<ActivationStack>;
++using CellRefSet         = detail::ReversibleCellSet<>;
+ 
+ struct ChoicePoint {
+   std::optional<CellRef> cursor;
+@@ -529,10 +532,10 @@
+   CellReferenceMap cellReferences;
+   StreamMap streams;
+   IteratorMap iterators;
+-  std::unordered_set<CellRef> streamSlots;
+-  std::unordered_set<CellRef> iteratorSlots;
++  CellRefSet streamSlots;
++  CellRefSet iteratorSlots;
+   std::optional<CellRef> streamCursor;
+-  std::unordered_map<CellRef, ActivationStack> activationFrames;
++  ActivationFrameMap activationFrames;
+   GuardStackMap guardStacks;
+   PendingGuardMap pendingGuardChecks;
+   GuardScopeMap guardScopes;
+@@ -873,12 +876,12 @@
+   CellReferenceMap cellReferences_;
+   StreamMap streams_;
+   IteratorMap iterators_;
+-  std::unordered_set<CellRef> streamSlots_;
+-  std::unordered_set<CellRef> iteratorSlots_;
++  CellRefSet streamSlots_;
++  CellRefSet iteratorSlots_;
+   std::optional<CellRef> streamCursor_;
+   std::unordered_map<CellRef, std::string> memoizedOps_;
+   std::unordered_map<CellRef, std::optional<CellRef>> cursorPC_;
+-  std::unordered_map<CellRef, ActivationStack> activationFrames_;
++  ActivationFrameMap activationFrames_;
+   GuardStackMap guardStacks_;
+   PendingGuardMap pendingGuardChecks_;
+   GuardScopeMap guardScopes_;
+--- a/apps/common/xanadu/vortex/vortex_vm.cpp
++++ b/apps/common/xanadu/vortex/vortex_vm.cpp
+@@ -47,9 +47,9 @@
+   const CellReferenceMap &cellReferences;
+   const StreamMap &streams;
+   const IteratorMap &iterators;
+-  const std::unordered_set<CellRef> &streamSlots;
+-  const std::unordered_set<CellRef> &iteratorSlots;
+-  const std::unordered_map<CellRef, ActivationStack> &activationFrames;
++  const CellRefSet &streamSlots;
++  const CellRefSet &iteratorSlots;
++  const ActivationFrameMap &activationFrames;
+   const GuardStackMap &guardStacks;
+   const PendingGuardMap &pendingGuardChecks;
+   const GuardScopeMap &guardScopes;
+@@ -209,10 +209,11 @@
+   return std::nullopt;
+ }
+ 
+-std::optional<CellRef> resolveCell(
+-    const std::vector<CellRef> &inCells, const std::vector<CellValue> &inputs,
+-    const std::unordered_map<CellRef, std::optional<CellRef>> &cellReferences,
+-    const std::size_t idx, const ArenaManifold &arena) {
++std::optional<CellRef> resolveCell(const std::vector<CellRef> &inCells,
++                                   const std::vector<CellValue> &inputs,
++                                   const CellReferenceMap &cellReferences,
++                                   const std::size_t idx,
++                                   const ArenaManifold &arena) {
+   if (idx < inCells.size()) {
+     CellRef c = inCells[idx];
+     if (const auto ref = cellReferences.find(c); ref != cellReferences.end()) {
+@@ -548,21 +549,19 @@
+   std::erase_if(cursorPC_, [this](const auto &entry) {
+     return !core_.arena().contains(entry.first);
+   });
+-  std::erase_if(cellReferences_, [this](const auto &entry) {
++  cellReferences_.eraseIf([this](const auto &entry) {
+     return !core_.arena().contains(entry.first);
+   });
+-  std::erase_if(streams_, [this](const auto &entry) {
++  streams_.eraseIf([this](const auto &entry) {
+     return !core_.arena().contains(entry.first);
+   });
+-  std::erase_if(iterators_, [this](const auto &entry) {
++  iterators_.eraseIf([this](const auto &entry) {
+     return !core_.arena().contains(entry.first);
+   });
+-  std::erase_if(streamSlots_, [this](const CellRef slot) {
+-    return !core_.arena().contains(slot);
+-  });
+-  std::erase_if(iteratorSlots_, [this](const CellRef slot) {
+-    return !core_.arena().contains(slot);
+-  });
++  streamSlots_.eraseIfKey(
++      [this](const CellRef slot) { return !core_.arena().contains(slot); });
++  iteratorSlots_.eraseIfKey(
++      [this](const CellRef slot) { return !core_.arena().contains(slot); });
+   if (streamCursor_ && !core_.arena().contains(*streamCursor_))
+     streamCursor_.reset();
+   pruneResumeState();
+--- a/apps/common/xanadu/vortex/vortex_bindings.cpp
++++ b/apps/common/xanadu/vortex/vortex_bindings.cpp
+@@ -319,7 +319,7 @@
+     (void)slot;
+     if (target) ++plannedReferences;
+   }
+-  for (const auto slot : streamSlots_) {
++  streamSlots_.forEachKey([&](const CellRef slot) {
+     const auto found = streams_.find(slot);
+     if (found != streams_.end() && found->second) {
+       if (found->second->size() >
+@@ -328,7 +328,7 @@
+         fail("binding snapshot exceeds the reference limit");
+       plannedReferences += found->second->size();
+     }
+-  }
++  });
+   if (plannedReferences > limits.maxReferences)
+     fail("binding snapshot exceeds the reference limit");
+   std::size_t references = 0;
+@@ -358,7 +358,7 @@
+     snapshot.cellReferences.emplace(slot, target);
+   }
+   snapshot.streams.reserve(streamSlots_.size());
+-  for (const auto slot : streamSlots_) {
++  streamSlots_.forEachKey([&](const CellRef slot) {
+     addWork();
+     if (!core_.arena().contains(slot) || iteratorSlots_.contains(slot) ||
+         cellReferences_.contains(slot))
+@@ -381,9 +381,9 @@
+     auto &savedItems = snapshot.streams[slot];
+     savedItems.reserve(items.size());
+     savedItems.insert(savedItems.end(), items.begin(), items.end());
+-  }
++  });
+   snapshot.iterators.reserve(iteratorSlots_.size());
+-  for (const auto slot : iteratorSlots_) {
++  iteratorSlots_.forEachKey([&](const CellRef slot) {
+     addWork();
+     if (!core_.arena().contains(slot) || streamSlots_.contains(slot) ||
+         cellReferences_.contains(slot))
+@@ -404,7 +404,7 @@
+     }
+     addRef();
+     snapshot.iterators.emplace(slot, state);
+-  }
++  });
+   return snapshot;
+ }
+ 
+@@ -682,8 +682,8 @@
+   CellReferenceMap cellReferences;
+   StreamMap streams;
+   IteratorMap iterators;
+-  std::unordered_set<CellRef> streamSlots;
+-  std::unordered_set<CellRef> iteratorSlots;
++  CellRefSet streamSlots;
++  CellRefSet iteratorSlots;
+   cellReferences.reserve(snapshot.cellReferences.size());
+   streams.reserve(snapshot.streams.size());
+   iterators.reserve(snapshot.iterators.size());
+--- a/apps/common/xanadu/vortex/vortex_comparison.cpp
++++ b/apps/common/xanadu/vortex/vortex_comparison.cpp
+@@ -21,11 +21,11 @@
+ 
+ using ComparisonValue = std::variant<std::int64_t, double, bool, std::string>;
+ 
+-std::optional<CellValue>
+-comparisonOperand(VortexCore &core, const CellReferenceMap &references,
+-                  const std::unordered_set<CellRef> &streamSlots,
+-                  const std::unordered_set<CellRef> &iteratorSlots,
+-                  const CellRef slot) {
++std::optional<CellValue> comparisonOperand(VortexCore &core,
++                                           const CellReferenceMap &references,
++                                           const CellRefSet &streamSlots,
++                                           const CellRefSet &iteratorSlots,
++                                           const CellRef slot) {
+   if (streamSlots.contains(slot) || iteratorSlots.contains(slot)) {
+     throw std::invalid_argument("VQL comparison operands must be scalar");
+   }
+--- /dev/null
++++ b/apps/common/xanadu/vortex/reversible_cell_map.hpp
+@@ -0,0 +1,852 @@
++/**
++ * @file reversible_cell_map.hpp
++ * @brief Isolated M5a rollback-capable CellRef map and set draft.
++ *
++ * This file is not integrated into the repository. See DESIGN.md.
++ */
++#ifndef COMMON_XANADU_VORTEX_REVERSIBLE_CELL_MAP_HPP
++#define COMMON_XANADU_VORTEX_REVERSIBLE_CELL_MAP_HPP
++
++#include <algorithm>
++#include <cassert>
++#include <concepts>
++#include <cstddef>
++#include <cstdint>
++#include <expected>
++#include <functional>
++#include <iterator>
++#include <limits>
++#include <memory_resource>
++#include <new>
++#include <optional>
++#include <stdexcept>
++#include <tuple>
++#include <type_traits>
++#include <utility>
++#include <variant>
++#include <vector>
++
++#include "common/xanadu/zigzag/dim_vector.hpp"
++
++namespace zigzag::vortex::detail {
++
++struct ReversibleCellMapTestAccess;
++
++enum class ReversibleMapFailure : std::uint8_t {
++  AllocationUnavailable,
++  CapacityOverflow,
++  AlreadyLive,
++  MissingLiveKey,
++  StalePreparation,
++};
++
++struct CellRefHash {
++  [[nodiscard]] std::size_t
++  operator()(const zigzag::CellRef key) const noexcept {
++    auto value = static_cast<std::uint64_t>(key) + 0x9e3779b97f4a7c15ULL;
++    value      = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
++    value      = (value ^ (value >> 27U)) * 0x94d049bb133111ebULL;
++    return static_cast<std::size_t>(value ^ (value >> 31U));
++  }
++};
++
++template <class Value, class Hash = CellRefHash> class ReversibleCellMap {
++public:
++  using Key = zigzag::CellRef;
++
++  template <bool IsConst> class BasicIterator {
++    friend class ReversibleCellMap;
++    template <bool> friend class BasicIterator;
++    using Owner =
++        std::conditional_t<IsConst, const ReversibleCellMap, ReversibleCellMap>;
++    Owner *owner_{nullptr};
++    std::size_t index_{0};
++
++    BasicIterator(Owner *owner, const std::size_t index) noexcept
++        : owner_(owner), index_(index) {}
++
++    void skipAbsent() noexcept {
++      while (owner_ && index_ < owner_->slots_.size() &&
++             !owner_->slots_[index_].liveEntry) {
++        ++index_;
++      }
++    }
++
++  public:
++    using iterator_category = std::forward_iterator_tag;
++    using value_type        = std::pair<const Key, Value>;
++    using difference_type   = std::ptrdiff_t;
++    using reference =
++        std::conditional_t<IsConst, const value_type &, value_type &>;
++    using pointer =
++        std::conditional_t<IsConst, const value_type *, value_type *>;
++
++    BasicIterator() = default;
++    template <bool OtherConst = IsConst>
++      requires OtherConst
++    BasicIterator(const BasicIterator<false> &other) noexcept
++        : owner_(other.owner_), index_(other.index_) {}
++
++    [[nodiscard]] reference operator*() const noexcept {
++      return *owner_->slots_[index_].liveEntry;
++    }
++    [[nodiscard]] pointer operator->() const noexcept {
++      return &*owner_->slots_[index_].liveEntry;
++    }
++    BasicIterator &operator++() noexcept {
++      ++index_;
++      skipAbsent();
++      return *this;
++    }
++    BasicIterator operator++(int) noexcept {
++      auto previous = *this;
++      ++*this;
++      return previous;
++    }
++    friend bool operator==(const BasicIterator &,
++                           const BasicIterator &) = default;
++  };
++  using iterator       = BasicIterator<false>;
++  using const_iterator = BasicIterator<true>;
++
++  static_assert(std::is_empty_v<Hash>, "hash policy must be stateless");
++  static_assert(std::is_nothrow_default_constructible_v<Hash>,
++                "hash policy construction must not throw");
++  static_assert(std::is_nothrow_invocable_r_v<std::size_t, Hash, Key>,
++                "hashing undo keys must not throw");
++  static_assert(std::is_nothrow_move_constructible_v<Value>,
++                "undo must restore values with a nonthrowing move");
++  static_assert(std::is_nothrow_destructible_v<Value>,
++                "undo must destroy values without throwing");
++  // The traits above are necessary, not sufficient: each supported Value's
++  // noexcept move/destructor must also be allocation-free by its own contract.
++  // This table is intended for standard optional/shared_ptr/monostate handles
++  // and default-allocator vectors moved as values, not arbitrary user types.
++  static_assert(std::is_copy_constructible_v<Value>,
++                "logical snapshots require copyable values");
++
++  enum class ProbeState : std::uint8_t { Empty, Deleted, Occupied };
++
++private:
++  struct Slot {
++    ProbeState state{ProbeState::Empty};
++    Key retainedKey{};
++    std::optional<std::pair<const Key, Value>> liveEntry;
++  };
++
++public:
++  // Prepared capabilities are operation-local. They must not outlive their
++  // owning map or be used after that map has been destroyed.
++  class PreparedInsert {
++    friend class ReversibleCellMap;
++    const ReversibleCellMap *owner_{nullptr};
++    std::uint64_t generation_{0};
++    std::size_t slot_{0};
++    Key key_{0};
++    ProbeState previous_{ProbeState::Empty};
++
++    PreparedInsert(const ReversibleCellMap *owner, std::uint64_t generation,
++                   std::size_t slot, Key key, ProbeState previous) noexcept
++        : owner_(owner), generation_(generation), slot_(slot), key_(key),
++          previous_(previous) {}
++
++  public:
++    PreparedInsert(const PreparedInsert &)                = default;
++    PreparedInsert &operator=(const PreparedInsert &)     = default;
++    PreparedInsert(PreparedInsert &&) noexcept            = default;
++    PreparedInsert &operator=(PreparedInsert &&) noexcept = default;
++  };
++
++  class PreparedErase {
++    friend class ReversibleCellMap;
++    const ReversibleCellMap *owner_{nullptr};
++    std::uint64_t generation_{0};
++    Key key_{0};
++
++    PreparedErase(const ReversibleCellMap *owner, std::uint64_t generation,
++                  Key key) noexcept
++        : owner_(owner), generation_(generation), key_(key) {}
++
++  public:
++    PreparedErase(const PreparedErase &)                = default;
++    PreparedErase &operator=(const PreparedErase &)     = default;
++    PreparedErase(PreparedErase &&) noexcept            = default;
++    PreparedErase &operator=(PreparedErase &&) noexcept = default;
++  };
++
++  class PreparedReplace {
++    friend class ReversibleCellMap;
++    const ReversibleCellMap *owner_{nullptr};
++    std::uint64_t generation_{0};
++    Key key_{0};
++
++    PreparedReplace(const ReversibleCellMap *owner, std::uint64_t generation,
++                    Key key) noexcept
++        : owner_(owner), generation_(generation), key_(key) {}
++
++  public:
++    PreparedReplace(const PreparedReplace &)                = default;
++    PreparedReplace &operator=(const PreparedReplace &)     = default;
++    PreparedReplace(PreparedReplace &&) noexcept            = default;
++    PreparedReplace &operator=(PreparedReplace &&) noexcept = default;
++  };
++
++  explicit ReversibleCellMap(
++      std::pmr::memory_resource *resource = std::pmr::get_default_resource())
++      : resource_(resource == nullptr ? std::pmr::get_default_resource()
++                                      : resource),
++        slots_(resource_) {}
++
++  ReversibleCellMap(const ReversibleCellMap &other)
++    requires std::is_copy_constructible_v<Value>
++      : ReversibleCellMap(other, other.resource_) {}
++
++  ReversibleCellMap(const ReversibleCellMap &other,
++                    std::pmr::memory_resource *resource)
++    requires std::is_copy_constructible_v<Value>
++      : ReversibleCellMap(resource) {
++    clonePhysicalState(other);
++  }
++
++  ReversibleCellMap(ReversibleCellMap &&other) noexcept
++      : resource_(other.resource_), slots_(std::move(other.slots_)),
++        liveCount_(std::exchange(other.liveCount_, 0)),
++        occupiedCount_(std::exchange(other.occupiedCount_, 0)) {
++    other.slots_.clear();
++    other.bumpGeneration();
++  }
++
++  ReversibleCellMap &operator=(const ReversibleCellMap &other)
++    requires std::is_copy_constructible_v<Value>
++  {
++    if (this == &other) {
++      bumpGeneration();
++      return *this;
++    }
++    ReversibleCellMap replacement(other, resource_);
++    slots_.swap(replacement.slots_);
++    liveCount_     = replacement.liveCount_;
++    occupiedCount_ = replacement.occupiedCount_;
++    bumpGeneration();
++    return *this;
++  }
++
++  ReversibleCellMap &operator=(ReversibleCellMap &&other) {
++    if (this == &other) {
++      bumpGeneration();
++      return *this;
++    }
++    if (resource_ == other.resource_) {
++      slots_.swap(other.slots_);
++      std::swap(liveCount_, other.liveCount_);
++      std::swap(occupiedCount_, other.occupiedCount_);
++      bumpGeneration();
++      other.bumpGeneration();
++      return *this;
++    }
++
++    ReversibleCellMap replacement(resource_);
++    replacement.clonePhysicalStateByMove(other);
++    slots_.swap(replacement.slots_);
++    liveCount_     = replacement.liveCount_;
++    occupiedCount_ = replacement.occupiedCount_;
++    other.slots_.clear();
++    other.liveCount_     = 0;
++    other.occupiedCount_ = 0;
++    bumpGeneration();
++    other.bumpGeneration();
++    return *this;
++  }
++
++  [[nodiscard]] std::size_t size() const noexcept { return liveCount_; }
++  [[nodiscard]] bool empty() const noexcept { return liveCount_ == 0; }
++  [[nodiscard]] std::size_t capacity() const noexcept { return slots_.size(); }
++  void reserve(const std::size_t requested) {
++    std::size_t target = slots_.empty() ? 8U : slots_.size();
++    const auto maxLive = [](const std::size_t capacity) noexcept {
++      return (capacity / 10U) * 7U + ((capacity % 10U) * 7U) / 10U;
++    };
++    while (requested > maxLive(target)) {
++      if (target > std::numeric_limits<std::size_t>::max() / 2U)
++        throw std::length_error("reversible map reserve exceeds capacity");
++      target *= 2U;
++    }
++    if (target > slots_.size() && !rehash(target)) {
++      if (lastFailure_ == ReversibleMapFailure::AllocationUnavailable)
++        throw std::bad_alloc{};
++      throw std::length_error("reversible map reserve exceeds capacity");
++    }
++  }
++  [[nodiscard]] iterator begin() noexcept {
++    iterator result(this, 0);
++    result.skipAbsent();
++    return result;
++  }
++  [[nodiscard]] iterator end() noexcept {
++    return iterator(this, slots_.size());
++  }
++  [[nodiscard]] const_iterator begin() const noexcept {
++    const_iterator result(this, 0);
++    result.skipAbsent();
++    return result;
++  }
++  [[nodiscard]] const_iterator end() const noexcept {
++    return const_iterator(this, slots_.size());
++  }
++  [[nodiscard]] const_iterator cbegin() const noexcept { return begin(); }
++  [[nodiscard]] const_iterator cend() const noexcept { return end(); }
++  [[nodiscard]] iterator findEntry(const Key key) noexcept {
++    const auto index = findSlot(key);
++    if (!index || !slots_[*index].liveEntry) return end();
++    return iterator(this, *index);
++  }
++  [[nodiscard]] const_iterator findEntry(const Key key) const noexcept {
++    const auto index = findSlot(key);
++    if (!index || !slots_[*index].liveEntry) return end();
++    return const_iterator(this, *index);
++  }
++  iterator find(const Key key) noexcept { return findEntry(key); }
++  const_iterator find(const Key key) const noexcept { return findEntry(key); }
++  [[nodiscard]] std::uint64_t generationForTest() const noexcept {
++    return generation_;
++  }
++
++  [[nodiscard]] bool contains(const Key key) const noexcept {
++    const auto index = findSlot(key);
++    return index && slots_[*index].liveEntry.has_value();
++  }
++
++  [[nodiscard]] Value *findValue(const Key key) noexcept {
++    const auto index = findSlot(key);
++    if (!index || !slots_[*index].liveEntry) return nullptr;
++    return &slots_[*index].liveEntry->second;
++  }
++
++  [[nodiscard]] const Value *findValue(const Key key) const noexcept {
++    const auto index = findSlot(key);
++    if (!index || !slots_[*index].liveEntry) return nullptr;
++    return &slots_[*index].liveEntry->second;
++  }
++
++  template <class Visitor> void forEachLive(Visitor &&visitor) {
++    for (auto &slot : slots_) {
++      if (slot.state == ProbeState::Occupied && slot.liveEntry) {
++        std::invoke(visitor, slot.liveEntry->first, slot.liveEntry->second);
++      }
++    }
++  }
++
++  template <class Visitor> void forEachLive(Visitor &&visitor) const {
++    for (const auto &slot : slots_) {
++      if (slot.state == ProbeState::Occupied && slot.liveEntry) {
++        std::invoke(visitor, slot.liveEntry->first, slot.liveEntry->second);
++      }
++    }
++  }
++
++  template <class... Args>
++  std::pair<iterator, bool> try_emplace(const Key key, Args &&...args) {
++    if (auto found = find(key); found != end()) return {found, false};
++    Value value(std::forward<Args>(args)...);
++    auto prepared = prepareInsert(key);
++    if (!prepared) throw std::bad_alloc{};
++    if (!commitInsert(std::move(*prepared), std::move(value)))
++      throw std::logic_error("prepared insert became stale");
++    return {find(key), true};
++  }
++
++  std::pair<iterator, bool> emplace(const Key key, Value value) {
++    return try_emplace(key, std::move(value));
++  }
++
++  template <class Mapped>
++  std::pair<iterator, bool> insert_or_assign(const Key key, Mapped &&value) {
++    if (auto found = find(key); found != end()) {
++      Value replacement(std::forward<Mapped>(value));
++      std::optional<Value> oldValue;
++      auto prepared = prepareReplace(key);
++      if (!prepared || !commitReplace(std::move(*prepared),
++                                      std::move(replacement), oldValue)) {
++        throw std::logic_error("prepared replacement became stale");
++      }
++      return {find(key), false};
++    }
++    Value inserted(std::forward<Mapped>(value));
++    auto prepared = prepareInsert(key);
++    if (!prepared) throw std::bad_alloc{};
++    if (!commitInsert(std::move(*prepared), std::move(inserted)))
++      throw std::logic_error("prepared insert became stale");
++    return {find(key), true};
++  }
++
++  [[nodiscard]] Value &operator[](const Key key)
++    requires std::default_initializable<Value>
++  {
++    return try_emplace(key).first->second;
++  }
++
++  [[nodiscard]] Value &at(const Key key) {
++    const auto found = find(key);
++    if (found == end()) throw std::out_of_range("missing CellRef key");
++    return found->second;
++  }
++  [[nodiscard]] const Value &at(const Key key) const {
++    const auto found = find(key);
++    if (found == end()) throw std::out_of_range("missing CellRef key");
++    return found->second;
++  }
++
++  std::size_t erase(const Key key) noexcept {
++    auto prepared = prepareErase(key);
++    if (!prepared) return 0;
++    std::optional<Value> oldValue;
++    return commitErase(std::move(*prepared), oldValue, false) ? 1U : 0U;
++  }
++
++  iterator erase(iterator position) noexcept {
++    if (position.owner_ != this || position == end()) return end();
++    const auto nextIndex = position.index_ + 1U;
++    (void)erase(position->first);
++    iterator result(this, std::min(nextIndex, slots_.size()));
++    result.skipAbsent();
++    return result;
++  }
++
++  template <class Predicate> std::size_t eraseIf(Predicate &&predicate) {
++    std::size_t removed = 0;
++    for (auto entry = begin(); entry != end();) {
++      if (std::invoke(predicate, *entry)) {
++        entry = erase(entry);
++        ++removed;
++      } else {
++        ++entry;
++      }
++    }
++    return removed;
++  }
++
++  void clear() noexcept {
++    for (auto &slot : slots_) {
++      if (slot.state == ProbeState::Occupied) {
++        slot.liveEntry.reset();
++        slot.state = ProbeState::Deleted;
++      }
++    }
++    liveCount_     = 0;
++    occupiedCount_ = 0;
++    bumpGeneration();
++  }
++
++  void swap(ReversibleCellMap &other) {
++    if (this == &other) {
++      bumpGeneration();
++      return;
++    }
++    if (resource_ != other.resource_)
++      throw std::logic_error("cannot swap maps with unequal resources");
++    slots_.swap(other.slots_);
++    std::swap(liveCount_, other.liveCount_);
++    std::swap(occupiedCount_, other.occupiedCount_);
++    bumpGeneration();
++    other.bumpGeneration();
++  }
++
++  friend void swap(ReversibleCellMap &left, ReversibleCellMap &right) {
++    left.swap(right);
++  }
++
++  [[nodiscard]] std::expected<PreparedInsert, ReversibleMapFailure>
++  prepareInsert(const Key key) noexcept {
++    const auto existing = findSlot(key);
++    if (existing && slots_[*existing].liveEntry.has_value()) {
++      return std::unexpected{ReversibleMapFailure::AlreadyLive};
++    }
++    if (!existing && !ensureInsertCapacity()) {
++      return std::unexpected{lastFailure_};
++    }
++    const auto position = insertionPosition(key);
++    if (!position) {
++      return std::unexpected{ReversibleMapFailure::CapacityOverflow};
++    }
++    const auto previous = slots_[*position].state;
++    if (!generationAvailable()) {
++      return std::unexpected{ReversibleMapFailure::CapacityOverflow};
++    }
++    return PreparedInsert{this, generation_, *position, key, previous};
++  }
++
++  [[nodiscard]] std::expected<PreparedErase, ReversibleMapFailure>
++  prepareErase(const Key key) noexcept {
++    if (!contains(key)) {
++      return std::unexpected{ReversibleMapFailure::MissingLiveKey};
++    }
++    if (!generationAvailable()) {
++      return std::unexpected{ReversibleMapFailure::CapacityOverflow};
++    }
++    return PreparedErase{this, generation_, key};
++  }
++
++  [[nodiscard]] std::expected<PreparedReplace, ReversibleMapFailure>
++  prepareReplace(const Key key) noexcept {
++    if (!contains(key)) {
++      return std::unexpected{ReversibleMapFailure::MissingLiveKey};
++    }
++    if (!generationAvailable()) {
++      return std::unexpected{ReversibleMapFailure::CapacityOverflow};
++    }
++    return PreparedReplace{this, generation_, key};
++  }
++
++  [[nodiscard]] bool commitInsert(PreparedInsert &&prepared,
++                                  Value &&value) noexcept {
++    if (!valid(prepared.owner_, prepared.generation_) ||
++        prepared.slot_ >= slots_.size() ||
++        slots_[prepared.slot_].state != prepared.previous_ ||
++        (slots_[prepared.slot_].state == ProbeState::Occupied &&
++         slots_[prepared.slot_].liveEntry)) {
++      return false;
++    }
++    if (!generationAvailable()) return false;
++    auto &slot = slots_[prepared.slot_];
++    if (slot.state != ProbeState::Occupied) {
++      slot.retainedKey = prepared.key_;
++      slot.state       = ProbeState::Occupied;
++      ++occupiedCount_;
++    }
++    slot.liveEntry.emplace(std::piecewise_construct,
++                           std::forward_as_tuple(prepared.key_),
++                           std::forward_as_tuple(std::move(value)));
++    ++liveCount_;
++    bumpGeneration();
++    prepared.owner_ = nullptr;
++    return true;
++  }
++
++  [[nodiscard]] bool commitErase(PreparedErase &&prepared,
++                                 std::optional<Value> &trailValue,
++                                 const bool retainForUndo) noexcept {
++    if (!valid(prepared.owner_, prepared.generation_) || trailValue ||
++        !generationAvailable()) {
++      return false;
++    }
++    const auto index = findSlot(prepared.key_);
++    if (!index || !slots_[*index].liveEntry) return false;
++    auto &slot = slots_[*index];
++    trailValue.emplace(std::move(slot.liveEntry->second));
++    slot.liveEntry.reset();
++    --liveCount_;
++    if (!retainForUndo) {
++      slot.state = ProbeState::Deleted;
++      --occupiedCount_;
++    }
++    bumpGeneration();
++    prepared.owner_ = nullptr;
++    return true;
++  }
++
++  [[nodiscard]] bool commitReplace(PreparedReplace &&prepared, Value &&newValue,
++                                   std::optional<Value> &trailValue) noexcept {
++    if (!valid(prepared.owner_, prepared.generation_) || trailValue ||
++        !generationAvailable()) {
++      return false;
++    }
++    const auto index = findSlot(prepared.key_);
++    if (!index || !slots_[*index].liveEntry) return false;
++    auto &slot = slots_[*index];
++    trailValue.emplace(std::move(slot.liveEntry->second));
++    slot.liveEntry.reset();
++    slot.liveEntry.emplace(std::piecewise_construct,
++                           std::forward_as_tuple(prepared.key_),
++                           std::forward_as_tuple(std::move(newValue)));
++    bumpGeneration();
++    prepared.owner_ = nullptr;
++    return true;
++  }
++
++  [[nodiscard]] bool undoInsert(const Key key) noexcept {
++    const auto index = findSlot(key);
++    if (!index || !slots_[*index].liveEntry) return false;
++    auto &slot = slots_[*index];
++    slot.liveEntry.reset();
++    --liveCount_;
++    bumpGeneration();
++    return true;
++  }
++
++  [[nodiscard]] bool undoErase(const Key key,
++                               std::optional<Value> &oldValue) noexcept {
++    if (!oldValue) return false;
++    const auto index = findSlot(key);
++    if (!index || slots_[*index].liveEntry) return false;
++    auto &slot = slots_[*index];
++    slot.liveEntry.emplace(std::piecewise_construct, std::forward_as_tuple(key),
++                           std::forward_as_tuple(std::move(*oldValue)));
++    oldValue.reset();
++    ++liveCount_;
++    bumpGeneration();
++    return true;
++  }
++
++  [[nodiscard]] bool undoReplace(const Key key,
++                                 std::optional<Value> &oldValue) noexcept {
++    if (!oldValue) return false;
++    const auto index = findSlot(key);
++    if (!index || !slots_[*index].liveEntry) return false;
++    auto &slot = slots_[*index];
++    slot.liveEntry.reset();
++    slot.liveEntry.emplace(std::piecewise_construct, std::forward_as_tuple(key),
++                           std::forward_as_tuple(std::move(*oldValue)));
++    oldValue.reset();
++    bumpGeneration();
++    return true;
++  }
++
++  void reclaimRetainedAbsent() noexcept {
++    bool changed = false;
++    for (auto &slot : slots_) {
++      if (slot.state == ProbeState::Occupied && !slot.liveEntry) {
++        slot.state = ProbeState::Deleted;
++        --occupiedCount_;
++        changed = true;
++      }
++    }
++    if (changed) bumpGeneration();
++  }
++
++  [[nodiscard]] ReversibleCellMap
++  logicalCopy(std::pmr::memory_resource *resource) const
++    requires std::is_copy_constructible_v<Value>
++  {
++    ReversibleCellMap result(resource);
++    forEachLive([&](const Key key, const Value &value) {
++      auto prepared = result.prepareInsert(key);
++      if (!prepared) {
++        if (prepared.error() == ReversibleMapFailure::AllocationUnavailable)
++          throw std::bad_alloc{};
++        throw std::length_error("logical map copy could not insert entry");
++      }
++      if (!result.commitInsert(std::move(*prepared), Value(value)))
++        throw std::logic_error("logical map copy commit failed");
++    });
++    return result;
++  }
++
++  [[nodiscard]] bool logicallyEquals(const ReversibleCellMap &other) const
++    requires requires(const Value &left, const Value &right) {
++      { left == right } -> std::convertible_to<bool>;
++    }
++  {
++    if (size() != other.size()) return false;
++    bool equal = true;
++    forEachLive([&](const Key key, const Value &value) {
++      const Value *otherValue = other.findValue(key);
++      if (otherValue == nullptr || !(*otherValue == value)) equal = false;
++    });
++    return equal;
++  }
++
++private:
++  friend struct ReversibleCellMapTestAccess;
++
++  [[nodiscard]] bool valid(const ReversibleCellMap *owner,
++                           const std::uint64_t generation) const noexcept {
++    return owner == this && generation == generation_;
++  }
++
++  [[nodiscard]] bool generationAvailable() const noexcept {
++    return generation_ != std::numeric_limits<std::uint64_t>::max();
++  }
++
++  [[nodiscard]] bool canBumpTwice() const noexcept {
++    return generation_ < std::numeric_limits<std::uint64_t>::max() - 1U;
++  }
++
++  void bumpGeneration() noexcept {
++    // Preparation stops at saturation, so no capability can be created with
++    // generation max. Keep rollback available and avoid generation ABA.
++    if (generationAvailable()) ++generation_;
++  }
++
++  [[nodiscard]] std::optional<std::size_t>
++  findSlot(const Key key) const noexcept {
++    if (slots_.empty()) return std::nullopt;
++    const std::size_t mask = slots_.size() - 1U;
++    std::size_t index      = Hash{}(key)&mask;
++    for (std::size_t probes = 0; probes < slots_.size(); ++probes) {
++      const auto &slot = slots_[index];
++      if (slot.state == ProbeState::Empty) return std::nullopt;
++      if (slot.state == ProbeState::Occupied && slot.retainedKey == key)
++        return index;
++      index = (index + 1U) & mask;
++    }
++    return std::nullopt;
++  }
++
++  [[nodiscard]] std::optional<std::size_t>
++  insertionPosition(const Key key) const noexcept {
++    if (slots_.empty()) return std::nullopt;
++    const std::size_t mask = slots_.size() - 1U;
++    std::size_t index      = Hash{}(key)&mask;
++    std::optional<std::size_t> firstDeleted;
++    for (std::size_t probes = 0; probes < slots_.size(); ++probes) {
++      const auto &slot = slots_[index];
++      if (slot.state == ProbeState::Occupied && slot.retainedKey == key)
++        return index;
++      if (slot.state == ProbeState::Deleted && !firstDeleted) {
++        firstDeleted = index;
++      } else if (slot.state == ProbeState::Empty) {
++        return firstDeleted.value_or(index);
++      }
++      index = (index + 1U) & mask;
++    }
++    return firstDeleted;
++  }
++
++  bool ensureInsertCapacity() noexcept {
++    lastFailure_ = ReversibleMapFailure::CapacityOverflow;
++    const bool needsGrowth =
++        slots_.empty() || occupiedCount_ + 1U > maxOccupied(slots_.size());
++    if (!generationAvailable() || (needsGrowth && !canBumpTwice())) {
++      return false;
++    }
++    if (!needsGrowth) return true;
++    if (slots_.empty()) return rehash(8U);
++    if (slots_.size() > std::numeric_limits<std::size_t>::max() / 2U) {
++      return false;
++    }
++    return rehash(slots_.size() * 2U);
++  }
++
++  [[nodiscard]] static constexpr std::size_t
++  maxOccupied(const std::size_t capacity) noexcept {
++    return (capacity / 10U) * 7U + ((capacity % 10U) * 7U) / 10U;
++  }
++
++  bool rehash(const std::size_t capacity) noexcept {
++    if (capacity == 0 || (capacity & (capacity - 1U)) != 0 ||
++        !generationAvailable()) {
++      lastFailure_ = ReversibleMapFailure::CapacityOverflow;
++      return false;
++    }
++    try {
++      std::pmr::vector<Slot> replacement(resource_);
++      replacement.resize(capacity);
++      const std::size_t mask = capacity - 1U;
++      std::size_t occupied   = 0;
++      for (auto &source : slots_) {
++        if (source.state != ProbeState::Occupied) continue;
++        std::size_t index = Hash{}(source.retainedKey) & mask;
++        while (replacement[index].state != ProbeState::Empty) {
++          index = (index + 1U) & mask;
++        }
++        auto &target       = replacement[index];
++        target.state       = ProbeState::Occupied;
++        target.retainedKey = source.retainedKey;
++        if (source.liveEntry) {
++          target.liveEntry.emplace(
++              std::piecewise_construct,
++              std::forward_as_tuple(source.retainedKey),
++              std::forward_as_tuple(std::move(source.liveEntry->second)));
++        }
++        ++occupied;
++      }
++      slots_.swap(replacement);
++      occupiedCount_ = occupied;
++      bumpGeneration();
++      return true;
++    } catch (const std::bad_alloc &) {
++      lastFailure_ = ReversibleMapFailure::AllocationUnavailable;
++      return false;
++    } catch (const std::length_error &) {
++      lastFailure_ = ReversibleMapFailure::CapacityOverflow;
++      return false;
++    }
++  }
++
++  void clonePhysicalState(const ReversibleCellMap &other)
++    requires std::is_copy_constructible_v<Value>
++  {
++    slots_.resize(other.slots_.size());
++    for (std::size_t i = 0; i < other.slots_.size(); ++i) {
++      const auto &source = other.slots_[i];
++      auto &target       = slots_[i];
++      target.state       = source.state;
++      if (source.state == ProbeState::Occupied) {
++        target.retainedKey = source.retainedKey;
++        if (source.liveEntry) {
++          target.liveEntry.emplace(
++              std::piecewise_construct,
++              std::forward_as_tuple(source.retainedKey),
++              std::forward_as_tuple(source.liveEntry->second));
++        }
++      }
++    }
++    liveCount_     = other.liveCount_;
++    occupiedCount_ = other.occupiedCount_;
++  }
++
++  void clonePhysicalStateByMove(ReversibleCellMap &other) {
++    slots_.resize(other.slots_.size());
++    for (std::size_t i = 0; i < other.slots_.size(); ++i) {
++      auto &source = other.slots_[i];
++      auto &target = slots_[i];
++      target.state = source.state;
++      if (source.state == ProbeState::Occupied) {
++        target.retainedKey = source.retainedKey;
++        if (source.liveEntry) {
++          target.liveEntry.emplace(
++              std::piecewise_construct,
++              std::forward_as_tuple(source.retainedKey),
++              std::forward_as_tuple(std::move(source.liveEntry->second)));
++        }
++      }
++    }
++    liveCount_     = std::exchange(other.liveCount_, 0);
++    occupiedCount_ = std::exchange(other.occupiedCount_, 0);
++  }
++
++  std::pmr::memory_resource *resource_;
++  std::pmr::vector<Slot> slots_;
++  std::size_t liveCount_{0};
++  std::size_t occupiedCount_{0};
++  std::uint64_t generation_{0};
++  ReversibleMapFailure lastFailure_{ReversibleMapFailure::CapacityOverflow};
++};
++
++template <class Hash = CellRefHash>
++class ReversibleCellSet : public ReversibleCellMap<std::monostate, Hash> {
++  using Base = ReversibleCellMap<std::monostate, Hash>;
++
++public:
++  using Base::Base;
++  using Base::contains;
++  using Base::erase;
++  using Base::forEachLive;
++  using Base::logicalCopy;
++  using Base::logicallyEquals;
++  using Base::prepareErase;
++  using Base::prepareInsert;
++  using Base::reclaimRetainedAbsent;
++  using Base::reserve;
++  using Base::size;
++  using Base::swap;
++
++  template <class Visitor> void forEachKey(Visitor &&visitor) const {
++    Base::forEachLive([&](const zigzag::CellRef key, const std::monostate &) {
++      std::invoke(visitor, key);
++    });
++  }
++
++  template <class Predicate> std::size_t eraseIfKey(Predicate &&predicate) {
++    return Base::eraseIf(
++        [&](const auto &entry) { return std::invoke(predicate, entry.first); });
++  }
++
++  bool insert(const zigzag::CellRef key) {
++    return Base::emplace(key, std::monostate{}).second;
++  }
++};
++
++} // namespace zigzag::vortex::detail
++
++#endif // COMMON_XANADU_VORTEX_REVERSIBLE_CELL_MAP_HPP

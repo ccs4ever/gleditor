@@ -19,6 +19,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <memory_resource>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -31,6 +32,7 @@
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
+#include "common/xanadu/osmic_walker.hpp"
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
@@ -42,6 +44,25 @@ namespace zigzag {
 
 /// Seed one representable maximum-size run without building quadratic history.
 struct ManifoldTestAccess {
+  static std::optional<std::uint32_t> denseOf(const Manifold &manifold,
+                                              CellRef ref) {
+    return manifold.denseOf(ref);
+  }
+  static void setOpCountHint(Manifold &manifold, std::size_t hint) {
+    manifold.setOpCountHint(hint);
+  }
+  static std::optional<std::size_t> opCountHint(const Manifold &manifold) {
+    return manifold.byRef.opCountHint();
+  }
+  static std::size_t byRefDenseCapacity(const Manifold &manifold) {
+    return manifold.byRef.denseValueCapacity();
+  }
+  static bool hasByRef(const Manifold &manifold, std::uint32_t op) {
+    return manifold.byRef.contains(op);
+  }
+  static std::size_t birthCapacity(const Manifold &manifold) {
+    return manifold.structureBirths_.capacity();
+  }
   static bool
   seedMaxContentRun(Manifold &manifold, const CellRef cell,
                     const std::span<const xanadu::PrimediaSpan> spans) {
@@ -55,7 +76,49 @@ struct ManifoldTestAccess {
 
 } // namespace zigzag
 
+namespace xanadu {
+struct StoreTestAccess {
+  static void setLookupResource(Store &store,
+                                std::pmr::memory_resource *resource) {
+    store.lookupResource_ = resource;
+  }
+};
+} // namespace xanadu
+
 namespace {
+
+class FailingLookupResource final : public std::pmr::memory_resource {
+public:
+  void failAfter(std::size_t successfulAllocations) noexcept {
+    remaining_ = successfulAllocations;
+    failing_   = true;
+  }
+  void allowAllocations() noexcept { failing_ = false; }
+  [[nodiscard]] std::size_t allocations() const noexcept {
+    return allocations_;
+  }
+
+private:
+  void *do_allocate(std::size_t bytes, std::size_t alignment) override {
+    ++allocations_;
+    if (failing_) {
+      if (remaining_ == 0) throw std::bad_alloc{};
+      --remaining_;
+    }
+    return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+  }
+  void do_deallocate(void *p, std::size_t bytes,
+                     std::size_t alignment) override {
+    std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
+  }
+  bool
+  do_is_equal(const std::pmr::memory_resource &other) const noexcept override {
+    return this == &other;
+  }
+  std::size_t remaining_{0};
+  std::size_t allocations_{0};
+  bool failing_{false};
+};
 
 using xanadu::Link;
 using xanadu::LinkType;
@@ -117,6 +180,318 @@ struct Slice {
     return store.cellRefOf(at).value();
   }
 };
+
+TEST(ManifoldTest, lookupAllocationFailuresLeaveMakeCellFoldStateUntouched) {
+  xanadu::CompactOpNode node{};
+  node.kind  = xanadu::OpKind::Structure;
+  node.flags = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
+
+  std::size_t allocationPoints = 0;
+  {
+    FailingLookupResource resource;
+    Manifold manifold(&resource);
+    ASSERT_TRUE(manifold.applyStructure(1, node));
+    allocationPoints = resource.allocations();
+  }
+  ASSERT_GT(allocationPoints, 0U);
+
+  // Count this variant's actual PMR requests, then fail each request ordinal.
+  for (std::size_t failAt = 0; failAt < allocationPoints; ++failAt) {
+    FailingLookupResource resource;
+    Manifold manifold(&resource);
+    resource.failAfter(failAt);
+    const auto refused = manifold.applyStructure(1, node);
+    ASSERT_FALSE(refused) << "allocation " << failAt;
+    EXPECT_EQ(refused.error(), zigzag::FoldRefusal::LookupCapacityUnavailable);
+    EXPECT_EQ(manifold.foldedThrough(), 0U);
+    EXPECT_EQ(manifold.refusedOps(), 0U);
+    EXPECT_EQ(manifold.cellCount(), 0U);
+    EXPECT_EQ(manifold.structureBirth(1), std::nullopt);
+
+    resource.allowAllocations();
+    ASSERT_TRUE(manifold.applyStructure(1, node));
+    Manifold expected;
+    ASSERT_TRUE(expected.applyStructure(1, node));
+    EXPECT_TRUE(manifold.equivalentTo(expected));
+    EXPECT_EQ(manifold.foldedThrough(), 1U);
+    ASSERT_EQ(manifold.cellCount(), 1U);
+    EXPECT_EQ(zigzag::ManifoldTestAccess::denseOf(manifold, 1), 0U);
+    EXPECT_TRUE(manifold.structureBirth(1).has_value());
+  }
+}
+
+TEST(ManifoldTest, DenseGrowthFailurePreservesExistingLookupEntries) {
+  xanadu::CompactOpNode first{};
+  first.kind  = xanadu::OpKind::Structure;
+  first.flags = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
+  xanadu::CompactOpNode later = first;
+
+  std::size_t allocationPoints = 0;
+  {
+    FailingLookupResource resource;
+    Manifold manifold(&resource);
+    ASSERT_TRUE(manifold.applyStructure(1, first));
+    const auto before = resource.allocations();
+    ASSERT_TRUE(manifold.applyStructure(100, later));
+    allocationPoints = resource.allocations() - before;
+  }
+  ASSERT_GT(allocationPoints, 0U);
+
+  for (std::size_t failAt = 0; failAt < allocationPoints; ++failAt) {
+    FailingLookupResource resource;
+    Manifold manifold(&resource);
+    ASSERT_TRUE(manifold.applyStructure(1, first));
+    resource.failAfter(failAt);
+    const auto refused = manifold.applyStructure(100, later);
+    ASSERT_FALSE(refused) << "allocation " << failAt;
+    EXPECT_EQ(refused.error(), zigzag::FoldRefusal::LookupCapacityUnavailable);
+    EXPECT_EQ(manifold.foldedThrough(), 1U);
+    EXPECT_EQ(manifold.cellCount(), 1U);
+    EXPECT_TRUE(manifold.structureBirth(1).has_value());
+    EXPECT_EQ(manifold.structureBirth(100), std::nullopt);
+    EXPECT_TRUE(zigzag::ManifoldTestAccess::hasByRef(manifold, 1));
+    EXPECT_FALSE(zigzag::ManifoldTestAccess::hasByRef(manifold, 100));
+
+    resource.allowAllocations();
+    ASSERT_TRUE(manifold.applyStructure(100, later));
+    Manifold expected;
+    ASSERT_TRUE(expected.applyStructure(1, first));
+    ASSERT_TRUE(expected.applyStructure(100, later));
+    EXPECT_TRUE(manifold.equivalentTo(expected));
+  }
+}
+
+TEST(ManifoldTest, advanceAndAdvanceOrRefoldPropagateLookupCapacityFailure) {
+  for (const bool useRefold : {false, true}) {
+    FailingLookupResource resource;
+    Slice slice;
+    const auto first = slice.cell("first");
+    (void)first;
+    xanadu::StoreTestAccess::setLookupResource(slice.store, &resource);
+    auto manifold           = slice.store.rebuildManifold(slice.at);
+    const auto beforeFolded = manifold.foldedThrough();
+    const auto beforeCells  = manifold.cellCount();
+    const auto beforeHint   = zigzag::ManifoldTestAccess::opCountHint(manifold);
+    const auto base         = slice.at;
+    (void)slice.store.makeCell(base, "unrelated sibling");
+    const auto next = slice.store.makeCell(base, "capacity");
+    // Each new birth stages a node, so failure is reached without filling
+    // implementation-specific bucket capacity.
+    resource.failAfter(0);
+    if (useRefold) {
+      EXPECT_THROW(manifold.advanceOrRefold(slice.store, next),
+                   zigzag::ManifoldCapacityUnavailable);
+    } else {
+      const auto result = manifold.advance(slice.store, next);
+      ASSERT_FALSE(result);
+      EXPECT_EQ(result.error().kind, zigzag::AdvanceError::Kind::Refused);
+      EXPECT_EQ(result.error().refusal,
+                zigzag::FoldRefusal::LookupCapacityUnavailable);
+    }
+    EXPECT_EQ(manifold.foldedThrough(), beforeFolded);
+    EXPECT_EQ(manifold.cellCount(), beforeCells);
+    EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), beforeHint);
+    EXPECT_EQ(manifold.refusedOps(), 0U);
+    resource.allowAllocations();
+    if (useRefold) {
+      ASSERT_EQ(manifold.advanceOrRefold(slice.store, next), &manifold);
+    } else {
+      ASSERT_TRUE(manifold.advance(slice.store, next));
+    }
+    if (beforeHint) {
+      const auto nextHint =
+          *beforeHint == std::numeric_limits<std::size_t>::max()
+              ? *beforeHint
+              : *beforeHint + 1U;
+      EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold),
+                std::optional<std::size_t>{nextHint});
+      EXPECT_GT(slice.store.opCount(), nextHint);
+    } else {
+      EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold),
+                std::nullopt);
+    }
+  }
+}
+
+TEST(ManifoldTest,
+     StoreRebuildThrowsInsteadOfReturningPartialFoldOnLookupFailure) {
+  FailingLookupResource resource;
+  Slice slice;
+  const auto cell           = slice.cell("stored");
+  const auto unknownPrefix  = slice.at.next();
+  const auto expectedFull   = slice.store.rebuildManifold(slice.at);
+  const auto expectedPrefix = slice.store.rebuildManifold(unknownPrefix);
+  ASSERT_TRUE(expectedFull.contains(cell));
+
+  xanadu::StoreTestAccess::setLookupResource(slice.store, &resource);
+  resource.failAfter(0);
+  EXPECT_THROW((void)slice.store.rebuildManifold(slice.at),
+               zigzag::ManifoldCapacityUnavailable);
+  EXPECT_THROW((void)slice.store.rebuildManifold(unknownPrefix),
+               zigzag::ManifoldCapacityUnavailable);
+
+  resource.allowAllocations();
+  const auto retriedFull   = slice.store.rebuildManifold(slice.at);
+  const auto retriedPrefix = slice.store.rebuildManifold(unknownPrefix);
+  EXPECT_TRUE(retriedFull.equivalentTo(expectedFull));
+  EXPECT_TRUE(retriedFull.contains(cell));
+  EXPECT_TRUE(retriedPrefix.equivalentTo(expectedPrefix));
+  EXPECT_EQ(retriedFull.refusedOps(), expectedFull.refusedOps());
+  EXPECT_EQ(retriedPrefix.refusedOps(), expectedPrefix.refusedOps());
+}
+
+TEST(ManifoldTest, advanceTracksLinearAncestryCount) {
+  Slice slice;
+  (void)slice.cell("first");
+  auto manifold      = slice.store.rebuildManifold(slice.at);
+  auto expectedCount = slice.store.opsFor(slice.at).size();
+  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), expectedCount);
+
+  for (int i = 0; i < 4; ++i) {
+    const auto next = slice.store.makeCell(slice.at, "next");
+    ASSERT_TRUE(manifold.advance(slice.store, next));
+    slice.at = next;
+    ++expectedCount;
+    EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), expectedCount);
+    EXPECT_EQ(expectedCount, slice.store.opsFor(slice.at).size());
+  }
+}
+
+TEST(ManifoldTest, coldBranchHintIgnoresSiblingOperations) {
+  Slice slice;
+  const auto fork                      = slice.at;
+  constexpr std::uint32_t siblingCount = 8200;
+  for (std::uint32_t i = 0; i < siblingCount; ++i)
+    (void)slice.store.makeCell(fork, "sibling");
+
+  const auto lateBranch = slice.store.makeCell(fork, "late branch");
+  const auto lateIndex = slice.store.segmentedOps().indexOf(lateBranch).value();
+  ASSERT_GT(lateIndex, 8192U);
+
+  const auto folded    = slice.store.rebuildManifold(lateBranch);
+  const auto pathCount = slice.store.opsFor(lateBranch).size();
+  EXPECT_LT(pathCount, 16U);
+  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(folded), pathCount);
+  EXPECT_GT(zigzag::ManifoldTestAccess::byRefDenseCapacity(folded), 0U);
+  EXPECT_LT(zigzag::ManifoldTestAccess::birthCapacity(folded),
+            slice.store.opCount());
+  EXPECT_TRUE(zigzag::ManifoldTestAccess::hasByRef(folded, lateIndex));
+  EXPECT_TRUE(folded.equivalentTo(slice.store.rebuildManifold(lateBranch)));
+
+  const auto unknownSuffix = lateBranch.next();
+  const auto prefix        = slice.store.rebuildManifold(unknownSuffix);
+  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(prefix),
+            slice.store.opsFor(unknownSuffix).size());
+  EXPECT_EQ(prefix.foldedThrough(), lateIndex);
+}
+
+TEST(ManifoldTest, IgnoredTextOperationAdvancesWithoutLookupAllocation) {
+  FailingLookupResource resource;
+  Manifold manifold(&resource);
+  xanadu::CompactOpNode text{};
+  text.kind          = xanadu::OpKind::Insert;
+  text.sourceOpIndex = 77U; // no authored cell is present in this manifold
+  text.setSpan(xanadu::PrimediaSpan{
+      .scroll = xanadu::scratchScroll, .start = 0, .length = 1});
+  resource.failAfter(0);
+
+  ASSERT_TRUE(manifold.applyStructure(5U, text));
+  EXPECT_EQ(resource.allocations(), 0U);
+  EXPECT_EQ(manifold.foldedThrough(), 5U);
+  EXPECT_EQ(manifold.refusedOps(), 0U);
+  EXPECT_EQ(manifold.cellCount(), 0U);
+
+  const auto invalid = manifold.applyStructure(0U, text);
+  ASSERT_FALSE(invalid);
+  EXPECT_EQ(invalid.error(), zigzag::FoldRefusal::InvalidOperationIndex);
+  EXPECT_EQ(manifold.foldedThrough(), 5U);
+  EXPECT_EQ(resource.allocations(), 0U);
+}
+
+TEST(ManifoldTest, UnknownHintRemainsUnknownAfterResourceRefusalAndRetry) {
+  FailingLookupResource resource;
+  Slice slice;
+  const auto next = slice.store.makeCell(slice.at, "unknown hint");
+  Manifold manifold(&resource);
+  manifold.setStore(&slice.store);
+  const auto genesis = slice.store.segmentedOps().indexOf(slice.at);
+  ASSERT_TRUE(genesis);
+  ASSERT_TRUE(xanadu::OsmicWalker::walkAncestral(
+      slice.store.segmentedOps(), *genesis,
+      [&manifold](std::uint32_t op, const xanadu::CompactOpNode &node) {
+        return manifold.applyStructure(op, node).has_value();
+      }));
+  const auto beforeFolded = manifold.foldedThrough();
+  ASSERT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), std::nullopt);
+
+  resource.failAfter(0);
+  const auto failed = manifold.advance(slice.store, next);
+  ASSERT_FALSE(failed);
+  EXPECT_EQ(failed.error().refusal,
+            zigzag::FoldRefusal::LookupCapacityUnavailable);
+  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), std::nullopt);
+  EXPECT_EQ(manifold.foldedThrough(), beforeFolded);
+
+  resource.allowAllocations();
+  ASSERT_TRUE(manifold.advance(slice.store, next));
+  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), std::nullopt);
+}
+
+TEST(ManifoldTest, zeroOperationIndexIsRefusedBeforeLookupArithmetic) {
+  Manifold manifold;
+  xanadu::CompactOpNode node{};
+  node.kind         = xanadu::OpKind::Structure;
+  node.flags        = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
+  const auto result = manifold.applyStructure(0, node);
+  ASSERT_FALSE(result);
+  EXPECT_EQ(result.error(), zigzag::FoldRefusal::InvalidOperationIndex);
+  EXPECT_EQ(manifold.foldedThrough(), 0U);
+  EXPECT_EQ(manifold.refusedOps(), 1U);
+  EXPECT_EQ(manifold.cellCount(), 0U);
+}
+
+TEST(ManifoldTest, lookupFailurePreflightsTextAndStructureChainMutations) {
+  enum class Operation { Insert, SetLink, Splice, SetValue };
+  for (const auto operation : {Operation::Insert, Operation::SetLink,
+                               Operation::Splice, Operation::SetValue}) {
+    FailingLookupResource resource;
+    Manifold manifold(&resource);
+    xanadu::CompactOpNode make{};
+    make.kind  = xanadu::OpKind::Structure;
+    make.flags = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
+    ASSERT_TRUE(manifold.applyStructure(1, make));
+    ASSERT_TRUE(manifold.applyStructure(2, make));
+    const auto before = *manifold.slot(1);
+    xanadu::CompactOpNode node{};
+    node.sourceOpIndex = 1;
+    if (operation == Operation::Insert) {
+      node.kind = xanadu::OpKind::Insert;
+      node.setSpan(PrimediaSpan{.scroll = 0, .start = 0, .length = 1});
+    } else {
+      node.kind = xanadu::OpKind::Structure;
+      if (operation == Operation::SetLink) {
+        node.flags  = xanadu::structureFlags(StructureVerb::SetLink);
+        node.linkId = 2;
+      } else if (operation == Operation::Splice) {
+        node.flags = xanadu::structureFlags(StructureVerb::Splice);
+      } else {
+        node.flags = xanadu::structureFlags(StructureVerb::SetValue);
+      }
+    }
+    resource.failAfter(0);
+    const auto failed = manifold.applyStructure(8192, node);
+    ASSERT_FALSE(failed);
+    EXPECT_EQ(failed.error(), zigzag::FoldRefusal::LookupCapacityUnavailable);
+    EXPECT_EQ(manifold.foldedThrough(), 2U);
+    EXPECT_EQ(manifold.refusedOps(), 0U);
+    EXPECT_EQ(*manifold.slot(1), before);
+    EXPECT_EQ(zigzag::ManifoldTestAccess::denseOf(manifold, 8192),
+              std::nullopt);
+    resource.allowAllocations();
+    ASSERT_TRUE(manifold.applyStructure(8192, node));
+    EXPECT_EQ(zigzag::ManifoldTestAccess::denseOf(manifold, 8192), 0U);
+  }
+}
 
 TEST(ManifoldTest, missingNeighboursStayOptionalThroughTraversal) {
   static_assert(!std::is_convertible_v<zigzag::OptionalCell, CellRef>);
