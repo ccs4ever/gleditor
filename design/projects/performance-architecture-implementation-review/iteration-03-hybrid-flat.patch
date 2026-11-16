@@ -1,0 +1,986 @@
+diff --git a/apps/common/xanadu/osmic_walker.hpp b/apps/common/xanadu/osmic_walker.hpp
+index 6bd5abc9..35703e9b 100644
+--- a/apps/common/xanadu/osmic_walker.hpp
++++ b/apps/common/xanadu/osmic_walker.hpp
+@@ -76,12 +76,15 @@ public:
+   // (potentially many times), so std::forward-ing either here would move
+   // from it on the first call and leave later calls operating on a
+   // moved-from callable.
+-  template <typename NodeAccessor, OsmicVisitor Visitor>
+-  static bool walkPathCustom(
++  template <typename NodeAccessor, OsmicVisitor Visitor, typename BeforeVisit>
++  static bool walkPathCustomWithCount(
+       const std::uint32_t fromAncestor, const std::uint32_t toDescendant,
+       NodeAccessor &&getNode, // NOLINT(cppcoreguidelines-missing-std-forward)
+-      Visitor &&visitor) {    // NOLINT(cppcoreguidelines-missing-std-forward)
++      Visitor &&visitor,      // NOLINT(cppcoreguidelines-missing-std-forward)
++      BeforeVisit
++          &&beforeVisit) { // NOLINT(cppcoreguidelines-missing-std-forward)
+     if (fromAncestor == toDescendant || 0 == toDescendant) {
++      beforeVisit(0);
+       return true;
+     }
+ 
+@@ -113,6 +116,8 @@ public:
+       return false; // fromAncestor is not on the ancestral line of toDescendant
+     }
+ 
++    beforeVisit(count);
++
+     // Iterate backwards through the recorded indices to visit them in forward
+     // chronological order (ancestor -> descendant) without an explicit reverse
+     // pass.
+@@ -154,6 +159,16 @@ public:
+     return true;
+   }
+ 
++  template <typename NodeAccessor, OsmicVisitor Visitor>
++  static bool walkPathCustom(
++      const std::uint32_t fromAncestor, const std::uint32_t toDescendant,
++      NodeAccessor &&getNode, // NOLINT(cppcoreguidelines-missing-std-forward)
++      Visitor &&visitor) {    // NOLINT(cppcoreguidelines-missing-std-forward)
++    return walkPathCustomWithCount(
++        fromAncestor, toDescendant, std::forward<NodeAccessor>(getNode),
++        std::forward<Visitor>(visitor), [](std::size_t) {});
++  }
++
+   /**
+    * @brief Walk the forward path from @p fromAncestor to @p toDescendant in
+    *        @p spool.
+@@ -178,6 +193,23 @@ public:
+     return walkPath(spool, 0, targetIndex, std::forward<Visitor>(visitor));
+   }
+ 
++  /**
++   * @brief Walk one ancestry path and report its exact length before visiting.
++   *
++   * The count comes from the path buffer already collected by the walker, so
++   * callers can seed path-sized replay state without a second ancestry walk.
++   */
++  template <OsmicVisitor Visitor, typename BeforeVisit>
++  static bool walkAncestralWithCount(const SegmentedOpsSpool &spool,
++                                     const std::uint32_t targetIndex,
++                                     BeforeVisit &&beforeVisit,
++                                     Visitor &&visitor) {
++    return walkPathCustomWithCount(
++        0, targetIndex,
++        [&spool](const std::uint32_t idx) { return spool.get(idx); },
++        std::forward<Visitor>(visitor), std::forward<BeforeVisit>(beforeVisit));
++  }
++
+   /**
+    * @brief Fold operations from @p fromAncestor to @p toDescendant onto
+    *        @p state.
+diff --git a/apps/common/xanadu/store.cpp b/apps/common/xanadu/store.cpp
+index 1ddeb797..c84e72aa 100644
+--- a/apps/common/xanadu/store.cpp
++++ b/apps/common/xanadu/store.cpp
+@@ -527,13 +527,20 @@ Store::rebuildResolved(const MicroversionId &version,
+ 
+ zigzag::Manifold
+ Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
+-  zigzag::Manifold folded;
++  zigzag::Manifold folded(lookupResource_);
+   folded.setStore(const_cast<Store *>(this));
+-  OsmicWalker::walkAncestral(
+-      opsSpool, index, [&folded](std::uint32_t idx, const CompactOpNode &node) {
+-        // A cold fold keeps going past a refusal: the manifold counts it in
+-        // refusedOps(), which is where a caller checking honesty looks.
+-        std::ignore = folded.applyStructure(idx, node);
++  OsmicWalker::walkAncestralWithCount(
++      opsSpool, index,
++      [&folded](const std::size_t pathCount) {
++        folded.setOpCountHint(pathCount);
++      },
++      [&folded](std::uint32_t idx, const CompactOpNode &node) {
++        // Semantic refusals remain counted and non-fatal. Lookup exhaustion
++        // aborts the walk so a partial manifold cannot escape.
++        const auto result = folded.applyStructure(idx, node);
++        if (!result &&
++            result.error() == zigzag::FoldRefusal::LookupCapacityUnavailable)
++          throw zigzag::ManifoldCapacityUnavailable(idx);
+       });
+   // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
+   // the cost of a manifold that was just loaded rather than a best case.
+@@ -548,13 +555,22 @@ zigzag::Manifold Store::rebuildManifold(const MicroversionId &version) const {
+   }
+   // Nothing filed under this name: fold the longest recorded prefix of it, for
+   // the same reason rebuild() replays one.
+-  zigzag::Manifold folded;
++  zigzag::Manifold folded(lookupResource_);
+   folded.setStore(const_cast<Store *>(this));
+-  for (const auto &step : version.path()) {
++  const auto path       = version.path();
++  std::size_t pathCount = 0;
++  for (const auto &step : path) {
++    if (opsSpool.get(step) != nullptr) ++pathCount;
++  }
++  folded.setOpCountHint(pathCount);
++  for (const auto &step : path) {
+     if (const auto *const node = opsSpool.get(step); nullptr != node) {
+       // As above: refusals are counted, not fatal to the fold.
+-      std::ignore =
+-          folded.applyStructure(opsSpool.indexOf(step).value(), *node);
++      const auto opIndex = opsSpool.indexOf(step).value();
++      const auto result  = folded.applyStructure(opIndex, *node);
++      if (!result &&
++          result.error() == zigzag::FoldRefusal::LookupCapacityUnavailable)
++        throw zigzag::ManifoldCapacityUnavailable(opIndex);
+     }
+   }
+   folded.compact();
+diff --git a/apps/common/xanadu/store.hpp b/apps/common/xanadu/store.hpp
+index 5bab16e6..b4952c0b 100644
+--- a/apps/common/xanadu/store.hpp
++++ b/apps/common/xanadu/store.hpp
+@@ -33,6 +33,7 @@
+ #include <functional>
+ #include <iosfwd>
+ #include <map>
++#include <memory_resource>
+ #include <optional>
+ #include <ranges>
+ #include <string>
+@@ -1372,6 +1373,7 @@ public:
+   void adoptOpRecords(const std::vector<OpRecord> &records);
+ 
+ private:
++  friend struct StoreTestAccess;
+   friend class enfilade::Chronofilade;
+   friend class OsmicWalker;
+   /// Apply one recorded op to @p onto. The single replay path: everything that
+@@ -1463,6 +1465,7 @@ private:
+   /// this -- a parallel std::map<MicroversionId, Op> used to answer most of
+   /// them, holding the same operations a second time at about twice the size
+   /// and three heap allocations apiece.
++  std::pmr::memory_resource *lookupResource_{std::pmr::get_default_resource()};
+   SegmentedOpsSpool opsSpool;
+   std::map<zigzag::CellRef, Link> linkTable;
+   /// The first two cells minted, which is what genesis mints. Derived from the
+diff --git a/apps/common/xanadu/zigzag/manifold.cpp b/apps/common/xanadu/zigzag/manifold.cpp
+index cb8b22e5..3a1659e7 100644
+--- a/apps/common/xanadu/zigzag/manifold.cpp
++++ b/apps/common/xanadu/zigzag/manifold.cpp
+@@ -18,6 +18,9 @@ namespace zigzag {
+ 
+ Manifold::Manifold() = default;
+ 
++Manifold::Manifold(std::pmr::memory_resource *lookupResource)
++    : byRef(lookupResource), structureBirths_(lookupResource) {}
++
+ Manifold::~Manifold() {
+   if (store_ != nullptr) {
+     store_->detachManifold(this);
+@@ -128,9 +131,7 @@ Manifold::denseOf(const CellRef ref) const noexcept {
+   if (noCell == ref || isEphemeral(ref)) {
+     return std::nullopt;
+   }
+-  const auto found = byRef.find(ref);
+-  return found == byRef.end() ? std::nullopt
+-                              : std::optional<std::uint32_t>{found->second};
++  return byRef.find(ref);
+ }
+ 
+ SlotRef Manifold::slot(const CellRef ref) const noexcept {
+@@ -320,7 +321,51 @@ FoldResult Manifold::spliceContent(const std::uint32_t dense,
+ FoldResult
+ Manifold::applyStructure(const std::uint32_t opIndex,
+                          const xanadu::CompactOpNode &node) noexcept {
+-  foldedThrough_ = std::max(opIndex, foldedThrough_);
++  struct FoldPositionGuard {
++    std::uint32_t &position;
++    std::uint32_t op;
++    bool commit{true};
++    ~FoldPositionGuard() {
++      if (commit) position = std::max(op, position);
++    }
++  } foldPosition{foldedThrough_, opIndex};
++  if (opIndex == 0) return refuse(FoldRefusal::InvalidOperationIndex);
++
++  const auto prepareRef = [this](std::uint32_t op)
++      -> std::expected<
++          std::optional<detail::ManifoldOpIndexMap::PreparedInsert>,
++          FoldRefusal> {
++    if (byRef.contains(op))
++      return std::optional<detail::ManifoldOpIndexMap::PreparedInsert>{};
++    auto prepared = byRef.prepareInsert(op);
++    if (!prepared)
++      return std::unexpected{FoldRefusal::LookupCapacityUnavailable};
++    return std::optional<detail::ManifoldOpIndexMap::PreparedInsert>{
++        std::move(*prepared)};
++  };
++  const auto commitRef = [this](auto &prepared, std::uint32_t op,
++                                std::uint32_t dense) noexcept {
++    return !prepared || byRef.commitInsert(std::move(*prepared), op, dense);
++  };
++  const auto requireRefCommit = [&commitRef](auto &prepared, std::uint32_t op,
++                                             std::uint32_t dense) noexcept {
++    if (!commitRef(prepared, op, dense)) std::terminate();
++  };
++  const auto prepareBirth = [this](std::uint32_t op)
++      -> std::expected<detail::FlatU32Map<StructureBirthInfo>::PreparedInsert,
++                       FoldRefusal> {
++    auto prepared = structureBirths_.prepareInsert(op);
++    if (!prepared) {
++      if (prepared.error() == detail::FlatU32MapPrepareFailure::AlreadyPresent)
++        return std::unexpected{FoldRefusal::DuplicateCell};
++      return std::unexpected{FoldRefusal::LookupCapacityUnavailable};
++    }
++    return std::move(*prepared);
++  };
++  const auto lookupFailure = [&]() -> FoldResult {
++    foldPosition.commit = false;
++    return std::unexpected{FoldRefusal::LookupCapacityUnavailable};
++  };
+ 
+   if (xanadu::OpKind::Structure != node.kind) {
+     const auto ctx       = xanadu::contextOf(node);
+@@ -333,13 +378,15 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+       if (xanadu::scratchScroll == node.span().scroll) {
+         return refuse(FoldRefusal::ScratchAddress);
+       }
++      auto refToken = prepareRef(opIndex);
++      if (!refToken) return lookupFailure();
+       if (xanadu::OpKind::Insert == node.kind) {
+         if (const auto result = spliceContent(d, node.at, 0, node.span());
+             !result) {
+           return refuse(result.error());
+         }
+         slots[d].lastOp = opIndex;
+-        byRef.emplace(opIndex, d);
++        requireRefCommit(*refToken, opIndex, d);
+         return {};
+       }
+       if (xanadu::OpKind::Delete == node.kind) {
+@@ -349,7 +396,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+           return refuse(result.error());
+         }
+         slots[d].lastOp = opIndex;
+-        byRef.emplace(opIndex, d);
++        requireRefCommit(*refToken, opIndex, d);
+         return {};
+       }
+       if (xanadu::OpKind::Transclude == node.kind) {
+@@ -381,7 +428,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+           }
+         }
+         slots[d].lastOp = opIndex;
+-        byRef.emplace(opIndex, d);
++        requireRefCommit(*refToken, opIndex, d);
+         return {};
+       }
+       if (xanadu::OpKind::Rearrange == node.kind) {
+@@ -395,11 +442,11 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+           return refuse(result.error());
+         }
+         slots[d].lastOp = opIndex;
+-        byRef.emplace(opIndex, d);
++        requireRefCommit(*refToken, opIndex, d);
+         return {};
+       }
+       slots[d].lastOp = opIndex;
+-      byRef.emplace(opIndex, d);
++      requireRefCommit(*refToken, opIndex, d);
+       return {};
+     }
+     return {};
+@@ -443,16 +490,18 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+           return refuse(FoldRefusal::UnknownSubject);
+         }
+       }
+-      const auto [_, inserted] = structureBirths_.try_emplace(
+-          opIndex, StructureBirthInfo{
+-                       .opIndex     = opIndex,
+-                       .kind        = kind,
+-                       .containerOp = node.sourceOpIndex,
+-                       .nameSpan    = node.span(),
+-                   });
+-      if (!inserted) {
+-        return refuse(FoldRefusal::DuplicateCell);
++      auto birthToken = prepareBirth(opIndex);
++      if (!birthToken) {
++        if (birthToken.error() == FoldRefusal::LookupCapacityUnavailable)
++          return lookupFailure();
++        return refuse(birthToken.error());
+       }
++      const StructureBirthInfo info{.opIndex     = opIndex,
++                                    .kind        = kind,
++                                    .containerOp = node.sourceOpIndex,
++                                    .nameSpan    = node.span()};
++      if (!structureBirths_.commitInsert(std::move(*birthToken), info))
++        std::terminate();
+       return {};
+     }
+ 
+@@ -463,20 +512,24 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+         return refuse(FoldRefusal::UnknownSubject);
+       }
+     }
+-    const auto [_, inserted] = structureBirths_.try_emplace(
+-        opIndex, StructureBirthInfo{
+-                     .opIndex     = opIndex,
+-                     .kind        = xanadu::StructureKind::Cell,
+-                     .containerOp = node.sourceOpIndex,
+-                     .nameSpan    = node.span(),
+-                 });
+-    if (!inserted) {
+-      return refuse(FoldRefusal::DuplicateCell);
++    auto birthToken = prepareBirth(opIndex);
++    if (!birthToken) {
++      if (birthToken.error() == FoldRefusal::LookupCapacityUnavailable)
++        return lookupFailure();
++      return refuse(birthToken.error());
+     }
++    auto refToken = prepareRef(opIndex);
++    if (!refToken) return lookupFailure();
+ 
+     const auto dense = static_cast<std::uint32_t>(slots.size());
+     // The empty runs start at the arenas' tails, so this cell's first link and
+     // first span are appends in place rather than relocations.
++    const StructureBirthInfo info{.opIndex     = opIndex,
++                                  .kind        = xanadu::StructureKind::Cell,
++                                  .containerOp = node.sourceOpIndex,
++                                  .nameSpan    = node.span()};
++    if (!structureBirths_.commitInsert(std::move(*birthToken), info))
++      std::terminate();
+     slots.push_back(CellSlot{
+         .spanOffset  = static_cast<std::uint32_t>(content.size()),
+         .spanCount   = 0,
+@@ -489,7 +542,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+         .flags     = 0,
+         .valueBits = node.value,
+     });
+-    byRef.emplace(opIndex, dense);
++    requireRefCommit(*refToken, opIndex, dense);
+     if (!node.span().empty()) {
+       const auto only = node.span();
+       if (const auto result = setContent(
+@@ -555,6 +608,9 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+       }
+     }
+ 
++    auto refToken = prepareRef(opIndex);
++    if (!refToken) return lookupFailure();
++
+     // A link is one edge shared by two cells, so setting it breaks whatever
+     // each end was holding: the invariant this maintains is that
+     // linked(a, d, dir) == b exactly when linked(b, d, -dir) == a. zzcore's
+@@ -576,7 +632,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+     setOneSide(d, dim, dir, to);
+ 
+     slots[d].lastOp = opIndex;
+-    byRef.emplace(opIndex, d);
++    requireRefCommit(*refToken, opIndex, d);
+     dimsCacheStale = true;
+     return {};
+   }
+@@ -586,7 +642,9 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+     if (!dense.has_value()) {
+       return refuse(FoldRefusal::UnknownSubject);
+     }
+-    const auto d = *dense;
++    const auto d  = *dense;
++    auto refToken = prepareRef(opIndex);
++    if (!refToken) return lookupFailure();
+     if (const auto result = spliceContent(d, node.at, node.length, node.span());
+         !result) {
+       return refuse(result.error());
+@@ -595,7 +653,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+     cell.valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags));
+     cell.valueBits = node.value;
+     cell.lastOp    = opIndex;
+-    byRef.emplace(opIndex, d);
++    requireRefCommit(*refToken, opIndex, d);
+     return {};
+   }
+ 
+@@ -609,6 +667,8 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+     // make the fold depend on the order two branches were folded in.
+     const auto restated = node.span();
+     const auto d        = *dense;
++    auto refToken       = prepareRef(opIndex);
++    if (!refToken) return lookupFailure();
+     if (const auto result = setContent(
+             d, restated.empty()
+                    ? std::span<const xanadu::PrimediaSpan>{}
+@@ -620,7 +680,7 @@ Manifold::applyStructure(const std::uint32_t opIndex,
+     cell.valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags));
+     cell.valueBits = node.value;
+     cell.lastOp    = opIndex;
+-    byRef.emplace(opIndex, d);
++    requireRefCommit(*refToken, opIndex, d);
+     return {};
+   }
+   }
+@@ -637,6 +697,11 @@ Manifold *Manifold::advanceOrRefold(const xanadu::Store &store,
+   if (stepped) {
+     return this;
+   }
++  if (stepped.error().kind == AdvanceError::Kind::Refused &&
++      stepped.error().refusal == FoldRefusal::LookupCapacityUnavailable) {
++    const auto index = store.segmentedOps().indexOf(version);
++    throw ManifoldCapacityUnavailable(index.value_or(0));
++  }
+   GLEDITOR_LOG_DEBUG("zigzag.manifold", "folding {} afresh: {}", version.str(),
+                      AdvanceError::Kind::Refused == stepped.error().kind
+                          ? toString(stepped.error().refusal)
+@@ -661,11 +726,20 @@ AdvanceResult Manifold::advance(const xanadu::Store &store,
+     return std::unexpected{
+         AdvanceError{.kind = AdvanceError::Kind::MissingNode}};
+   }
+-  return applyStructure(*index, *node)
+-      .transform_error([](const FoldRefusal why) {
+-        return AdvanceError{.kind    = AdvanceError::Kind::Refused,
+-                            .refusal = why};
+-      });
++  const auto previousHint = byRef.opCountHint();
++  const auto nextHint = previousHint == std::numeric_limits<std::size_t>::max()
++                            ? previousHint
++                            : previousHint + 1U;
++  byRef.setOpCountHint(nextHint);
++  auto folded = applyStructure(*index, *node);
++  if (!folded && folded.error() == FoldRefusal::LookupCapacityUnavailable) {
++    // The new hint is only policy state. Restore it on resource refusal along
++    // with applyStructure's unchanged logical fold position and mappings.
++    byRef.setOpCountHint(previousHint);
++  }
++  return folded.transform_error([](const FoldRefusal why) {
++    return AdvanceError{.kind = AdvanceError::Kind::Refused, .refusal = why};
++  });
+ }
+ 
+ Manifold *Manifold::compact() {
+diff --git a/apps/common/xanadu/zigzag/manifold.hpp b/apps/common/xanadu/zigzag/manifold.hpp
+index cfe29707..acd48a73 100644
+--- a/apps/common/xanadu/zigzag/manifold.hpp
++++ b/apps/common/xanadu/zigzag/manifold.hpp
+@@ -22,8 +22,10 @@
+ #include <expected>
+ #include <limits>
+ #include <map>
++#include <memory_resource>
+ #include <optional>
+ #include <span>
++#include <stdexcept>
+ #include <string>
+ #include <string_view>
+ #include <type_traits>
+@@ -39,6 +41,7 @@
+ #include "common/xanadu/ops.hpp"
+ #include "common/xanadu/spool.hpp"
+ #include "common/xanadu/zigzag/dim_vector.hpp"
++#include "common/xanadu/zigzag/manifold_lookup.hpp"
+ 
+ namespace xanadu {
+ class Store;
+@@ -231,7 +234,9 @@ enum class FoldRefusal : std::uint8_t {
+                     ///< Slice/Xanadoc Make
+   WrongContextKind, ///< Operation applied to an incompatible context kind (e.g.
+                     ///< PageBreak on Cell)
+-  ContentRunTooLong, ///< A cell's content count does not fit CellSlot
++  ContentRunTooLong,         ///< A cell's content count does not fit CellSlot
++  LookupCapacityUnavailable, ///< Lookup storage could not be prepared
++  InvalidOperationIndex,     ///< Operation zero cannot name a fold step
+ };
+ 
+ [[nodiscard]] constexpr std::string_view
+@@ -257,6 +262,10 @@ toString(const FoldRefusal refusal) noexcept {
+     return "wrong context kind";
+   case FoldRefusal::ContentRunTooLong:
+     return "content run too long";
++  case FoldRefusal::LookupCapacityUnavailable:
++    return "lookup capacity unavailable";
++  case FoldRefusal::InvalidOperationIndex:
++    return "invalid operation index";
+   }
+   return "unknown refusal";
+ }
+@@ -276,6 +285,19 @@ struct AdvanceError {
+ };
+ 
+ /// The outcome of folding or stepping: nothing on success, the reason if not.
++class ManifoldCapacityUnavailable final : public std::exception {
++public:
++  explicit ManifoldCapacityUnavailable(std::uint32_t opIndex = 0) noexcept
++      : opIndex_(opIndex) {}
++  [[nodiscard]] std::uint32_t opIndex() const noexcept { return opIndex_; }
++  [[nodiscard]] const char *what() const noexcept override {
++    return "manifold lookup capacity unavailable";
++  }
++
++private:
++  std::uint32_t opIndex_;
++};
++
+ using FoldResult    = std::expected<void, FoldRefusal>;
+ using AdvanceResult = std::expected<void, AdvanceError>;
+ 
+@@ -385,6 +407,7 @@ using SlotRef = gleditor::cpp26::optional<const CellSlot &>;
+ class Manifold {
+ public:
+   Manifold();
++  explicit Manifold(std::pmr::memory_resource *lookupResource);
+   ~Manifold();
+   Manifold(const Manifold &other);
+   Manifold &operator=(const Manifold &other);
+@@ -783,7 +806,9 @@ public:
+    * cannot make sense of: a SetLink or SetValue whose subject chain does not
+    * reach a cell this manifold holds, a second MakeCell at one index, or --
+    * R8's boundary as a bit rather than a convention -- a link whose target or
+-   * dimension isEphemeral(). Each refusal bumps refusedOps().
++   * dimension isEphemeral(). Authored semantic refusals bump refusedOps(); a
++   * lookup-capacity refusal leaves the logical fold position and counters
++   * unchanged so the caller can retry or abort.
+    *
+    * Anything that is not OpKind::Structure is ignored -- and answers success,
+    * since there was nothing to refuse -- so a caller may hand over every node
+@@ -851,6 +876,11 @@ private:
+       bool legacyMode) const;
+ 
+   friend struct ManifoldTestAccess;
++  friend class xanadu::Store;
++  Manifold *setOpCountHint(std::size_t hint) noexcept {
++    byRef.setOpCountHint(hint);
++    return this;
++  }
+ 
+   /// Count @p why and hand it back as the fold's answer.
+   FoldResult refuse(const FoldRefusal why) noexcept {
+@@ -900,7 +930,7 @@ private:
+   std::size_t liveContent{0};
+   /// Operation index -> dense id, for every operation in a cell's chain and
+   /// not only for its birth op -- see slot().
+-  std::unordered_map<CellRef, std::uint32_t> byRef;
++  detail::ManifoldOpIndexMap byRef;
+   /// Live entries in @ref links. The difference against links.size() is the
+   /// dead runs compact() would reclaim.
+   std::size_t liveLinks{0};
+@@ -911,7 +941,7 @@ private:
+   std::uint32_t refusedOps_{0};
+   std::vector<CellRef> externalCells_;
+   std::uint32_t unresolvedExternals_{0};
+-  std::unordered_map<std::uint32_t, StructureBirthInfo> structureBirths_;
++  detail::FlatU32Map<StructureBirthInfo> structureBirths_;
+ 
+   /// dimensions() is a rank walk, and a span has to point at something.
+   mutable std::vector<DimRef> dimsCache;
+diff --git a/tests/xuzz/manifold_test.cpp b/tests/xuzz/manifold_test.cpp
+index a562033c..af92c097 100644
+--- a/tests/xuzz/manifold_test.cpp
++++ b/tests/xuzz/manifold_test.cpp
+@@ -19,6 +19,7 @@
+ #include <iostream>
+ #include <limits>
+ #include <memory>
++#include <memory_resource>
+ #include <optional>
+ #include <span>
+ #include <stdexcept>
+@@ -42,6 +43,35 @@ namespace zigzag {
+ 
+ /// Seed one representable maximum-size run without building quadratic history.
+ struct ManifoldTestAccess {
++  static std::optional<std::uint32_t> denseOf(const Manifold &manifold,
++                                              CellRef ref) {
++    return manifold.denseOf(ref);
++  }
++  static void setOpCountHint(Manifold &manifold, std::size_t hint) {
++    manifold.setOpCountHint(hint);
++  }
++  static std::size_t opCountHint(const Manifold &manifold) {
++    return manifold.byRef.opCountHint();
++  }
++  static std::size_t denseValueCapacity(const Manifold &manifold) {
++    return manifold.byRef.denseValueCapacity();
++  }
++  static std::size_t overflowBucketCapacity(const Manifold &manifold) {
++    return manifold.byRef.overflowBucketCapacity();
++  }
++  static bool hasByRef(const Manifold &manifold, std::uint32_t op) {
++    return manifold.byRef.contains(op);
++  }
++  static std::size_t birthSize(const Manifold &manifold) {
++    return manifold.structureBirths_.size();
++  }
++  static std::size_t birthCapacity(const Manifold &manifold) {
++    return manifold.structureBirths_.capacity();
++  }
++  static std::size_t birthLimit(const Manifold &manifold) {
++    return detail::FlatU32Map<StructureBirthInfo>::maxLiveEntries(
++        manifold.structureBirths_.capacity());
++  }
+   static bool
+   seedMaxContentRun(Manifold &manifold, const CellRef cell,
+                     const std::span<const xanadu::PrimediaSpan> spans) {
+@@ -55,8 +85,45 @@ struct ManifoldTestAccess {
+ 
+ } // namespace zigzag
+ 
++namespace xanadu {
++struct StoreTestAccess {
++  static void setLookupResource(Store &store,
++                                std::pmr::memory_resource *resource) {
++    store.lookupResource_ = resource;
++  }
++};
++} // namespace xanadu
++
+ namespace {
+ 
++class FailingLookupResource final : public std::pmr::memory_resource {
++public:
++  void failAfter(std::size_t successfulAllocations) noexcept {
++    remaining_ = successfulAllocations;
++    failing_   = true;
++  }
++  void allowAllocations() noexcept { failing_ = false; }
++
++private:
++  void *do_allocate(std::size_t bytes, std::size_t alignment) override {
++    if (failing_) {
++      if (remaining_ == 0) throw std::bad_alloc{};
++      --remaining_;
++    }
++    return std::pmr::new_delete_resource()->allocate(bytes, alignment);
++  }
++  void do_deallocate(void *p, std::size_t bytes,
++                     std::size_t alignment) override {
++    std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
++  }
++  bool
++  do_is_equal(const std::pmr::memory_resource &other) const noexcept override {
++    return this == &other;
++  }
++  std::size_t remaining_{0};
++  bool failing_{false};
++};
++
+ using xanadu::Link;
+ using xanadu::LinkType;
+ using xanadu::MicroversionId;
+@@ -118,6 +185,325 @@ struct Slice {
+   }
+ };
+ 
++bool fillBirthTableToLimit(Store &store, MicroversionId &at,
++                           Manifold &manifold) {
++  while (zigzag::ManifoldTestAccess::birthSize(manifold) <
++         zigzag::ManifoldTestAccess::birthLimit(manifold)) {
++    at = store.makeCell(at, "growth");
++    if (!manifold.advance(store, at) ||
++        zigzag::ManifoldTestAccess::opCountHint(manifold) != store.opCount())
++      return false;
++  }
++  return true;
++}
++
++TEST(ManifoldTest, lookupAllocationFailuresLeaveMakeCellFoldStateUntouched) {
++  // MakeCell prepares the sparse birth table and dense value/presence storage.
++  // Fail each allocation point independently, then retry the same operation.
++  for (std::size_t failAt = 0; failAt < 4; ++failAt) {
++    FailingLookupResource resource;
++    Manifold manifold(&resource);
++    xanadu::CompactOpNode node{};
++    node.kind  = xanadu::OpKind::Structure;
++    node.flags = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
++    resource.failAfter(failAt);
++    const auto refused = manifold.applyStructure(1, node);
++    ASSERT_FALSE(refused) << "allocation " << failAt;
++    EXPECT_EQ(refused.error(), zigzag::FoldRefusal::LookupCapacityUnavailable);
++    EXPECT_EQ(manifold.foldedThrough(), 0U);
++    EXPECT_EQ(manifold.refusedOps(), 0U);
++    EXPECT_EQ(manifold.cellCount(), 0U);
++    EXPECT_EQ(manifold.structureBirth(1), std::nullopt);
++
++    resource.allowAllocations();
++    ASSERT_TRUE(manifold.applyStructure(1, node));
++    Manifold expected;
++    ASSERT_TRUE(expected.applyStructure(1, node));
++    EXPECT_TRUE(manifold.equivalentTo(expected));
++    EXPECT_EQ(manifold.foldedThrough(), 1U);
++    ASSERT_EQ(manifold.cellCount(), 1U);
++    EXPECT_EQ(zigzag::ManifoldTestAccess::denseOf(manifold, 1), 0U);
++    EXPECT_TRUE(manifold.structureBirth(1).has_value());
++  }
++}
++
++TEST(ManifoldTest, advanceAndAdvanceOrRefoldPropagateLookupCapacityFailure) {
++  for (const bool useRefold : {false, true}) {
++    FailingLookupResource resource;
++    Slice slice;
++    const auto first = slice.cell("first");
++    (void)first;
++    xanadu::StoreTestAccess::setLookupResource(slice.store, &resource);
++    auto manifold = slice.store.rebuildManifold(slice.at);
++    ASSERT_TRUE(fillBirthTableToLimit(slice.store, slice.at, manifold));
++    const auto beforeFolded = manifold.foldedThrough();
++    const auto beforeCells  = manifold.cellCount();
++    const auto beforeHint   = zigzag::ManifoldTestAccess::opCountHint(manifold);
++    const auto base         = slice.at;
++    (void)slice.store.makeCell(base, "unrelated sibling");
++    const auto next = slice.store.makeCell(base, "capacity");
++    resource.failAfter(0);
++    if (useRefold) {
++      EXPECT_THROW(manifold.advanceOrRefold(slice.store, next),
++                   zigzag::ManifoldCapacityUnavailable);
++    } else {
++      const auto result = manifold.advance(slice.store, next);
++      ASSERT_FALSE(result);
++      EXPECT_EQ(result.error().kind, zigzag::AdvanceError::Kind::Refused);
++      EXPECT_EQ(result.error().refusal,
++                zigzag::FoldRefusal::LookupCapacityUnavailable);
++    }
++    EXPECT_EQ(manifold.foldedThrough(), beforeFolded);
++    EXPECT_EQ(manifold.cellCount(), beforeCells);
++    EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), beforeHint);
++    EXPECT_EQ(manifold.refusedOps(), 0U);
++    resource.allowAllocations();
++    if (useRefold) {
++      ASSERT_EQ(manifold.advanceOrRefold(slice.store, next), &manifold);
++    } else {
++      ASSERT_TRUE(manifold.advance(slice.store, next));
++    }
++    EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold),
++              beforeHint + 1U);
++    EXPECT_GT(slice.store.opCount(), beforeHint + 1U);
++  }
++}
++
++TEST(ManifoldTest,
++     StoreRebuildThrowsInsteadOfReturningPartialFoldOnLookupFailure) {
++  FailingLookupResource resource;
++  Slice slice;
++  const auto cell           = slice.cell("stored");
++  const auto unknownPrefix  = slice.at.next();
++  const auto expectedFull   = slice.store.rebuildManifold(slice.at);
++  const auto expectedPrefix = slice.store.rebuildManifold(unknownPrefix);
++  ASSERT_TRUE(expectedFull.contains(cell));
++
++  xanadu::StoreTestAccess::setLookupResource(slice.store, &resource);
++  resource.failAfter(0);
++  EXPECT_THROW((void)slice.store.rebuildManifold(slice.at),
++               zigzag::ManifoldCapacityUnavailable);
++  EXPECT_THROW((void)slice.store.rebuildManifold(unknownPrefix),
++               zigzag::ManifoldCapacityUnavailable);
++
++  resource.allowAllocations();
++  const auto retriedFull   = slice.store.rebuildManifold(slice.at);
++  const auto retriedPrefix = slice.store.rebuildManifold(unknownPrefix);
++  EXPECT_TRUE(retriedFull.equivalentTo(expectedFull));
++  EXPECT_TRUE(retriedFull.contains(cell));
++  EXPECT_TRUE(retriedPrefix.equivalentTo(expectedPrefix));
++  EXPECT_EQ(retriedFull.refusedOps(), expectedFull.refusedOps());
++  EXPECT_EQ(retriedPrefix.refusedOps(), expectedPrefix.refusedOps());
++}
++
++TEST(ManifoldTest, advanceTracksLinearAncestryCount) {
++  Slice slice;
++  (void)slice.cell("first");
++  auto manifold      = slice.store.rebuildManifold(slice.at);
++  auto expectedCount = slice.store.opsFor(slice.at).size();
++  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), expectedCount);
++
++  for (int i = 0; i < 4; ++i) {
++    const auto next = slice.store.makeCell(slice.at, "next");
++    ASSERT_TRUE(manifold.advance(slice.store, next));
++    slice.at = next;
++    ++expectedCount;
++    EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(manifold), expectedCount);
++    EXPECT_EQ(expectedCount, slice.store.opsFor(slice.at).size());
++  }
++}
++
++TEST(ManifoldTest, coldBranchHintBoundsDenseKeysBySelectedPath) {
++  Slice slice;
++  const auto fork                      = slice.at;
++  constexpr std::uint32_t siblingCount = 8200;
++  for (std::uint32_t i = 0; i < siblingCount; ++i)
++    (void)slice.store.makeCell(fork, "sibling");
++
++  const auto lateBranch = slice.store.makeCell(fork, "late branch");
++  const auto lateIndex = slice.store.segmentedOps().indexOf(lateBranch).value();
++  ASSERT_GT(lateIndex, 8192U);
++
++  const auto folded    = slice.store.rebuildManifold(lateBranch);
++  const auto pathCount = slice.store.opsFor(lateBranch).size();
++  EXPECT_LT(pathCount, 16U);
++  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(folded), pathCount);
++  EXPECT_LT(zigzag::ManifoldTestAccess::denseValueCapacity(folded), 8192U);
++  EXPECT_GT(zigzag::ManifoldTestAccess::overflowBucketCapacity(folded), 0U);
++  EXPECT_TRUE(zigzag::ManifoldTestAccess::hasByRef(folded, lateIndex));
++  EXPECT_TRUE(folded.equivalentTo(slice.store.rebuildManifold(lateBranch)));
++
++  const auto unknownSuffix = lateBranch.next();
++  const auto prefix        = slice.store.rebuildManifold(unknownSuffix);
++  EXPECT_EQ(zigzag::ManifoldTestAccess::opCountHint(prefix),
++            slice.store.opsFor(unknownSuffix).size());
++  EXPECT_EQ(prefix.foldedThrough(), lateIndex);
++}
++
++TEST(ManifoldTest, opIndexLookupKeepsDenseZeroAndSparseOverflowDistinct) {
++  zigzag::detail::ManifoldOpIndexMap map;
++  map.setOpCountHint(1); // U-P2 threshold is 8,192 operation indices.
++  auto dense = map.prepareInsert(8191);
++  ASSERT_TRUE(dense);
++  ASSERT_TRUE(map.commitInsert(std::move(*dense), 8191, 0));
++  auto sparse = map.prepareInsert(8192);
++  ASSERT_TRUE(sparse);
++  ASSERT_TRUE(map.commitInsert(std::move(*sparse), 8192, 17));
++  EXPECT_EQ(map.find(8191), 0U);
++  EXPECT_EQ(map.find(8192), 17U);
++  EXPECT_EQ(map.find(0), std::nullopt);
++  EXPECT_EQ(map.find(8190), std::nullopt);
++  auto copy = map;
++  EXPECT_TRUE(copy == map);
++  zigzag::detail::ManifoldOpIndexMap moved(std::move(copy));
++  EXPECT_TRUE(moved == map);
++}
++
++TEST(ManifoldTest, zeroOperationIndexIsRefusedBeforeLookupArithmetic) {
++  Manifold manifold;
++  xanadu::CompactOpNode node{};
++  node.kind         = xanadu::OpKind::Structure;
++  node.flags        = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
++  const auto result = manifold.applyStructure(0, node);
++  ASSERT_FALSE(result);
++  EXPECT_EQ(result.error(), zigzag::FoldRefusal::InvalidOperationIndex);
++  EXPECT_EQ(manifold.foldedThrough(), 0U);
++  EXPECT_EQ(manifold.refusedOps(), 1U);
++  EXPECT_EQ(manifold.cellCount(), 0U);
++}
++
++TEST(ManifoldTest, opIndexMapMoveInvalidatesPreparedDenseToken) {
++  zigzag::detail::ManifoldOpIndexMap source;
++  source.setOpCountHint(1);
++  auto stale = source.prepareInsert(1);
++  ASSERT_TRUE(stale);
++  zigzag::detail::ManifoldOpIndexMap moved(std::move(source));
++  auto fresh = source.prepareInsert(1);
++  ASSERT_TRUE(fresh);
++  EXPECT_FALSE(source.commitInsert(std::move(*stale), 1, 11));
++  ASSERT_TRUE(source.commitInsert(std::move(*fresh), 1, 22));
++  EXPECT_EQ(source.find(1), 22U);
++  EXPECT_FALSE(moved.contains(1));
++}
++
++TEST(ManifoldTest, opIndexMapMoveAssignmentInvalidatesDestinationTokens) {
++  zigzag::detail::ManifoldOpIndexMap destination;
++  destination.setOpCountHint(1);
++  auto stale = destination.prepareInsert(1);
++  ASSERT_TRUE(stale);
++  zigzag::detail::ManifoldOpIndexMap source;
++  source.setOpCountHint(1);
++  auto staleSource = source.prepareInsert(2);
++  ASSERT_TRUE(staleSource);
++  destination = std::move(source);
++  EXPECT_FALSE(destination.commitInsert(std::move(*stale), 1, 11));
++  auto replacement = destination.prepareInsert(1);
++  ASSERT_TRUE(replacement);
++  ASSERT_TRUE(destination.commitInsert(std::move(*replacement), 1, 22));
++  EXPECT_EQ(destination.find(1), 22U);
++
++  auto freshSource = source.prepareInsert(2);
++  ASSERT_TRUE(freshSource);
++  EXPECT_FALSE(source.commitInsert(std::move(*staleSource), 2, 33));
++  ASSERT_TRUE(source.commitInsert(std::move(*freshSource), 2, 44));
++  EXPECT_EQ(source.find(2), 44U);
++}
++
++TEST(ManifoldTest, opIndexMapCopyAssignmentUsesDestinationResource) {
++  FailingLookupResource destinationResource;
++  zigzag::detail::ManifoldOpIndexMap destination(&destinationResource);
++  {
++    FailingLookupResource sourceResource;
++    zigzag::detail::ManifoldOpIndexMap source(&sourceResource);
++    source.setOpCountHint(1);
++    auto prepared = source.prepareInsert(8192);
++    ASSERT_TRUE(prepared);
++    ASSERT_TRUE(source.commitInsert(std::move(*prepared), 8192, 0));
++    destination = source;
++  }
++
++  EXPECT_EQ(destination.find(8192), 0U);
++  // Force overflow-table growth after the source resource has been destroyed.
++  for (std::uint32_t op = 8193; op < 8300; ++op) {
++    auto prepared = destination.prepareInsert(op);
++    ASSERT_TRUE(prepared);
++    ASSERT_TRUE(destination.commitInsert(std::move(*prepared), op, op));
++  }
++  EXPECT_EQ(destination.find(8192), 0U);
++  EXPECT_EQ(destination.find(8299), 8299U);
++}
++
++TEST(ManifoldTest, opIndexMapCopyAssignmentFailurePreservesDestination) {
++  for (std::size_t failAt = 0; failAt < 4; ++failAt) {
++    FailingLookupResource destinationResource;
++    zigzag::detail::ManifoldOpIndexMap destination(&destinationResource);
++    auto old = destination.prepareInsert(1);
++    ASSERT_TRUE(old);
++    ASSERT_TRUE(destination.commitInsert(std::move(*old), 1, 9));
++
++    FailingLookupResource sourceResource;
++    zigzag::detail::ManifoldOpIndexMap source(&sourceResource);
++    source.setOpCountHint(1);
++    auto denseEntry = source.prepareInsert(1);
++    ASSERT_TRUE(denseEntry);
++    ASSERT_TRUE(source.commitInsert(std::move(*denseEntry), 1, 17));
++    auto sourceEntry = source.prepareInsert(8192);
++    ASSERT_TRUE(sourceEntry);
++    ASSERT_TRUE(source.commitInsert(std::move(*sourceEntry), 8192, 18));
++
++    destinationResource.failAfter(failAt);
++    EXPECT_THROW(destination = source, std::bad_alloc);
++    destinationResource.allowAllocations();
++    EXPECT_EQ(destination.find(1), 9U);
++    EXPECT_EQ(destination.find(8192), std::nullopt);
++    EXPECT_EQ(source.find(8192), 18U);
++  }
++}
++
++TEST(ManifoldTest, lookupFailurePreflightsTextAndStructureChainMutations) {
++  enum class Operation { Insert, SetLink, Splice, SetValue };
++  for (const auto operation : {Operation::Insert, Operation::SetLink,
++                               Operation::Splice, Operation::SetValue}) {
++    FailingLookupResource resource;
++    Manifold manifold(&resource);
++    zigzag::ManifoldTestAccess::setOpCountHint(manifold, 1);
++    xanadu::CompactOpNode make{};
++    make.kind  = xanadu::OpKind::Structure;
++    make.flags = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
++    ASSERT_TRUE(manifold.applyStructure(1, make));
++    ASSERT_TRUE(manifold.applyStructure(2, make));
++    const auto before = *manifold.slot(1);
++    xanadu::CompactOpNode node{};
++    node.sourceOpIndex = 1;
++    if (operation == Operation::Insert) {
++      node.kind = xanadu::OpKind::Insert;
++      node.setSpan(PrimediaSpan{.scroll = 0, .start = 0, .length = 1});
++    } else {
++      node.kind = xanadu::OpKind::Structure;
++      if (operation == Operation::SetLink) {
++        node.flags  = xanadu::structureFlags(StructureVerb::SetLink);
++        node.linkId = 2;
++      } else if (operation == Operation::Splice) {
++        node.flags = xanadu::structureFlags(StructureVerb::Splice);
++      } else {
++        node.flags = xanadu::structureFlags(StructureVerb::SetValue);
++      }
++    }
++    resource.failAfter(0);
++    const auto failed = manifold.applyStructure(8192, node);
++    ASSERT_FALSE(failed);
++    EXPECT_EQ(failed.error(), zigzag::FoldRefusal::LookupCapacityUnavailable);
++    EXPECT_EQ(manifold.foldedThrough(), 2U);
++    EXPECT_EQ(manifold.refusedOps(), 0U);
++    EXPECT_EQ(*manifold.slot(1), before);
++    EXPECT_EQ(zigzag::ManifoldTestAccess::denseOf(manifold, 8192),
++              std::nullopt);
++    resource.allowAllocations();
++    ASSERT_TRUE(manifold.applyStructure(8192, node));
++    EXPECT_EQ(zigzag::ManifoldTestAccess::denseOf(manifold, 8192), 0U);
++  }
++}
++
+ TEST(ManifoldTest, missingNeighboursStayOptionalThroughTraversal) {
+   static_assert(!std::is_convertible_v<zigzag::OptionalCell, CellRef>);
+   Slice slice;

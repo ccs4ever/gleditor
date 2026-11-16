@@ -12,7 +12,7 @@ reviewers; acceptance is based on current code and recorded checks.
 | M0 baseline/observability | In progress | Ordinary `-O3 -g` full build passed. Complete control `make test` passed, including 842 library, 4380 Xuzz, 268 ZigZag, 12 additional tests and 5 network tests. Independent M0/probe reviews converged for the frozen corpus recipe. All 36 split probe cases and both corpus smoke reports passed; full control backend comparison passed. Fine-grained telemetry listed below remains open. |
 | M1 release ThinLTO+PGO    | Complete    | Four Clang modes built and passed16 held-out timing blocks each;512 separate perf samples usable. Combined full tests/backends passed;41 focused tests and formatting passed. Independent C++ performance review converged; scoped results and pre-existing lint failure recorded below.                                                                                                       |
 | M2 P3/P4                  | Complete    | P3 retained after ThinLTO/PGO convergence; P4 measured separately and reverted to the accepted out-of-line fallback; restored hashes and 161 PGO tests pass                                                                                                                                                                                                                                    |
-| M3 P2                     | Pending     | No runtime lookup changes yet                                                                                                                                                                                                                                                                                                                                                                  |
+| M3 P2                     | In progress | Candidate applied; first engine/probe ThinLTO build and integrated correctness gates pending                                                                                                                                                                                                                                                                                                   |
 | M4 P5                     | Pending     | No operand container changes yet                                                                                                                                                                                                                                                                                                                                                               |
 | M5a-c P1                  | Pending     | No VM trail/container changes yet                                                                                                                                                                                                                                                                                                                                                              |
 | M6 final release          | Pending     | Requires all preceding correctness and performance gates                                                                                                                                                                                                                                                                                                                                       |
@@ -360,3 +360,301 @@ than reserved unordered controls in the measured synthetic cohorts; final storag
 actual fold timing and resource evidence. M4's eight consumer/test translation units pass isolated
 syntax checks. M5's map-facade draft has helper-only checks and still requires a complete
 reference-invalidation audit and separate snapshot-preserving VM integration before trail work.
+
+## Iteration 3: lookup representation candidate
+
+After M2 closure (`3142aac4`), the reviewed M3 draft was applied and formatted with the repository's
+clang-format configuration. The first engine/probe build is running:
+
+```sh
+make -j$(nproc) PERF_MODE=thinlto xuzz_test performance-probe performance-probe-counts
+```
+
+Log/resource files are `m3-candidate-engine-build.*` under `build/performance/iterations/`. No
+integrated runtime or M3 performance pass is claimed yet. The candidate adds dense values plus
+presence and sparse overflow, flat birth lookup, typed lookup-capacity preflight/refusal, and
+branch-local fold capacity hints. `OsmicWalker` exposes its already-collected ancestry count before
+visiting operations; the fallback retains one version-path vector. No persistent format changes or
+fixture regeneration are intended.
+
+Preparation artifacts are `/tmp/perf-m3-integration.patch` and its isolated tree, with reviews
+`/tmp/perf-m3-integration-review-r2.md` and `/tmp/perf-m3-branch-hint-implementation-review.md`.
+Root formatting removed unrelated isolated-default-style churn. Standalone helper checks are not a
+substitute for Store/Manifold integration: flat map passed 12 normal/sanitizer tests, lookup/walker
+passed 10 normal/sanitizer tests, and affected translation units passed syntax checks. The actual
+new Store/Manifold failure/retry tests must now run in a fully rebuilt binary.
+
+Memory selection remains open. Isolated PMR measurements in
+`/tmp/perf-m3-integration/MEMORY-RESULTS.md` show compact sequential dense lookup, expensive sparse
+indices when eligibility was hinted from the global spool, and flat births using more memory than
+reserved unordered controls. Branch-local hints address unrelated sibling operations, but measured
+fold throughput, capacity and peak memory must still decide retained representations. Preserve
+reserved unordered fallbacks when the candidate does not justify its cost.
+
+Later work remains isolated: `/tmp/perf-m4-operand-list.patch` has eight consumer/test syntax passes
+and earlier standalone helper checks, with no integration runtime gate. The M5 pair-backed facade in
+`/tmp/perf-m5-reversible-map/` has 24 normal/sanitizer helper passes before its final declaration
+polish. Its final files require another test/review; iterator invalidation and trail-aware mutation
+staging still block VM migration. The current production VM still uses snapshots and original
+containers. No M4/M5 implementation or performance result is claimed.
+
+### M3 integrated correctness and first pilot
+
+The first engine/probe build passed, followed by 194/195 focused tests. The new Store retry test had
+incorrectly assumed slice genesis minted no cells; its expected one cell was actually three. The
+test now compares full and unknown-prefix retry folds against failure-free folds, explicitly checks
+the authored cell, and retains both typed-exception assertions. Store gained its direct
+memory-resource include and new hint setters follow the chaining convention.
+
+The subsequent full ThinLTO build passed (842.24 seconds, maximum child RSS 5,832,016 KiB, not
+aggregate process-tree RSS). All 195 focused tests passed, including the new helper suites. The
+complete Xuzz run reported 4,415 passed, 28 skipped, 12 disabled and zero failures; ZigZag passed
+268/268. Logs and JSON use `m3-r2-*` under the iterations directory.
+
+Candidate source fingerprint: `c427cb45c5230f70bc27315e3f3faf16c8d442f832b87670bc0ecd931dffe243`.
+The 21-workload smoke and seven-run timing pilot passed. Its first hardware run was interrupted by
+the usage-limit pause and is excluded; `hardware-r2.json` passed all 168 samples with unchanged
+source/artifact identities. The canonical report is an unchanged copy of that second report,
+retaining its actual invocation and raw CSV paths. Reports live in
+`build/performance/variants/m3-hybrid-flat/`.
+
+The first small-case observations do not establish a retention decision. Structure-fold allocation
+calls fell from 483 to 52, but its measured fold median increased; text also slowed while branch
+folding improved. Candidate-only larger-input observations are being collected separately. The
+reserved-unordered control draft remains partial and unvalidated under
+`/tmp/perf-m3-unordered-control/repo/`; it has not been applied or benchmarked. No M3 performance
+acceptance or new release-profile success is claimed.
+
+Two CPU-active orphaned test processes were observed outside this worktree and left untouched. These
+measurements use a shared host; earlier load was not sampled contemporaneously. Their bootstrap
+intervals describe recorded serial blocks, not a dedicated-host or universal causal claim.
+`m3-shared-host-observation.json` records the limitation. A worker's shell approval review still
+exhausted its quota after the latest resume; that worker was stopped rather than rerouted. The
+primary agent's normally approved result checks remain available.
+
+### Reserved-unordered control and paired lookup experiment
+
+The reserved-unordered control is now integrated and measured, superseding its partial status above.
+Source fingerprint is `b7773c5c6a4a7f57112e6a465bdf871ecbd7836d25ed67cb2ff24e4ee8a38987`. Its full
+ThinLTO build passed in 819.4 seconds. Focused tests passed 206/206; the full Xuzz suite reported
+4,426 passed, 28 skipped, 12 disabled and zero failures, and ZigZag passed 268/268. Its staged
+same-resource node handles reserve destination capacity before logical mutation. A control bug that
+could shrink a cold-fold reservation was repaired before building and measuring; the staging bucket
+allocation is reused. Both tables currently reserve the path-count upper bound, including on
+text-only folds, so that overreservation is part of this control's measured cost. Reports and exact
+source/binary archives are in `build/performance/variants/m3-reserved-unordered/`. Its 21-workload
+smoke, seven-run timing pilot and 168 hardware samples passed identity checks.
+
+The two archived executables were then compared in alternating temporal order, pinned to CPU 0, on
+the shared host. Their system-library hashes matched and neither depends on a private engine shared
+library. The comparison has 252 successful samples across 14 fixed cases: nine folds (text,
+structure, branch at sizes 144, 1,000 and 10,000) and five link cohorts. Each side has one warm-up,
+seven timings and one separate allocation-counter run per case. Non-cost work metrics matched.
+Reports are `build/performance/comparisons/m3-interleaved/{report,analysis}.json`. The analysis uses
+20,000 paired temporal-block bootstrap draws and labels the selected metric: `fold_kernel_ns` for
+folds, `p3_link_traversal_ns` for links. These are not whole-scenario timings.
+
+Unordered/hybrid median ratios favor hybrid structure folding (1.27–1.39 across the three sizes) and
+branch folding (1.88–3.05). Unordered improves the local and ordinary-quote link cohorts (ratios
+0.760 and 0.764); the other three link intervals cross one. Text folding favors hybrid at 144 and
+1,000 operations; the 10,000-operation interval crosses one. These are conditional results, not an
+application-wide aggregate. At 10,000 structure operations, hybrid uses 100 fold allocation calls
+versus 30,068, but requests 4,700,638 bytes versus 4,062,264. Requested bytes are cumulative, not
+retained capacity or peak memory. Whole-process peak RSS includes startup and fixture setup.
+
+No M3 representation has yet been accepted. A bounded third experiment will separate the two maps:
+dense/presence byRef with staged unordered birth records. It must preserve allocation-failure
+atomicity and use geometric incremental growth rather than repeatedly reserving size-plus-one. Fresh
+source-bound PGO validation and the independent C++ expert's convergence remain required. M4 and M5
+remain isolated drafts, and the production VM still uses its snapshot implementation.
+
+While the M3 selection review runs, the exact latest isolated M4 helper was rebuilt using Make's
+default compiler and expanded control flags. Its five tests passed in all four configurations:
+native and forced Beman fallback, each normal and ASan/UBSan. Source hashes, commands and results
+are in `build/performance/iterations/m4-preintegration-helper/report.json`. This supersedes the
+helper recheck pending above; it does not establish engine integration, consumer runtime or a
+performance improvement.
+
+The resumed independent C++ and architecture reviews are preserved as
+[selection review](performance-architecture-implementation-review/iteration-03-selection-review.md)
+and
+[architecture review](performance-architecture-implementation-review/iteration-03-architecture.md).
+Neither selects a final M3 representation. The isolated combined candidate is under
+`/tmp/perf-m3-hybrid-unordered`; its first static pass found no logical atomicity blocker but caught
+excessive initial birth reservation and near-limit growth arithmetic, which are being corrected
+before measurement.
+
+To prepare the release comparison, root temporarily restored exact accepted P3 source `09da6e1b...`
+from `3142aac4` after archiving all 13 experimental B files and their hashes/patch. The recorded
+source/profile/compiler/profile-tool identities were verified. The normal all-target PGO rebuild
+passed in 414.28 seconds and reproduced the accepted Xuzz test hash. All-target does not build the
+performance probes: the first archive attempt correctly refused their stale B hashes. The explicit
+two-probe target build then passed in 21.79 seconds. Both probe hashes and runtime library
+identities exactly match the accepted P3 archive. The verified pair and provenance are preserved in
+`build/performance/variants/m3-p3-baseline-pgo/`. No stale probe was benchmarked or accepted. The
+unchanged baseline was reconstructed using its own verified profile, not retrained.
+
+### Combined lookup candidate integrated
+
+The frozen C source was copied from the isolated overlay after its patch hash and repository-style
+formatting were checked. Its 14-file source backup is preserved under
+`build/performance/variants/m3-hybrid-unordered/`; source fingerprint is
+`88de216a6bc6c5b05c87d09f2eab21f1bd667942d33f10b362fb6acbeb6ae1f2`. Dense/presence byRef and flat
+sparse overflow are combined with staged PMR unordered births. Birth growth starts at one requested
+entry and doubles with checked/clamped arithmetic. A shared failure enum removes duplicate
+definitions. Allocation-failure tests discover allocation ordinals from fresh fixtures, including a
+later dense growth with a live mapping, rather than depending on one implementation's fixed
+allocation count.
+
+The isolated author reports six passing syntax translation units, then 12 flat-map, 10 lookup/walker
+and 12 prepared-map tests in both normal and ASan/UBSan configurations. The memory probe completed
+at 10,000, 100,000 and 1,000,000 requested rows. Exact CSVs and the isolated report are archived
+with C. Sequential byRef at one million rows uses 4,325,376 current / 6,488,064 peak PMR bytes;
+staged births use 64,450,600 current / peak. The clustered and three-key synthetic fixtures
+explicitly expose dense slack and mixed dense/overflow growth costs. PMR bytes measure allocator
+requests; per-table virtual reservation and residency are not isolated, and no claim conflates them
+with RSS. These are capacity observations, not a throughput or retention verdict.
+
+The full C ThinLTO build is now running via `make -j$(nproc)` with all targets and both probes.
+`m3-combined-*` logs under the iterations directory will record its focused/full correctness,
+21-workload pilot and planned three-way rotating-order comparison. Neither build nor integrated
+runtime success is claimed until the corresponding stage completes. No final M3 selection has been
+made, and the independent expert's post-fix review is pending.
+
+The first full C build passed in 747.30 seconds (maximum child RSS 6,131,744 KiB, not aggregate).
+Its focused runtime exposed a test-setup defect: `fillBirthTableToLimit` waited for actual hash
+bucket capacity to fill, while geometric growth increased capacity before reaching that count. The
+run was stopped by terminating only its owned Xuzz test descendant; later stages did not run. The
+cold MakeCell and later-dense-growth failure tests had passed before the stall. This is not a
+production capacity-refusal failure or a completed correctness pass.
+
+The fill helper was removed. Every staged unordered birth needs a new node, so the existing
+fail-next-allocation injection directly exercises advance/refold refusal without filling buckets.
+Other failure loops now discover allocation ordinals from successful fixtures instead of assuming
+standard-library-specific bucket/node geometry. Portable logical-entry and allocation-free commit
+checks remain. A patch-version mismatch skipped one test file during application; root completed
+that file explicitly and checked the resulting source before rebuilding. No rejected hunk was
+accepted as a passing change.
+
+These changes affect only three test files. All production source hashes match the first C source.
+The revised source fingerprint is
+`e1ad7a0de3b5d7b60c52bf5623f62410a1dd463b2b3a2e70b365da3506f8fb30`. The original C source/patch
+remain as `source-backup-r1*` and `source-evaluated-r1.patch`, while canonical C backup/patch now
+describe the revised tests. The `m3-combined-r2-*` run adds owned process-group timeouts for focused
+and full tests. Its build and runtime results remain pending. The corrected second expert review
+distinguishes flat bytes per slot from total bytes per live entry; it does not treat the plan's
+48-byte flat slot as a 48-byte total/live memory target.
+
+The corrected ThinLTO rebuild passed in 91.35 seconds. All 208 focused integration tests passed,
+including both typed advance/refold refusal paths. Root independently rebuilt the exact revised
+helper sources: 34 normal and 34 ASan/UBSan tests passed (12 flat, 10 lookup/walker, 12
+prepared-map). Their commands, source hashes and JSON results are under
+`build/performance/iterations/m3-r2-helper-check/`. The full Xuzz/ZigZag runs are now in progress;
+no full-suite or C performance result is claimed yet. The third expert static review found no
+remaining logical test blocker and only a duplicated explanatory comment. That comment will be
+removed after the frozen ThinLTO experiment and before the fresh PGO source is captured.
+
+The isolated M5a snapshot-preserving overlay is ready under `/tmp/perf-m5a-vm-integration/`: ten
+Vortex translation units passed syntax checks, and its exact formatted helper passed 29 normal and
+29 ASan/UBSan tests. Public binding snapshot DTOs remain standard maps, and production VM files
+remain unchanged. Rebase after M4, linked engine tests, reference-invalidation acceptance and later
+trail integration are still required; helper/syntax passes do not satisfy those gates.
+
+### C correctness and three-way ThinLTO result
+
+Revised C passed the full Xuzz run: 4,428 passed, 28 skipped, 12 disabled, zero failures (314.19
+seconds). ZigZag passed 268/268. Its smoke passed all 21 validation workloads, the timing pilot
+completed seven measured runs plus warm-up per workload with separate counters, and hardware
+collection passed all 168 samples with artifact identities unchanged.
+
+The rotating/reversing three-way comparison passed 378 total samples: 42 warm-ups, 294 measured
+timings and 42 allocation runs across the same 14 cases. Raw work/checksum metrics matched, and all
+three binary pairs retained their archived hashes and identical runtime-library identities. Reports
+are `build/performance/comparisons/m3-threeway-interleaved/{report,analysis}.json`. Toolchain detail
+records Clang 23.1.4, libstdc++ release 16, header date 20260810. Its 20,000-draw per-pair temporal
+block intervals are exploratory and unadjusted across multiple comparisons; no application mix or
+universal causal result is inferred.
+
+C/B structure-fold median ratios were 0.774, 0.654 and 0.692 at sizes 144/1,000/10,000, with their
+intervals below one. At 10,000 structure operations, selected kernel medians were 2.156 ms C, 2.291
+ms A and 3.117 ms B. C used 10,095 fold allocation calls and 3,950,824 requested bytes, versus 100 /
+4,700,638 for A and 30,068 / 4,062,264 for B. C therefore trades some of A's allocation call
+reduction for lower requested memory and competitive measured structure throughput.
+
+This is a tradeoff, not a general C win. C's local and ordinary-quote link ratios versus B were
+1.309 and 1.307 with intervals above one. C was generally near B on text/branch folds and slower
+than A there; at 10,000 the branch kernels were 18.115 us C versus 5.981 us A, and text kernels were
+87.918 us C versus 79.783 us A. Process RSS includes startup/setup and does not isolate table
+residency. Exact PMR capacity observations remain separate from these measurements.
+
+The independent expert recommends one bounded fresh PGO experiment for C against the reconstructed
+accepted P3 release. This does not accept C for production. Before capturing its profile source,
+five duplicate map-helper tests were consolidated into their owning helper suite, preserving the
+unique dense-boundary/value-zero and populated copy/move equality checks. The branch test was
+renamed for its actual sibling-operation behavior and the duplicated comment removed. The updated
+ten lookup/walker tests passed normal and ASan/UBSan checks. Production file hashes still match the
+measured C source; these final changes affect only two test files.
+
+Fresh PGO source is `18deb2a53e37823511dea52ec01b742d1b4bad19ef0a1c1c3149f814bc0b9605`. The pipeline
+is now generating its instrumented build, with exact source backup and complete patch under
+`build/performance/variants/m3-hybrid-unordered-pgo/`. It will train, merge, build and validate that
+source's own profile before collecting held-out timings/hardware. The accepted P3 profile is
+reserved for the unchanged P3 baseline. Full PGO Xuzz/ZigZag checks and an interleaved probe
+comparison are queued after that pipeline. No PGO result or final M3 selection is claimed yet.
+
+### First C PGO result: gate remains open
+
+C's instrumented generation, training, merge and optimized release all passed (770.47, 55.43, 8.88
+and 778.59 seconds respectively). The source-bound profile SHA-256 is
+`dd1bea45872fa285d8566978fb844cd4075235da6036d9ed32a1c0b67361d2c6`. Thirty training and 21 held-out
+validation workloads passed, followed by seven-run held-out timing and 168 hardware samples. Full
+optimized Xuzz passed 4,423 tests, with 28 skipped and 12 disabled; ZigZag passed 268/268. The five
+fewer passes than the earlier C run reflect duplicate helper tests consolidated into their owning
+suite, not lost coverage.
+
+The 21 held-out serial-block comparisons had no regression interval excluding one. That broad result
+did not close the gate: the subsequent CPU-pinned interleaved probe comparison passed all 252
+samples and exposed substantial selected-kernel regressions. C/P3 text ratios were 4.780 / 2.247 /
+1.285 at 144 / 1,000 / 10,000; branch ratios were 2.691 / 2.359 / 2.580, with their exploratory
+paired intervals above one. Larger structure-fold ratios were 0.887 and 0.912, with intervals below
+one; local/ordinary-quote traversal ratios were 0.987 and 0.956. Whole-scenario setup costs must not
+be used to dismiss these internal kernel regressions. C has not converged and has not been accepted.
+
+Raw paired reports are under `build/performance/comparisons/m3-pgo-interleaved/`; the separate
+independent-resampling 21-case analysis is `m3-pgo-heldout-analysis.json`. The first PGO
+[expert review](performance-architecture-implementation-review/iteration-03-pgo-review-r1.md)
+recommends a bounded correction. Disassembly shows C's `applyStructure` at 7,441 bytes with a
+408-byte stack frame, versus P3's 5,194 bytes / 216 bytes. The ignored-text path may avoid that
+heavy mutation body. Branch folds contain only five ancestral operations / three references even
+when many siblings were generated, so the text dispatch fix alone cannot explain their slowdown.
+
+A diagnostic using the archived binaries and `LD_BIND_NOW=1` reduced, but did not eliminate, the
+fixed cold-fold penalties. This is a loader diagnostic, not replacement acceptance evidence or an
+excuse to prewarm a measured kernel. Short branch paths also expose the 4,096 dense-hint floor: the
+1,000-sibling fixture requests 5,234 fold bytes in C versus 1,028 in P3. Known ancestry counts can
+justify a tighter dense eligibility bound while raw callers retain a conservative unknown-hint
+policy. Birth-node preparation and its separate staging map are being reviewed for avoidable
+reserve/allocation overhead; no speculative replacement has yet been applied.
+
+ABI accounting records P3 Manifold at 296 bytes, A/B at 496 and C at 544 (all aligned to 8). C's
+fixed +248 bytes are distinct from the PMR allocation figures. Exact commands and header sources are
+in `build/performance/comparisons/m3-abi-accounting.json`. Completed first-C evidence and
+reproduction scripts are preserved in `iteration-03-evidence.jsonl`; corrective-iteration evidence
+will be added separately. Root remains on exact first-PGO source `18deb2a5...` pending the bounded
+correction's review. M4 integration has not started.
+
+The bounded corrective C2 draft is now authorized by the C++ expert and remains isolated under
+`/tmp/perf-m3-c2-correction`. It keeps the same dense-plus-overflow / unordered-birth
+representation: a small dispatch excludes ignored text from the heavy mutation body; an optional
+known ancestry count can use its actual dense cutoff while unknown callers keep the fallback policy;
+and birth preparation uses destination `try_emplace` followed immediately by `extract`. Successful
+temporary insertion establishes final-size capacity, extraction preserves that capacity, and the
+generation checks protect allocation-free node publication. Preparation returns with no new logical
+key. The exact first/rehash allocation failures, key invisibility, unchanged logical state and
+retry, plus allocation-disabled commits across growth must all be tested. No callback or reentrant
+point is allowed between temporary insertion and extraction. The separate staging map is
+unnecessary.
+
+This is one corrective iteration, not a fourth storage representation or a final retention ruling.
+Its implementation and tests must be reviewed before root integration. Known versus unknown hints
+must remain distinct through copy/move and failed advance; no zero-value sentinel is introduced.
