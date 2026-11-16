@@ -11,7 +11,7 @@ reviewers; acceptance is based on current code and recorded checks.
 | ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | M0 baseline/observability | In progress | Ordinary `-O3 -g` full build passed. Complete control `make test` passed, including 842 library, 4380 Xuzz, 268 ZigZag, 12 additional tests and 5 network tests. Independent M0/probe reviews converged for the frozen corpus recipe. All 36 split probe cases and both corpus smoke reports passed; full control backend comparison passed. Fine-grained telemetry listed below remains open. |
 | M1 release ThinLTO+PGO    | Complete    | Four Clang modes built and passed16 held-out timing blocks each;512 separate perf samples usable. Combined full tests/backends passed;41 focused tests and formatting passed. Independent C++ performance review converged; scoped results and pre-existing lint failure recorded below.                                                                                                       |
-| M2 P3/P4                  | In progress | P3 converged in ThinLTO and independently trained ThinLTO+PGO comparisons; separate P4 accessor experiment pending                                                                                                                                                                                                                                                                             |
+| M2 P3/P4                  | Complete    | P3 retained after ThinLTO/PGO convergence; P4 measured separately and reverted to the accepted out-of-line fallback; restored hashes and 161 PGO tests pass                                                                                                                                                                                                                                    |
 | M3 P2                     | Pending     | No runtime lookup changes yet                                                                                                                                                                                                                                                                                                                                                                  |
 | M4 P5                     | Pending     | No operand container changes yet                                                                                                                                                                                                                                                                                                                                                               |
 | M5a-c P1                  | Pending     | No VM trail/container changes yet                                                                                                                                                                                                                                                                                                                                                              |
@@ -313,3 +313,50 @@ For P4, actual disassembly of the exact restored candidate probe records no dire
 accessor calls, 55 references to `Manifold::slot` and 117 to `ArenaManifold::slot` before header
 inlining. This is an executable-specific call-reference inventory, not a per-call inlining ratio.
 The accessor patch remains separate and has not been applied.
+
+### P4 measured fallback and M2 closure
+
+The six-file accessor-only candidate completed a full ThinLTO build, all 161 focused tests,
+21-workload smoke validation, seven measured runs plus warmup for all 21 workloads, separate
+allocation/count passes, and 168 usable hardware samples. Exact source reconstruction verified only
+the reviewed function moves. ThinLTO results were mixed: ordinary quote traversal and the complete
+text-fold scenario regressed, while proxies and the snapshot scenario improved. Text-fold primary
+time includes input construction and inspection; it is not a replay-kernel-only claim.
+
+A fresh candidate-specific ThinLTO+PGO pipeline then passed generation, all 30 training workloads,
+merge, the full release build, 21 held-out validation cases, repeated timings and all 168 hardware
+samples. Candidate fingerprint: `ede83f51eb1ea706e8ab732f6a09eef74c8672cf6449bec6c85c6f33cfbb3bcd`.
+Its release experiment shows structure-fold scenario ratio 0.858 (95% interval 0.699–0.964), but
+store projection 1.070 (1.028–1.096) and VIcon 1.084 (1.002–1.155). The overall ratio is
+inconclusive; it is not an application-mix prediction. All five P3 traversal intervals cross parity.
+Canonical PGO text growth is 27,936 bytes (0.038%), counting each binary once rather than its
+compatibility aliases.
+
+Actual probe disassembly changes named direct call/tail-jump references from 55 to 5 for
+`Manifold::slot` and 117 to 12 for `ArenaManifold::slot`; uint32 spool accessors already had zero
+direct references in the PGO baseline. These static counts do not measure dynamic inlining rates.
+More inlining did not establish a sufficient net release benefit in this experiment.
+
+The independent C++ performance expert selected the existing out-of-line definitions under the
+plan's explicit fallback rule. All six candidate files were restored. Source fingerprint again
+matches accepted P3 (`09da6e1b...`); the compiler/profile/tool were verified before the scoped
+rebuild. All three restored binary hashes exactly match the accepted P3 archive, and the final
+focused PGO run passed 161/161 tests. M2 is complete: retain P3 and the M1 release pipeline, retain
+out-of-line accessors, and carry the measured costs and uncertainty forward.
+
+P4 reports remain under `build/performance/variants/m2-p4-{candidate,candidate-pgo}/`; analyses are
+`m2-p4-{thinlto,pgo}-analysis.json` under the iterations directory. The
+[PGO review](performance-architecture-implementation-review/iteration-02-p4-pgo-review.md),
+[final M2 review](performance-architecture-implementation-review/iteration-02-final-review.md),
+[raw evidence](performance-architecture-implementation-review/iteration-02-p4-evidence.jsonl), and
+[evaluated patch](performance-architecture-implementation-review/iteration-02-p4-evaluated.patch)
+record the rejected candidate and restored baseline. The patch was reconstructed from committed
+source and matched to archived file hashes after reversion; it is not represented as a fresh copy of
+the former live worktree. Both analyses successfully rerun against those archived identities.
+
+M3 is next. Its isolated helper tests, branch-local walker metadata, capacity-failure tests and
+synthetic memory observations are preparation, not an integrated pass. Flat births cost more memory
+than reserved unordered controls in the measured synthetic cohorts; final storage selection requires
+actual fold timing and resource evidence. M4's eight consumer/test translation units pass isolated
+syntax checks. M5's map-facade draft has helper-only checks and still requires a complete
+reference-invalidation audit and separate snapshot-preserving VM integration before trail work.

@@ -1,0 +1,123 @@
+# Evaluated P4 accessor-move patch reconstructed after source fallback.
+# Provenance: source blocks from git revision 0c029b60 plus deterministic
+# accessor moves encoded in /tmp/perf-m2-p4-analyze.py.
+# Each reconstructed file SHA-256 matches both archived P4 timing.json
+# dirty-file records (ThinLTO and fresh PGO). This is not a claim that the
+# bytes were copied from the former live worktree.
+# Baseline source fingerprint: 09da6e1b74a0cd90328882713f3591b03f6f84285552aa903871c9530a930873
+# Candidate source fingerprint: ede83f51eb1ea706e8ab732f6a09eef74c8672cf6449bec6c85c6f33cfbb3bcd
+#
+# reconstructed-sha256 2383cf9014e7f05cdda0b53f074342d98ab66af4b792cd4faa61fe95e79c4d7a  apps/common/xanadu/segmented_ops_spool.cpp
+--- a/apps/common/xanadu/segmented_ops_spool.cpp
++++ b/apps/common/xanadu/segmented_ops_spool.cpp
+@@ -392,20 +392,6 @@
+   // there is a slot for it. Nothing inside an already-stored node is touched.
+   linkIntoTree(newIndex);
+   return newIndex;
+-}
+-
+-const CompactOpNode *SegmentedOpsSpool::get(const std::uint32_t index) const {
+-  if (0 == index || index > opCount || nullptr == arena.base()) {
+-    return nullptr;
+-  }
+-  return &reinterpret_cast<const CompactOpNode *>(arena.base())[index];
+-}
+-
+-CompactOpNode *SegmentedOpsSpool::get(const std::uint32_t index) {
+-  if (0 == index || index > opCount || nullptr == arena.base()) {
+-    return nullptr;
+-  }
+-  return &reinterpret_cast<CompactOpNode *>(arena.base())[index];
+ }
+ 
+ const CompactOpNode *SegmentedOpsSpool::get(const MicroversionId &id) const {
+# reconstructed-sha256 ba269e392631542ecc760d1f9f5487d5030034011e0c297f31ce05dcf656acce  apps/common/xanadu/segmented_ops_spool.hpp
+--- a/apps/common/xanadu/segmented_ops_spool.hpp
++++ b/apps/common/xanadu/segmented_ops_spool.hpp
+@@ -258,8 +258,18 @@
+   /**
+    * @brief Get a pointer to an operation by its 1-based index.
+    */
+-  [[nodiscard]] const CompactOpNode *get(std::uint32_t index) const;
+-  [[nodiscard]] CompactOpNode *get(std::uint32_t index);
++  [[nodiscard]] const CompactOpNode *get(std::uint32_t index) const {
++    if (0 == index || index > opCount || nullptr == arena.base()) {
++      return nullptr;
++    }
++    return &reinterpret_cast<const CompactOpNode *>(arena.base())[index];
++  }
++  [[nodiscard]] CompactOpNode *get(std::uint32_t index) {
++    if (0 == index || index > opCount || nullptr == arena.base()) {
++      return nullptr;
++    }
++    return &reinterpret_cast<CompactOpNode *>(arena.base())[index];
++  }
+ 
+   /**
+    * @brief Get an operation by the microversion it produces.
+# reconstructed-sha256 4896e10f764e92b74fba94c29fe24eecf77feaa5eba174e5a9905565345163bb  apps/common/xanadu/zigzag/arena_manifold.cpp
+--- a/apps/common/xanadu/zigzag/arena_manifold.cpp
++++ b/apps/common/xanadu/zigzag/arena_manifold.cpp
+@@ -1446,14 +1446,6 @@
+       visitor(occ, key.second);
+     }
+   }
+-}
+-
+-SlotRef ArenaManifold::slot(const CellRef ref) const noexcept {
+-  const auto dense = denseOf(ref);
+-  if (dense.has_value()) {
+-    return SlotRef{slots_[*dense]};
+-  }
+-  return nullptr == base_ ? SlotRef{} : base_->slot(ref);
+ }
+ 
+ DimLink *ArenaManifold::existingLink(const std::uint32_t dense,
+# reconstructed-sha256 456a2ac2e36838d51b28db40c1f4ce5fd208cdd75a5b7059ce212a378f0f3592  apps/common/xanadu/zigzag/arena_manifold.hpp
+--- a/apps/common/xanadu/zigzag/arena_manifold.hpp
++++ b/apps/common/xanadu/zigzag/arena_manifold.hpp
+@@ -657,7 +657,13 @@
+     return ephemeralBit | dense;
+   }
+ 
+-  [[nodiscard]] SlotRef slot(CellRef ref) const noexcept;
++  [[nodiscard]] SlotRef slot(CellRef ref) const noexcept {
++    const auto dense = denseOf(ref);
++    if (dense.has_value()) {
++      return SlotRef{slots_[*dense]};
++    }
++    return nullptr == base_ ? SlotRef{} : base_->slot(ref);
++  }
+ 
+   [[nodiscard]] bool contains(CellRef ref) const noexcept {
+     return slot(ref).has_value();
+# reconstructed-sha256 c22643e401f6fd18868eeedcaa117665823a9834319fae7bc5e9ef28e758079a  apps/common/xanadu/zigzag/manifold.cpp
+--- a/apps/common/xanadu/zigzag/manifold.cpp
++++ b/apps/common/xanadu/zigzag/manifold.cpp
+@@ -131,11 +131,6 @@
+   const auto found = byRef.find(ref);
+   return found == byRef.end() ? std::nullopt
+                               : std::optional<std::uint32_t>{found->second};
+-}
+-
+-SlotRef Manifold::slot(const CellRef ref) const noexcept {
+-  const auto dense = denseOf(ref);
+-  return !dense.has_value() ? SlotRef{} : SlotRef{slots[*dense]};
+ }
+ 
+ DimLink *Manifold::existingLink(const std::uint32_t dense,
+# reconstructed-sha256 827dfadfeacda3f233aa2610a11da2204629d76722e4ff1b2a482ab3e1857c52  apps/common/xanadu/zigzag/manifold.hpp
+--- a/apps/common/xanadu/zigzag/manifold.hpp
++++ b/apps/common/xanadu/zigzag/manifold.hpp
+@@ -443,7 +443,10 @@
+    * operation on the same cell (R7), so resolving a chain index to the cell it
+    * belongs to is something this class has to be able to do anyway.
+    */
+-  [[nodiscard]] SlotRef slot(CellRef ref) const noexcept;
++  [[nodiscard]] SlotRef slot(CellRef ref) const noexcept {
++    const auto dense = denseOf(ref);
++    return !dense.has_value() ? SlotRef{} : SlotRef{slots[*dense]};
++  }
+ 
+   /// Whether @p ref names a cell this manifold holds.
+   [[nodiscard]] bool contains(CellRef ref) const noexcept {
