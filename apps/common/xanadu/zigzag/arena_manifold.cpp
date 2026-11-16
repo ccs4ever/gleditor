@@ -1628,23 +1628,16 @@ OptionalCell ArenaManifold::linked(const CellRef from, const DimRef dim,
   if (!dense.has_value()) {
     return nullptr == base_ ? std::nullopt : base_->linked(from, dim, dir);
   }
-  const auto d = *dense;
-  if (isQuoteOccurrence(from)) {
-    // Only authored / materialized local edges exist in this presentation view
-    const auto &cell = slots_[d];
-    for (std::uint16_t i = 0; i < cell.linkCount; i++) {
-      const auto &edge = links_[static_cast<std::size_t>(cell.linkOffset) + i];
-      if (edge.dim == dim) {
-        return edge.neighbor(dir);
-      }
-    }
-    return std::nullopt;
-  }
-  if (isProxy(from)) {
+  const auto d     = *dense;
+  const auto &cell = slots_[d];
+  const auto isExternRef =
+      cell.valueKind == static_cast<std::uint8_t>(xanadu::ValueKind::ExternRef);
+  // Occurrences expose only their own presentation edges, even if their
+  // mutable value is ExternRef.
+  if (isExternRef && isEphemeral(from) && !isQuoteOccurrence(from)) {
     // Check if explicitly shadowed locally
     if (proxyShadowedEdges_.contains(
             ShadowEdgeKey{.dense = d, .dim = dim, .dir = dir})) {
-      const auto &cell = slots_[d];
       for (std::uint16_t i = 0; i < cell.linkCount; i++) {
         const auto &edge =
             links_[static_cast<std::size_t>(cell.linkOffset) + i];
@@ -1671,7 +1664,6 @@ OptionalCell ArenaManifold::linked(const CellRef from, const DimRef dim,
     }
     return std::nullopt;
   }
-  const auto &cell = slots_[d];
   for (std::uint16_t i = 0; i < cell.linkCount; i++) {
     const auto &edge = links_[static_cast<std::size_t>(cell.linkOffset) + i];
     if (edge.dim == dim) {

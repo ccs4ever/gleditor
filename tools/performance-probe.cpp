@@ -45,12 +45,17 @@ void *allocate(std::size_t bytes) {
 }
 
 void *allocateAligned(std::size_t bytes, std::size_t alignment) {
+  // POSIX requires alignment to be a pointer-size multiple; aligned new and
+  // PMR callers may request a smaller fundamental alignment.
+  const auto providerAlignment = std::max(alignment, sizeof(void *));
 #if defined(_WIN32)
-  void *memory = _aligned_malloc(std::max(bytes, alignment), alignment);
+  void *memory =
+      _aligned_malloc(std::max(bytes, providerAlignment), providerAlignment);
   if (nullptr == memory) throw std::bad_alloc();
 #else
   void *memory = nullptr;
-  if (0 != posix_memalign(&memory, alignment, std::max(bytes, alignment)))
+  if (0 != posix_memalign(&memory, providerAlignment,
+                          std::max(bytes, providerAlignment)))
     throw std::bad_alloc();
 #endif
   noteAllocation(bytes);
@@ -118,14 +123,24 @@ Options parseArgs(int argc, char **argv) {
     throw std::invalid_argument("timing probe accepts only --measure timing; "
                                 "use performance-probe-counts for allocations");
 #endif
-  if (options.scenario != "arena-links" && options.scenario != "fold-text" &&
-      options.scenario != "fold-structure" &&
+  if (options.scenario != "arena-links" &&
+      options.scenario != "arena-link-local" &&
+      options.scenario != "arena-link-base" &&
+      options.scenario != "arena-link-quote-local" &&
+      options.scenario != "arena-link-quote-extern" &&
+      options.scenario != "arena-link-proxy" &&
+      options.scenario != "fold-text" && options.scenario != "fold-structure" &&
       options.scenario != "fold-branch" && options.scenario != "operands" &&
       options.scenario != "vm-snapshots")
     throw std::invalid_argument("scenario not implemented by this probe: " +
                                 options.scenario);
   if (options.size == 0) throw std::invalid_argument("--size must be positive");
-  if ((options.scenario == "arena-links" || options.scenario == "operands") &&
+  if (options.scenario.starts_with("arena-link-") && options.size < 2)
+    throw std::invalid_argument(
+        "arena-link class scenarios need at least 2 cells");
+  if ((options.scenario == "arena-links" ||
+       options.scenario.starts_with("arena-link-") ||
+       options.scenario == "operands") &&
       options.size >= zigzag::ephemeralBit)
     throw std::invalid_argument("arena workload size exceeds CellRef capacity");
   if (options.scenario.starts_with("fold-") &&
@@ -148,6 +163,10 @@ struct WorkResult {
   std::size_t emptyWings{};
   std::size_t choicePoints{};
   std::size_t snapshotEntries{};
+  std::size_t p3Calls{};
+  std::size_t p3EligibleCalls{};
+  std::uint64_t p3TraversalNs{};
+  std::size_t p3Repetitions{};
   std::size_t zeroArityWings{};
   std::size_t eightArityWings{};
   std::size_t nineArityWings{};
@@ -386,6 +405,181 @@ WorkResult runFold(std::size_t size, bool textHeavy, bool branched) {
   return result;
 }
 
+WorkResult runArenaLinkClass(std::size_t size, std::uint64_t seed,
+                             const std::string_view scenario) {
+  (void)seed; // Invocation order is deterministic and identical per cohort.
+  const bool local        = scenario == "arena-link-local";
+  const bool baseFallback = scenario == "arena-link-base";
+  const bool quote        = scenario == "arena-link-quote-local" ||
+                     scenario == "arena-link-quote-extern";
+  const bool proxy = scenario == "arena-link-proxy";
+  if (!(local || baseFallback || quote || proxy))
+    throw std::logic_error("unknown arena link class");
+
+  xanadu::Store store;
+  auto version         = store.sliceGenesis(xanadu::MicroversionId{});
+  const auto dimension = store.makeDimension(version, "performance.axis");
+  version              = dimension.version;
+  std::vector<zigzag::CellRef> persistent;
+  persistent.reserve(size);
+  for (std::size_t i = 0; i < size; ++i) {
+    version        = store.makeCell(version, "persistent-member");
+    const auto ref = store.cellRefOf(version);
+    if (!ref) throw std::runtime_error("persistent cell has no CellRef");
+    persistent.push_back(*ref);
+    if (i != 0)
+      version = store.setLink(version, persistent[i - 1], dimension.dim,
+                              zigzag::DimVector::POS, persistent[i]);
+  }
+  const auto base = store.rebuildManifold(version);
+  zigzag::ArenaManifold arena(local ? nullptr : &base,
+                              local ? nullptr : &store);
+  zigzag::DimRef axis = dimension.dim;
+  std::vector<zigzag::CellRef> sources;
+  std::vector<zigzag::CellRef> targets;
+  sources.reserve(size);
+  targets.reserve(size);
+
+  if (local) {
+    axis = arena.ensureDimension("performance.axis.local");
+    for (std::size_t i = 0; i < size; ++i)
+      sources.push_back(arena.makeCell("local-source"));
+    for (std::size_t i = 0; i < size; ++i) targets.push_back(sources[i]);
+    for (std::size_t i = 1; i < size; ++i) {
+      if (!arena.link(sources[i - 1], axis, zigzag::DimVector::POS, sources[i]))
+        throw std::runtime_error("arena refused a local rank link");
+    }
+  } else if (baseFallback) {
+    sources = persistent;
+    targets = persistent;
+  } else {
+    const auto space = arena.attach(zigzag::Space{
+        .manifold = &base, .store = &store, .label = "performance-probe"});
+    axis             = arena.ensureDimension("performance.axis.proxy");
+    arena.bindDimension(axis, space, dimension.dim);
+    std::vector<zigzag::CellRef> proxies;
+    proxies.reserve(size);
+    for (const auto ref : persistent)
+      proxies.push_back(arena.proxyFor(space, ref));
+    if (proxy) {
+      sources = proxies;
+      targets = proxies;
+      for (std::size_t i = 0; i < proxies.size(); ++i) {
+        const auto foreign = arena.foreignOf(proxies[i]);
+        if (!arena.isProxy(proxies[i]) || !foreign || foreign->space != space ||
+            foreign->index != persistent[i] ||
+            arena.valueKindOf(proxies[i]) != xanadu::ValueKind::ExternRef)
+          throw std::runtime_error("canonical proxy setup failed validation");
+      }
+    } else {
+      std::vector<zigzag::CellRef> occurrences;
+      occurrences.reserve(size);
+      constexpr zigzag::QuoteViewId view = 1;
+      for (const auto ref : proxies)
+        occurrences.push_back(arena.quoteOccurrence(view, ref));
+      sources = occurrences;
+      // A quote's own edge deliberately points at its local occurrence peer.
+      // The canonical proxy still names the persistent source whose foreign
+      // POS edge points at a different canonical target.
+      targets = occurrences;
+      for (const auto ref : occurrences) {
+        const auto kind = scenario == "arena-link-quote-extern"
+                              ? xanadu::ValueKind::ExternRef
+                              : xanadu::ValueKind::None;
+        if (!arena.setValueBits(ref, kind, 17))
+          throw std::runtime_error("could not set quote value marker");
+      }
+      if (scenario == "arena-link-quote-extern") {
+        const auto mark = arena.mark();
+        if (!arena.setValueBits(occurrences.front(), xanadu::ValueKind::None,
+                                0) ||
+            !arena.release(mark) ||
+            arena.valueKindOf(occurrences.front()) !=
+                xanadu::ValueKind::ExternRef)
+          throw std::runtime_error("quote ExternRef mark rollback failed");
+      }
+      for (std::size_t i = 1; i < size; ++i) {
+        if (!arena.link(occurrences[i - 1], axis, zigzag::DimVector::POS,
+                        occurrences[i]))
+          throw std::runtime_error("arena refused a quote occurrence edge");
+      }
+    }
+  }
+
+  if (sources.size() != size || targets.size() != size)
+    throw std::runtime_error("arena link cohort setup has the wrong size");
+  for (std::size_t i = 0; i < size; ++i) {
+    if (quote && !arena.isQuoteOccurrence(sources[i]))
+      throw std::runtime_error("quote scenario lost occurrence identity");
+    if (proxy && (!arena.isProxy(sources[i]) || !arena.foreignOf(sources[i])))
+      throw std::runtime_error("proxy scenario lost canonical identity");
+    if ((local || scenario == "arena-link-quote-local") &&
+        (arena.denseOf(sources[i]) == std::nullopt ||
+         arena.valueKindOf(sources[i]) == xanadu::ValueKind::ExternRef))
+      throw std::runtime_error("eligible scenario is not local non-ExternRef");
+    if (scenario == "arena-link-quote-extern" &&
+        arena.valueKindOf(sources[i]) != xanadu::ValueKind::ExternRef)
+      throw std::runtime_error("quote ExternRef marker is absent");
+  }
+  for (std::size_t i = 1; i < size; ++i) {
+    const auto forward =
+        arena.linked(sources[i - 1], axis, zigzag::DimVector::POS);
+    const auto reverse = arena.linked(sources[i], axis, zigzag::DimVector::NEG);
+    if (forward != targets[i] || reverse != targets[i - 1])
+      throw std::runtime_error("arena link cohort edge validation failed");
+  }
+
+  // The timed primary performs only the actual reads, required result check,
+  // and checksum. Cohort classification/counting is intentionally below and
+  // only compiled into the separately collected allocation/count executable.
+  WorkResult result{.cells = arena.cellCount()};
+  std::uint64_t checksum                  = 0;
+  constexpr std::size_t targetLinkedCalls = 32768;
+  const std::size_t callsPerPass          = 2 * (size - 1);
+  result.p3Repetitions = (targetLinkedCalls + callsPerPass - 1) / callsPerPass;
+  const auto visit     = [&](const zigzag::CellRef source,
+                         const zigzag::CellRef expected,
+                         const zigzag::DimVector dir) {
+    const auto actual = arena.linked(source, axis, dir);
+    if (actual != expected)
+      throw std::runtime_error("arena link cohort traversal failed");
+    checksum += static_cast<std::uint64_t>(actual.value_or(0)) ^ seed;
+#if defined(GLEDITOR_PERF_ALLOC_PROBE)
+    ++result.traversed;
+#endif
+  };
+  const auto traversalStarted = std::chrono::steady_clock::now();
+  for (std::size_t repetition = 0; repetition < result.p3Repetitions;
+       ++repetition) {
+    for (std::size_t i = 1; i < size; ++i) {
+      visit(sources[i - 1], targets[i], zigzag::DimVector::POS);
+      visit(sources[i], targets[i - 1], zigzag::DimVector::NEG);
+    }
+  }
+  result.p3TraversalNs = static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now() - traversalStarted)
+          .count());
+#if !defined(GLEDITOR_PERF_ALLOC_PROBE)
+  // The primary timing loop avoids per-call telemetry; this exact count is
+  // derived from the loop bounds after the measured region.
+  result.traversed = result.p3Repetitions * callsPerPass;
+#endif
+  result.checksum = checksum;
+  inspectArenaStructure(arena, result);
+#if defined(GLEDITOR_PERF_ALLOC_PROBE)
+  // These count real linked() invocations in this generated scenario. The
+  // scenario itself supplies the validated path class; this is not a global
+  // runtime estimate. Base fallback and proxies are intentionally not P3
+  // fast-path eligible. A quote qualifies only when it is arena-owned and its
+  // ValueKind is not ExternRef.
+  result.p3Calls = result.traversed;
+  result.p3EligibleCalls =
+      (local || scenario == "arena-link-quote-local") ? result.traversed : 0;
+#endif
+  return result;
+}
+
 WorkResult runOperands(std::size_t size, std::uint64_t seed) {
   zigzag::ArenaManifold arena;
   zigzag::vortex::VortexCore core(arena);
@@ -463,6 +657,8 @@ WorkResult runVmSnapshots(std::size_t size) {
 WorkResult runScenario(const Options &options) {
   if (options.scenario == "arena-links")
     return runArenaLinks(options.size, options.seed);
+  if (options.scenario.starts_with("arena-link-"))
+    return runArenaLinkClass(options.size, options.seed, options.scenario);
   if (options.scenario == "fold-text")
     return runFold(options.size, true, false);
   if (options.scenario == "fold-structure")
@@ -650,7 +846,48 @@ int main(int argc, char **argv) {
       std::cout << (timed ? timed->indexScanNs : metrics.indexScanNs);
     else
       std::cout << "null";
-    std::cout << ",\"checksum\":";
+    std::cout << ",\"p3_repetitions\":";
+    if (options.scenario.starts_with("arena-link-"))
+      std::cout << metrics.p3Repetitions;
+    else
+      std::cout << "null";
+    std::cout << ",\"p3_link_traversal_ns\":";
+    if (timed && options.scenario.starts_with("arena-link-"))
+      std::cout << timed->p3TraversalNs;
+    else
+      std::cout << "null";
+    std::cout << ",\"p3_linked_calls\":";
+#if defined(GLEDITOR_PERF_ALLOC_PROBE)
+    if (options.scenario.starts_with("arena-link-"))
+      std::cout << metrics.p3Calls;
+    else
+      std::cout << "null";
+#else
+    std::cout << "null";
+#endif
+    std::cout << ",\"p3_fastpath_eligible_calls\":";
+#if defined(GLEDITOR_PERF_ALLOC_PROBE)
+    if (options.scenario.starts_with("arena-link-"))
+      std::cout << metrics.p3EligibleCalls;
+    else
+      std::cout << "null";
+#else
+    std::cout << "null";
+#endif
+    std::cout << ",\"p3_eligibility_scope\":\"scenario_only\"";
+    std::cout << ",\"p3_eligibility_class\":\"";
+    if (options.scenario == "arena-link-local" ||
+        options.scenario == "arena-link-quote-local")
+      std::cout << "eligible_arena_owned_non_externref";
+    else if (options.scenario == "arena-link-base")
+      std::cout << "base_fallback_unchanged";
+    else if (options.scenario == "arena-link-quote-extern")
+      std::cout << "quote_externref_excluded";
+    else if (options.scenario == "arena-link-proxy")
+      std::cout << "canonical_proxy_slow_classification";
+    else
+      std::cout << "not_applicable";
+    std::cout << "\",\"checksum\":";
     if (metrics.checksum)
       std::cout << *metrics.checksum;
     else

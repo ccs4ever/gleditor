@@ -4,9 +4,9 @@
   "repetitions": 7,
   "training_weight_policy": "positive integer multiplier of measured repetitions; validation repetitions are explicit and unweighted",
   "input_identity_kind": "CLI corpus files and generated probe scenario parameters are hashed; test-source dependencies are identified separately",
-  "corpus_identity_claim": "CLI train and validation inputs are distinct files, and generated probes use distinct seeds; source-only GoogleTest workloads have synthetic or embedded data and make no held-out corpus claim",
+  "corpus_identity_claim": "CLI train and validation inputs are distinct files, and generated probes use distinct seeds; source-only GoogleTest workloads have synthetic or embedded data and make no held-out corpus claim; P3 link cohorts are deterministic topology classes; their distinct seed tags affect checksum labeling only and do not claim randomized graph inputs",
   "environment_policy": "fresh isolated XDG data, config, and cache directories per warmup and measured sample",
-  "probe_measurement_policy": "primary timing commands use --measure timing; optional --collect-counters runs separate --measure allocations commands after timing. The counter pass is off by default and is excluded from primary wall-time and peak-RSS samples.",
+  "probe_measurement_policy": "primary timing commands use --measure timing; optional --collect-counters runs separate --measure allocations commands after timing. The counter pass is off by default and is excluded from primary wall-time and peak-RSS samples. P3 link cohort primary timing selects p3_link_traversal_ns and excludes setup/validation/inspection; its paired allocation/count command classifies constructed scenario edges only, not global eligibility",
   "workloads": [
     {
       "id": "gleditor_test_entrypoint_train",
@@ -1122,6 +1122,446 @@
         "--measure",
         "allocations"
       ]
+    },
+    {
+      "id": "probe_arena_link_local_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-link-local",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3211,
+      "timing_metric": "p3_link_traversal_ns",
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-link-local",
+        "--size",
+        "128",
+        "--seed",
+        "3211",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 128-cell eligible arena-owned non-ExternRef links; seed 3211 is a checksum tag only, not a randomized graph input",
+      "covers": [
+        "P3 linked() traversal timing",
+        "scenario-specific edge class",
+        "paired count-build eligibility classification"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-link-local",
+        "--size",
+        "128",
+        "--seed",
+        "3211",
+        "--measure",
+        "allocations"
+      ],
+      "timing_scope": "forward/reverse ArenaManifold::linked calls with result checks and checksum; excludes cohort construction, validation, and structure inspection"
+    },
+    {
+      "id": "probe_arena_link_base_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-link-base",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3212,
+      "timing_metric": "p3_link_traversal_ns",
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-link-base",
+        "--size",
+        "128",
+        "--seed",
+        "3212",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 128-cell persistent base-manifold fallback links; seed 3212 is a checksum tag only, not a randomized graph input",
+      "covers": [
+        "P3 linked() traversal timing",
+        "scenario-specific edge class",
+        "paired count-build eligibility classification"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-link-base",
+        "--size",
+        "128",
+        "--seed",
+        "3212",
+        "--measure",
+        "allocations"
+      ],
+      "timing_scope": "forward/reverse ArenaManifold::linked calls with result checks and checksum; excludes cohort construction, validation, and structure inspection"
+    },
+    {
+      "id": "probe_arena_link_quote_local_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-link-quote-local",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3213,
+      "timing_metric": "p3_link_traversal_ns",
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-link-quote-local",
+        "--size",
+        "128",
+        "--seed",
+        "3213",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 128-cell quote occurrences with ValueKind::None; seed 3213 is a checksum tag only, not a randomized graph input",
+      "covers": [
+        "P3 linked() traversal timing",
+        "scenario-specific edge class",
+        "paired count-build eligibility classification"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-link-quote-local",
+        "--size",
+        "128",
+        "--seed",
+        "3213",
+        "--measure",
+        "allocations"
+      ],
+      "timing_scope": "forward/reverse ArenaManifold::linked calls with result checks and checksum; excludes cohort construction, validation, and structure inspection"
+    },
+    {
+      "id": "probe_arena_link_quote_extern_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-link-quote-extern",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3214,
+      "timing_metric": "p3_link_traversal_ns",
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-link-quote-extern",
+        "--size",
+        "128",
+        "--seed",
+        "3214",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 128-cell quote occurrences with ExternRef; excluded from fast path; seed 3214 is a checksum tag only, not a randomized graph input",
+      "covers": [
+        "P3 linked() traversal timing",
+        "scenario-specific edge class",
+        "paired count-build eligibility classification"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-link-quote-extern",
+        "--size",
+        "128",
+        "--seed",
+        "3214",
+        "--measure",
+        "allocations"
+      ],
+      "timing_scope": "forward/reverse ArenaManifold::linked calls with result checks and checksum; excludes cohort construction, validation, and structure inspection"
+    },
+    {
+      "id": "probe_arena_link_proxy_train",
+      "split": "train",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-link-proxy",
+      "measure": "timing",
+      "size": 128,
+      "seed": 3215,
+      "timing_metric": "p3_link_traversal_ns",
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-link-proxy",
+        "--size",
+        "128",
+        "--seed",
+        "3215",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 128-cell canonical proxies retaining the slow classification path; seed 3215 is a checksum tag only, not a randomized graph input",
+      "covers": [
+        "P3 linked() traversal timing",
+        "scenario-specific edge class",
+        "paired count-build eligibility classification"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-link-proxy",
+        "--size",
+        "128",
+        "--seed",
+        "3215",
+        "--measure",
+        "allocations"
+      ],
+      "timing_scope": "forward/reverse ArenaManifold::linked calls with result checks and checksum; excludes cohort construction, validation, and structure inspection"
+    },
+    {
+      "id": "probe_arena_link_local_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-link-local",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9211,
+      "timing_metric": "p3_link_traversal_ns",
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-link-local",
+        "--size",
+        "144",
+        "--seed",
+        "9211",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 144-cell eligible arena-owned non-ExternRef links; seed 9211 is a checksum tag only, not a randomized graph input",
+      "covers": [
+        "P3 linked() traversal timing",
+        "scenario-specific edge class",
+        "paired count-build eligibility classification"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-link-local",
+        "--size",
+        "144",
+        "--seed",
+        "9211",
+        "--measure",
+        "allocations"
+      ],
+      "timing_scope": "forward/reverse ArenaManifold::linked calls with result checks and checksum; excludes cohort construction, validation, and structure inspection"
+    },
+    {
+      "id": "probe_arena_link_base_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-link-base",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9212,
+      "timing_metric": "p3_link_traversal_ns",
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-link-base",
+        "--size",
+        "144",
+        "--seed",
+        "9212",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 144-cell persistent base-manifold fallback links; seed 9212 is a checksum tag only, not a randomized graph input",
+      "covers": [
+        "P3 linked() traversal timing",
+        "scenario-specific edge class",
+        "paired count-build eligibility classification"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-link-base",
+        "--size",
+        "144",
+        "--seed",
+        "9212",
+        "--measure",
+        "allocations"
+      ],
+      "timing_scope": "forward/reverse ArenaManifold::linked calls with result checks and checksum; excludes cohort construction, validation, and structure inspection"
+    },
+    {
+      "id": "probe_arena_link_quote_local_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-link-quote-local",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9213,
+      "timing_metric": "p3_link_traversal_ns",
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-link-quote-local",
+        "--size",
+        "144",
+        "--seed",
+        "9213",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 144-cell quote occurrences with ValueKind::None; seed 9213 is a checksum tag only, not a randomized graph input",
+      "covers": [
+        "P3 linked() traversal timing",
+        "scenario-specific edge class",
+        "paired count-build eligibility classification"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-link-quote-local",
+        "--size",
+        "144",
+        "--seed",
+        "9213",
+        "--measure",
+        "allocations"
+      ],
+      "timing_scope": "forward/reverse ArenaManifold::linked calls with result checks and checksum; excludes cohort construction, validation, and structure inspection"
+    },
+    {
+      "id": "probe_arena_link_quote_extern_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-link-quote-extern",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9214,
+      "timing_metric": "p3_link_traversal_ns",
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-link-quote-extern",
+        "--size",
+        "144",
+        "--seed",
+        "9214",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 144-cell quote occurrences with ExternRef; excluded from fast path; seed 9214 is a checksum tag only, not a randomized graph input",
+      "covers": [
+        "P3 linked() traversal timing",
+        "scenario-specific edge class",
+        "paired count-build eligibility classification"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-link-quote-extern",
+        "--size",
+        "144",
+        "--seed",
+        "9214",
+        "--measure",
+        "allocations"
+      ],
+      "timing_scope": "forward/reverse ArenaManifold::linked calls with result checks and checksum; excludes cohort construction, validation, and structure inspection"
+    },
+    {
+      "id": "probe_arena_link_proxy_validation",
+      "split": "validation",
+      "weight": 1,
+      "result_format": "probe_json",
+      "probe_scenario": "arena-link-proxy",
+      "measure": "timing",
+      "size": 144,
+      "seed": 9215,
+      "timing_metric": "p3_link_traversal_ns",
+      "command": [
+        "build/performance-probe",
+        "--scenario",
+        "arena-link-proxy",
+        "--size",
+        "144",
+        "--seed",
+        "9215",
+        "--measure",
+        "timing"
+      ],
+      "inputs": [],
+      "dependencies": [
+        "tools/performance-probe.cpp"
+      ],
+      "scenario": "generated 144-cell canonical proxies retaining the slow classification path; seed 9215 is a checksum tag only, not a randomized graph input",
+      "covers": [
+        "P3 linked() traversal timing",
+        "scenario-specific edge class",
+        "paired count-build eligibility classification"
+      ],
+      "counter_command": [
+        "build/performance-probe-counts",
+        "--scenario",
+        "arena-link-proxy",
+        "--size",
+        "144",
+        "--seed",
+        "9215",
+        "--measure",
+        "allocations"
+      ],
+      "timing_scope": "forward/reverse ArenaManifold::linked calls with result checks and checksum; excludes cohort construction, validation, and structure inspection"
     }
   ]
 }

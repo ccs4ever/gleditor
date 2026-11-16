@@ -11,7 +11,7 @@ reviewers; acceptance is based on current code and recorded checks.
 | ------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | M0 baseline/observability | In progress | Ordinary `-O3 -g` full build passed. Complete control `make test` passed, including 842 library, 4380 Xuzz, 268 ZigZag, 12 additional tests and 5 network tests. Independent M0/probe reviews converged for the frozen corpus recipe. All 36 split probe cases and both corpus smoke reports passed; full control backend comparison passed. Fine-grained telemetry listed below remains open. |
 | M1 release ThinLTO+PGO    | Complete    | Four Clang modes built and passed16 held-out timing blocks each;512 separate perf samples usable. Combined full tests/backends passed;41 focused tests and formatting passed. Independent C++ performance review converged; scoped results and pre-existing lint failure recorded below.                                                                                                       |
-| M2 P3/P4                  | Pending     | Depends on baseline and release pipeline evidence                                                                                                                                                                                                                                                                                                                                              |
+| M2 P3/P4                  | In progress | P3 ThinLTO baseline/candidate builds and 21-workload comparisons passed; fresh PGO comparison and separate P4 experiment pending                                                                                                                                                                                                                                                               |
 | M3 P2                     | Pending     | No runtime lookup changes yet                                                                                                                                                                                                                                                                                                                                                                  |
 | M4 P5                     | Pending     | No operand container changes yet                                                                                                                                                                                                                                                                                                                                                               |
 | M5a-c P1                  | Pending     | No VM trail/container changes yet                                                                                                                                                                                                                                                                                                                                                              |
@@ -229,3 +229,38 @@ or cold-build speed claim.
 M0 fine-grained telemetry remains in progress for later candidate gates. M2 begins with isolated
 probe and accessor drafts; no P1-P3/P5 runtime changes have landed. Every later PGO source variant
 must be retrained. No whole-plan completion is claimed.
+
+## Iteration 2: guarded link traversal
+
+The unchanged-guard ThinLTO baseline built successfully in 422.37 seconds. All 21 held-out workloads
+passed smoke and seven measured repetitions plus a warmup, with separate allocation/count runs. The
+new five P3 cohorts select the internal traversal timer rather than setup-inclusive wall time. The
+permanent hardware collector passed 168 samples per variant (147 measured and 21 warmup), with
+cycles and instructions usable, no identity changes, and whole-process scope.
+
+The P3 candidate changes only the production decision path in `ArenaManifold::linked`; it preserves
+base fallback and quote/local/proxy behavior. It passed a full ThinLTO build (404.58 seconds), 158
+focused arena/manifold/dimension/spool tests, three Store lookup tests, all 21 held-out smoke cases,
+and the same repeated measurement recipe. All 51 focused infrastructure tests passed. A first
+candidate build was interrupted to apply required C++ formatting; it is not counted as a pass.
+
+Baseline source fingerprint: `a6a4f2c59c4d2ac1c1c03c93872e5b6c7e6def2358b62703303e18962b8c14a0`.
+Candidate fingerprint: `09da6e1b74a0cd90328882713f3591b03f6f84285552aa903871c9530a930873`. Probe
+formatting is explicitly checked: formatting the archived baseline probe with clang-format 19
+produces the candidate bytes. Other intentional changes are the guarded link path and its
+regression.
+
+The independent-block bootstrap comparison reports candidate/baseline median traversal ratios of
+0.352 (95% interval 0.292–0.557) for local cells and 0.656 (0.623–0.708) for ordinary quote
+occurrences. Base fallback, ExternRef quotes, and canonical proxies remain inconclusive. No workload
+interval establishes a regression; inconclusive results are not equivalence proofs. Each constructed
+cohort executes 32,890 link calls. Local cells and ordinary quotes are entirely eligible; the other
+three cohorts have zero qualifying calls. These are scenario counts, not global eligibility
+estimates.
+
+Raw reports are under `build/performance/variants/m2-p3-{baseline,candidate}/`; validated analysis
+is `build/performance/iterations/m2-p3-analysis.json`. These results concern ThinLTO, not PGO. A
+fresh ThinLTO+PGO generation/train/merge/release and repeated validation of the candidate is now
+running; profiles from M1 are not reused. P3 release acceptance and the separate P4 accessor
+experiment remain open. M3/M4/M5 drafts are isolated under `/tmp` and are not production
+implementations.

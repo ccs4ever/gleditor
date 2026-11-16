@@ -51,6 +51,107 @@ class PerformanceReportTest(unittest.TestCase):
         self.assertTrue(all(isinstance(item["weight"], int) and item["weight"] > 0
                             for item in manifest["workloads"]))
 
+    def test_p3_manifest_has_paired_deterministic_cohorts(self):
+        manifest = performance_report.load_manifest()
+        workloads = manifest["workloads"]
+        self.assertEqual(sum(item["split"] == "train" for item in workloads), 30)
+        self.assertEqual(sum(item["split"] == "validation" for item in workloads), 21)
+        expected = {
+            "arena-link-local", "arena-link-base", "arena-link-quote-local",
+            "arena-link-quote-extern", "arena-link-proxy"}
+        by_split = {
+            split: {item["probe_scenario"]: item for item in workloads
+                    if item["split"] == split and
+                    item.get("probe_scenario", "").startswith("arena-link-") and
+                    item["probe_scenario"] != "arena-links"}
+            for split in ("train", "validation")}
+        self.assertEqual(set(by_split["train"]), expected)
+        self.assertEqual(set(by_split["validation"]), expected)
+        for scenario in expected:
+            train, validation = (by_split[split][scenario]
+                                 for split in ("train", "validation"))
+            self.assertEqual(train["size"], 128)
+            self.assertEqual(validation["size"], 144)
+            self.assertNotEqual(train["seed"], validation["seed"])
+            self.assertEqual(train["timing_metric"], "p3_link_traversal_ns")
+            self.assertEqual(validation["timing_metric"], "p3_link_traversal_ns")
+            self.assertEqual(train["timing_scope"], validation["timing_scope"])
+            self.assertEqual(train["counter_command"][1], "--scenario")
+        self.assertIn("checksum labeling only",
+                      manifest["corpus_identity_claim"])
+
+    def test_p3_report_uses_isolated_traversal_for_primary_summary(self):
+        with tempfile.TemporaryDirectory(prefix="perf-p3-timing-") as temp:
+            repo = Path(temp)
+            log_dir = repo / "logs"
+            log_dir.mkdir()
+            payload = {
+                "schema_version": 2, "scenario": "arena-link-local",
+                "measure": "timing", "wall_time_scope": "whole process",
+                "wall_time_ns": 900_000_000,
+                "p3_link_traversal_ns": 3_210_000,
+                "work_items": 32768, "checksum": 42}
+            program = ("import json; print(json.dumps(" +
+                       json.dumps(payload) + "))")
+            workload = {
+                "id": "p3_local", "result_format": "probe_json",
+                "probe_scenario": "arena-link-local", "measure": "timing",
+                "timing_metric": "p3_link_traversal_ns",
+                "timing_scope": ("forward/reverse ArenaManifold::linked calls with "
+                                "result checks and checksum; excludes cohort "
+                                "construction, validation, and structure inspection"),
+                "command": [sys.executable, "-c", program]}
+            with patch.object(performance_report, "ROOT", repo):
+                sample = performance_report.run_one(
+                    workload, "run", 1, log_dir,
+                    performance_report.headless_environment(os.environ),
+                    "p3-timing-test", "p3-pair", "synthetic")
+            self.assertTrue(sample["success"], sample)
+            self.assertEqual(sample["timing_source"],
+                             "probe_metrics.p3_link_traversal_ns")
+            self.assertEqual(sample["timing_scope"],
+                             "forward/reverse ArenaManifold::linked calls with "
+                             "result checks and checksum; excludes cohort "
+                             "construction, validation, and structure inspection")
+            self.assertAlmostEqual(sample["wall_seconds"], 0.00321)
+            summary = performance_report.summarize([sample])
+            self.assertAlmostEqual(summary["median_wall_seconds"], 0.00321)
+            self.assertNotAlmostEqual(summary["median_wall_seconds"], 0.9)
+
+    def test_timing_metric_requires_positive_finite_value(self):
+        with tempfile.TemporaryDirectory(prefix="perf-p3-invalid-timing-") as temp:
+            repo = Path(temp)
+            log_dir = repo / "logs"
+            log_dir.mkdir()
+            for index, value in enumerate((0, float("nan"), float("inf")), 1):
+                payload = {
+                    "schema_version": 2, "scenario": "arena-link-local",
+                    "measure": "timing", "wall_time_scope": "whole process",
+                    "wall_time_ns": 900_000_000,
+                    "p3_link_traversal_ns": value,
+                    "work_items": 32768, "checksum": 42}
+                encoded_payload = json.dumps(payload, allow_nan=True)
+                program = ("import json; print(json.dumps(json.loads(" +
+                           repr(encoded_payload) + "))) ")
+                with patch.object(performance_report, "ROOT", repo):
+                    sample = performance_report.run_one(
+                        {"id": f"p3_invalid_{index}",
+                         "result_format": "probe_json",
+                         "probe_scenario": "arena-link-local",
+                         "measure": "timing",
+                         "timing_metric": "p3_link_traversal_ns",
+                         "timing_scope": ("forward/reverse ArenaManifold::linked calls with "
+                                "result checks and checksum; excludes cohort "
+                                "construction, validation, and structure inspection"),
+                         "command": [sys.executable, "-c", program]},
+                        "run", index, log_dir,
+                        performance_report.headless_environment(os.environ),
+                        "p3-invalid-test", "p3-pair", "synthetic")
+                self.assertFalse(sample["success"])
+                self.assertIsNone(sample["probe_metrics"])
+                self.assertIn("positive finite p3_link_traversal_ns",
+                              sample["probe_error"])
+
     def test_training_weight_controls_realized_repetitions(self):
         self.assertEqual(performance_report.effective_repetitions("train", 3, 2), 6)
         self.assertEqual(performance_report.effective_repetitions("validation", 3, 2), 3)

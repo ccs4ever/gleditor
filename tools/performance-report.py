@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import resource
@@ -30,6 +31,15 @@ HEADLESS_ENV = {
     "XDG_CONFIG_HOME": "build/performance/xdg/config",
     "XDG_CACHE_HOME": "build/performance/xdg/cache",
 }
+
+
+def positive_finite_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return value > 0 and math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def sha256(path: Path) -> str:
@@ -350,15 +360,10 @@ def gcc_profile_snapshot(directory: Path) -> dict[str, str]:
     return {str(path): sha256(path) for path in directory.rglob("*.gcda") if path.is_file()}
 
 
-def run_one(workload: dict[str, Any], label: str, index: int,
-            log_dir: Path, env: dict[str, str], run_id: str,
-            pairing_group: str, variant: str) -> dict[str, Any]:
-    argv = workload["command"]
-    log_path = log_dir / f"{workload['id']}-{label}-{index:02d}.log"
-    usage_path = log_path.with_suffix(".usage.json")
-    result_path = log_path.with_suffix(".gtest.json")
+def expand_workload_command(workload: dict[str, Any], run_id: str,
+                            label: str, index: int) -> tuple[list[str], dict[str, str]]:
+    """Expand manifest placeholders consistently for runners and wrappers."""
     artifact_dir = ROOT / "build/performance/artifacts" / run_id / workload["id"] / f"{label}-{index:02d}"
-    artifact_dir.mkdir(parents=True, exist_ok=True)
     input_paths = [str(ROOT / name) for name in workload.get("inputs", [])]
     placeholders = {"{run_id}": run_id, "{workload_id}": workload["id"],
                     "{sample_index}": str(index), "{artifact_dir}": str(artifact_dir)}
@@ -366,11 +371,24 @@ def run_one(workload: dict[str, Any], label: str, index: int,
         placeholders["{input}"] = input_paths[0]
         placeholders.update({f"{{input{number}}}": path
                              for number, path in enumerate(input_paths)})
-    expanded_argv = []
-    for value in argv:
+    expanded = []
+    for argument in workload["command"]:
         for placeholder, replacement in placeholders.items():
-            value = value.replace(placeholder, replacement)
-        expanded_argv.append(value)
+            argument = argument.replace(placeholder, replacement)
+        expanded.append(argument)
+    return expanded, placeholders
+
+
+def run_one(workload: dict[str, Any], label: str, index: int,
+            log_dir: Path, env: dict[str, str], run_id: str,
+            pairing_group: str, variant: str) -> dict[str, Any]:
+    log_path = log_dir / f"{workload['id']}-{label}-{index:02d}.log"
+    usage_path = log_path.with_suffix(".usage.json")
+    result_path = log_path.with_suffix(".gtest.json")
+    expanded_argv, placeholders = expand_workload_command(workload, run_id,
+                                                           label, index)
+    artifact_dir = Path(placeholders["{artifact_dir}"])
+    artifact_dir.mkdir(parents=True, exist_ok=True)
     result_format = workload["result_format"]
     child_argv = [str(resolve_executable(expanded_argv[0])), *expanded_argv[1:]]
     if result_format == "gtest_json":
@@ -445,8 +463,12 @@ def run_one(workload: dict[str, Any], label: str, index: int,
                     raise ValueError("timing probe has no wall_time_scope")
                 if not {"work_items", "checksum"} <= probe_metrics.keys():
                     raise ValueError("probe JSON misses work_items/checksum")
-                if workload["measure"] in {"timing", "both"} and not isinstance(probe_metrics.get("wall_time_ns"), int):
-                    raise ValueError("timing probe has no integer wall_time_ns")
+                timing_metric = workload.get("timing_metric", "wall_time_ns")
+                timing_value = probe_metrics.get(timing_metric)
+                if workload["measure"] in {"timing", "both"}:
+                    if not positive_finite_number(timing_value):
+                        raise ValueError(
+                            f"timing probe has no positive finite {timing_metric}")
                 calls = probe_metrics.get("scenario_total_cpp_new_calls",
                                           probe_metrics.get("cpp_new_calls"))
                 requested_bytes = probe_metrics.get(
@@ -493,11 +515,23 @@ def run_one(workload: dict[str, Any], label: str, index: int,
         llvm_changed = [{"path": str(path.relative_to(ROOT)), "sha256": digest}
                         for path, digest in profile_after.items()
                         if profile_before.get(path) != digest]
-        probe_wall = (probe_metrics.get("wall_time_ns") / 1e9
-                      if probe_metrics and isinstance(probe_metrics.get("wall_time_ns"), int)
-                      else None)
+        timing_metric = workload.get("timing_metric", "wall_time_ns")
+        timing_value = probe_metrics.get(timing_metric) if probe_metrics else None
+        probe_wall = (timing_value / 1e9
+                      if positive_finite_number(timing_value) else None)
         sample_wall = probe_wall if result_format == "probe_json" else child_wall
+        timing_is_measured = (result_format != "probe_json" or
+                              workload["measure"] in {"timing", "both"})
+        timing_source = (f"probe_metrics.{timing_metric}"
+                         if result_format == "probe_json" and timing_is_measured
+                         else "child_wall_seconds" if result_format != "probe_json"
+                         else "not_measured")
+        timing_scope = ((workload.get("timing_scope") or
+                         (probe_metrics.get("wall_time_scope")
+                          if result_format == "probe_json" and probe_metrics
+                          else None)) if timing_is_measured else None)
         return {"phase": label, "index": index, "wall_seconds": sample_wall,
+                "timing_source": timing_source, "timing_scope": timing_scope,
                 "runner_wall_seconds": wall,
                 "peak_rss_bytes": rss, "peak_rss_source": "isolated helper RUSAGE_CHILDREN" if rss is not None else "unavailable",
                 "returncode": completed.returncode, "success": success,
@@ -568,6 +602,13 @@ def load_manifest() -> dict[str, Any]:
         if workload["result_format"] == "probe_json":
             if workload["measure"] not in {"timing", "allocations", "both"}:
                 raise ValueError(f"invalid probe measurement mode: {workload['id']}")
+            if ("timing_metric" in workload and
+                    (not isinstance(workload["timing_metric"], str) or
+                     not workload["timing_metric"])):
+                raise ValueError(f"timing_metric must be a nonempty string: {workload['id']}")
+            if "timing_metric" in workload and not isinstance(
+                    workload.get("timing_scope"), str):
+                raise ValueError(f"selected timing metric needs timing_scope: {workload['id']}")
             if any(not isinstance(workload[key], int) or workload[key] <= 0
                    for key in ("size", "seed")):
                 raise ValueError(f"probe size and seed must be positive integers: {workload['id']}")
@@ -645,7 +686,8 @@ def run(args: argparse.Namespace) -> int:
                                    "make": tool_version(["make", "--version"]),
                                    "linker": configured_linker_identity(source.get("buildflags"))}},
         "counters": {
-            "timing_probe_fields": ["wall_time_ns", "fold_kernel_ns", "cell_count",
+            "timing_probe_fields": ["wall_time_ns", "p3_link_traversal_ns",
+                                    "fold_kernel_ns", "cell_count",
                                     "dimension_run_count", "empty_dimension_run_cells",
                                     "by_ref_entries_per_cell", "wing_arity_histogram",
                                     "choice_points", "selected_snapshot_map_entries"],
@@ -665,6 +707,12 @@ def run(args: argparse.Namespace) -> int:
         record: dict[str, Any] = {
             "id": workload["id"], "split": workload["split"],
             "weight": workload["weight"], "covers": workload["covers"],
+            "timing_metric": (workload.get("timing_metric", "wall_time_ns")
+                              if workload["result_format"] == "probe_json" else None),
+            "timing_source": (f"probe_metrics.{workload.get('timing_metric', 'wall_time_ns')}"
+                              if workload["result_format"] == "probe_json"
+                              else "child_wall_seconds"),
+            "timing_scope": workload.get("timing_scope"),
             "inputs": input_identity(workload),
             "dependencies": input_identity({"inputs": workload.get("dependencies", [])}),
             "input_identity_kind": manifest["input_identity_kind"],

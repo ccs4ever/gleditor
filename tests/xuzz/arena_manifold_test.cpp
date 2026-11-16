@@ -1449,6 +1449,76 @@ TEST(ArenaManifoldTest, suppressEmitsNothingNotEvenAdds) {
   EXPECT_EQ(after.refusedOps(), 0U);
 }
 
+TEST(ArenaManifoldTest, externRefQuoteOccurrencesKeepLocalLinksAndRollback) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base, &doc.store};
+  const auto space = arena.attach(
+      Space{.manifold = &base, .store = &doc.store, .label = "quoted"});
+  const auto dim = arena.ensureDimension("d.step");
+  arena.bindDimension(dim, space, doc.dim);
+  const auto proxy       = arena.proxyFor(space, doc.first);
+  const auto proxyTarget = arena.proxyFor(space, doc.second);
+  ASSERT_EQ(arena.linked(proxy, dim, DimVector::POS), proxyTarget);
+
+  const auto occurrence  = arena.quoteOccurrence(1, proxy);
+  const auto foreignBits = (static_cast<std::uint64_t>(space) << 32) |
+                           static_cast<std::uint32_t>(doc.first);
+  ASSERT_EQ(arena.valueKindOf(occurrence), ValueKind::None);
+  EXPECT_FALSE(arena.linked(occurrence, dim, DimVector::POS));
+  EXPECT_FALSE(arena.linked(occurrence, dim, DimVector::NEG));
+
+  const auto localPos = arena.makeCell("quote local POS");
+  const auto localNeg = arena.makeCell("quote local NEG");
+  ASSERT_TRUE(arena.link(occurrence, dim, DimVector::POS, localPos));
+  ASSERT_TRUE(arena.link(localNeg, dim, DimVector::POS, occurrence));
+  EXPECT_EQ(arena.linked(occurrence, dim, DimVector::POS), localPos);
+  EXPECT_EQ(arena.linked(occurrence, dim, DimVector::NEG), localNeg);
+  EXPECT_EQ(arena.linked(localPos, dim, DimVector::NEG), occurrence);
+  EXPECT_EQ(arena.linked(localNeg, dim, DimVector::POS), occurrence);
+
+  ASSERT_TRUE(
+      arena.setValueBits(occurrence, ValueKind::ExternRef, foreignBits));
+  EXPECT_EQ(arena.linked(occurrence, dim, DimVector::POS), localPos);
+  EXPECT_EQ(arena.linked(occurrence, dim, DimVector::NEG), localNeg);
+
+  const auto mark         = arena.mark();
+  const auto temporaryPos = arena.makeCell("temporary quote POS");
+  const auto temporaryNeg = arena.makeCell("temporary quote NEG");
+  ASSERT_TRUE(arena.link(occurrence, dim, DimVector::POS, temporaryPos));
+  ASSERT_TRUE(arena.link(temporaryNeg, dim, DimVector::POS, occurrence));
+  ASSERT_TRUE(arena.setValueBits(occurrence, ValueKind::Int64, 9));
+  EXPECT_EQ(arena.linked(occurrence, dim, DimVector::POS), temporaryPos);
+  EXPECT_EQ(arena.linked(occurrence, dim, DimVector::NEG), temporaryNeg);
+  ASSERT_TRUE(
+      arena.setValueBits(occurrence, ValueKind::ExternRef, foreignBits));
+  EXPECT_EQ(arena.linked(occurrence, dim, DimVector::POS), temporaryPos);
+  EXPECT_EQ(arena.linked(occurrence, dim, DimVector::NEG), temporaryNeg);
+  EXPECT_TRUE(arena.release(mark));
+  EXPECT_EQ(arena.valueKindOf(occurrence), ValueKind::ExternRef);
+  EXPECT_EQ(arena.linked(occurrence, dim, DimVector::POS), localPos);
+  EXPECT_EQ(arena.linked(occurrence, dim, DimVector::NEG), localNeg);
+  EXPECT_FALSE(arena.contains(temporaryPos));
+  EXPECT_FALSE(arena.contains(temporaryNeg));
+
+  // A canonical proxy's locally shadowed edge wins while present; releasing
+  // the branch restores foreign delegation through its original POS edge.
+  const auto proxyMark    = arena.mark();
+  const auto shadowTarget = arena.makeCell("proxy local target");
+  ASSERT_TRUE(arena.link(proxy, dim, DimVector::POS, shadowTarget));
+  EXPECT_EQ(arena.linked(proxy, dim, DimVector::POS), shadowTarget);
+  EXPECT_EQ(arena.linked(shadowTarget, dim, DimVector::NEG), proxy);
+  EXPECT_TRUE(arena.release(proxyMark));
+  EXPECT_FALSE(arena.contains(shadowTarget));
+  EXPECT_EQ(arena.linked(proxy, dim, DimVector::POS), proxyTarget);
+
+  // A persistent base cell can be shadowed with ExternRef too. It stays on
+  // the local/base-cell edge path rather than proxy resolution.
+  ASSERT_TRUE(arena.setValueBits(doc.first, ValueKind::ExternRef, foreignBits));
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, DimVector::POS), doc.second);
+  EXPECT_FALSE(arena.linked(doc.first, doc.dim, DimVector::NEG));
+}
+
 TEST(ArenaManifoldTest, netIdenticalShadowEmitsNothing) {
   Document doc;
   const auto base = doc.manifold();
