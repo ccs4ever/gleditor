@@ -76,7 +76,7 @@ VplView makeView(std::optional<zigzag::CellRef> cell, const ViewFacts &facts,
       box.enclose(std::make_shared<VplView>(makeView(content, {}, core)));
     } else {
       box.enclose(std::make_shared<VplView>(
-          makeRankView(content, facts.axes, {}, {}, arena)));
+          makeRankView(content, facts.axes, facts.reversed, {}, arena)));
     }
     return box;
   }

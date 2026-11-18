@@ -32,6 +32,9 @@ constexpr std::string_view kEncloseDimension =
 constexpr std::string_view kEncloseBounded =
     "VPL enclose of a bounded view (a take or a negative drop) is unsupported "
     "by the VM: the box would lose the bound";
+constexpr std::string_view kEncloseNested =
+    "VPL nested enclose is unsupported by the VM: the box records one level "
+    "of enclosure, so enclosing an enclosed value would lose the depth";
 constexpr std::string_view kDiscloseDimension =
     "VPL disclose of a dimension value is unsupported by the VM";
 
@@ -61,6 +64,10 @@ Maybe lowerEncloseMonadic(LowerContext &ctx, const MonadicExpr &expr) {
   // and the enclosed value would be the whole rank.
   if (ctx.isBounded(*rCell)) refuse(kEncloseBounded);
 
+  // Enclosure is a static flag, not a depth: a second box would read back as
+  // a raw cell reference rather than as the first box.
+  if (ctx.isEnclosed(*rCell)) refuse(kEncloseNested);
+
   const auto dimEnclosure =
       ctx.core().findOrMintDimension(enclosureDimensionName);
   const auto box = ctx.core().arena().makeCell();
@@ -73,6 +80,11 @@ Maybe lowerEncloseMonadic(LowerContext &ctx, const MonadicExpr &expr) {
 
   if (const auto *axes = ctx.axesOf(*rCell)) {
     ctx.rankAxes()[box] = *axes;
+  }
+  // The box links to the operand's origin, so the direction the operand reads
+  // in must travel with it or a reversed operand would come back forward.
+  if (const auto *reversed = ctx.reversedOf(*rCell)) {
+    ctx.rankReversed()[box] = *reversed;
   }
   ctx.markEnclosed(box);
   emit::mergeRankInputDependencies(ctx, box, std::array{*rCell});
@@ -106,6 +118,9 @@ Maybe lowerDiscloseMonadic(LowerContext &ctx, const MonadicExpr &expr) {
 
   if (const auto *axes = ctx.axesOf(*rCell)) {
     ctx.rankAxes()[innerCell] = *axes;
+  }
+  if (const auto *reversed = ctx.reversedOf(*rCell)) {
+    ctx.rankReversed()[innerCell] = *reversed;
   }
   emit::mergeRankInputDependencies(ctx, innerCell, std::array{*rCell});
   return innerCell;

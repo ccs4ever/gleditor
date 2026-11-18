@@ -185,7 +185,9 @@ Maybe lowerMonadicArithmeticOnRank(LowerContext &ctx, const MonadicExpr &expr,
 CellRef lowerDyadicArithmeticOnRank(LowerContext &ctx, const DyadicExpr &expr,
                                     CellRef lCell, CellRef rCell) {
   const auto verb = scalarDyadicVerb(expr.verb());
-  if (!verb) refuse(msg::dyadicOnRank);
+  if (!verb) {
+    refuse(namedRefusal(msg::dyadicOnRank, tokenKindToString(expr.verb())));
+  }
   const bool leftRank  = ctx.isRank(lCell);
   const bool rightRank = ctx.isRank(rCell);
   // The scalar side of a scalar extension is checked too: an enclosed or

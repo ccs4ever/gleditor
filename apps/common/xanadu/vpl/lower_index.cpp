@@ -25,6 +25,9 @@ using zigzag::DimVector;
 using zigzag::DirectedDim;
 using zigzag::vortex::OpcodeKind;
 
+constexpr std::int64_t kBoolFalse = 0; ///< the integer value of a false cell
+constexpr std::int64_t kBoolTrue  = 1; ///< the integer value of a true cell
+
 constexpr std::string_view kIndexDimension =
     "VPL indexing with a dimension value is unsupported by the VM";
 constexpr std::string_view kIndexTargetDimension =
@@ -37,6 +40,10 @@ constexpr std::string_view kIndexScalar =
     "VPL indexing on a scalar is unsupported by the VM";
 constexpr std::string_view kIndexValence =
     "VPL indexing on a rank with more than one axis is unsupported by the VM";
+constexpr std::string_view kIndexIndexValence =
+    "VPL indexing with a rank of more than one axis is unsupported by the VM";
+constexpr std::string_view kIndexNotNumber =
+    "VPL index is not a number (DOMAIN ERROR)";
 constexpr std::string_view kIndexMultiDim =
     "VPL multi-dimensional indexing is unsupported by the VM";
 constexpr std::string_view kIndexNegativeLiteral =
@@ -58,6 +65,9 @@ constexpr std::string_view kWhereEnclosed =
     "VPL where of an enclosed value is unsupported by the VM";
 constexpr std::string_view kWhereValence =
     "VPL where on a rank with more than one axis is unsupported by the VM";
+
+constexpr std::string_view kWhereNotBoolean =
+    "VPL where requires booleans: every cell must be exactly 0 or 1";
 
 constexpr std::string_view kMatchDimension =
     "VPL match of a dimension value is unsupported by the VM";
@@ -187,11 +197,24 @@ Maybe lowerWhereMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
   zero(ctx, iCell, "#WHERE_I_ZERO");
 
   walkView(ctx, rCell, axis, [&](CellRef item) {
-    const auto neqOp = ctx.emitOp(OpcodeKind::Neq, "#WHERE_NEQ");
-    ctx.emitInput(neqOp, item);
-    ctx.emitInputConstant(neqOp, std::int64_t{0});
-    const auto isNonZero = ctx.core().arena().makeCell();
-    ctx.emitOutput(neqOp, isNonZero);
+    // The spec defines where for booleans only, and a count-style reading of
+    // 2 0 3 would differ from APL's, so any cell that is not exactly 0 or 1 by
+    // value is refused. Neq on the stored types would also call the Bool
+    // false of a comparison unequal to the integer 0, hence order tests.
+    assertNumeric(ctx, item, "#WHERE_NUMBER", kWhereNotBoolean);
+    const auto isZero = emitBinaryOp(
+        ctx, OpcodeKind::And, "#WHERE_IS_ZERO",
+        emitBinaryOp(ctx, OpcodeKind::Lte, "#WHERE_ZERO_LTE", item, kBoolFalse),
+        emitBinaryOp(ctx, OpcodeKind::Gte, "#WHERE_ZERO_GTE", item,
+                     kBoolFalse));
+    const auto isOne = emitBinaryOp(
+        ctx, OpcodeKind::And, "#WHERE_IS_ONE",
+        emitBinaryOp(ctx, OpcodeKind::Lte, "#WHERE_ONE_LTE", item, kBoolTrue),
+        emitBinaryOp(ctx, OpcodeKind::Gte, "#WHERE_ONE_GTE", item, kBoolTrue));
+    assertCell(
+        ctx, emitBinaryOp(ctx, OpcodeKind::Or, "#WHERE_IS_BOOL", isZero, isOne),
+        "#WHERE_BOOLEAN", kWhereNotBoolean);
+    const auto isNonZero = isOne;
 
     const auto skipLabel = emit::mintLabel(ctx, "#WHERE_SKIP");
     emit::branchIfFalse(ctx, isNonZero, skipLabel, "#WHERE_BRANCH_SKIP");
@@ -276,8 +299,22 @@ Maybe lowerIndexing(LowerContext &ctx, const IndexingExpr &expr) {
     refuse(kIndexIndexEnclosed);
   }
 
-  assertNotNegative(ctx, *indexCell, "#INDEX_NONNEGATIVE",
-                    "VPL index out of range: negative index");
+  // A matrix of positions would be read along its first axis only and answer
+  // a wrong-shaped vector, so it is refused rather than half read.
+  if (const auto *indexAxes = ctx.axesOf(*indexCell);
+      indexAxes != nullptr && indexAxes->size() > 1) {
+    refuse(kIndexIndexValence);
+  }
+
+  // Computed positions get the same whole-number test a literal count does,
+  // so 1.0 and 4÷2 index and 3÷2 is the DOMAIN ERROR that [1.5] is.
+  const auto checkedPosition = [&](CellRef position) {
+    const auto whole = checkedWholeNumber(ctx, position, kIndexNotNumber,
+                                          kIndexNonIntegerLiteral);
+    assertNotNegative(ctx, whole, "#INDEX_NONNEGATIVE",
+                      "VPL index out of range: negative index");
+    return whole;
+  };
 
   const auto walk = axisWalkOf(ctx, *target);
   // The cell at a position is found by a walk that stops at the view's bound,
@@ -285,7 +322,7 @@ Maybe lowerIndexing(LowerContext &ctx, const IndexingExpr &expr) {
   // past a bound, and past the rank's end it would answer an absent cell that
   // reads as 0.
   const auto at = [&](CellRef position) {
-    const auto found = nthCell(ctx, walk, position);
+    const auto found = nthCell(ctx, walk, checkedPosition(position));
     assertCell(ctx, found.found, "#INDEX_IN_RANGE", kIndexOutOfRange);
     return found.cell;
   };
