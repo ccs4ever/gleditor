@@ -1092,8 +1092,46 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
   return result;
 }
 
+namespace {
+
+/// The text of a string literal operand, when @p expr is exactly one.
+const std::string *textLiteral(const std::shared_ptr<ValueExpr> &expr) {
+  if (!expr) return nullptr;
+  const auto *literal = std::get_if<ScalarLiteral>(&expr->kind);
+  return literal == nullptr ? nullptr
+                            : std::get_if<std::string>(&literal->value);
+}
+
+bool compareText(const std::string &left, const CompOp op,
+                 const std::string &right) {
+  switch (op) {
+  case CompOp::Equal:
+    return left == right;
+  case CompOp::NotEqual:
+    return left != right;
+  case CompOp::LessThan:
+    return left < right;
+  case CompOp::LessEqual:
+    return left <= right;
+  case CompOp::GreaterThan:
+    return left > right;
+  case CompOp::GreaterEqual:
+    return left >= right;
+  }
+  return false;
+}
+
+} // namespace
+
 std::optional<CellRef>
 VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef) {
+  // Two string literals are text, so they compare as text. Minting a literal
+  // infers a number from text that looks like one, and "nan" then compared as
+  // an IEEE NaN, making a string unequal to itself.
+  if (const auto *left = textLiteral(comp.left)) {
+    if (const auto *right = textLiteral(comp.right))
+      return emitConstant(compareText(*left, comp.op, *right));
+  }
   const auto context             = ambientContext_;
   const std::vector<CellRef> lhs = comp.left
                                        ? compileArgument(*comp.left, context)

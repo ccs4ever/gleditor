@@ -99,8 +99,17 @@ TEST_F(VQLSemanticsRepairTest, ScalarComparisonCoercionBoundariesRemainStable) {
   // Floating-point and integer comparisons are exact per R-NUM.
   EXPECT_FALSE(matches("9007199254740992 = 9007199254740993"));
   EXPECT_TRUE(matches("9007199254740992 != 9007199254740993"));
-  EXPECT_FALSE(matches(R"("nan" = "nan")"));
-  EXPECT_TRUE(matches(R"("nan" != "nan")"));
+  // Two text operands compare as text, so a string is never unequal to
+  // itself however much it reads like a number; text against a number still
+  // compares numerically.
+  EXPECT_TRUE(matches(R"("nan" = "nan")"));
+  EXPECT_FALSE(matches(R"("nan" != "nan")"));
+  EXPECT_TRUE(matches(R"("inf" = "inf")"));
+  EXPECT_FALSE(matches(R"("inf" != "inf")"));
+  EXPECT_FALSE(matches(R"("1" = "1.0")"));
+  EXPECT_TRUE(matches(R"("1" != "1.0")"));
+  EXPECT_TRUE(matches(R"("10" < "9")"));
+  EXPECT_FALSE(matches(R"("nan" = 1)"));
   EXPECT_FALSE(matches(R"("inf" < 1)"));
 }
 
