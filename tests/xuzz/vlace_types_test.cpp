@@ -121,3 +121,99 @@ TEST(VlaceTypesTest, RejectHeterogeneousList) {
 }
 
 } // namespace
+
+// -- Record patterns resolve fields by name -----------------------------------
+
+namespace {
+// The checker's error as "<Code>: <detail>", or "OK:<type>".
+std::string verdict(std::string_view src) {
+  Parser parser(src);
+  auto prog = parser.parseProgram();
+  if (!prog) return "parse:" + prog.error().detail;
+  TypeChecker tc;
+  auto r = tc.checkProgram(*prog);
+  if (!r) {
+    return std::string(compileErrorName(r.error().code)) + ": " +
+           r.error().detail;
+  }
+  return "OK:" + *r;
+}
+constexpr const char *kQ = "data Q = Q { n :: Int, s :: String } ; ";
+} // namespace
+
+TEST(VlaceRecordPatternTypesTest, OutOfOrderFieldsAreCheckedByName) {
+  // `a` is the String field however the pattern is written, so a + 1 is
+  // ill-typed. The positional reading typed it as Int and it ran, printing 1.
+  EXPECT_EQ(
+      code(std::string(kQ) + "f (Q { s = a, n = b }) = a + 1 ; f (Q 1 \"hi\")"),
+      "TypeMismatch");
+  // The mirror, well-typed, was refused with "cannot unify String with Int".
+  EXPECT_EQ(verdict(std::string(kQ) +
+                    "f (Q { s = a, n = b }) = b + 1 ; f (Q 1 \"hi\")"),
+            "OK:Int");
+}
+
+TEST(VlaceRecordPatternTypesTest, UnlistedFieldsAreWildcards) {
+  EXPECT_EQ(verdict(std::string(kQ) + "f (Q { s = a }) = a ; f (Q 1 \"hi\")"),
+            "OK:String");
+  EXPECT_EQ(
+      verdict(std::string(kQ) + "f (Q { n = b }) = b + 1 ; f (Q 1 \"hi\")"),
+      "OK:Int");
+  EXPECT_EQ(verdict(std::string(kQ) + "f (Q { }) = 7 ; f (Q 1 \"hi\")"),
+            "OK:Int");
+  // A partial pattern still types the value as the data type, not a function.
+  EXPECT_EQ(code(std::string(kQ) + "f (Q { n = b }) = b + 1 ; f 5"),
+            "TypeMismatch");
+}
+
+TEST(VlaceRecordPatternTypesTest, FieldPatternTypesComeFromTheDeclaration) {
+  // The literal 1 cannot match the String field.
+  EXPECT_EQ(code(std::string(kQ) + "f (Q { s = 1 }) = 0 ; f (Q 1 \"hi\")"),
+            "TypeMismatch");
+  EXPECT_EQ(code(std::string(kQ) + "f (Q { n = \"x\" }) = 0 ; f (Q 1 \"hi\")"),
+            "TypeMismatch");
+}
+
+TEST(VlaceRecordPatternTypesTest, UnknownFieldIsNamed) {
+  const std::string v =
+      verdict(std::string(kQ) + "f (Q { z = a }) = a ; f (Q 1 \"hi\")");
+  EXPECT_NE(v.find("UnboundIdentifier"), std::string::npos) << v;
+  EXPECT_NE(v.find("record 'Q' has no field 'z'"), std::string::npos) << v;
+}
+
+TEST(VlaceRecordPatternTypesTest, RepeatedFieldInAPatternIsRefused) {
+  const std::string v =
+      verdict(std::string(kQ) + "f (Q { n = a, n = b }) = a ; f (Q 1 \"hi\")");
+  EXPECT_NE(v.find("TypeMismatch"), std::string::npos) << v;
+  EXPECT_NE(v.find("repeats field 'n'"), std::string::npos) << v;
+}
+
+TEST(VlaceRecordPatternTypesTest, RecordPatternOnAPlainConstructorIsRefused) {
+  const std::string v =
+      verdict("data P = P Int ; f (P { x = a }) = a ; f (P 1)");
+  EXPECT_NE(v.find("'P' is not a record constructor"), std::string::npos) << v;
+}
+
+TEST(VlaceRecordPatternTypesTest, DuplicateFieldDeclarationIsRefused) {
+  const std::string v = verdict("data S = A { v :: Int, v :: Int } ; 1");
+  EXPECT_NE(v.find("TypeMismatch"), std::string::npos) << v;
+  EXPECT_NE(v.find("declares field 'v' twice"), std::string::npos) << v;
+}
+
+// -- Text and booleans are not numbers ---------------------------------------
+// The VM reads text as zero in arithmetic, so only the checker keeps these from
+// running; each must be refused before evaluation.
+
+TEST(VlaceTextIsNotNumericTest, ArithmeticOnNonNumbersIsRejected) {
+  EXPECT_EQ(code("\"hi\" + 1"), "TypeMismatch");
+  EXPECT_EQ(code("1 + \"hi\""), "TypeMismatch");
+  EXPECT_EQ(code("True + 1"), "TypeMismatch");
+  EXPECT_EQ(code("1 - False"), "TypeMismatch");
+  EXPECT_EQ(code("\"a\" * \"b\""), "TypeMismatch");
+  EXPECT_EQ(code("\"a\" < 1"), "TypeMismatch");
+  EXPECT_EQ(code("(fn a => a + 1) \"hi\""), "TypeMismatch");
+  EXPECT_EQ(code("f a = a + 1 ; f \"hi\""), "TypeMismatch");
+  EXPECT_EQ(code("f a = a + 1 ; f True"), "TypeMismatch");
+  EXPECT_EQ(code("1 / \"x\""), "TypeMismatch");
+  EXPECT_EQ(code("0 - \"x\""), "TypeMismatch");
+}

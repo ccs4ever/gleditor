@@ -429,6 +429,17 @@ std::string TypeChecker::renderType(const TyPtr &tIn) {
 
 std::expected<void, TypeError> TypeChecker::registerData(const DataDecl &dd) {
   for (const auto &c : dd.ctors) {
+    // Two fields of one name make `r.v` and a record pattern ambiguous.
+    for (std::size_t i = 0; i < c.fields.size(); ++i) {
+      for (std::size_t j = i + 1; j < c.fields.size(); ++j) {
+        if (c.fields[i].first == c.fields[j].first) {
+          return terr(CompileError::TypeMismatch,
+                      "record constructor '" + c.name + "' declares field '" +
+                          c.fields[i].first + "' twice",
+                      {});
+        }
+      }
+    }
     // A ctor name the runtime itself interprets may not be redeclared
     // (§7 P1): `data W = Some` would overwrite the prelude scheme a
     // program already typechecks against.
@@ -558,19 +569,55 @@ TypeChecker::inferPattern(const PatternNode &p, const EnvPtr &env,
           auto u = unify(expected, tycon("Tuple", elemTys), p.loc);
           if (!u) return std::unexpected(u.error());
           return expected;
-        } else { // PRecord: treat positionally for Stage 5
+        } else { // PRecord: fields are matched by name, in declaration order
           const auto it = ctors_.find(pat.ctor);
           if (it == ctors_.end()) {
             return terr(CompileError::UnboundIdentifier,
                         "unknown record constructor '" + pat.ctor + "'", p.loc);
           }
+          const auto namesIt = recordFields_.find(pat.ctor);
+          if (namesIt == recordFields_.end()) {
+            return terr(CompileError::TypeMismatch,
+                        "'" + pat.ctor + "' is not a record constructor",
+                        p.loc);
+          }
+          const std::vector<std::string> &fieldNames = namesIt->second;
+          // Peel the constructor's arrows to learn every field's type; the
+          // pattern may list any subset, in any order.
           TyPtr ct = instantiate(it->second);
-          for (const auto &f : pat.fields) {
+          std::vector<TyPtr> fieldTys;
+          fieldTys.reserve(fieldNames.size());
+          for (std::size_t k = 0; k < fieldNames.size(); ++k) {
             TyPtr pruned = prune(ct);
-            if (pruned->kind != Ty::Kind::Con || pruned->con != "->") break;
-            auto sm = inferPattern(*f.second, env, pruned->args[0], binds);
-            if (!sm) return sm;
+            if (pruned->kind != Ty::Kind::Con || pruned->con != "->") {
+              return terr(CompileError::TypeMismatch,
+                          "record constructor '" + pat.ctor +
+                              "' has fewer fields",
+                          p.loc);
+            }
+            fieldTys.push_back(pruned->args[0]);
             ct = pruned->args[1];
+          }
+          std::vector<bool> seen(fieldNames.size(), false);
+          for (const auto &[name, sub] : pat.fields) {
+            const auto idxIt = std::ranges::find(fieldNames, name);
+            if (idxIt == fieldNames.end()) {
+              return terr(CompileError::UnboundIdentifier,
+                          "record '" + pat.ctor + "' has no field '" + name +
+                              "'",
+                          p.loc);
+            }
+            const auto idx =
+                static_cast<std::size_t>(idxIt - fieldNames.begin());
+            if (seen[idx]) {
+              return terr(CompileError::TypeMismatch,
+                          "record pattern '" + pat.ctor + "' repeats field '" +
+                              name + "'",
+                          p.loc);
+            }
+            seen[idx] = true;
+            auto sm   = inferPattern(*sub, env, fieldTys[idx], binds);
+            if (!sm) return sm;
           }
           auto u = unify(expected, ct, p.loc);
           if (!u) return std::unexpected(u.error());
