@@ -5,6 +5,7 @@
  */
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -259,11 +260,42 @@ makeSettingDefaultCell(VortexCore &core, VortexStdLib &stdlib,
 // Relation Providers
 // =============================================================================
 
+std::atomic<std::size_t> gSettingsModelBuilds{0};
+
+// The settings model of the bound store, built on first use after a solve
+// begins. A solve mints no store operations, so one build serves every answer
+// and every settings relation of that solve; rebuilding per answer made an
+// enumeration quadratic in the number of settings.
+class SettingsModelCache {
+public:
+  [[nodiscard]] const xanadu::SystemStoreModel &
+  get(const xanadu::Store &store) {
+    if (!model_) {
+      model_.emplace(xanadu::SystemStoreModel::fromStore(store));
+      gSettingsModelBuilds.fetch_add(1, std::memory_order_relaxed);
+    }
+    return *model_;
+  }
+  void reset() noexcept { model_.reset(); }
+
+private:
+  std::optional<xanadu::SystemStoreModel> model_;
+};
+
+// Module names carry a colon ("std:math"), which the Prolog lexer reads as an
+// operator, so a goal spells one as a quoted atom: vortex_module('std:math').
+// Teaching the lexer an unquoted module-qualified atom would claim `:` before
+// the language decides what module-qualified calls mean.
 class VortexModuleProvider : public CoreBoundProvider {
 public:
   explicit VortexModuleProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 1; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 1> kKinds{ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -297,6 +329,11 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 1; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 1> kKinds{ArgKind::Atom};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_) return std::nullopt;
@@ -328,6 +365,12 @@ public:
   explicit VortexFunctionProvider2(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Atom,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -364,6 +407,12 @@ public:
   explicit VortexFunctionProvider3(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{ArgKind::Atom, ArgKind::Atom,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -405,6 +454,12 @@ public:
   explicit VortexInstructionProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{
+        ArgKind::Atom, ArgKind::Integer, ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -454,6 +509,12 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{ArgKind::Atom, ArgKind::Atom,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_) return std::nullopt;
@@ -498,6 +559,12 @@ public:
   explicit VortexParamProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 4; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 4> kKinds{
+        ArgKind::Atom, ArgKind::Atom, ArgKind::Integer, ArgKind::Integer};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -552,9 +619,18 @@ private:
 
 class SettingProvider : public CoreBoundProvider {
 public:
-  explicit SettingProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
+  SettingProvider(VortexStdLib &stdlib,
+                  std::shared_ptr<SettingsModelCache> cache)
+      : stdlib_(stdlib), cache_(std::move(cache)) {}
+
+  void beginSolve() override { cache_->reset(); }
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Atom, ArgKind::Any};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -563,9 +639,7 @@ public:
     const bool isVar0 = !bound0 || stdlib_.isVar(*bound0);
 
     if (stdlib_.boundStore() != nullptr) {
-      const auto model =
-          xanadu::SystemStoreModel::fromStore(*stdlib_.boundStore());
-      const auto &settings = model.settings();
+      const auto &settings = cache_->get(*stdlib_.boundStore()).settings();
       const auto limit     = request.limit.value_or(settings.size());
 
       for (std::size_t i = request.position; i < limit && i < settings.size();
@@ -619,32 +693,42 @@ public:
 
 private:
   VortexStdLib &stdlib_;
+  std::shared_ptr<SettingsModelCache> cache_;
 };
 
 class SettingShapeProvider : public CoreBoundProvider {
 public:
-  explicit SettingShapeProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
+  SettingShapeProvider(VortexStdLib &stdlib,
+                       std::shared_ptr<SettingsModelCache> cache)
+      : stdlib_(stdlib), cache_(std::move(cache)) {}
+
+  void beginSolve() override {
+    cache_->reset();
+    items_.reset();
+  }
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Atom, ArgKind::Any};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_ || stdlib_.boundStore() == nullptr) return std::nullopt;
 
-    struct ShapeItem {
-      std::string name;
-      std::vector<std::string> types;
-    };
-    const auto model =
-        xanadu::SystemStoreModel::fromStore(*stdlib_.boundStore());
-    std::vector<ShapeItem> items;
-    for (const auto &s : model.settings()) {
-      core_->arena().consumeWork();
-      for (const auto &alt : s.schema.alternatives) {
+    if (!items_) {
+      items_.emplace();
+      for (const auto &s : cache_->get(*stdlib_.boundStore()).settings()) {
         core_->arena().consumeWork();
-        items.push_back({s.name, alt.expectedTypes});
+        for (const auto &alt : s.schema.alternatives) {
+          core_->arena().consumeWork();
+          items_->push_back({s.name, alt.expectedTypes});
+        }
       }
     }
+    const auto &items = *items_;
 
     const auto limit  = request.limit.value_or(items.size());
     const auto bound0 = stdlib_.deref(request.arguments[0]);
@@ -674,32 +758,47 @@ public:
 
 private:
   VortexStdLib &stdlib_;
+  std::shared_ptr<SettingsModelCache> cache_;
+  struct ShapeItem {
+    std::string name;
+    std::vector<std::string> types;
+  };
+  std::optional<std::vector<ShapeItem>> items_;
 };
 
 class SettingDefaultProvider : public CoreBoundProvider {
 public:
-  explicit SettingDefaultProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
+  SettingDefaultProvider(VortexStdLib &stdlib,
+                         std::shared_ptr<SettingsModelCache> cache)
+      : stdlib_(stdlib), cache_(std::move(cache)) {}
+
+  void beginSolve() override {
+    cache_->reset();
+    items_.reset();
+  }
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Atom, ArgKind::Any};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_ || stdlib_.boundStore() == nullptr) return std::nullopt;
 
-    struct DefaultItem {
-      std::string name;
-      std::vector<xanadu::CellValue> defaults;
-    };
-    const auto model =
-        xanadu::SystemStoreModel::fromStore(*stdlib_.boundStore());
-    std::vector<DefaultItem> items;
-    for (const auto &s : model.settings()) {
-      core_->arena().consumeWork();
-      for (const auto &alt : s.schema.alternatives) {
+    if (!items_) {
+      items_.emplace();
+      for (const auto &s : cache_->get(*stdlib_.boundStore()).settings()) {
         core_->arena().consumeWork();
-        items.push_back({s.name, alt.defaultValues});
+        for (const auto &alt : s.schema.alternatives) {
+          core_->arena().consumeWork();
+          items_->push_back({s.name, alt.defaultValues});
+        }
       }
     }
+    const auto &items = *items_;
 
     const auto limit  = request.limit.value_or(items.size());
     const auto bound0 = stdlib_.deref(request.arguments[0]);
@@ -724,6 +823,12 @@ public:
 
 private:
   VortexStdLib &stdlib_;
+  std::shared_ptr<SettingsModelCache> cache_;
+  struct DefaultItem {
+    std::string name;
+    std::vector<xanadu::CellValue> defaults;
+  };
+  std::optional<std::vector<DefaultItem>> items_;
 };
 
 class TranscludeProvider : public CoreBoundProvider {
@@ -731,6 +836,12 @@ public:
   explicit TranscludeProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{ArgKind::Atom, ArgKind::Atom,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -768,6 +879,12 @@ public:
   explicit XanalinkProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{ArgKind::Atom, ArgKind::Atom,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -841,10 +958,13 @@ void registerStdlibRelations(RelationRegistry &registry, VortexStdLib &stdlib) {
                std::make_unique<VortexContractProvider>(stdlib));
   registry.add("vortex_param", std::make_unique<VortexParamProvider>(stdlib));
 
-  registry.add("setting", std::make_unique<SettingProvider>(stdlib));
-  registry.add("setting_shape", std::make_unique<SettingShapeProvider>(stdlib));
+  const auto settingsModel = std::make_shared<SettingsModelCache>();
+  registry.add("setting",
+               std::make_unique<SettingProvider>(stdlib, settingsModel));
+  registry.add("setting_shape",
+               std::make_unique<SettingShapeProvider>(stdlib, settingsModel));
   registry.add("setting_default",
-               std::make_unique<SettingDefaultProvider>(stdlib));
+               std::make_unique<SettingDefaultProvider>(stdlib, settingsModel));
 
   registry.add("transclude", std::make_unique<TranscludeProvider>(stdlib));
   registry.add("xanalink", std::make_unique<XanalinkProvider>(stdlib));
@@ -919,7 +1039,14 @@ void emitRelationGoal(CompileContext &ctx, FrameScope &scope, Chain &chain,
   }
 }
 
+std::size_t settingsModelBuilds() noexcept {
+  return gSettingsModelBuilds.load(std::memory_order_relaxed);
+}
+
 void installRelationProvider(CompileContext &ctx) {
+  // Taken here, before the query is lowered, so the compiled program and
+  // everything the run mints sit above it and stay invisible to a scan.
+  const std::size_t scanEnd = ctx.core.arena().cellCount();
   for (const auto nameView : kAllRelationNames) {
     const std::string name(nameView);
     bool hasAny = false;
@@ -928,6 +1055,8 @@ void installRelationProvider(CompileContext &ctx) {
         hasAny = true;
         if (auto *bound = dynamic_cast<CoreBoundProvider *>(provider)) {
           bound->bindCore(&ctx.core);
+          bound->bindScan(ctx.stdlib.bootstrapCellCount(), scanEnd);
+          bound->beginSolve();
         }
       }
     }
@@ -953,6 +1082,15 @@ void installRelationProvider(CompileContext &ctx) {
                            : std::optional<std::size_t>(
                                  static_cast<std::size_t>(query.limit)),
           };
+          if (const auto *bound =
+                  dynamic_cast<const CoreBoundProvider *>(provider)) {
+            try {
+              checkArguments(ctx.stdlib, ctx.core.arena(), key,
+                             bound->signature(), query.arguments);
+            } catch (const RelationError &err) {
+              return std::unexpected(std::string(err.what()));
+            }
+          }
           const auto ans = provider->next(req);
           if (!ans) {
             return std::optional<zigzag::vortex::RelationAnswer>(std::nullopt);

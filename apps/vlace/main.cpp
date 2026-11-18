@@ -10,8 +10,10 @@
 #include <argparse/argparse.hpp>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 #include "common/xanadu/vlace/driver.hpp"
 #include "common/xanadu/vortex/mesh_cli.hpp"
@@ -20,6 +22,10 @@
 namespace {
 
 using xanadu::vlace::Driver;
+using xanadu::vlace::DriverResult;
+
+/// How the renderer writes the value of an action that returns nothing.
+constexpr std::string_view kUnitText = "Unit";
 
 std::string readFile(const std::string &path) {
   std::ifstream f(path);
@@ -31,31 +37,50 @@ std::string readFile(const std::string &path) {
   return ss.str();
 }
 
-// Runs a single source string once. If the program's type is an IO action, it
-// is PERFORMED at the boundary (console wired to stdin/stdout) and the final
-// wrapped value is printed; otherwise the pure value is rendered. Returns the
-// process exit code.
+// Runs a single source string once. A program whose type is an IO action is
+// PERFORMED at the boundary (console wired to stdin/stdout), not rendered: the
+// pure run would force every operand of the description and could fault before
+// an earlier effect happened. The action's final value is then printed, as the
+// REPL of a typed IO language does, except `()` (Unit), which every
+// putStrLn-style program ends in and which carries nothing. Any other program
+// is evaluated and its value rendered. Returns the process exit code.
 int runOnce(Driver &driver, const std::string &source) {
-  auto result = driver.run(source);
-  if (!result) {
-    std::cerr << Driver::formatError(result.error()) << "\n";
+  const auto type = driver.typeOf(source);
+  if (!type) {
+    std::cerr << Driver::formatError(type.error()) << "\n";
     return 1;
   }
-  // An IO-typed program is a description; perform it (§6.5). The type is
-  // "IO ..." when type-checking ran; when it is off, fall back to detecting the
-  // rendered description's IO. prefix.
-  const bool isIO =
-      result->type.rfind("IO ", 0) == 0 || result->type == "IO" ||
-      (result->type.empty() && result->value.rfind("IO.", 0) == 0);
+  // With type checking off there is no type to ask; the rendered description's
+  // IO. prefix is then the only sign, so the pure run is unavoidable.
+  std::optional<DriverResult> pure;
+  bool isIO = type->rfind("IO ", 0) == 0 || *type == "IO";
+  if (type->empty()) {
+    auto result = driver.run(source);
+    if (!result) {
+      std::cerr << Driver::formatError(result.error()) << "\n";
+      return 1;
+    }
+    isIO = result->value.rfind("IO.", 0) == 0;
+    pure = std::move(*result);
+  }
   if (isIO) {
     auto done = driver.runIO(source, std::cin, std::cout);
     if (!done) {
       std::cerr << Driver::formatError(done.error()) << "\n";
       return 1;
     }
+    if (done->value != kUnitText) std::cout << done->value << "\n";
     return 0;
   }
-  std::cout << result->value << "\n";
+  if (!pure) {
+    auto result = driver.run(source);
+    if (!result) {
+      std::cerr << Driver::formatError(result.error()) << "\n";
+      return 1;
+    }
+    pure = std::move(*result);
+  }
+  std::cout << pure->value << "\n";
   return 0;
 }
 

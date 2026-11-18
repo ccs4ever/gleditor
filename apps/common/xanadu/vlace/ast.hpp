@@ -133,11 +133,49 @@ struct ERecordUpdate { ///< r { f = e, ... }
   std::vector<std::pair<std::string, Expr>> fields;
 };
 
+/// How deeply one expression may nest before the type checker (and lowering,
+/// which keeps its own guard of the same size) refuses it as BudgetExhausted:
+/// both recurse on the host stack, one frame set per level. A long flat list
+/// literal is not limited by it; it is a ':' spine walked iteratively.
+inline constexpr std::size_t maxExprNesting = 1000;
+
+/// The parser's own bound, larger because a parse level costs far less stack
+/// than a lowering level, and large enough that lowering's guard stays the one
+/// a deeply nested but parseable program meets.
+inline constexpr std::size_t maxParseNesting = 2 * maxExprNesting;
+
 struct ExprNode {
   std::variant<EVar, ECtor, ELiteral, ELet, EIf, ECase, ELambda, EApp, EBinOp,
                EList, ETuple, ERecordUpdate>
       node;
   SourceLocation loc{};
+
+  ExprNode()                                = default;
+  ExprNode(ExprNode &&) noexcept            = default;
+  ExprNode &operator=(ExprNode &&) noexcept = default;
+  ExprNode(const ExprNode &)                = delete;
+  ExprNode &operator=(const ExprNode &)     = delete;
+  /// Takes a long operator or application chain apart with a work list. A
+  /// literal [1, ..., n] is an n-deep right spine and `1 + ... + 1` an n-deep
+  /// left one, and the implicit destructor would recurse once per link.
+  ~ExprNode() {
+    std::vector<Expr> pending;
+    const auto detach = [&pending](ExprNode &n) {
+      if (auto *bin = std::get_if<EBinOp>(&n.node)) {
+        pending.push_back(std::move(bin->lhs));
+        pending.push_back(std::move(bin->rhs));
+      } else if (auto *app = std::get_if<EApp>(&n.node)) {
+        pending.push_back(std::move(app->fn));
+        pending.push_back(std::move(app->arg));
+      }
+    };
+    detach(*this);
+    while (!pending.empty()) {
+      const Expr next = std::move(pending.back());
+      pending.pop_back();
+      if (next) detach(*next);
+    }
+  }
 };
 
 // -- Type expressions (§5.1) -------------------------------------------------
@@ -227,6 +265,8 @@ enum class CompileError : std::uint8_t {
   BudgetExhausted,
   /// Appended: a run-time arithmetic fault (spec §6.6), division by zero.
   ArithFault,
+  /// Appended: a run-time argument the operation refuses (an empty name).
+  InvalidArgument,
 };
 
 [[nodiscard]] std::string_view compileErrorName(CompileError err) noexcept;

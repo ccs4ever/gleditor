@@ -90,6 +90,8 @@ std::string_view compileErrorName(CompileError e) noexcept {
     return "BudgetExhausted";
   case CompileError::ArithFault:
     return "ArithFault";
+  case CompileError::InvalidArgument:
+    return "InvalidArgument";
   }
   return "Unknown";
 }
@@ -584,18 +586,51 @@ std::expected<Type, ParseError> Parser::parseAtomType() {
 
 // -- Expressions -------------------------------------------------------------
 
+namespace {
+// Bounds the recursion of a production that can nest without limit. Counted in
+// the parser so the refusal is a named error at the offending token.
+class NestingScope {
+public:
+  explicit NestingScope(std::size_t &depth) : depth_(depth) { ++depth_; }
+  NestingScope(const NestingScope &)            = delete;
+  NestingScope &operator=(const NestingScope &) = delete;
+  ~NestingScope() { --depth_; }
+  [[nodiscard]] bool exceeded() const noexcept {
+    return depth_ > maxParseNesting;
+  }
+
+private:
+  std::size_t &depth_;
+};
+} // namespace
+
 std::expected<Expr, ParseError> Parser::parseExpr() {
   switch (cur_.kind) {
   case TokenKind::KwLet:
-    return parseLet(false);
   case TokenKind::KwLetrec:
-    return parseLet(true);
   case TokenKind::KwIf:
-    return parseIf();
   case TokenKind::KwCase:
-    return parseCase();
-  case TokenKind::KwFn:
-    return parseLambda();
+  case TokenKind::KwFn: {
+    const NestingScope scope(depth_);
+    if (scope.exceeded()) {
+      return err(CompileError::BudgetExhausted,
+                 "expression nesting exceeds " +
+                     std::to_string(maxParseNesting) + " levels",
+                 cur_.loc);
+    }
+    switch (cur_.kind) {
+    case TokenKind::KwLet:
+      return parseLet(false);
+    case TokenKind::KwLetrec:
+      return parseLet(true);
+    case TokenKind::KwIf:
+      return parseIf();
+    case TokenKind::KwCase:
+      return parseCase();
+    default:
+      return parseLambda();
+    }
+  }
   default:
     return parseOpExpr(0);
   }
@@ -604,6 +639,13 @@ std::expected<Expr, ParseError> Parser::parseExpr() {
 // Precedence climbing over the fixity table (§5.1). Application binds tighter
 // than every operator, so the operand of an operator is a full application.
 std::expected<Expr, ParseError> Parser::parseOpExpr(int minLevel) {
+  const NestingScope scope(depth_);
+  if (scope.exceeded()) {
+    return err(CompileError::BudgetExhausted,
+               "expression nesting exceeds " + std::to_string(maxParseNesting) +
+                   " levels",
+               cur_.loc);
+  }
   auto left = parseApp();
   if (!left) return std::unexpected(left.error());
 
@@ -672,7 +714,10 @@ std::expected<Expr, ParseError> Parser::parseApp() {
 }
 
 Expr Parser::desugarList(std::vector<Expr> elems, SourceLocation loc) {
-  // [a, b, c] => a : b : c : []  (Cons chain ending in Nil).
+  // [a, b, c] => a : b : c : []  (Cons chain ending in Nil). The chain is as
+  // deep as the literal is long, so everything that walks or destroys an
+  // expression handles a right-nested ':' spine iteratively (ExprNode's
+  // destructor, the checker's ':' case, lowerCons).
   Expr acc = makeExpr(ECtor{.name = "Nil"}, loc);
   for (auto it = elems.rbegin(); it != elems.rend(); ++it) {
     acc = makeExpr(

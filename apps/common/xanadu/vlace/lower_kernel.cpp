@@ -58,11 +58,11 @@ constexpr std::int64_t firstEpoch = 3;
 constexpr std::int64_t linkPosward = 1;
 
 /// How deeply one expression may nest before lowering (and copying a
-/// declaration) is refused. The parser does not bound nesting (the mesh
-/// evaluator bounds the source before parsing), and lowering recurses on the
-/// host stack, so a Compiler fed a pathological tree directly needs its own
-/// limit. Reported as BudgetExhausted like the other evaluation budgets.
-constexpr std::size_t maxAstDepth = 1000;
+/// declaration) is refused. The parser and the checker enforce the same bound,
+/// but lowering recurses on the host stack and a Compiler can be fed a tree
+/// directly, so it keeps its own guard. Reported as BudgetExhausted like the
+/// other evaluation budgets.
+constexpr std::size_t maxAstDepth = maxExprNesting;
 
 /// Host recursion depth of the functions that walk an expression tree.
 thread_local std::size_t astDepth = 0;
@@ -1040,6 +1040,21 @@ std::expected<ValuePtr, EvalError> forceValueOnVm(Compiler &compiler,
                 "VM thunk forcing needs a value to force");
   }
   if (!value->cell || value->kind != Value::Kind::Thunk) return value;
+  // A field read back while its parent was being read is tagged Thunk even
+  // when its cell already holds a constructed term or a scalar. Reading the
+  // cell again settles that without a VM run; a run is only for a cell that
+  // really is an unevaluated thunk. Without this every element of a literal
+  // list cost one run, each slower than the last (see the note below).
+  if (auto direct = readbackCell(compiler, *value->cell);
+      !direct || (*direct)->kind != Value::Kind::Thunk)
+    return direct;
+  // Remaining limit, card L-RENDER: each run of a genuinely lazy tail (a list
+  // built by recursion) still costs time proportional to every earlier run.
+  // VortexVM::executeFrameOpcode copies the VM's cell-reference, cursor and
+  // activation tables on every InvokeFrame/ReturnFrame (vortex_frames.cpp), and
+  // nothing erases the entries a finished run leaves keyed by cells that stay
+  // alive, so rendering n forced tails is quadratic (about 2 s at 3,000 and
+  // 47 s at 12,000). Removing it needs a change under vortex/, not here.
   LowerContext ctx(compiler);
   try {
     auto forced = forceOperand(ctx, Operand(*value->cell), {});

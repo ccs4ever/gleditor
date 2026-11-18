@@ -824,11 +824,15 @@ VortexHost::executeScript(std::string_view script,
         // left in place rather than stripped.
         q.remove_prefix(7);
       }
-      auto solutions = solveLogic(q);
-      res.success    = !solutions.empty();
+      const auto solutions = solveLogic(q);
+      if (!solutions) {
+        res.message = "Logic error: " + solutions.error().message;
+        return res;
+      }
+      res.success = !solutions->empty();
       res.message =
-          std::format("Logic query returned {} solution(s)", solutions.size());
-      for (const auto &sol : solutions) {
+          std::format("Logic query returned {} solution(s)", solutions->size());
+      for (const auto &sol : *solutions) {
         for (const auto &[name, cell] : sol.bindings) {
           res.affectedCells.push_back(cell);
         }
@@ -933,8 +937,8 @@ VortexHost::ScriptResult VortexHost::executeVPL(std::string_view expr) {
   return res;
 }
 
-std::vector<LogicSolution> VortexHost::solveLogic(std::string_view goalQuery,
-                                                  std::size_t maxSolutions) {
+std::expected<std::vector<LogicSolution>, LogicQueryError>
+VortexHost::solveLogic(std::string_view goalQuery, std::size_t maxSolutions) {
   try {
     xanadu::vprolog::Compiler compiler(primary_.core);
     auto query = compiler.compileQuery(goalQuery);
@@ -945,15 +949,16 @@ std::vector<LogicSolution> VortexHost::solveLogic(std::string_view goalQuery,
     return primary_.stdlib.solveQuery(query.goals, compiler.customPredicates(),
                                       maxSolutions);
   } catch (const std::exception &err) {
-    std::cerr << "VortexHost::solveLogic error: " << err.what() << "\n";
-    return {};
+    GLEDITOR_LOG_DEBUG("vortex.logic", "solveLogic failed: {}", err.what());
+    return std::unexpected(LogicQueryError{err.what()});
   }
 }
 
-std::vector<std::vector<std::string>>
+std::vector<std::expected<std::vector<std::string>, LogicQueryError>>
 VortexHost::solveLogicBatchParallel(const std::vector<std::string> &goalQueries,
                                     std::size_t maxSolutions) {
-  std::vector<std::vector<std::string>> results(goalQueries.size());
+  std::vector<std::expected<std::vector<std::string>, LogicQueryError>> results(
+      goalQueries.size());
   if (goalQueries.empty()) {
     return results;
   }
@@ -990,7 +995,7 @@ VortexHost::solveLogicBatchParallel(const std::vector<std::string> &goalQueries,
       xanadu::vprolog::Compiler compiler(ctx.core);
       auto query = compiler.compileQuery(goalQueries[i]);
       if (query.goals.empty()) {
-        results[i] = {};
+        results[i] = std::vector<std::string>{};
         return;
       }
       ctx.stdlib.setLogicCycleBudget(config_.logicMaxCycles);
@@ -1001,8 +1006,10 @@ VortexHost::solveLogicBatchParallel(const std::vector<std::string> &goalQueries,
         rendered.push_back(renderSolution(ctx, sol));
       }
     } catch (const std::exception &err) {
-      std::cerr << "solveLogicBatchParallel error: " << err.what() << "\n";
-      rendered.clear();
+      GLEDITOR_LOG_DEBUG("vortex.logic", "solveLogicBatchParallel failed: {}",
+                         err.what());
+      results[i] = std::unexpected(LogicQueryError{err.what()});
+      return;
     }
     results[i] = std::move(rendered);
   };

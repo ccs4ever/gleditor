@@ -80,6 +80,8 @@ private:
 
   static Expr desugarList(std::vector<Expr> elems, SourceLocation loc);
 
+  /// Host recursion depth of the expression productions; see maxExprNesting.
+  std::size_t depth_{0};
   Lexer lexer_;
   Token cur_{};
   Token next_{};

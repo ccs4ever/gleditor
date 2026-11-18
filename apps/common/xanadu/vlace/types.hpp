@@ -127,6 +127,22 @@ private:
   // Record constructor name -> ordered field names (for ERecordUpdate field
   // name resolution against the ctor's argument types).
   std::unordered_map<std::string, std::vector<std::string>> recordFields_;
+
+  /// Host recursion depth of infer(); see maxExprNesting.
+  std::size_t inferDepth_{0};
+  class InferDepth {
+  public:
+    explicit InferDepth(std::size_t &depth) : depth_(depth) { ++depth_; }
+    InferDepth(const InferDepth &)            = delete;
+    InferDepth &operator=(const InferDepth &) = delete;
+    ~InferDepth() { --depth_; }
+    [[nodiscard]] bool exceeded() const noexcept {
+      return depth_ > maxExprNesting;
+    }
+
+  private:
+    std::size_t &depth_;
+  };
   // Built-in value identifiers (not constructors): the typed IO primitives
   // pure/bind/then/putStr/putStrLn/getLine (§6.5). Looked up for an EVar after
   // the lexical env and before failing, so a program references them without

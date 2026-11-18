@@ -76,6 +76,7 @@ double toDoubleVal(const CellValue &v) {
 VortexStdLib::VortexStdLib(VortexCore &core, VortexVM &vm)
     : core_(core), vm_(vm) {
   bootstrap();
+  bootstrapCells_ = core_.arena().cellCount();
 }
 
 CellRef VortexStdLib::getOrCreateModule(std::string_view modulePath) {

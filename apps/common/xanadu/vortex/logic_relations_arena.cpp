@@ -4,6 +4,7 @@
  * bridge_edge, lens and SQL fact enumeration).
  */
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -31,6 +32,12 @@ public:
   explicit CellValueProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Integer,
+                                                   ArgKind::Any};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -70,8 +77,9 @@ public:
     }
 
     // Unbound CellId: scan all arena cells up to snapshot limit
-    const auto limit = request.limit.value_or(core_->arena().cellCount());
-    const std::size_t start = std::max<std::size_t>(1, request.position);
+    const auto limit = scanEnd();
+    const std::size_t start =
+        std::max<std::size_t>(scanBegin(), request.position);
 
     for (std::size_t c = start; c < limit; ++c) {
       core_->arena().consumeWork();
@@ -111,6 +119,12 @@ public:
   explicit CellLinkProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 4; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 4> kKinds{
+        ArgKind::Integer, ArgKind::Atom, ArgKind::Atom, ArgKind::Integer};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -180,12 +194,12 @@ public:
     }
 
     // Unbound FromId: scan all cells
-    const auto limit = request.limit.value_or(core_->arena().cellCount());
+    const auto limit               = scanEnd();
     constexpr unsigned kSubBits    = 7;
     constexpr std::size_t kSubMask = (1U << kSubBits) - 1U;
 
     const std::size_t startC =
-        std::max<std::size_t>(1, request.position >> kSubBits);
+        std::max<std::size_t>(scanBegin(), request.position >> kSubBits);
     const std::size_t startSub = request.position & kSubMask;
 
     for (std::size_t c = startC; c < limit; ++c) {
@@ -218,6 +232,12 @@ public:
   explicit CellSpanProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Integer,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -258,12 +278,12 @@ public:
     }
 
     // Unbound CellId
-    const auto limit = request.limit.value_or(core_->arena().cellCount());
+    const auto limit               = scanEnd();
     constexpr unsigned kSubBits    = 7;
     constexpr std::size_t kSubMask = (1U << kSubBits) - 1U;
 
     const std::size_t startC =
-        std::max<std::size_t>(1, request.position >> kSubBits);
+        std::max<std::size_t>(scanBegin(), request.position >> kSubBits);
     const std::size_t startSub = request.position & kSubMask;
 
     for (std::size_t c = startC; c < limit; ++c) {
@@ -308,6 +328,12 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Integer,
+                                                   ArgKind::Integer};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_) return std::nullopt;
@@ -346,8 +372,9 @@ public:
     }
 
     // Unbound PresentationCell
-    const auto limit = request.limit.value_or(core_->arena().cellCount());
-    const std::size_t start = std::max<std::size_t>(1, request.position);
+    const auto limit = scanEnd();
+    const std::size_t start =
+        std::max<std::size_t>(scanBegin(), request.position);
 
     for (std::size_t c = start; c < limit; ++c) {
       core_->arena().consumeWork();
@@ -392,6 +419,12 @@ public:
   explicit BridgeEdgeProvider3(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{
+        ArgKind::Integer, ArgKind::Atom, ArgKind::Integer};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -459,12 +492,12 @@ public:
     }
 
     // Unbound U
-    const auto limit = request.limit.value_or(core_->arena().cellCount());
+    const auto limit               = scanEnd();
     constexpr unsigned kSubBits    = 7;
     constexpr std::size_t kSubMask = (1U << kSubBits) - 1U;
 
     const std::size_t startC =
-        std::max<std::size_t>(1, request.position >> kSubBits);
+        std::max<std::size_t>(scanBegin(), request.position >> kSubBits);
     const std::size_t startSub = request.position & kSubMask;
 
     for (std::size_t c = startC; c < limit; ++c) {

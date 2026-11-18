@@ -60,6 +60,24 @@ zigzag::CellRef emit(LowerContext &ctx, zigzag::vortex::OpcodeKind kind,
   return op;
 }
 
+/// Fails the run, naming the verb, unless the (already forced) name operand is
+/// non-empty text. The VM refuses an empty name too, but with its own message
+/// (about DimByName) and no VLace code.
+void requireDimensionName(LowerContext &c, const Operand &name,
+                          std::string_view verb, SourceLocation loc) {
+  const auto empty = c.newRegister();
+  emit(c, zigzag::vortex::OpcodeKind::Eq, "#dim_name_empty",
+       {name.cell,
+        c.emitConstant(zigzag::vortex::CellValue{std::string{}}).cell},
+       {empty.cell});
+  const auto ok = c.mintLabel("#dim_name_ok");
+  c.branchIfFalse(empty, ok);
+  c.emitRuntimeFailure(CompileError::InvalidArgument, loc,
+                       std::string(verb) +
+                           ": dimension name must not be empty");
+  c.placeLabel(ok);
+}
+
 Operand emitLinkRead(LowerContext &ctx, zigzag::CellRef subject,
                      zigzag::DimRef dim) {
   const auto out = ctx.newRegister();
@@ -241,6 +259,7 @@ std::optional<Lowered<Operand>> lowerXanaduBuiltin(LowerContext &ctx,
               std::span<const Operand> args) -> Lowered<Operand> {
           auto nameForced = forceOperand(c, args[0], loc);
           if (!nameForced) return nameForced;
+          requireDimensionName(c, *nameForced, "makeDim", loc);
           auto op = c.emitOp(zigzag::vortex::OpcodeKind::DimByName, "#makeDim");
           c.emitInput(op, nameForced->cell);
           c.emitInput(op, c.emitConstant(zigzag::vortex::CellValue{true}).cell);
@@ -258,6 +277,7 @@ std::optional<Lowered<Operand>> lowerXanaduBuiltin(LowerContext &ctx,
               std::span<const Operand> args) -> Lowered<Operand> {
           auto nameForced = forceOperand(c, args[0], loc);
           if (!nameForced) return nameForced;
+          requireDimensionName(c, *nameForced, "dimensionNamed", loc);
           auto op = c.emitOp(zigzag::vortex::OpcodeKind::DimByName,
                              "#dimensionNamed");
           c.emitInput(op, nameForced->cell);
@@ -266,6 +286,8 @@ std::optional<Lowered<Operand>> lowerXanaduBuiltin(LowerContext &ctx,
           auto dimRefReg = c.newRegister();
           c.emitOutput(op, dimRefReg.cell);
 
+          // The VM reports an absent dimension as cell 0, which is never a
+          // cell (op index 0 is state zero), so 0 cannot be a real answer.
           const auto isPresent = c.newRegister();
           emit(
               c, zigzag::vortex::OpcodeKind::Neq, "#dim_check",
@@ -358,6 +380,9 @@ std::optional<Lowered<Operand>> lowerXanaduBuiltin(LowerContext &ctx,
           auto neighbor = c.newRegister();
           c.emitOutput(op, neighbor.cell);
 
+          // A rank with no neighbour reads as cell 0, which is never a cell
+          // (op index 0 is state zero; arena refs carry ephemeralBit), so the
+          // comparison cannot mistake a real neighbour for absence.
           const auto isPresent = c.newRegister();
           emit(
               c, zigzag::vortex::OpcodeKind::Neq, "#linked_check",
