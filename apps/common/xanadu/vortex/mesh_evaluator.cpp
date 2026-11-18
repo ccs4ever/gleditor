@@ -257,6 +257,9 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::RankBegin:
   case OpcodeKind::IteratorNext:
   case OpcodeKind::PinHistorical:
+  // Mints fresh cells on every run, so a memo key (content) would hand the
+  // second caller the first caller's cells.
+  case OpcodeKind::ProjectTopology:
     return false;
   case OpcodeKind::ResumeInit:
   case OpcodeKind::ResumeSet:
@@ -549,7 +552,8 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::GroupNext))
+    if (opcode < 0 ||
+        opcode > static_cast<std::int64_t>(OpcodeKind::ProjectTopology))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

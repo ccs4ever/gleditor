@@ -6,6 +6,7 @@
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/arena_savepoint.hpp"
+#include "common/xanadu/zigzag/arena_topology_copy.hpp"
 
 namespace zigzag::vortex {
 namespace {
@@ -27,6 +28,7 @@ bool VortexVM::streamStateOpcode(const OpcodeKind kind) const noexcept {
   case OpcodeKind::GroupBegin:
   case OpcodeKind::GroupNext:
   case OpcodeKind::PinHistorical:
+  case OpcodeKind::ProjectTopology:
     return true;
   default:
     return false;
@@ -695,6 +697,76 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
     cellReferences_.erase(target);
     iterators_.erase(target);
     streams_[target] = std::move(values);
+    break;
+  }
+  case OpcodeKind::ProjectTopology: {
+    // Inputs: the subject stream, the wildcard flag, the count of added edges,
+    // then (dimension, sign) pairs -- the added edges, then the removed ones
+    // to the end. The compiler folded the shape's rules, so none is read here.
+    constexpr std::size_t headerInputs = 3;
+    if (inputs.size() < headerInputs || slots.size() != 1) {
+      return invalidStreamOperation(
+          "ProjectTopology expects a subject stream, a wildcard flag, an "
+          "added-edge count, edge pairs and one output register");
+    }
+    const auto integerAt =
+        [&](const std::size_t at) -> std::optional<std::int64_t> {
+      const auto value = inputValue(inputs[at]);
+      if (const auto *held = std::get_if<std::int64_t>(&value)) return *held;
+      return std::nullopt;
+    };
+    const auto wildcard = integerAt(1);
+    const auto added    = integerAt(2);
+    const auto pairs    = inputs.size() - headerInputs;
+    if (!wildcard || !added || *added < 0 || pairs % 2 != 0 ||
+        static_cast<std::uint64_t>(*added) > pairs / 2) {
+      return invalidStreamOperation(
+          "ProjectTopology edge operands are malformed");
+    }
+    EdgeSelection selection{.everything = *wildcard != 0};
+    for (std::size_t pair = 0; pair < pairs / 2; ++pair) {
+      const auto dim  = integerAt(headerInputs + 2 * pair);
+      const auto sign = integerAt(headerInputs + 2 * pair + 1);
+      if (!dim || !sign || *dim <= 0 ||
+          !core_.arena().contains(static_cast<CellRef>(*dim))) {
+        return invalidStreamOperation(
+            "ProjectTopology edge operand does not name a dimension");
+      }
+      const DirectedDim edge{static_cast<DimRef>(*dim), fromSign(*sign)};
+      (static_cast<std::int64_t>(pair) < *added ? selection.add
+                                                : selection.remove)
+          .push_back(edge);
+    }
+
+    std::vector<CellRef> subjects;
+    const CellRef in = inputs.front();
+    if (iteratorSlots_.contains(in)) {
+      return invalidStreamOperation(
+          "an iterator register cannot be projected as a stream");
+    }
+    if (const auto found = streams_.find(in); found != streams_.end()) {
+      if (found->second)
+        subjects.insert(subjects.end(), found->second->begin(),
+                        found->second->end());
+    } else if (streamSlots_.contains(in)) {
+      // empty stream
+    } else if (const auto cell = resultCell(in)) {
+      subjects.push_back(*cell);
+    }
+
+    auto copied =
+        copyTopology(core_.arena(), subjects, selection, core_.dims().clone);
+    if (!copied) {
+      return invalidStreamOperation("ProjectTopology refused: " +
+                                    toString(copied.error()));
+    }
+    const CellRef target = slots.front();
+    streamSlots_.insert(target);
+    iteratorSlots_.erase(target);
+    cellReferences_.erase(target);
+    iterators_.erase(target);
+    streams_[target] =
+        std::make_shared<std::vector<CellRef>>(std::move(*copied));
     break;
   }
   default:

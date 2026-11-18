@@ -440,6 +440,9 @@ private:
   std::vector<zigzag::CellRef>
   compileSemanticShapeCall(const FunctionInvocation &fn,
                            std::optional<zigzag::CellRef> context);
+  std::vector<zigzag::CellRef>
+  compileProject(const FunctionInvocation &fn, const ShapeLiteral &shape,
+                 std::optional<zigzag::CellRef> context);
   std::optional<zigzag::CellRef>
   compileSemanticShapeValue(const FunctionInvocation &fn,
                             zigzag::CellRef ctxCell);

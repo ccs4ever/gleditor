@@ -359,6 +359,8 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "GROUP_BEGIN";
   case OpcodeKind::GroupNext:
     return "GROUP_NEXT";
+  case OpcodeKind::ProjectTopology:
+    return "PROJECT_TOPOLOGY";
   default:
     return "UNKNOWN";
   }

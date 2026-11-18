@@ -326,7 +326,7 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // ceiling with the generated-vocabulary bound in meta.cpp.
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::GroupNext)) {
+            static_cast<std::uint64_t>(OpcodeKind::ProjectTopology)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -602,7 +602,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::GroupNext)) {
+          static_cast<std::uint64_t>(OpcodeKind::ProjectTopology)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -3527,6 +3527,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
   case OpcodeKind::GroupBegin:
   case OpcodeKind::GroupNext:
   case OpcodeKind::PinHistorical:
+  case OpcodeKind::ProjectTopology:
     return executeStreamOpcode(kind, opcode, outputs, cursor);
   case OpcodeKind::Jump: {
     if (!inputs.empty() && cursor) {

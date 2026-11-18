@@ -5,9 +5,10 @@
 // existing projection helpers, and the reciprocal links are written last, all
 // inside one mutation group so a refusal leaves the subject untouched.
 //
-// project is refused by name. Its result is a detached copy of the selected
-// topology whose cells share the source's content spans and keep its quote
-// binding, and no Vortex opcode mints a cell carrying another cell's spans.
+// project is lowered to one ProjectTopology op: its result is a detached copy
+// of the selected topology whose cells share the source's content spans and
+// keep its quote binding, which only the engine's copyTopology can mint. The
+// shape's rules are folded to an edge selection here, so the op reads no AST.
 #include "common/xanadu/vql/compiler.hpp"
 
 #include <array>
@@ -30,6 +31,67 @@ namespace {
 
 } // namespace
 
+std::vector<CellRef>
+VQLCompiler::compileProject(const FunctionInvocation &fn,
+                            const ShapeLiteral &shape,
+                            const std::optional<CellRef> context) {
+  // The rule walk of the oracle, kept as a fold: a wildcard resets what came
+  // before, a dimension rule adds or removes its signed edge, and `~` is both
+  // signs. What is left is "everything but `remove`" or just `add`.
+  bool everything = false;
+  using Edge      = std::pair<std::string, DimVector>;
+  std::vector<Edge> add;
+  std::vector<Edge> remove;
+  const auto forget = [](std::vector<Edge> &edges, const Edge &edge) {
+    std::erase(edges, edge);
+  };
+  for (const ShapeRule &entry : shape.rules) {
+    if (const auto *wildcard = std::get_if<ShapeWildcard>(&entry.rule)) {
+      everything = *wildcard == ShapeWildcard::Everything;
+      add.clear();
+      remove.clear();
+      continue;
+    }
+    const auto *dimension = std::get_if<DimensionShapeRule>(&entry.rule);
+    if (!dimension)
+      refuse("project supports only wildcard and dimension shape rules; "
+             "pivot, computed-dimension, variable and nested rules are not "
+             "lowered");
+    if (dimension->targetValue)
+      refuse("project accepts dimension masks; use apply_shape for target "
+             "assignments");
+    const auto fold = [&](const DimVector direction) {
+      const Edge edge{dimension->dimName, direction};
+      forget(add, edge);
+      forget(remove, edge);
+      (dimension->negated ? remove : add).push_back(edge);
+    };
+    fold(dimension->direction);
+    if (dimension->isBidir)
+      fold(dimension->direction == DimVector::POS ? DimVector::NEG
+                                                  : DimVector::POS);
+  }
+
+  const auto subjects = compileArgument(fn.args[0], context);
+  const CellRef input = normalizeFrameStream(subjects);
+  const CellRef op = emitOp(OpcodeKind::ProjectTopology, "#PROJECT_TOPOLOGY");
+  emitInput(op, input);
+  emitInputConstant(op, static_cast<std::int64_t>(everything ? 1 : 0));
+  emitInputConstant(op, static_cast<std::int64_t>(add.size()));
+  const auto emitEdges = [&](const std::vector<Edge> &edges) {
+    for (const auto &[name, direction] : edges) {
+      emitInputConstant(op, static_cast<std::int64_t>(resolveDimension(name)));
+      emitInputConstant(op, static_cast<std::int64_t>(toSign(direction)));
+    }
+  };
+  emitEdges(add);
+  emitEdges(remove);
+  const CellRef result = core_.arena().makeCell();
+  dynamicStreams_.insert(result);
+  emitOutput(op, result);
+  return {result};
+}
+
 std::vector<CellRef> VQLCompiler::compileSemanticShapeStep(
     const PathStep &step, const CellRef current, const bool hasContext) {
   const auto &fn = std::get<FunctionInvocation>(step.selector);
@@ -48,11 +110,7 @@ VQLCompiler::compileSemanticShapeCall(const FunctionInvocation &fn,
                      "or returned by a function is not lowered");
   const ShapeLiteral &shape = **shapeArgument;
 
-  if (fn.name == "project")
-    refuse("VQL 'project' is not compiled to Vortex: it must copy the "
-           "selected topology into detached cells that share the source "
-           "content spans and quote bindings, and no Vortex opcode creates "
-           "such a cell");
+  if (fn.name == "project") return compileProject(fn, shape, context);
 
   // Rules are walked in order exactly as the direct evaluator did: a wildcard
   // drops every pending assignment, and a later rule on the same signed edge
