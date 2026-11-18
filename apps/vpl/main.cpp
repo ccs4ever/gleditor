@@ -48,6 +48,9 @@ std::string formatCell(const ArenaManifold &arena, CellRef c) {
     ss << *dVal;
     return ss.str();
   }
+  // A comparison mints a boolean cell; APL prints it as 1 or 0, as `+` reads
+  // it.
+  if (auto bVal = arena.asBool(c)) return *bVal ? "1" : "0";
   std::string txt = arena.textOf(c);
   if (!txt.empty()) return txt;
   return "c#" + std::to_string(c);

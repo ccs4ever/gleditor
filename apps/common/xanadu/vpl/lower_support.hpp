@@ -109,6 +109,182 @@ scalarDyadicVerb(const TokenKind verb) {
   }
 }
 
+/// Integer constants the emitters use for what they mean, not as bare digits.
+inline constexpr std::int64_t kNoneYet = 0; ///< a counter before its first step
+inline constexpr std::int64_t kOneStep = 1; ///< one cell, one position
+inline constexpr double kZeroDouble    = 0.0;
+
+/// Emits `out := left <opcode> right` on two cells, or on a cell and an
+/// integer constant, and returns `out`.
+inline CellRef emitBinaryOp(LowerContext &ctx,
+                            zigzag::vortex::OpcodeKind opcode,
+                            std::string_view label, CellRef left,
+                            CellRef right) {
+  const auto out = ctx.core().arena().makeCell();
+  const auto op  = ctx.emitOp(opcode, label);
+  ctx.emitInput(op, left);
+  ctx.emitInput(op, right);
+  ctx.emitOutput(op, out);
+  return out;
+}
+
+inline CellRef emitBinaryOp(LowerContext &ctx,
+                            zigzag::vortex::OpcodeKind opcode,
+                            std::string_view label, CellRef left,
+                            std::int64_t right) {
+  const auto out = ctx.core().arena().makeCell();
+  const auto op  = ctx.emitOp(opcode, label);
+  ctx.emitInput(op, left);
+  ctx.emitInputConstant(op, right);
+  ctx.emitOutput(op, out);
+  return out;
+}
+
+inline CellRef emitUnaryOp(LowerContext &ctx, zigzag::vortex::OpcodeKind opcode,
+                           std::string_view label, CellRef operand) {
+  const auto out = ctx.core().arena().makeCell();
+  const auto op  = ctx.emitOp(opcode, label);
+  ctx.emitInput(op, operand);
+  ctx.emitOutput(op, out);
+  return out;
+}
+
+/// A Bool register: true when `value` is a number (int, double or bool) and
+/// false for text. The VM coerces text in arithmetic (`"x"` is 0, `"5"` is 5),
+/// so a value's own type is the only honest test: `x + 0` keeps a number's
+/// type and turns text into an integer, so it equals `x` only for a number;
+/// `¬¬x` is a Bool, which equals `x` only for one.
+[[nodiscard]] inline CellRef emitIsNumeric(LowerContext &ctx, CellRef value) {
+  using zigzag::vortex::OpcodeKind;
+  const auto sum =
+      emitBinaryOp(ctx, OpcodeKind::Add, "#NUM_PLUS_ZERO", value, kNoneYet);
+  const auto keepsType =
+      emitBinaryOp(ctx, OpcodeKind::Eq, "#NUM_KEEPS_TYPE", value, sum);
+  const auto asBool =
+      emitUnaryOp(ctx, OpcodeKind::Not, "#NUM_NOT_NOT",
+                  emitUnaryOp(ctx, OpcodeKind::Not, "#NUM_NOT", value));
+  const auto isBool =
+      emitBinaryOp(ctx, OpcodeKind::Eq, "#NUM_IS_BOOL", value, asBool);
+  return emitBinaryOp(ctx, OpcodeKind::Or, "#NUM_OR", keepsType, isBool);
+}
+
+/// True when the cell already holds a number as the program is compiled: a
+/// literal, or a stored scalar typed as one. Nothing writes such a cell at run
+/// time but a copy of another number, so no run-time test is owed.
+[[nodiscard]] inline bool isKnownNumber(LowerContext &ctx, CellRef cell) {
+  auto &arena = ctx.core().arena();
+  return arena.contains(cell) &&
+         (arena.asInt64(cell) || arena.asDouble(cell) || arena.asBool(cell));
+}
+
+/// Fails at run time, with `message`, unless `value` is a number.
+inline void assertNumeric(LowerContext &ctx, CellRef value,
+                          std::string_view label, std::string_view message) {
+  if (isKnownNumber(ctx, value)) return;
+  assertCell(ctx, emitIsNumeric(ctx, value), label, message);
+}
+
+/// A Bool register: `left = right`. Two numbers compare by value, so the int 2
+/// and the double 2.0 are equal (the VM's own Eq compares the stored types);
+/// anything else falls back to Eq, so text is never read as 0.
+[[nodiscard]] inline CellRef emitEquals(LowerContext &ctx, CellRef left,
+                                        CellRef right) {
+  using zigzag::vortex::OpcodeKind;
+  const auto both =
+      emitBinaryOp(ctx, OpcodeKind::And, "#EQ_BOTH_NUMBERS",
+                   emitIsNumeric(ctx, left), emitIsNumeric(ctx, right));
+  const auto byValue =
+      emitBinaryOp(ctx, OpcodeKind::And, "#EQ_BY_VALUE",
+                   emitBinaryOp(ctx, OpcodeKind::Lte, "#EQ_LTE", left, right),
+                   emitBinaryOp(ctx, OpcodeKind::Gte, "#EQ_GTE", left, right));
+  const auto plain =
+      emitBinaryOp(ctx, OpcodeKind::Eq, "#EQ_PLAIN", left, right);
+  const auto numeric =
+      emitBinaryOp(ctx, OpcodeKind::And, "#EQ_NUMERIC", both, byValue);
+  const auto textual = emitBinaryOp(
+      ctx, OpcodeKind::And, "#EQ_TEXTUAL",
+      emitUnaryOp(ctx, OpcodeKind::Not, "#EQ_NOT_BOTH", both), plain);
+  return emitBinaryOp(ctx, OpcodeKind::Or, "#EQ_RESULT", numeric, textual);
+}
+
+/// `left ÷ right` on doubles: `5 ÷ 2` is 2.5, as in APL, not the VM's integer
+/// quotient, and a whole result is a double with a whole value. The spec is
+/// silent on a zero divisor and the VM would answer 0, a silent wrong value,
+/// so it fails by name.
+[[nodiscard]] inline CellRef emitDivide(LowerContext &ctx, CellRef left,
+                                        CellRef right) {
+  using zigzag::vortex::OpcodeKind;
+  const auto asDouble = [&](CellRef value) {
+    const auto out = ctx.core().arena().makeCell();
+    const auto op  = ctx.emitOp(OpcodeKind::Add, "#DIV_AS_DOUBLE");
+    ctx.emitInput(op, value);
+    ctx.emitInputConstant(op, kZeroDouble);
+    ctx.emitOutput(op, out);
+    return out;
+  };
+  const auto divisor = asDouble(right);
+  const auto nonZero = ctx.core().arena().makeCell();
+  const auto test    = ctx.emitOp(OpcodeKind::Neq, "#DIV_NONZERO");
+  ctx.emitInput(test, divisor);
+  ctx.emitInputConstant(test, kZeroDouble);
+  ctx.emitOutput(test, nonZero);
+  assertCell(ctx, nonZero, "#DIV_NONZERO", "VPL divide by zero (DOMAIN ERROR)");
+  return emitBinaryOp(ctx, OpcodeKind::Div, "#DIV", asDouble(left), divisor);
+}
+
+/// `1 ÷ value`, with the same zero refusal.
+[[nodiscard]] inline CellRef emitReciprocal(LowerContext &ctx, CellRef value) {
+  using zigzag::vortex::OpcodeKind;
+  const auto one = ctx.core().arena().makeCell();
+  const auto op  = ctx.emitOp(OpcodeKind::Add, "#RECIPROCAL_ONE");
+  ctx.emitInputConstant(op, 1.0);
+  ctx.emitInputConstant(op, kZeroDouble);
+  ctx.emitOutput(op, one);
+  return emitDivide(ctx, one, value);
+}
+
+/// True for the verbs that are arithmetic on numbers (text is no operand).
+[[nodiscard]] constexpr bool isArithmeticVerb(TokenKind verb) noexcept {
+  switch (verb) {
+  case TokenKind::Plus:
+  case TokenKind::Minus:
+  case TokenKind::Times:
+  case TokenKind::Divide:
+  case TokenKind::Magnitude:
+  case TokenKind::Ceiling:
+  case TokenKind::Floor:
+    return true;
+  default:
+    return false;
+  }
+}
+
+[[nodiscard]] inline std::string textArithmeticMessage(TokenKind verb) {
+  return "VPL arithmetic on text is unsupported: " +
+         std::string{tokenKindToString(verb)} + " needs numbers";
+}
+
+/// One application of the scalar dyadic `verb` to two cells: arithmetic
+/// refuses non-numbers at run time, `÷` divides as doubles, `=` and `≠`
+/// compare numbers by value. Every other verb is its VM opcode.
+[[nodiscard]] inline CellRef emitScalarDyadic(LowerContext &ctx, TokenKind verb,
+                                              const ScalarVerb &scalar,
+                                              CellRef left, CellRef right) {
+  using zigzag::vortex::OpcodeKind;
+  if (isArithmeticVerb(verb)) {
+    const auto message = textArithmeticMessage(verb);
+    assertNumeric(ctx, left, "#ARITH_LEFT_NUMBER", message);
+    assertNumeric(ctx, right, "#ARITH_RIGHT_NUMBER", message);
+  }
+  if (verb == TokenKind::Divide) return emitDivide(ctx, left, right);
+  if (verb == TokenKind::Equal) return emitEquals(ctx, left, right);
+  if (verb == TokenKind::NotEqual) {
+    return emitUnaryOp(ctx, OpcodeKind::Not, "#NEQ",
+                       emitEquals(ctx, left, right));
+  }
+  return emitBinaryOp(ctx, scalar.opcode, scalar.label, left, right);
+}
+
 } // namespace xanadu::vpl::lower
 
 namespace xanadu::vpl::lower {
@@ -149,6 +325,115 @@ inline zigzag::CellRef hop(LowerContext &ctx, zigzag::CellRef origin,
     ctx.emitOutput(advance, cursor);
   });
   return cursor;
+}
+
+/// Where and how one axis of a view is read, with its far-end bound honoured
+/// (card V6 take bound): the walker arguments that read exactly the cells the
+/// view holds, in the order it presents them. Unreversed, the walk is from the
+/// origin to the bound (or the rank's end). Reversed, it is from the bound (or
+/// the far end, found by walking the rank) back to the origin, which is its
+/// own stop, so a reversed bounded view reads the bounded prefix reversed.
+struct AxisWalk {
+  zigzag::CellRef anchor;
+  zigzag::DimRef dimension;
+  zigzag::DimVector direction;
+  std::optional<zigzag::CellRef> stop;
+};
+
+[[nodiscard]] inline AxisWalk axisWalkOf(LowerContext &ctx,
+                                         zigzag::CellRef cell,
+                                         const zigzag::DirectedDim &axis,
+                                         const std::size_t index) {
+  const auto bound = ctx.boundOf(cell, index);
+  if (!ctx.isReversed(cell, index)) {
+    return {cell, axis.dim, axis.dir, bound};
+  }
+  const auto far = emit::extreme(ctx, cell, axis.dim, axis.dir, std::nullopt);
+  if (bound) {
+    // The bound is a register that may hold no cell at run time (the view
+    // ends where the rank does), so the read starts from the rank's far end
+    // unless the bound is there.
+    const auto present =
+        emit::extentOf(ctx, *bound, axis.dim, axis.dir, *bound);
+    const auto keepFar = emit::mintLabel(ctx, "#AXIS_FAR_END");
+    emit::branchIfFalse(ctx, present, keepFar, "#AXIS_IF_BOUND");
+    const auto copy =
+        ctx.emitOp(zigzag::vortex::OpcodeKind::CopyCellRefs, "#AXIS_AT_BOUND");
+    ctx.emitInput(copy, *bound);
+    ctx.emitOutput(copy, far);
+    emit::placeLabel(ctx, keepFar);
+  }
+  return {far, axis.dim, -axis.dir, cell};
+}
+
+/// The walk of the first (only) axis of the valence-1 view `cell`.
+[[nodiscard]] inline AxisWalk axisWalkOf(LowerContext &ctx,
+                                         zigzag::CellRef cell) {
+  return axisWalkOf(ctx, cell, ctx.axesOf(cell)->front(), 0);
+}
+
+/// Calls `body` for each cell of axis `axis` of the view `cell`, in the order
+/// the view presents them. Also valid for a scalar, which has no flags or
+/// bounds: it is walked from itself, unbounded.
+inline void
+walkView(LowerContext &ctx, zigzag::CellRef cell,
+         const zigzag::DirectedDim &axis,
+         gleditor::cpp26::function_ref<void(zigzag::CellRef item)> body) {
+  const auto walk = axisWalkOf(ctx, cell, axis, 0);
+  emit::walkRank(ctx, walk.anchor, walk.dimension, walk.direction, body,
+                 walk.stop);
+}
+
+/// The cell at 0-based position `index` of `walk`, in a register that is
+/// cleared when the walk is shorter, plus an integer register that is 1 when
+/// the cell was found and 0 when not. One pass over the walk, so a position
+/// far beyond its length costs the length, not the position. `index` must be
+/// an integer-typed register.
+struct NthCell {
+  zigzag::CellRef cell;
+  zigzag::CellRef found;
+};
+
+[[nodiscard]] inline NthCell nthCell(LowerContext &ctx, const AxisWalk &walk,
+                                     zigzag::CellRef index) {
+  using zigzag::vortex::OpcodeKind;
+  auto &arena = ctx.core().arena();
+  // Cleared, not merely unwritten: the executor reads an unwritten result
+  // register as the register's own cell, and a cleared one as an empty array.
+  const auto cell  = arena.makeCell();
+  const auto clear = ctx.emitOp(OpcodeKind::ClearCellRefs, "#NTH_EMPTY");
+  ctx.emitOutput(clear, cell);
+  const auto found = arena.makeCell();
+  zero(ctx, found, "#NTH_FOUND");
+  const auto target = arena.makeCell();
+  const auto plus   = ctx.emitOp(OpcodeKind::Add, "#NTH_TARGET");
+  ctx.emitInput(plus, index);
+  ctx.emitInputConstant(plus, kOneStep);
+  ctx.emitOutput(plus, target);
+  const auto position = arena.makeCell();
+  zero(ctx, position, "#NTH_POSITION");
+  emit::walkRank(
+      ctx, walk.anchor, walk.dimension, walk.direction,
+      [&](zigzag::CellRef item) {
+        increment(ctx, position, "#NTH_POSITION_NEXT");
+        const auto reached = arena.makeCell();
+        const auto test    = ctx.emitOp(OpcodeKind::Eq, "#NTH_REACHED");
+        ctx.emitInput(test, position);
+        ctx.emitInput(test, target);
+        ctx.emitOutput(test, reached);
+        const auto next = emit::mintLabel(ctx, "#NTH_NEXT");
+        emit::branchIfFalse(ctx, reached, next, "#NTH_IF_REACHED");
+        const auto keep = ctx.emitOp(OpcodeKind::CopyCellRefs, "#NTH_KEEP");
+        ctx.emitInput(keep, item);
+        ctx.emitOutput(keep, cell);
+        const auto mark = ctx.emitOp(OpcodeKind::Add, "#NTH_MARK");
+        ctx.emitInputConstant(mark, kOneStep);
+        ctx.emitInputConstant(mark, kNoneYet);
+        ctx.emitOutput(mark, found);
+        emit::placeLabel(ctx, next);
+      },
+      walk.stop);
+  return {cell, found};
 }
 
 struct Minting {

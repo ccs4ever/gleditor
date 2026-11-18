@@ -131,13 +131,20 @@ TEST_F(VplLowerFoldTest, ReduceOverReversedViews) {
   EXPECT_TRUE(sumRev.view.isScalar());
   EXPECT_EQ(sumRev.view.scalarInt(), 15);
 
-  // Subtraction reduction over reversed: 5 - 4 - 3 - 2 - 1 = -5
-  // Right-associative fold in APL: 5 - (4 - (3 - (2 - 1))) = 5 - (4 - (3 - 1))
-  // = 5 - 2 = 3 In our left-to-right walk: ((5 - 4) - 3) - 2) - 1 = 1 - 3 - 2 -
-  // 1 = -5
-  const auto subRev = run("-/ ⌽A");
-  EXPECT_TRUE(subRev.view.isScalar());
-  EXPECT_EQ(subRev.view.scalarInt(), -5);
+  // Subtraction is not associative: APL folds from the right and this lowering
+  // folds in walk order, so it is refused by name instead of answered wrongly.
+  expectCompileRefusal("-/ ⌽A",
+                       "supports only +, *, maximum, minimum, and, and or");
+}
+
+TEST_F(VplLowerFoldTest, ScanOverReversedViewsMintsInReversedOrder) {
+  const auto a = run("A ← 5⍳d.1; A");
+  const auto r = run("+\\ ⌽A");
+  EXPECT_EQ(values(r.view), (Values{5, 9, 12, 14, 15}));
+  // A scan mints: its cells are not A's.
+  for (const auto cell : r.view.collectCells(arena)) {
+    EXPECT_EQ(std::ranges::count(a.view.collectCells(arena), cell), 0);
+  }
 }
 
 TEST_F(VplLowerFoldTest, ScanOverRuntimeRanks) {

@@ -168,14 +168,16 @@ Maybe lowerRhoMonadic(LowerContext &ctx, const MonadicExpr &expr) {
   const auto measured  = *axes;
   std::vector<CellRef> cells;
   cells.reserve(measured.size());
-  for (const auto &axis : measured) {
+  for (std::size_t index = 0; index < measured.size(); ++index) {
+    const auto &axis = measured[index];
     // Each extent is measured from the origin, which is how the first row's
     // length stands for every row of a rectangular array. A reversed axis has
     // the extent of the unreversed one (same origin, same cells), so the flag
     // is deliberately not consulted: `⍴⌽A` is `⍴A` by construction.
-    const auto extent =
-        emit::extentOf(ctx, operand, axis.dim, axis.dir, std::nullopt);
-    const auto cell = ctx.core().arena().makeCell();
+    // A far-end bound ends the count: `⍴ 3 ↑ A` is 3 however long A is.
+    const auto extent = emit::extentOf(ctx, operand, axis.dim, axis.dir,
+                                       ctx.boundOf(operand, index));
+    const auto cell   = ctx.core().arena().makeCell();
     // The cell needs a value before the first Value op can replace it.
     ctx.core().writeValue(cell, kWholeValueOffset, std::nullopt,
                           std::int64_t{0});

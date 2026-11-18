@@ -198,35 +198,31 @@ TEST(VPLEngineTest, Drop) {
   EXPECT_EQ(dropAscii.extents()[0], 3u);
 }
 
-TEST(VPLEngineTest, TakeRefused) {
+// The original assertions of this test, restored unweakened now that views
+// carry a far-end bound (it was disabled, then pinned as a refusal, while they
+// could not).
+TEST(VPLEngineTest, TakeAndDrop) {
   VPLEngine engine;
 
   engine.evaluate("A ← 5⍳d.1");
 
-  // Take 3: 3 ↑ A is refused until views can carry far-end bounds
-  EXPECT_THROW(
-      {
-        try {
-          engine.evaluate("3 ↑ A");
-        } catch (const VPLExecutionError &e) {
-          EXPECT_NE(std::string_view(e.what()).find("VPL take is unsupported"),
-                    std::string_view::npos);
-          throw;
-        }
-      },
-      VPLExecutionError);
+  // Take 3: 3 ↑ A
+  auto take3 = engine.evaluate("3 ↑ A");
+  EXPECT_EQ(take3.extents().size(), 1u);
+  EXPECT_EQ(take3.extents()[0], 3u);
 
-  EXPECT_THROW(
-      {
-        try {
-          engine.evaluate("3 {. A");
-        } catch (const VPLExecutionError &e) {
-          EXPECT_NE(std::string_view(e.what()).find("VPL take is unsupported"),
-                    std::string_view::npos);
-          throw;
-        }
-      },
-      VPLExecutionError);
+  // Take ASCII: 3 {. A
+  auto takeAscii = engine.evaluate("3 {. A");
+  EXPECT_EQ(takeAscii.extents()[0], 3u);
+
+  // Drop 2: 2 ↓ A
+  auto drop2 = engine.evaluate("2 ↓ A");
+  EXPECT_EQ(drop2.extents().size(), 1u);
+  EXPECT_EQ(drop2.extents()[0], 3u);
+
+  // Drop ASCII: 2 }. A
+  auto dropAscii = engine.evaluate("2 }. A");
+  EXPECT_EQ(dropAscii.extents()[0], 3u);
 }
 
 TEST(VPLEngineTest, ReductionsAndScans) {

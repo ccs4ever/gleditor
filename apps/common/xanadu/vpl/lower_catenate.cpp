@@ -40,19 +40,8 @@ void appendOperand(LowerContext &ctx, const Minting &result, CellRef cell) {
   if (ctx.isRank(cell)) {
     const auto *axes = ctx.axesOf(cell);
     if (axes == nullptr || axes->size() != 1) refuse(kValence);
-    const auto axis             = axes->front();
-    const bool reversed         = ctx.isReversed(cell, 0);
-    CellRef anchor              = cell;
-    DimVector dir               = axis.dir;
-    std::optional<CellRef> stop = std::nullopt;
-    if (reversed) {
-      anchor = emit::extreme(ctx, cell, axis.dim, axis.dir, std::nullopt);
-      dir    = -axis.dir;
-      stop   = cell;
-    }
-    emit::walkRank(
-        ctx, anchor, axis.dim, dir,
-        [&](CellRef item) { mintValue(ctx, result, item); }, stop);
+    walkView(ctx, cell, axes->front(),
+             [&](CellRef item) { mintValue(ctx, result, item); });
   } else {
     const auto fresh              = mintValue(ctx, result, cell);
     ctx.cellDependencies()[fresh] = ctx.rankDependenciesOf(cell);
@@ -117,20 +106,12 @@ CellRef lowerCatenateDyadic(LowerContext &ctx, const DyadicExpr &expr) {
     return c0;
   }
 
-  // Prepended scalar to a compile-time rank (e.g. ready , unready , total).
-  if (!lRank && rRank && ctx.core().arena().contains(*rCell) &&
-      ctx.core().arena().linked(*rCell, dim, DimVector::POS).has_value()) {
-    const auto c0 = ctx.core().arena().makeCell();
-    emit::copyValue(ctx, *lCell, c0);
-    zigzag::expectWritten(
-        ctx.core().arena().link(c0, dim, DimVector::POS, *rCell));
-    ctx.cellDependencies()[c0] = ctx.rankDependenciesOf(*lCell);
-    ctx.rankAxes()[c0]         = {DirectedDim{dim, DimVector::POS}};
-    emit::mergeRankInputDependencies(ctx, c0, std::array{*lCell, *rCell});
-    return c0;
-  }
-
-  // General runtime catenation (ranks, mixed rank/scalar).
+  // Every case mints fresh cells. The spec's glyph table (vpl-array-language.md
+  // 3, 3.1) lists `,` in neither its view-returning rows (`⍉ ⌽ ↑ ↓`) nor its
+  // weaving ones, but 4.3 says a verb that produces a value mints cells, and
+  // VPLEngineTest.CatenateKeepsBudgetAndAliasesIntact pins copies. Linking a
+  // new cell into an operand's own cells would also make a second catenation
+  // steal the operand's NEG link and mutate the operand.
   const auto result = beginResult(ctx, dim);
   appendOperand(ctx, result, *lCell);
   appendOperand(ctx, result, *rCell);
@@ -141,17 +122,15 @@ CellRef lowerCatenateDyadic(LowerContext &ctx, const DyadicExpr &expr) {
   return first;
 }
 
-Maybe lowerVectorOfRanks(LowerContext &ctx, const VectorExpr &,
-                         const std::vector<CellRef> &cells) {
-  const auto dim    = ctx.core().dims().step;
-  const auto result = beginResult(ctx, dim);
-  for (const auto cell : cells) {
-    appendOperand(ctx, result, cell);
-  }
-  const auto first      = endResult(ctx, result);
-  ctx.rankAxes()[first] = {DirectedDim{dim, DimVector::POS}};
-  emit::mergeRankInputDependencies(ctx, first, cells);
-  return first;
+// A strand with a rank in it is a nested array in APL: `(1 2) (3 4)` has two
+// items, not four. A nested value cannot be exact here. A box (enclose) is
+// marked on the single cell that stands for the whole value, so a rank whose
+// items are boxes cannot be told from one enclosed scalar, and flattening it
+// would answer 1 2 3 4 for a value of tally 2. Refused by name rather than
+// answered wrongly; `,` is the verb that joins ranks.
+Maybe lowerVectorOfRanks(LowerContext &, const VectorExpr &,
+                         const std::vector<CellRef> &) {
+  refuse(msg::nestedRanks);
 }
 
 } // namespace xanadu::vpl::lower

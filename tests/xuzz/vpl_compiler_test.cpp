@@ -207,7 +207,8 @@ TEST_F(VPLCompilerTest, ProgramExposesOnlyFinalResultAndRankAxes) {
   EXPECT_TRUE(multiple.resultAxes.empty());
 }
 
-TEST_F(VPLCompilerTest, ScalarArithmeticExplicitlyRefusesRankOperands) {
+TEST_F(VPLCompilerTest,
+       ScalarArithmeticLowersRankOperandsAndRefusesDimensionValues) {
   VPLCompiler compiler(*core, *vm);
 
   const auto dyadic = compiler.compile("1 2 3 + 4 5 6");

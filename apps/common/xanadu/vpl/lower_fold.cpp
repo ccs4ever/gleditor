@@ -11,8 +11,10 @@
  * Tally computes the length of runtime ranks via extentOf, or 1 for scalars.
  */
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -35,6 +37,21 @@ constexpr std::string_view kEnclosed =
     "VPL reduction on an enclosed value is unsupported by the VM";
 constexpr std::string_view kDimension =
     "VPL reduction on a dimension value is unsupported by the VM";
+constexpr std::int64_t kSumIdentity     = 0;
+constexpr std::int64_t kProductIdentity = 1;
+
+std::string noIdentityMessage(std::string_view verbName) {
+  return "VPL reduce of an empty rank has no identity for " +
+         std::string{verbName};
+}
+
+/// Emits `target` := constant, by arithmetic only so it is a plain integer.
+void emitConstant(LowerContext &ctx, CellRef target, std::int64_t value) {
+  const auto op = ctx.emitOp(OpcodeKind::Add, "#REDUCE_IDENTITY");
+  ctx.emitInputConstant(op, value);
+  ctx.emitInputConstant(op, std::int64_t{0});
+  ctx.emitOutput(op, target);
+}
 
 } // namespace
 
@@ -48,25 +65,49 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
     }
 
     OpcodeKind opKind = OpcodeKind::Add;
+    // Owner 2026-11-18: an empty reduce is the APL identity for the two verbs
+    // that have one (`+/⍬` is 0, `×/⍬` is 1); maximum and minimum have none and
+    // are refused by name, at run time for a rank and at compile time for an
+    // empty literal vector.
+    std::optional<std::int64_t> identity;
+    std::string_view verbName = "sum";
     std::string_view opLabel =
         adverb == TokenKind::Reduce ? "#REDUCE_ADD" : "#SCAN_ADD";
     if (innerVerb == TokenKind::Plus) {
-      opKind  = OpcodeKind::Add;
-      opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_ADD" : "#SCAN_ADD";
+      opKind   = OpcodeKind::Add;
+      opLabel  = (adverb == TokenKind::Reduce) ? "#REDUCE_ADD" : "#SCAN_ADD";
+      identity = kSumIdentity;
     } else if (innerVerb == TokenKind::Times) {
-      opKind  = OpcodeKind::Mul;
-      opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_MUL" : "#SCAN_MUL";
+      opKind   = OpcodeKind::Mul;
+      opLabel  = (adverb == TokenKind::Reduce) ? "#REDUCE_MUL" : "#SCAN_MUL";
+      identity = kProductIdentity;
+      verbName = "product";
     } else if (innerVerb == TokenKind::Ceiling) {
-      opKind  = OpcodeKind::Max;
-      opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_MAX" : "#SCAN_MAX";
+      opKind   = OpcodeKind::Max;
+      opLabel  = (adverb == TokenKind::Reduce) ? "#REDUCE_MAX" : "#SCAN_MAX";
+      verbName = "maximum";
     } else if (innerVerb == TokenKind::Floor) {
-      opKind  = OpcodeKind::Min;
-      opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_MIN" : "#SCAN_MIN";
+      opKind   = OpcodeKind::Min;
+      opLabel  = (adverb == TokenKind::Reduce) ? "#REDUCE_MIN" : "#SCAN_MIN";
+      verbName = "minimum";
+    } else if (innerVerb == TokenKind::And) {
+      // Associative, so the left-to-right chain agrees with APL's right fold.
+      opKind   = OpcodeKind::And;
+      opLabel  = (adverb == TokenKind::Reduce) ? "#REDUCE_AND" : "#SCAN_AND";
+      identity = kProductIdentity;
+      verbName = "and";
+    } else if (innerVerb == TokenKind::Or) {
+      opKind   = OpcodeKind::Or;
+      opLabel  = (adverb == TokenKind::Reduce) ? "#REDUCE_OR" : "#SCAN_OR";
+      identity = kSumIdentity;
+      verbName = "or";
     } else {
-      const auto v = scalarDyadicVerb(innerVerb);
-      if (!v) refuse(msg::reduceScanVerbs);
-      opKind  = v->opcode;
-      opLabel = v->label;
+      // APL folds from the right, so `-/` and `÷/` are not the left-to-right
+      // chain this lowering emits; only the associative verbs agree in both
+      // orders (`=/` and `≠/` among those refused: `=` is not associative, so
+      // the two orders differ). Anything else is refused rather than answered
+      // differently.
+      refuse(msg::reduceScanVerbs);
     }
 
     if (const auto *vec =
@@ -80,8 +121,13 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
       }
 
       if (adverb == TokenKind::Reduce) {
-        if (operandCells.empty())
-          throw std::invalid_argument("VPL reduce requires a nonempty rank");
+        if (operandCells.empty()) {
+          if (!identity)
+            throw std::invalid_argument(noIdentityMessage(verbName));
+          const auto result = ctx.core().arena().makeCell();
+          emitConstant(ctx, result, *identity);
+          return result;
+        }
         if (operandCells.size() == 1) return operandCells.front();
 
         CellRef acc = operandCells[0];
@@ -164,20 +210,28 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
     if (axes == nullptr || axes->size() != 1) {
       refuse(kValence);
     }
-    const auto axis     = axes->front();
-    const bool reversed = ctx.isReversed(*rCell, 0);
+    const auto axis      = axes->front();
+    const auto walk      = axisWalkOf(ctx, *rCell);
+    const CellRef anchor = walk.anchor;
+    const DimVector dir  = walk.direction;
+    const auto stop      = walk.stop;
 
-    CellRef anchor              = *rCell;
-    DimVector dir               = axis.dir;
-    std::optional<CellRef> stop = std::nullopt;
-    if (reversed) {
-      anchor = emit::extreme(ctx, *rCell, axis.dim, axis.dir, std::nullopt);
-      dir    = -axis.dir;
-      stop   = *rCell;
-    }
+    // 1 when the walk has a first cell, 0 for an empty rank (an absent
+    // anchor): the anchor is its own stop, so the count cannot pass one.
+    const auto present = emit::extentOf(ctx, anchor, axis.dim, dir, anchor);
 
     if (adverb == TokenKind::Reduce) {
       const auto acc = ctx.core().arena().makeCell();
+      std::optional<CellRef> emptyLabel;
+      std::optional<CellRef> endLabel;
+      if (identity) {
+        emptyLabel = emit::mintLabel(ctx, "#REDUCE_EMPTY");
+        endLabel   = emit::mintLabel(ctx, "#REDUCE_END");
+        emit::branchIfFalse(ctx, present, *emptyLabel, "#REDUCE_IF_EMPTY");
+      } else {
+        assertCell(ctx, present, "#REDUCE_NONEMPTY",
+                   noIdentityMessage(verbName));
+      }
       const auto initial =
           ctx.emitOp(OpcodeKind::CopyCellRefs, "#REDUCE_START");
       ctx.emitInput(initial, anchor);
@@ -193,6 +247,13 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
           },
           stop);
 
+      if (identity) {
+        emit::branchAlways(ctx, *endLabel, "#REDUCE_DONE");
+        emit::placeLabel(ctx, *emptyLabel);
+        emitConstant(ctx, acc, *identity);
+        emit::placeLabel(ctx, *endLabel);
+      }
+
       emit::mergeRankInputDependencies(ctx, acc, std::array{*rCell});
       mergeDependencies(ctx.cellDependencies()[acc],
                         ctx.rankDependenciesOf(*rCell));
@@ -203,6 +264,10 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
       const auto resultDim = ctx.core().dims().step;
       const auto result    = beginResult(ctx, resultDim);
       const auto acc       = ctx.core().arena().makeCell();
+      // An empty rank scans to an empty rank: nothing is minted, and the
+      // result's first-cell read below finds nothing.
+      const auto skip = emit::mintLabel(ctx, "#SCAN_EMPTY");
+      emit::branchIfFalse(ctx, present, skip, "#SCAN_IF_EMPTY");
       const auto initial = ctx.emitOp(OpcodeKind::CopyCellRefs, "#SCAN_START");
       ctx.emitInput(initial, anchor);
       ctx.emitOutput(initial, acc);
@@ -218,6 +283,7 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
             mintValue(ctx, result, acc);
           },
           stop);
+      emit::placeLabel(ctx, skip);
 
       const auto first      = endResult(ctx, result);
       ctx.rankAxes()[first] = {DirectedDim{resultDim, DimVector::POS}};
@@ -249,19 +315,9 @@ Maybe lowerTallyMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
   if (axes == nullptr || axes->size() != 1) {
     refuse(kValence);
   }
-  const auto axis     = axes->front();
-  const bool reversed = ctx.isReversed(rCell, 0);
-
-  CellRef anchor              = rCell;
-  DimVector dir               = axis.dir;
-  std::optional<CellRef> stop = std::nullopt;
-  if (reversed) {
-    anchor = emit::extreme(ctx, rCell, axis.dim, axis.dir, std::nullopt);
-    dir    = -axis.dir;
-    stop   = rCell;
-  }
-
-  return emit::extentOf(ctx, anchor, axis.dim, dir, stop);
+  const auto axis = axes->front();
+  const auto walk = axisWalkOf(ctx, rCell);
+  return emit::extentOf(ctx, walk.anchor, axis.dim, walk.direction, walk.stop);
 }
 
 CellRef lowerFoldDyadic(LowerContext &ctx, const DyadicExpr &,

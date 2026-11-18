@@ -104,6 +104,22 @@ public:
     const auto *flags = reversedOf(cell);
     return flags != nullptr && index < flags->size() && (*flags)[index];
   }
+  /// The far-end bound register of axis `index` of `cell`, when it has one.
+  [[nodiscard]] std::optional<zigzag::CellRef>
+  boundOf(zigzag::CellRef cell, std::size_t index) const {
+    const auto found = compiler_.rankBounds_.find(cell);
+    if (found == compiler_.rankBounds_.end() || index >= found->second.size()) {
+      return std::nullopt;
+    }
+    return found->second[index];
+  }
+  [[nodiscard]] bool isBounded(zigzag::CellRef cell) const {
+    return compiler_.rankBounds_.contains(cell);
+  }
+  [[nodiscard]] const AxisBounds *boundsOf(zigzag::CellRef cell) const {
+    const auto found = compiler_.rankBounds_.find(cell);
+    return found == compiler_.rankBounds_.end() ? nullptr : &found->second;
+  }
   [[nodiscard]] std::size_t valenceOf(zigzag::CellRef cell) const {
     const auto *axes = axesOf(cell);
     return axes == nullptr ? 0U : axes->size();
@@ -134,6 +150,9 @@ public:
   }
   std::unordered_map<zigzag::CellRef, AxisReversed> &rankReversed() const {
     return compiler_.rankReversed_;
+  }
+  std::unordered_map<zigzag::CellRef, AxisBounds> &rankBounds() const {
+    return compiler_.rankBounds_;
   }
   std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>> &
   rankDependencies() const {
@@ -203,7 +222,7 @@ inline constexpr std::string_view dyadicOnRank =
 inline constexpr std::string_view customUnsupported =
     "unsupported VPL custom verb in VM compiler";
 inline constexpr std::string_view reduceScanVerbs =
-    "VPL VM reduce/scan supports only +, *, maximum, and minimum";
+    "VPL VM reduce/scan supports only +, *, maximum, minimum, and, and or";
 inline constexpr std::string_view eachUnsupported =
     "VPL VM each adverb is unsupported";
 inline constexpr std::string_view dimensionValues =
@@ -214,7 +233,8 @@ inline constexpr std::string_view conjunctions =
     "VPL conjunctions are unsupported by the VM";
 inline constexpr std::string_view quad = "VPL quad IO is unsupported by the VM";
 inline constexpr std::string_view nestedRanks =
-    "nested VPL ranks require explicit array lowering";
+    "VPL strand of ranks (a nested array) is unsupported by the VM: it awaits "
+    "enclose-based nesting, and joining ranks takes ,";
 } // namespace msg
 
 [[noreturn]] inline void refuse(std::string_view message) {

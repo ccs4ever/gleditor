@@ -571,10 +571,12 @@ VPLCompiler::tryFoldConstant(const AstNode &node) const {
     case TokenKind::Floor:
       return isFloat ? CellValue(std::min(toD(*lVal), toD(*rVal)))
                      : CellValue(std::min(toI(*lVal), toI(*rVal)));
+    // Two numbers are equal by value, as the emitted comparison does: the int
+    // 2 and the double 2.0 are one number.
     case TokenKind::Equal:
-      return CellValue(*lVal == *rVal);
+      return CellValue(toD(*lVal) == toD(*rVal));
     case TokenKind::NotEqual:
-      return CellValue(*lVal != *rVal);
+      return CellValue(toD(*lVal) != toD(*rVal));
     case TokenKind::LessThan:
       return CellValue(toD(*lVal) < toD(*rVal));
     case TokenKind::LessEqual:
@@ -670,12 +672,17 @@ std::optional<CellRef> VPLCompiler::compileProgram(const Program &prog) {
     lastResultCells_.push_back(*lastRes);
     lastResultAxes_.clear();
     lastResultReversed_.clear();
+    lastResultBounds_.clear();
     if (const auto axes = rankAxes_.find(*lastRes); axes != rankAxes_.end()) {
       lastResultAxes_ = axes->second;
     }
     if (const auto flags = rankReversed_.find(*lastRes);
         flags != rankReversed_.end()) {
       lastResultReversed_ = flags->second;
+    }
+    if (const auto stops = rankBounds_.find(*lastRes);
+        stops != rankBounds_.end()) {
+      lastResultBounds_ = stops->second;
     }
     lastResultDependencies_ = rankDependenciesOf(*lastRes);
     recordResultFacts(*lastRes);
@@ -760,6 +767,12 @@ VPLCompiler::compileIdentifier(const IdentifierExpr &expr) {
       } else {
         rankReversed_.erase(*it->second);
       }
+      if (const auto stops = varBounds_.find(expr.name());
+          stops != varBounds_.end()) {
+        rankBounds_[*it->second] = stops->second;
+      } else {
+        rankBounds_.erase(*it->second);
+      }
       if (varEnclosed_.contains(expr.name())) {
         enclosedCells_.insert(*it->second);
       }
@@ -805,6 +818,16 @@ std::optional<CellRef> VPLCompiler::compileAssign(const AssignExpr &expr) {
       flags != rankReversed_.end()) {
     bindingReversed = flags->second;
   }
+  AxisBounds bindingBounds;
+  if (const auto stops = rankBounds_.find(*valCell);
+      stops != rankBounds_.end()) {
+    bindingBounds = stops->second;
+  }
+  if (bindingBounds.empty()) {
+    varBounds_.erase(expr.target());
+  } else {
+    varBounds_[expr.target()] = bindingBounds;
+  }
   if (bindingAxes.empty()) {
     varAxes_.erase(expr.target());
   } else {
@@ -833,6 +856,7 @@ std::optional<CellRef> VPLCompiler::compileAssign(const AssignExpr &expr) {
       .cell            = *valCell,
       .axes            = bindingAxes,
       .reversed        = std::move(bindingReversed),
+      .bounds          = std::move(bindingBounds),
       .dependencies    = rankDependenciesOf(*valCell),
       .enclosed        = enclosed,
       .dimensionValues = std::move(dimensionValues),
@@ -941,6 +965,11 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     return rCell;
 
   case TokenKind::Minus: {
+    if (rCell) {
+      LowerContext guardCtx(*this);
+      lower::assertNumeric(guardCtx, *rCell, "#NEG_NUMBER",
+                           lower::textArithmeticMessage(TokenKind::Minus));
+    }
     CellRef op  = emitOp(OpcodeKind::Neg, "#NEG");
     CellRef out = core_.arena().makeCell();
     if (rCell) emitInput(op, *rCell);
@@ -948,6 +977,11 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     return out;
   }
   case TokenKind::Magnitude: {
+    if (rCell) {
+      LowerContext guardCtx(*this);
+      lower::assertNumeric(guardCtx, *rCell, "#ABS_NUMBER",
+                           lower::textArithmeticMessage(TokenKind::Magnitude));
+    }
     CellRef op  = emitOp(OpcodeKind::Abs, "#ABS");
     CellRef out = core_.arena().makeCell();
     if (rCell) emitInput(op, *rCell);
@@ -962,14 +996,12 @@ std::optional<CellRef> VPLCompiler::compileMonadic(const MonadicExpr &expr) {
     return out;
   }
   case TokenKind::Divide: {
-    // Reciprocal: 1.0 / rCell
-    CellRef one = emitConstant(1.0);
-    CellRef op  = emitOp(OpcodeKind::Div, "#RECIPROCAL");
-    emitInput(op, one);
-    if (rCell) emitInput(op, *rCell);
-    CellRef out = core_.arena().makeCell();
-    emitOutput(op, out);
-    return out;
+    // Reciprocal on doubles, refusing a zero and text as the dyadic form does.
+    if (!rCell) lower::refuse(lower::msg::monadicUnsupported);
+    LowerContext scalarCtx(*this);
+    lower::assertNumeric(scalarCtx, *rCell, "#RECIPROCAL_NUMBER",
+                         lower::textArithmeticMessage(TokenKind::Divide));
+    return lower::emitReciprocal(scalarCtx, *rCell);
   }
   default:
     lower::refuse(lower::msg::monadicUnsupported);
@@ -1010,6 +1042,16 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
   const auto rCell = compileNode(*expr.right());
   if (!lCell || !rCell)
     throw std::invalid_argument("VPL dyadic operands must compile to values");
+
+  // A text literal is no operand of arithmetic: the VM would read "x" as 0.
+  if (!expr.hasCustomVerb() && lower::isArithmeticVerb(expr.verb())) {
+    for (const auto *side : {expr.left().get(), expr.right().get()}) {
+      if (const auto *scalar = dynamic_cast<const ScalarExpr *>(side);
+          scalar != nullptr && scalar->isString()) {
+        lower::refuse(lower::textArithmeticMessage(expr.verb()));
+      }
+    }
+  }
 
   if (expr.hasCustomVerb()) {
     const AstNode *custom = expr.customVerb().get();
@@ -1075,15 +1117,7 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
 
   const auto scalarVerb = lower::scalarDyadicVerb(expr.verb());
   if (!scalarVerb) lower::refuse(lower::msg::dyadicUnsupported);
-  const OpcodeKind kind    = scalarVerb->opcode;
-  const std::string_view l = scalarVerb->label;
-
-  CellRef op = emitOp(kind, l);
-  if (lCell) emitInput(op, *lCell);
-  if (rCell) emitInput(op, *rCell);
-  CellRef out = core_.arena().makeCell();
-  emitOutput(op, out);
-  return out;
+  return lower::emitScalarDyadic(ctx, expr.verb(), *scalarVerb, *lCell, *rCell);
 }
 
 CellRef VPLCompiler::compileAdverb(const AdverbExpr &expr) {
@@ -1128,8 +1162,10 @@ CompilationResult VPLCompiler::compile(const Program &program,
   varBindings_.clear();
   varAxes_.clear();
   varReversed_.clear();
+  varBounds_.clear();
   rankAxes_.clear();
   rankReversed_.clear();
+  rankBounds_.clear();
   rankDependencies_.clear();
   cellDependencies_.clear();
   assignedBindings_.clear();
@@ -1143,6 +1179,7 @@ CompilationResult VPLCompiler::compile(const Program &program,
   lastResultCells_.clear();
   lastResultAxes_.clear();
   lastResultReversed_.clear();
+  lastResultBounds_.clear();
   lastResultDependencies_.clear();
   optimize_ = options.optimize;
 
@@ -1188,6 +1225,12 @@ CompilationResult VPLCompiler::compile(const Program &program,
         rankReversed_[*cell] = binding.reversed();
         varReversed_[name]   = binding.reversed();
       }
+      // A stored bound is the bound cell itself, used as its own register as
+      // an origin is.
+      if (!binding.bounds().empty()) {
+        rankBounds_[*cell] = binding.bounds();
+        varBounds_[name]   = binding.bounds();
+      }
     }
     if (cell && binding.isEnclosed()) {
       enclosedCells_.insert(*cell);
@@ -1206,6 +1249,10 @@ CompilationResult VPLCompiler::compile(const Program &program,
       if (const auto flags = rankReversed_.find(*resultCell);
           flags != rankReversed_.end()) {
         lastResultReversed_ = flags->second;
+      }
+      if (const auto stops = rankBounds_.find(*resultCell);
+          stops != rankBounds_.end()) {
+        lastResultBounds_ = stops->second;
       }
       lastResultDependencies_ = rankDependenciesOf(*resultCell);
       recordResultFacts(*resultCell);
@@ -1241,6 +1288,7 @@ CompilationResult VPLCompiler::compile(const Program &program,
         .resultSlots           = lastResultCells_,
         .resultAxes            = lastResultAxes_,
         .resultReversed        = lastResultReversed_,
+        .resultBounds          = lastResultBounds_,
         .resultDependencies    = lastResultDependencies_,
         .cellDependencies      = cellDependencies_,
         .assignedBindings      = assignedBindings_,

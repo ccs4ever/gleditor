@@ -54,14 +54,6 @@ struct Side {
   bool reversed;
 };
 
-// Where and how a side's walk runs: from the origin, or from the far end back
-// to the origin when reversed (the stop is the origin, as walkAxis does).
-struct Walk {
-  CellRef anchor;
-  DimVector direction;
-  std::optional<CellRef> stop;
-};
-
 void refuseOperandKind(LowerContext &ctx, CellRef cell) {
   if (ctx.dimensionValuesOf(cell) != nullptr) refuse(kDimension);
   if (ctx.isEnclosed(cell)) refuse(kEnclosed);
@@ -74,11 +66,8 @@ Side rankSide(LowerContext &ctx, CellRef cell) {
   return Side{cell, axes->front(), ctx.isReversed(cell, 0)};
 }
 
-Walk walkOf(LowerContext &ctx, const Side &side) {
-  if (!side.reversed) return Walk{side.origin, side.axis.dir, std::nullopt};
-  const auto far = emit::extreme(ctx, side.origin, side.axis.dim, side.axis.dir,
-                                 std::nullopt);
-  return Walk{far, -side.axis.dir, side.origin};
+AxisWalk walkOf(LowerContext &ctx, const Side &side) {
+  return axisWalkOf(ctx, side.origin, side.axis, 0);
 }
 
 CellRef finishRank(LowerContext &ctx, CellRef first, DimRef dimension,
@@ -88,42 +77,32 @@ CellRef finishRank(LowerContext &ctx, CellRef first, DimRef dimension,
   return first;
 }
 
-CellRef emitBinary(LowerContext &ctx, const ScalarVerb &verb, CellRef left,
-                   CellRef right) {
-  const auto op = ctx.emitOp(verb.opcode, verb.label);
-  ctx.emitInput(op, left);
-  ctx.emitInput(op, right);
-  const auto out = ctx.core().arena().makeCell();
-  ctx.emitOutput(op, out);
-  return out;
-}
-
 CellRef emitUnary(LowerContext &ctx, TokenKind verb, CellRef item) {
   const auto out = ctx.core().arena().makeCell();
   switch (verb) {
   case TokenKind::Minus:
   case TokenKind::Magnitude:
   case TokenKind::Not: {
-    const bool negate = verb == TokenKind::Minus;
-    const bool absval = verb == TokenKind::Magnitude;
-    const auto op     = ctx.emitOp(negate   ? OpcodeKind::Neg
-                                   : absval ? OpcodeKind::Abs
-                                            : OpcodeKind::Not,
-                               negate   ? "#NEG"
-                                   : absval ? "#ABS"
-                                            : "#NOT");
+    OpcodeKind opcode      = OpcodeKind::Not;
+    std::string_view label = "#NOT";
+    if (verb == TokenKind::Minus) {
+      opcode = OpcodeKind::Neg;
+      label  = "#NEG";
+    } else if (verb == TokenKind::Magnitude) {
+      opcode = OpcodeKind::Abs;
+      label  = "#ABS";
+    }
+    if (verb != TokenKind::Not) {
+      assertNumeric(ctx, item, "#UNARY_NUMBER", textArithmeticMessage(verb));
+    }
+    const auto op = ctx.emitOp(opcode, label);
     ctx.emitInput(op, item);
     ctx.emitOutput(op, out);
     return out;
   }
-  case TokenKind::Divide: {
-    // The reciprocal is 1.0 / x, as the scalar path writes it.
-    const auto op = ctx.emitOp(OpcodeKind::Div, "#RECIPROCAL");
-    ctx.emitInputConstant(op, 1.0);
-    ctx.emitInput(op, item);
-    ctx.emitOutput(op, out);
-    return out;
-  }
+  case TokenKind::Divide:
+    assertNumeric(ctx, item, "#UNARY_NUMBER", textArithmeticMessage(verb));
+    return emitReciprocal(ctx, item);
   default:
     refuse(msg::monadicOnRank);
   }
@@ -218,7 +197,7 @@ CellRef lowerDyadicArithmeticOnRank(LowerContext &ctx, const DyadicExpr &expr,
     const auto left  = rankSide(ctx, lCell);
     const auto right = rankSide(ctx, rCell);
     const auto first = zipRanks(ctx, left, right, [&](CellRef a, CellRef b) {
-      return emitBinary(ctx, *verb, a, b);
+      return emitScalarDyadic(ctx, expr.verb(), *verb, a, b);
     });
     return finishRank(ctx, first, left.axis.dim, inputs);
   }
@@ -226,14 +205,14 @@ CellRef lowerDyadicArithmeticOnRank(LowerContext &ctx, const DyadicExpr &expr,
     const auto left = rankSide(ctx, lCell);
     const auto first =
         mapRank(ctx, left, rCell, [&](CellRef item, std::optional<CellRef> s) {
-          return emitBinary(ctx, *verb, item, *s);
+          return emitScalarDyadic(ctx, expr.verb(), *verb, item, *s);
         });
     return finishRank(ctx, first, left.axis.dim, inputs);
   }
   const auto right = rankSide(ctx, rCell);
   const auto first =
       mapRank(ctx, right, lCell, [&](CellRef item, std::optional<CellRef> s) {
-        return emitBinary(ctx, *verb, *s, item);
+        return emitScalarDyadic(ctx, expr.verb(), *verb, *s, item);
       });
   return finishRank(ctx, first, right.axis.dim, inputs);
 }

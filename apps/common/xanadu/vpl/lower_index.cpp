@@ -41,6 +41,7 @@ constexpr std::string_view kIndexMultiDim =
     "VPL multi-dimensional indexing is unsupported by the VM";
 constexpr std::string_view kIndexNegativeLiteral =
     "VPL indexing with a negative index is a DOMAIN ERROR";
+constexpr std::string_view kIndexOutOfRange = "VPL index out of range";
 constexpr std::string_view kIndexNonIntegerLiteral =
     "VPL indexing with a non-integer index is a DOMAIN ERROR";
 
@@ -95,12 +96,11 @@ Maybe lowerGradeMonadic(LowerContext &ctx, const MonadicExpr &expr,
       (axes && !axes->empty())
           ? axes->front()
           : DirectedDim{ctx.core().dims().step, DimVector::POS};
-  const bool reversed = ctx.isReversed(rCell, 0);
 
   const auto dResult = ctx.core().findOrMintDimension("d.1");
   const auto result  = beginResult(ctx, dResult);
 
-  emit::walkAxis(ctx, rCell, axis.dim, axis.dir, reversed, [&](CellRef) {
+  walkView(ctx, rCell, axis, [&](CellRef) {
     static_cast<void>(
         emit::mintAfter(ctx, result.tail, dResult, DimVector::POS));
   });
@@ -109,54 +109,49 @@ Maybe lowerGradeMonadic(LowerContext &ctx, const MonadicExpr &expr,
   const auto iCell = ctx.core().arena().makeCell();
   zero(ctx, iCell, "#GRADE_I_ZERO");
 
-  emit::walkAxis(ctx, rCell, axis.dim, axis.dir, reversed, [&](CellRef iItem) {
+  walkView(ctx, rCell, axis, [&](CellRef iItem) {
     const auto posCell = ctx.core().arena().makeCell();
     zero(ctx, posCell, "#GRADE_POS_ZERO");
 
     const auto jCell = ctx.core().arena().makeCell();
     zero(ctx, jCell, "#GRADE_J_ZERO");
 
-    emit::walkAxis(
-        ctx, rCell, axis.dim, axis.dir, reversed, [&](CellRef jItem) {
-          const auto cmpOp = ctx.emitOp(
-              isDown ? OpcodeKind::Gt : OpcodeKind::Lt, "#GRADE_CMP");
-          ctx.emitInput(cmpOp, jItem);
-          ctx.emitInput(cmpOp, iItem);
-          const auto cmpVal = ctx.core().arena().makeCell();
-          ctx.emitOutput(cmpOp, cmpVal);
+    walkView(ctx, rCell, axis, [&](CellRef jItem) {
+      const auto cmpOp =
+          ctx.emitOp(isDown ? OpcodeKind::Gt : OpcodeKind::Lt, "#GRADE_CMP");
+      ctx.emitInput(cmpOp, jItem);
+      ctx.emitInput(cmpOp, iItem);
+      const auto cmpVal = ctx.core().arena().makeCell();
+      ctx.emitOutput(cmpOp, cmpVal);
 
-          const auto eqOp = ctx.emitOp(OpcodeKind::Eq, "#GRADE_EQ");
-          ctx.emitInput(eqOp, jItem);
-          ctx.emitInput(eqOp, iItem);
-          const auto eqVal = ctx.core().arena().makeCell();
-          ctx.emitOutput(eqOp, eqVal);
+      // Equal by value: the int 2 and the double 2.0 tie.
+      const auto eqVal = emitEquals(ctx, jItem, iItem);
 
-          const auto tieOp = ctx.emitOp(OpcodeKind::Lt, "#GRADE_TIE");
-          ctx.emitInput(tieOp, jCell);
-          ctx.emitInput(tieOp, iCell);
-          const auto tieVal = ctx.core().arena().makeCell();
-          ctx.emitOutput(tieOp, tieVal);
+      const auto tieOp = ctx.emitOp(OpcodeKind::Lt, "#GRADE_TIE");
+      ctx.emitInput(tieOp, jCell);
+      ctx.emitInput(tieOp, iCell);
+      const auto tieVal = ctx.core().arena().makeCell();
+      ctx.emitOutput(tieOp, tieVal);
 
-          const auto tieBreakOp =
-              ctx.emitOp(OpcodeKind::And, "#GRADE_TIE_BREAK");
-          ctx.emitInput(tieBreakOp, eqVal);
-          ctx.emitInput(tieBreakOp, tieVal);
-          const auto tieBreakVal = ctx.core().arena().makeCell();
-          ctx.emitOutput(tieBreakOp, tieBreakVal);
+      const auto tieBreakOp = ctx.emitOp(OpcodeKind::And, "#GRADE_TIE_BREAK");
+      ctx.emitInput(tieBreakOp, eqVal);
+      ctx.emitInput(tieBreakOp, tieVal);
+      const auto tieBreakVal = ctx.core().arena().makeCell();
+      ctx.emitOutput(tieBreakOp, tieBreakVal);
 
-          const auto advanceOp = ctx.emitOp(OpcodeKind::Or, "#GRADE_ADVANCE");
-          ctx.emitInput(advanceOp, cmpVal);
-          ctx.emitInput(advanceOp, tieBreakVal);
-          const auto advanceVal = ctx.core().arena().makeCell();
-          ctx.emitOutput(advanceOp, advanceVal);
+      const auto advanceOp = ctx.emitOp(OpcodeKind::Or, "#GRADE_ADVANCE");
+      ctx.emitInput(advanceOp, cmpVal);
+      ctx.emitInput(advanceOp, tieBreakVal);
+      const auto advanceVal = ctx.core().arena().makeCell();
+      ctx.emitOutput(advanceOp, advanceVal);
 
-          const auto addOp = ctx.emitOp(OpcodeKind::Add, "#GRADE_POS_ADD");
-          ctx.emitInput(addOp, posCell);
-          ctx.emitInput(addOp, advanceVal);
-          ctx.emitOutput(addOp, posCell);
+      const auto addOp = ctx.emitOp(OpcodeKind::Add, "#GRADE_POS_ADD");
+      ctx.emitInput(addOp, posCell);
+      ctx.emitInput(addOp, advanceVal);
+      ctx.emitOutput(addOp, posCell);
 
-          increment(ctx, jCell, "#GRADE_J_INC");
-        });
+      increment(ctx, jCell, "#GRADE_J_INC");
+    });
 
     const auto targetCell =
         hop(ctx, firstResult, posCell, dResult, DimVector::POS);
@@ -184,7 +179,6 @@ Maybe lowerWhereMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
       (axes && !axes->empty())
           ? axes->front()
           : DirectedDim{ctx.core().dims().step, DimVector::POS};
-  const bool reversed = ctx.isReversed(rCell, 0);
 
   const auto dResult = ctx.core().findOrMintDimension("d.1");
   const auto result  = beginResult(ctx, dResult);
@@ -192,7 +186,7 @@ Maybe lowerWhereMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
   const auto iCell = ctx.core().arena().makeCell();
   zero(ctx, iCell, "#WHERE_I_ZERO");
 
-  emit::walkAxis(ctx, rCell, axis.dim, axis.dir, reversed, [&](CellRef item) {
+  walkView(ctx, rCell, axis, [&](CellRef item) {
     const auto neqOp = ctx.emitOp(OpcodeKind::Neq, "#WHERE_NEQ");
     ctx.emitInput(neqOp, item);
     ctx.emitInputConstant(neqOp, std::int64_t{0});
@@ -285,17 +279,19 @@ Maybe lowerIndexing(LowerContext &ctx, const IndexingExpr &expr) {
   assertNotNegative(ctx, *indexCell, "#INDEX_NONNEGATIVE",
                     "VPL index out of range: negative index");
 
-  const auto axis     = axes->front();
-  const bool reversed = ctx.isReversed(*target, 0);
-  CellRef anchor      = *target;
-  DimVector dir       = axis.dir;
-  if (reversed) {
-    anchor = emit::extreme(ctx, *target, axis.dim, axis.dir, std::nullopt);
-    dir    = -axis.dir;
-  }
+  const auto walk = axisWalkOf(ctx, *target);
+  // The cell at a position is found by a walk that stops at the view's bound,
+  // and a position the walk does not reach fails by name: a hop would run on
+  // past a bound, and past the rank's end it would answer an absent cell that
+  // reads as 0.
+  const auto at = [&](CellRef position) {
+    const auto found = nthCell(ctx, walk, position);
+    assertCell(ctx, found.found, "#INDEX_IN_RANGE", kIndexOutOfRange);
+    return found.cell;
+  };
 
   if (!ctx.isRank(*indexCell)) {
-    const auto cell = hop(ctx, anchor, *indexCell, axis.dim, dir);
+    const auto cell = at(*indexCell);
     ctx.rankAxes().erase(cell);
     ctx.cellDependencies()[cell] = ctx.rankDependenciesOf(*target);
     emit::mergeRankInputDependencies(ctx, cell,
@@ -309,15 +305,13 @@ Maybe lowerIndexing(LowerContext &ctx, const IndexingExpr &expr) {
   const auto *idxAxes = ctx.axesOf(*indexCell);
   const auto idxAxis =
       idxAxes ? idxAxes->front() : DirectedDim{dResult, DimVector::POS};
-  const bool idxReversed = ctx.isReversed(*indexCell, 0);
 
-  emit::walkAxis(
-      ctx, *indexCell, idxAxis.dim, idxAxis.dir, idxReversed, [&](CellRef idx) {
-        const auto item = hop(ctx, anchor, idx, axis.dim, dir);
-        const auto fresh =
-            emit::mintAfter(ctx, result.tail, dResult, DimVector::POS);
-        emit::copyValue(ctx, item, fresh);
-      });
+  walkView(ctx, *indexCell, idxAxis, [&](CellRef idx) {
+    const auto item = at(idx);
+    const auto fresh =
+        emit::mintAfter(ctx, result.tail, dResult, DimVector::POS);
+    emit::copyValue(ctx, item, fresh);
+  });
 
   const auto firstResult      = endResult(ctx, result);
   ctx.rankAxes()[firstResult] = {DirectedDim{dResult, DimVector::POS}};
