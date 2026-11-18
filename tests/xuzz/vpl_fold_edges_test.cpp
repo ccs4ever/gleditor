@@ -123,5 +123,30 @@ TEST_F(VplFoldEdgesTest, EmptyLiteralVectorAgreesWithTheRuntimePath) {
   EXPECT_THROW(engine.evaluate(reduce(TokenKind::Floor)), std::exception);
 }
 
+TEST_F(VplFoldEdgesTest, FoldsReadAnAxisThatRunsNegward) {
+  // A rank whose natural walk is negward (a stored slice can have one): the
+  // folds must follow the axis direction, not assume posward.
+  const auto dimension = engine.resolveDimension("d.1");
+  std::vector<zigzag::CellRef> cells;
+  for (const std::int64_t value : {7, 8, 9}) {
+    const auto cell = engine.arena().makeCell();
+    engine.core().writeValue(cell, 0, std::nullopt, value);
+    cells.push_back(cell);
+  }
+  for (std::size_t i = 0; i + 1 < cells.size(); ++i) {
+    zigzag::expectWritten(engine.arena().link(
+        cells[i], dimension, zigzag::DimVector::NEG, cells[i + 1]));
+  }
+  engine.setVariable(
+      "N", VplView{cells.front(), {{dimension, zigzag::DimVector::NEG}}});
+  EXPECT_EQ(values("+/N"), (Values{24}));
+  EXPECT_EQ(values("⌈/N"), (Values{9}));
+  EXPECT_EQ(values("≢N"), (Values{3}));
+  EXPECT_EQ(values("+\\N"), (Values{7, 15, 24}));
+  EXPECT_EQ(values("+/ 1 ↓ N"), (Values{17}));
+  EXPECT_EQ(values("⌽N"), (Values{9, 8, 7}));
+  EXPECT_EQ(values("+\\⌽N"), (Values{9, 17, 24}));
+}
+
 } // namespace
 } // namespace xanadu::vpl

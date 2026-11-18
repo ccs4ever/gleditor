@@ -97,5 +97,13 @@ TEST_F(VplDropCountsTest, ANegativeCountIsStillRefused) {
   EXPECT_FALSE(refusal("A ← 5⍳d.1; n ← 0-1; n ↓ A").empty());
 }
 
+TEST_F(VplDropCountsTest, AScalarOrARankCountOrOperandIsRefusedByName) {
+  expectRefused("3 ↓ 4", "drop of a scalar", ExecutionError::Stage::Compile);
+  expectRefused("A ← 5⍳d.1; 1 2 ↓ A", "rank as its count",
+                ExecutionError::Stage::Compile);
+  expectRefused("A ← 5⍳d.1; d.1 ↓ A", "dimension value as its count",
+                ExecutionError::Stage::Compile);
+}
+
 } // namespace
 } // namespace xanadu::vpl
