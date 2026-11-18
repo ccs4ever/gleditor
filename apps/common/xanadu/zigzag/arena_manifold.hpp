@@ -644,6 +644,27 @@ public:
     return shadowOrder_;
   }
 
+  /**
+   * @brief Whether any cell that existed when @p older was taken has been
+   *        written since @p since (by default, since @p older itself): a
+   *        link, a content run, a value, or a base cell shadowed.
+   *
+   * release(older) undoes exactly those writes, so a caller that would release
+   * a run it wants to keep the effects of asks this first. Cells minted under
+   * the mark do not count: truncation removes them. A write that restored the
+   * old value still counts, because the trail records writes, not changes.
+   *
+   * @p since is a later, still-outstanding or just-discarded mark taken
+   * inside @p older, for a caller whose own set-up writes older cells on
+   * purpose and only the writes after it are in question. It must be a mark
+   * taken after the set-up, because a cell already copied out under one mark
+   * is not trailed again under it. Answers about a mark that was released are
+   * unspecified.
+   */
+  [[nodiscard]] bool wroteOlderCellSince(
+      const Mark &older,
+      const std::optional<Mark> &since = std::nullopt) const noexcept;
+
   // -- read path: the same questions Manifold answers ------------------------
 
   /// The dense id for @p ref, or nullopt. Arithmetic, not a lookup: an arena

@@ -204,13 +204,11 @@ TEST(VQLHistoryVmTest, InterpreterPinCacheDropsAnIdAReleaseFreed) {
                            : std::vector<zigzag::CellRef>{};
   };
   auto &arena = fixture.coordinator.arena();
-  // Rolled back, as a failed compile's transaction would: the cache entry the
-  // pin made names a space that is gone.
-  const auto mark = arena.mark();
-  (void)pinned(fixture.cellVersion);
+  // A query run releases its program's cells, pinned history spaces included,
+  // so the cache entry the pin made names a space that is already gone.
   const auto attached = arena.spaceCount();
-  EXPECT_TRUE(arena.release(mark));
-  ASSERT_LT(arena.spaceCount(), attached);
+  (void)pinned(fixture.cellVersion);
+  ASSERT_EQ(arena.spaceCount(), attached);
   // The freed id is reused by the other fold ...
   EXPECT_EQ(pinned(fixture.linkedVersion).size(), 1U);
   // ... and the first fold, asked again, is folded afresh rather than

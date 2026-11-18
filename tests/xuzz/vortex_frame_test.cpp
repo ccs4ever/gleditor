@@ -498,13 +498,16 @@ TEST(VortexFrameTest, InPlaceIdentityPreservesScalarPayload) {
                                                    .resultPorts = {argument}});
   ASSERT_TRUE(descriptor);
   h.core.bindInput(ret, *descriptor);
-  const auto scalar    = h.arena.makeScalarCell(std::int64_t{95});
+  // Any payload beyond the opcode ceiling: a scalar below it reads as an
+  // opcode kind, which a result destination may not be.
+  constexpr std::int64_t payload{1000};
+  const auto scalar    = h.arena.makeScalarCell(payload);
   const auto call      = h.invoke(*descriptor, scalar, scalar);
   const auto cursor    = h.entry(call);
   const auto execution = h.vm.run(cursor, 20);
   ASSERT_TRUE(execution.success) << execution.errorMessage;
   EXPECT_EQ(h.vm.resultCell(cursor, scalar), scalar);
-  EXPECT_EQ(h.arena.asInt64(scalar), std::optional{std::int64_t{95}});
+  EXPECT_EQ(h.arena.asInt64(scalar), std::optional{payload});
 }
 
 TEST(VortexFrameTest, FrameCannotHaltOrFallOffWithoutReturning) {

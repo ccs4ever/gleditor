@@ -91,7 +91,7 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
     return arena.makeScalarCell(value);
   };
   binds.validate.linkedCeiling =
-      mintInt(static_cast<std::int64_t>(OpcodeKind::GroupNext));
+      mintInt(static_cast<std::int64_t>(OpcodeKind::ProjectTopology));
   binds.validate.arityTable  = arena.makeCell();
   binds.validate.impureKinds = arena.makeCell();
 
@@ -148,7 +148,7 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       {static_cast<std::int64_t>(OpcodeKind::ChoiceDepth), 0, 1},
       {static_cast<std::int64_t>(OpcodeKind::Halt), 0, 0},
       {static_cast<std::int64_t>(OpcodeKind::Nop), 0, 0},
-      // The ceiling scalar above is GroupNext, the enum's last ordinal.
+      // The ceiling scalar above is ProjectTopology, the enum's last ordinal.
       // Host-state operations and closure operations remain absent from this
       // table; a kind absent here makes validation refuse it by name.
       {static_cast<std::int64_t>(OpcodeKind::Find), 2, 1},
@@ -316,7 +316,7 @@ bool MetaRuntime::isOpCell(CellRef cell) const {
   const auto ceiling =
       arena()
           .asInt64(binds_.validate.linkedCeiling)
-          .value_or(static_cast<std::int64_t>(OpcodeKind::GroupNext));
+          .value_or(static_cast<std::int64_t>(OpcodeKind::ProjectTopology));
   return *ordinal >= 0 && *ordinal <= ceiling;
 }
 
@@ -500,7 +500,7 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
 
   const auto ceiling =
       arena.asInt64(binds_.validate.linkedCeiling)
-          .value_or(static_cast<std::int64_t>(OpcodeKind::GroupNext));
+          .value_or(static_cast<std::int64_t>(OpcodeKind::ProjectTopology));
   if (!isOpCell(root)) return {false, "validate: root is not an op cell"};
 
   // Decode the bound arity table: `(op, in, out)` triples on `+d.step`.
@@ -554,7 +554,7 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
 
     const auto ordinal = arena.asInt64(op);
     if (!ordinal || *ordinal < 0 || *ordinal > ceiling)
-      return {false, "validate: op int64 outside [0, GroupNext]"};
+      return {false, "validate: op int64 outside [0, ProjectTopology]"};
     const auto shape = arity.find(*ordinal);
     if (shape == arity.end())
       return {false, "validate: op kind absent from the arity table"};

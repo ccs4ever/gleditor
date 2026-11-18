@@ -51,6 +51,14 @@ public:
   [[nodiscard]] std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
   execute(const QueryExpression &query,
           const std::vector<zigzag::CellRef> &contextCells = {});
+  /// Why the last run left its program's cells in the arena, when it did: the
+  /// result shape that could not be copied out exactly, by name. Empty when the
+  /// program was released and the arena is as it was before the run.
+  [[nodiscard]] const std::optional<std::string> &
+  programRetainedBecause() const noexcept {
+    return programRetained_;
+  }
+
   [[nodiscard]] std::string_view disassembly() const noexcept {
     return disassembly_;
   }
@@ -67,6 +75,7 @@ private:
   zigzag::vortex::VortexVM &vm_;
   QueryExecutionOptions options_;
   std::string disassembly_;
+  std::optional<std::string> programRetained_;
 };
 
 } // namespace xanadu::vql

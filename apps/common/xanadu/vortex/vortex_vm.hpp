@@ -210,6 +210,12 @@ enum class OpcodeKind : std::uint8_t {
   // Read one member group from a GroupBegin iterator. Appended to preserve
   // persisted opcode-kind integers.
   GroupNext,
+
+  // Copy the sub-graph reachable from a cell stream along selected edges into
+  // fresh ephemeral cells that share the source's content spans and quote
+  // bindings and link only to each other (VQL `project`). Appended to
+  // preserve persisted opcode-kind integers.
+  ProjectTopology,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.
