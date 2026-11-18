@@ -2425,6 +2425,27 @@ void ArenaManifold::trail(const std::uint32_t dense) {
   }
 }
 
+bool ArenaManifold::wroteOlderCellSince(
+    const Mark &older, const std::optional<Mark> &since) const noexcept {
+  const Mark &from = since.value_or(older);
+  // A base cell is shadowed only to be written, and its shadow is minted above
+  // the mark, where trail() deliberately records nothing.
+  if (shadowOrder_.size() > from.shadowCount) return true;
+  const auto written = std::span{trail_}.subspan(
+      std::min<std::size_t>(from.trailSize, trail_.size()));
+  // A shadow slot sits above every mark taken before it, but it stands for a
+  // base cell that predates them all, so a write to one counts.
+  const auto isShadowSlot = [&](const std::uint32_t dense) {
+    return std::ranges::any_of(shadowOrder_, [&](const CellRef base) {
+      const auto found = overlay_.find(base);
+      return found != overlay_.end() && found->second == dense;
+    });
+  };
+  return std::ranges::any_of(written, [&](const TrailEntry &entry) {
+    return entry.dense < older.cellCount || isShadowSlot(entry.dense);
+  });
+}
+
 Mark ArenaManifold::mark() {
   Mark taken{
       .cellCount   = static_cast<std::uint32_t>(slots_.size()),

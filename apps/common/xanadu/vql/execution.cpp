@@ -32,36 +32,6 @@ template <typename Action> struct RestoreScope {
   ~RestoreScope() { action(); }
 };
 
-/// The name of the first opcode in @p ops that can write a cell the program
-/// did not mint, if any.
-std::optional<std::string>
-firstWritingOpcode(const zigzag::vortex::VortexVM &vm,
-                   std::span<const zigzag::CellRef> ops) {
-  using zigzag::vortex::OpcodeKind;
-  for (const auto op : ops) {
-    const auto kind = vm.getOpcodeKind(op);
-    if (!kind) continue;
-    switch (*kind) {
-    case OpcodeKind::Link:
-    case OpcodeKind::Break:
-    case OpcodeKind::New:
-    case OpcodeKind::Value:
-    case OpcodeKind::Splice:
-    case OpcodeKind::Clone:
-    case OpcodeKind::FieldSet:
-    case OpcodeKind::VqlMaskLinks:
-    case OpcodeKind::BeginMutationGroup:
-    // Names a dimension at run time, minting it when asked to; a minted
-    // dimension is session state the arena would un-name on release.
-    case OpcodeKind::DimByName:
-      return std::to_string(static_cast<unsigned>(*kind));
-    default:
-      break;
-    }
-  }
-  return std::nullopt;
-}
-
 /// One query run's claim on the arena: everything minted from construction on
 /// is the program's, and is released unless settle() carries results out.
 class ProgramArea {
@@ -73,20 +43,22 @@ public:
 
   explicit ProgramArea(zigzag::vortex::VortexVM &vm)
       : vm_(vm), mark_(vm.core().arena().mark()),
-        dimensionsBefore_(vm.core().arena().dimensions().size()),
-        directoryTailBefore_(directoryTail(vm)) {}
+        dimensionsBefore_(vm.core().arena().dimensions().size()) {}
 
-  /// The program's opcode cells, once compiled.
-  void setProgram(std::span<const zigzag::CellRef> ops) {
-    programOps_.assign(ops.begin(), ops.end());
-  }
+  /// The program is compiled and attached to home; what the run writes from
+  /// here is the run's. Attaching it wrote home (a +d.spin entry and a cursor
+  /// on +d.cursors), which release() rightly undoes, so that write must not
+  /// count as the run's own: a second mark gives the arena a point after it
+  /// to ask from, and it is discarded before the first is released.
+  void beginRun() { runMark_ = vm_.core().arena().mark(); }
+
   ProgramArea(const ProgramArea &)            = delete;
   ProgramArea &operator=(const ProgramArea &) = delete;
   ~ProgramArea() {
     if (settled_) return;
     // A run that fails after a committed mutation keeps that mutation, as it
     // did before: release() would undo it.
-    if (mintedDimensions() || firstWritingOpcode(vm_, programOps_))
+    if (mintedDimensions() || wroteOlderCell())
       retain();
     else
       release();
@@ -98,28 +70,26 @@ public:
   std::optional<RetainedProgram>
   settle(std::vector<zigzag::CellRef> &cells,
          std::span<std::vector<zigzag::CellRef> *const> alsoLive) {
-    // release() also undoes every write the run made to a cell older than the
-    // mark, which is a mutation's intended effect (a sort, an apply_shape, a
-    // weave). The arena cannot say which older cells were written, so a
-    // program containing any writing opcode is kept whole.
     // A dimension the run named is a name the session keeps: release() would
-    // un-name it while later queries still resolve it.
+    // un-name it while later queries still resolve it. The arena records
+    // writes, not names, so this is the one question it cannot answer.
     if (mintedDimensions()) {
       retain();
-      return RetainedProgram{"the run minted a dimension or wrote a base cell"};
+      return RetainedProgram{"the run named a dimension the session keeps"};
     }
-    if (const auto writer = firstWritingOpcode(vm_, programOps_)) {
+    // release() undoes every write the run made to a cell older than the
+    // mark, which is a mutation's intended effect (a sort, an apply_shape, a
+    // weave). The arena says exactly whether there was one.
+    if (wroteOlderCell()) {
       retain();
-      return RetainedProgram{std::string{"the program writes cells (opcode "} +
-                             *writer + ")"};
+      return RetainedProgram{"the run writes cells that existed before it"};
     }
     std::vector<zigzag::CellRef> live{cells};
     for (const auto *extra : alsoLive)
       live.insert(live.end(), extra->begin(), extra->end());
     auto captured = zigzag::CopyOut::capture(vm_.core().arena(), mark_, live);
     if (!captured) {
-      settled_ = true;
-      zigzag::expectMarkOrder(vm_.core().arena().discard(mark_));
+      retain();
       return RetainedProgram{zigzag::toString(captured.error())};
     }
     release();
@@ -132,35 +102,37 @@ public:
   /// Keep the program: some published state names its cells.
   void retain() {
     settled_ = true;
+    endRun();
     zigzag::expectMarkOrder(vm_.core().arena().discard(mark_));
   }
 
 private:
-  /// The dimension directory's last entry: minting a dimension appends to it,
-  /// which writes a cell older than the mark.
-  static zigzag::CellRef directoryTail(zigzag::vortex::VortexVM &vm) {
-    const auto dims = vm.core().dims().dims;
-    return zigzag::rankTail(vm.core().arena(), dims, dims);
+  [[nodiscard]] bool mintedDimensions() const {
+    return vm_.core().arena().dimensions().size() != dimensionsBefore_;
   }
 
-  [[nodiscard]] bool mintedDimensions() const {
-    const auto &arena = vm_.core().arena();
-    return arena.dimensions().size() != dimensionsBefore_ ||
-           directoryTail(vm_) != directoryTailBefore_ ||
-           arena.shadowCount() > mark_.shadowCount;
+  [[nodiscard]] bool wroteOlderCell() const {
+    if (!runMark_) return false;
+    return vm_.core().arena().wroteOlderCellSince(mark_, runMark_);
+  }
+
+  void endRun() {
+    if (!runMark_) return;
+    zigzag::expectMarkOrder(vm_.core().arena().discard(*runMark_));
+    runMark_.reset();
   }
 
   void release() {
     settled_ = true;
+    endRun();
     zigzag::expectMarkOrder(vm_.core().arena().release(mark_));
     vm_.pruneAssemblyState();
   }
 
   zigzag::vortex::VortexVM &vm_;
   zigzag::Mark mark_;
+  std::optional<zigzag::Mark> runMark_;
   std::size_t dimensionsBefore_;
-  zigzag::CellRef directoryTailBefore_;
-  std::vector<zigzag::CellRef> programOps_;
   bool settled_{false};
 };
 
@@ -353,7 +325,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       });
     }
     const auto cursor = *result.cursor;
-    area.setProgram(result.generatedOpcodes);
+    area.beginRun();
 
     std::vector<zigzag::CellRef> cells;
     ContractBindings published;
