@@ -9,6 +9,7 @@
 #include <iterator>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -19,6 +20,9 @@
 #include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
+#include "common/xanadu/zigzag/arena_copy_out.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
+#include <gleditor/logging.hpp>
 
 namespace xanadu::vql {
 namespace {
@@ -26,6 +30,138 @@ namespace {
 template <typename Action> struct RestoreScope {
   Action action;
   ~RestoreScope() { action(); }
+};
+
+/// The name of the first opcode in @p ops that can write a cell the program
+/// did not mint, if any.
+std::optional<std::string>
+firstWritingOpcode(const zigzag::vortex::VortexVM &vm,
+                   std::span<const zigzag::CellRef> ops) {
+  using zigzag::vortex::OpcodeKind;
+  for (const auto op : ops) {
+    const auto kind = vm.getOpcodeKind(op);
+    if (!kind) continue;
+    switch (*kind) {
+    case OpcodeKind::Link:
+    case OpcodeKind::Break:
+    case OpcodeKind::New:
+    case OpcodeKind::Value:
+    case OpcodeKind::Splice:
+    case OpcodeKind::Clone:
+    case OpcodeKind::FieldSet:
+    case OpcodeKind::VqlMaskLinks:
+    case OpcodeKind::BeginMutationGroup:
+    // Names a dimension at run time, minting it when asked to; a minted
+    // dimension is session state the arena would un-name on release.
+    case OpcodeKind::DimByName:
+      return std::to_string(static_cast<unsigned>(*kind));
+    default:
+      break;
+    }
+  }
+  return std::nullopt;
+}
+
+/// One query run's claim on the arena: everything minted from construction on
+/// is the program's, and is released unless settle() carries results out.
+class ProgramArea {
+public:
+  /// Why the program's cells were kept, by name.
+  struct RetainedProgram {
+    std::string because;
+  };
+
+  explicit ProgramArea(zigzag::vortex::VortexVM &vm)
+      : vm_(vm), mark_(vm.core().arena().mark()),
+        dimensionsBefore_(vm.core().arena().dimensions().size()),
+        directoryTailBefore_(directoryTail(vm)) {}
+
+  /// The program's opcode cells, once compiled.
+  void setProgram(std::span<const zigzag::CellRef> ops) {
+    programOps_.assign(ops.begin(), ops.end());
+  }
+  ProgramArea(const ProgramArea &)            = delete;
+  ProgramArea &operator=(const ProgramArea &) = delete;
+  ~ProgramArea() {
+    if (settled_) return;
+    // A run that fails after a committed mutation keeps that mutation, as it
+    // did before: release() would undo it.
+    if (mintedDimensions() || firstWritingOpcode(vm_, programOps_))
+      retain();
+    else
+      release();
+  }
+
+  /// Release the program, then re-mint the results it minted. A shape that
+  /// cannot be copied exactly keeps the whole program instead -- the arena is
+  /// then as it was before this existed -- and the refusal is returned.
+  std::optional<RetainedProgram>
+  settle(std::vector<zigzag::CellRef> &cells,
+         std::span<std::vector<zigzag::CellRef> *const> alsoLive) {
+    // release() also undoes every write the run made to a cell older than the
+    // mark, which is a mutation's intended effect (a sort, an apply_shape, a
+    // weave). The arena cannot say which older cells were written, so a
+    // program containing any writing opcode is kept whole.
+    // A dimension the run named is a name the session keeps: release() would
+    // un-name it while later queries still resolve it.
+    if (mintedDimensions()) {
+      retain();
+      return RetainedProgram{"the run minted a dimension or wrote a base cell"};
+    }
+    if (const auto writer = firstWritingOpcode(vm_, programOps_)) {
+      retain();
+      return RetainedProgram{std::string{"the program writes cells (opcode "} +
+                             *writer + ")"};
+    }
+    std::vector<zigzag::CellRef> live{cells};
+    for (const auto *extra : alsoLive)
+      live.insert(live.end(), extra->begin(), extra->end());
+    auto captured = zigzag::CopyOut::capture(vm_.core().arena(), mark_, live);
+    if (!captured) {
+      settled_ = true;
+      zigzag::expectMarkOrder(vm_.core().arena().discard(mark_));
+      return RetainedProgram{zigzag::toString(captured.error())};
+    }
+    release();
+    const auto replacements = captured->materialize(vm_.core().arena());
+    zigzag::applyCopyOut(replacements, cells);
+    for (auto *extra : alsoLive) zigzag::applyCopyOut(replacements, *extra);
+    return std::nullopt;
+  }
+
+  /// Keep the program: some published state names its cells.
+  void retain() {
+    settled_ = true;
+    zigzag::expectMarkOrder(vm_.core().arena().discard(mark_));
+  }
+
+private:
+  /// The dimension directory's last entry: minting a dimension appends to it,
+  /// which writes a cell older than the mark.
+  static zigzag::CellRef directoryTail(zigzag::vortex::VortexVM &vm) {
+    const auto dims = vm.core().dims().dims;
+    return zigzag::rankTail(vm.core().arena(), dims, dims);
+  }
+
+  [[nodiscard]] bool mintedDimensions() const {
+    const auto &arena = vm_.core().arena();
+    return arena.dimensions().size() != dimensionsBefore_ ||
+           directoryTail(vm_) != directoryTailBefore_ ||
+           arena.shadowCount() > mark_.shadowCount;
+  }
+
+  void release() {
+    settled_ = true;
+    zigzag::expectMarkOrder(vm_.core().arena().release(mark_));
+    vm_.pruneAssemblyState();
+  }
+
+  zigzag::vortex::VortexVM &vm_;
+  zigzag::Mark mark_;
+  std::size_t dimensionsBefore_;
+  zigzag::CellRef directoryTailBefore_;
+  std::vector<zigzag::CellRef> programOps_;
+  bool settled_{false};
 };
 
 void validateSignatures(const QueryExpression &query) {
@@ -199,6 +335,8 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       publishMounts(session_, events);
       return std::vector<zigzag::CellRef>{};
     }
+    programRetained_.reset();
+    ProgramArea area(vm_);
     const auto result = compiler.compile(query, compilation);
     disassembly_      = result.disassembly;
     if (!result.success) {
@@ -215,51 +353,81 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       });
     }
     const auto cursor = *result.cursor;
-
-    // A frontend request has no resume handle. Keep raw VM stops resumable,
-    // but release this request's cursor on success, failure, or exception.
-    const RestoreScope finishRequest{[this, id = cursor] {
-      vm_.abortScopedChoices(id);
-      vm_.setCursorOpcode(id, std::nullopt);
-    }};
-    const auto execution = vm_.run(cursor, options_.maxCycles);
-    if (!execution.success) {
-      const auto category =
-          execution.contractViolation ==
-                  zigzag::vortex::ContractViolationKind::Postcondition
-              ? QueryExecutionError::Category::TypeContract
-              : (budgetFailure(execution.errorMessage)
-                     ? QueryExecutionError::Category::Budget
-                     : QueryExecutionError::Category::Runtime);
-      return std::unexpected(QueryExecutionError{
-          .category = category,
-          .message  = execution.errorMessage,
-      });
-    }
+    area.setProgram(result.generatedOpcodes);
 
     std::vector<zigzag::CellRef> cells;
-    for (const auto slot : result.resultSlots) {
-      const auto values = vm_.resultCells(slot);
-      cells.insert(cells.end(), values.begin(), values.end());
-    }
-    if (session_) {
-      ContractBindings published;
-      std::unordered_map<std::string, std::vector<PathStep>> functors;
-      publishMounts(session_, result.sessionBindings);
-      for (const auto &binding : result.sessionBindings) {
-        using Kind = CompilationResult::SessionBinding::Kind;
-        if (binding.kind == Kind::Mount || binding.kind == Kind::Unmount)
-          continue;
-        if (binding.kind == CompilationResult::SessionBinding::Kind::Functor) {
-          functors.emplace(binding.name, binding.functor);
-          continue;
-        }
-        auto &values = published[binding.name];
-        for (const auto slot : binding.slots) {
-          const auto slotValues = vm_.resultCells(slot);
-          values.insert(values.end(), slotValues.begin(), slotValues.end());
+    ContractBindings published;
+    std::unordered_map<std::string, std::vector<PathStep>> functors;
+    {
+      // A frontend request has no resume handle. Keep raw VM stops resumable,
+      // but release this request's cursor on success, failure, or exception.
+      // It goes before the program's cells do.
+      const RestoreScope finishRequest{[this, id = cursor] {
+        vm_.abortScopedChoices(id);
+        vm_.setCursorOpcode(id, std::nullopt);
+      }};
+      const auto execution = vm_.run(cursor, options_.maxCycles);
+      if (!execution.success) {
+        const auto category =
+            execution.contractViolation ==
+                    zigzag::vortex::ContractViolationKind::Postcondition
+                ? QueryExecutionError::Category::TypeContract
+                : (budgetFailure(execution.errorMessage)
+                       ? QueryExecutionError::Category::Budget
+                       : QueryExecutionError::Category::Runtime);
+        return std::unexpected(QueryExecutionError{
+            .category = category,
+            .message  = execution.errorMessage,
+        });
+      }
+
+      for (const auto slot : result.resultSlots) {
+        const auto values = vm_.resultCells(slot);
+        cells.insert(cells.end(), values.begin(), values.end());
+      }
+      if (session_) {
+        for (const auto &binding : result.sessionBindings) {
+          using Kind = CompilationResult::SessionBinding::Kind;
+          if (binding.kind == Kind::Mount || binding.kind == Kind::Unmount)
+            continue;
+          if (binding.kind == Kind::Functor) {
+            functors.emplace(binding.name, binding.functor);
+            continue;
+          }
+          auto &values = published[binding.name];
+          for (const auto slot : binding.slots) {
+            const auto slotValues = vm_.resultCells(slot);
+            values.insert(values.end(), slotValues.begin(), slotValues.end());
+          }
         }
       }
+    }
+
+    // The program's cells go now, and the results it minted are carried out
+    // first. A mount's roots are program slots a later query reads, which a
+    // value copy cannot stand in for, so a run that publishes one keeps its
+    // program.
+    const bool mountRoots =
+        std::ranges::any_of(result.sessionBindings, [](const auto &binding) {
+          return binding.kind ==
+                     CompilationResult::SessionBinding::Kind::Mount &&
+                 !binding.slots.empty();
+        });
+    if (session_ && mountRoots) {
+      area.retain();
+      programRetained_ = "session mount roots are program slots";
+    } else {
+      std::vector<std::vector<zigzag::CellRef> *> alsoLive;
+      for (auto &[name, values] : published) alsoLive.push_back(&values);
+      if (const auto refused = area.settle(cells, alsoLive)) {
+        programRetained_ = refused->because;
+        GLEDITOR_LOG_DEBUG("vql.execution",
+                           "program cells retained after the run: {}",
+                           *programRetained_);
+      }
+    }
+    if (session_) {
+      publishMounts(session_, result.sessionBindings);
       session_->publishCompilerBindings(std::move(published),
                                         std::move(functors));
       session_->publishUserDefs(query.defs);

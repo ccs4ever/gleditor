@@ -565,6 +565,24 @@ VortexVM *VortexVM::pruneAssemblyState() {
   std::erase_if(cursorPC_, [this](const auto &entry) {
     return !core_.arena().contains(entry.first);
   });
+  // Whatever else is keyed by a cell the arena no longer holds is stale, and
+  // once the arena mints cells again the same key would name a different cell:
+  // a finished stream cursor that stays "owner" blocks every later run.
+  const auto gone = [this](const CellRef cell) {
+    return !core_.arena().contains(cell);
+  };
+  std::erase_if(cellReferences_, [&](const auto &e) { return gone(e.first); });
+  std::erase_if(streams_, [&](const auto &e) { return gone(e.first); });
+  std::erase_if(iterators_, [&](const auto &e) { return gone(e.first); });
+  std::erase_if(groupIterators_, [&](const auto &e) { return gone(e.first); });
+  std::erase_if(groupOwners_, [&](const auto &e) { return gone(e.first); });
+  std::erase_if(streamSlots_, gone);
+  std::erase_if(iteratorSlots_, gone);
+  std::erase_if(groupIteratorSlots_, gone);
+  std::erase_if(memoizedOps_, [&](const auto &e) { return gone(e.first); });
+  std::erase_if(activationFrames_,
+                [&](const auto &e) { return gone(e.first); });
+  if (streamCursor_ && gone(*streamCursor_)) streamCursor_.reset();
   pruneResumeState();
   return this;
 }
