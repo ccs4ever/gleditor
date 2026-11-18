@@ -163,6 +163,8 @@ VQLCompiler::compileWatchOrPerspectiveStatement(const Statement &statement) {
           "watch since cannot be combined with a pinned path anchor");
     }
 
+    requireWatchBaseline(*watch.sinceVersion);
+
     PathExpression historicalPath = watch.targetPath;
     VersionPin pin;
     pin.versions.push_back(*watch.sinceVersion);

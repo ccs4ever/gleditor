@@ -57,8 +57,12 @@ void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
 
     const ValueExpr &target = *rule->targetValue;
     const auto rejectTarget = [&] {
-      throw std::invalid_argument("shape projection target is not read-only "
-                                  "or graph-supported");
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          "field binding in a shape ('" + rule->dimName +
+              "': ...) is not compiled to Vortex: its target is not a "
+              "scalar, a bound variable, a simple path or a read-only "
+              "computation");
     };
     const auto rejectPipelines = [this](const std::span<const CellRef> cells) {
       for (const CellRef cell : cells)

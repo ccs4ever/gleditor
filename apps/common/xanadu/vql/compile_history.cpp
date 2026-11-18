@@ -279,9 +279,6 @@ std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
   unpinned.shapePredicates.clear();
   unpinned.rangeClamp  = std::nullopt;
   unpinned.derefMaster = false;
-  std::vector<CellRef> stepped =
-      compileSteps(std::span{&unpinned, 1}, std::move(stream), hasContext,
-                   allowInitialEmptyCall);
 
   const auto variable = [this](const std::string &name) {
     return versionVariable(core_, varBindings_, name);
@@ -289,7 +286,11 @@ std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
   const auto versions =
       pinnedVersions(*step.versionPin, variable, core_.arena());
 
-  const CellRef resultStream = emitStreamClear();
+  // The step is walked inside each pinned fold, as the anchor form does, so it
+  // answers "reachable at that version": a link born later is not there and one
+  // removed since is. Walking the live store and mapping the answers back would
+  // answer a different question.
+  std::vector<CellRef> pinnedResults;
   for (const auto &version : versions) {
     for (const auto &info : coordinator_->stores()) {
       if (!info.store) continue;
@@ -297,12 +298,16 @@ std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
       if (std::ranges::find(available, version) == available.end()) continue;
       const auto space = historicalSpace(core_.arena(), info, version);
       if (!space) continue;
+      const CellRef pinnedInput = emitStreamClear();
       const auto pinOp = emitOp(OpcodeKind::PinHistorical, "#PIN_HISTORICAL");
-      for (const auto s : stepped) {
+      for (const auto s : stream) {
         emitInput(pinOp, s);
       }
       emitInputConstant(pinOp, static_cast<std::int64_t>(*space));
-      emitOutput(pinOp, resultStream);
+      emitOutput(pinOp, pinnedInput);
+      const auto walked = compileSteps(std::span{&unpinned, 1}, {pinnedInput},
+                                       hasContext, allowInitialEmptyCall);
+      pinnedResults.insert(pinnedResults.end(), walked.begin(), walked.end());
     }
   }
 
@@ -310,7 +315,7 @@ std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
     return stream;
   }
 
-  std::vector<CellRef> nextStream = {resultStream};
+  std::vector<CellRef> nextStream = std::move(pinnedResults);
 
   if (step.derefMaster) {
     nextStream = emitMap(nextStream, [&](CellRef candidate) {
@@ -359,6 +364,28 @@ std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
   if (step.rangeClamp) nextStream = emitClamp(nextStream, *step.rangeClamp);
 
   return nextStream;
+}
+
+void VQLCompiler::requireWatchBaseline(const VersionExpr &since) {
+  const auto variable = [this](const std::string &name) {
+    return versionVariable(core_, varBindings_, name);
+  };
+  VersionPin pin;
+  pin.versions.push_back(since);
+  const auto versions = pinnedVersions(pin, variable, core_.arena());
+  const bool exists   = std::ranges::any_of(versions, [&](const auto &version) {
+    return std::ranges::any_of(
+        coordinator_->stores(), [&](const StoreInfo &info) {
+          if (!info.store) return false;
+          const auto available = info.store->allVersions();
+          return std::ranges::find(available, version) != available.end();
+        });
+  });
+  if (exists) return;
+  const auto spelled =
+      versions.empty() ? since.versionStr : versions.front().str();
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "watch since version '" + spelled + "' does not exist");
 }
 
 std::optional<CellRef>

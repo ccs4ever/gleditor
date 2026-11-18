@@ -208,7 +208,11 @@ TEST(VQLLazyContractFramesTest,
       "+d.after: $after: Cell := fallback() }): Stream<Cell> := "
       "{ return $nested, $after; }; return choose($outer), "
       "./+d.fallback";
-  const auto compiled = h.compile(source, {{"outer", {outer}}});
+  // The trailing ./+d.fallback is context-relative, so compiling it needs the
+  // caller's context bound (R-CTX), exactly as the run below supplies it.
+  CompilationOptions withContext;
+  withContext.contextCells = {callerContext};
+  const auto compiled = h.compile(source, {{"outer", {outer}}}, withContext);
   ASSERT_TRUE(compiled.success) << compiled.errorMessage;
   EXPECT_TRUE(hasFrameInvocationFor(h, compiled, "choose"));
   EXPECT_GT(opcodeCount(h, compiled, OpcodeKind::ScopedChoice), 0U);

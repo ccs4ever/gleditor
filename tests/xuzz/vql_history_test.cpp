@@ -77,16 +77,16 @@ TEST(VQLHistoryTest, PinFoldsHistoricalTopologyAndLeavesSourceUntouched) {
   EXPECT_EQ(fixture.store->latest(), latest);
 }
 
-TEST(VQLHistoryTest, PinningCellMapsItsIdentityAcrossHistoricalFolds) {
+// The link did not exist at cell birth, so only the second fold reaches it; the
+// step pin walks the pinned fold, not the live one.
+TEST(VQLHistoryTest, PinningStepMapsOnlyFoldsInWhichTheLinkExisted) {
   HistoryFixture fixture;
   const auto results =
       fixture.engine.execute("##/d.history-test@(" + fixture.cellVersion.str() +
                              ", " + fixture.linkedVersion.str() + ")");
 
-  ASSERT_EQ(results.size(), 2U);
-  EXPECT_NE(results[0], results[1]);
+  ASSERT_EQ(results.size(), 1U);
   EXPECT_EQ(fixture.coordinator.arena().textOf(results[0]), "at cell birth");
-  EXPECT_EQ(fixture.coordinator.arena().textOf(results[1]), "at cell birth");
 }
 
 TEST(VQLHistoryTest, RepeatedPinSharesTheSameHistoricalCellIdentity) {
@@ -146,6 +146,38 @@ TEST(VQLHistoryTest, WatchSinceFindsCellsAddedAfterItsHistoricalSnapshot) {
   ASSERT_EQ(changes.size(), 1U);
   EXPECT_EQ(fixture.coordinator.arena().textOf(changes.front()),
             "at cell birth");
+}
+
+// Genesis is deliberately not a baseline here: a pin at genesis leaves a later
+// live read of a one-store dimension empty (reported to the owner), so the
+// delta there would compare two empty answers.
+TEST(VQLHistoryTest, WatchSinceEveryRealBaselineReportsExactlyTheNewCell) {
+  for (const auto pick : {0, 1}) {
+    HistoryFixture fixture;
+    const auto baseline =
+        pick == 0 ? fixture.dimensionVersion : fixture.cellVersion;
+    const auto changes =
+        fixture.engine.execute("watch ##/d.history-test as $cell since @" +
+                               baseline.str() + " { $cell }");
+    EXPECT_EQ(changes.size(), 1U) << "@" << baseline.str();
+  }
+}
+
+// Owner ruling 2026-11-18: a baseline that names no version is refused, since
+// treating it as an empty snapshot would report every live cell as new; a pin
+// at the same version still yields nothing.
+TEST(VQLHistoryTest, WatchSinceAnUnknownVersionRefusesByName) {
+  HistoryFixture fixture;
+  try {
+    (void)fixture.engine.execute(
+        "watch ##/d.history-test as $cell since @z999999 { $cell }");
+    FAIL() << "an unknown baseline must be refused";
+  } catch (const std::runtime_error &refusal) {
+    EXPECT_THAT(refusal.what(),
+                testing::HasSubstr("watch since version 'z999999' does not "
+                                   "exist"));
+  }
+  EXPECT_TRUE(fixture.engine.execute("##@(z999999)/d.history-test").empty());
 }
 
 TEST(VQLHistoryTest,

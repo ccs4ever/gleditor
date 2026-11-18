@@ -160,7 +160,9 @@ TEST(VQLConformanceTest, AcceptedSyntaxDoesNotImplyCompiledSemantics) {
     const auto result = compiler.compile(source);
     EXPECT_FALSE(result.success);
     EXPECT_NE(result.errorMessage.find(expectedSubstr), std::string::npos);
+    EXPECT_TRUE(result.generatedOpcodes.empty());
     EXPECT_EQ(arena.cellCount(), count);
+    EXPECT_TRUE(vm.activeCursors().empty());
   }
 }
 
@@ -182,7 +184,14 @@ TEST(VQLConformanceTest, RefusesUnboundContextAndInvalidProgrammaticCellIds) {
   zigzag::vortex::VortexCore core(arena);
   zigzag::vortex::VortexVM vm(core);
   VQLCompiler compiler(core, vm);
-  EXPECT_FALSE(compiler.compile(".").success);
+  const auto bare = compiler.compile(".");
+  EXPECT_FALSE(bare.success);
+  EXPECT_NE(bare.errorMessage.find("no bound context"), std::string::npos)
+      << bare.errorMessage;
+  const auto stepped = compiler.compile("/d.1/d.2");
+  EXPECT_FALSE(stepped.success);
+  EXPECT_NE(stepped.errorMessage.find("no bound context"), std::string::npos)
+      << stepped.errorMessage;
   for (const auto id : {std::uint64_t{0}, std::uint64_t{core.home()} +
                                               (std::uint64_t{1} << 32)}) {
     QueryExpression query;

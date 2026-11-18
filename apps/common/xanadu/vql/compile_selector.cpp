@@ -87,6 +87,9 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         const CellRef group = beginMutationGroup("#CREATE_CELL_GROUP");
         std::vector<CellRef> createdCells;
         CellRef attachPoint = emitExtreme(current, dim, zigzag::DimVector::POS);
+        emitRefuseCycle(attachPoint, dim, zigzag::DimVector::POS,
+                        "VQL append refused: the rank is a cycle, so it has no "
+                        "end to append at");
         for (const auto &createVal : sd.creates) {
           std::optional<CellRef> initialValue;
           if (createVal.kind == CreateValue::Kind::Expression && createVal.expr)
@@ -216,6 +219,16 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         }
       }
 
+      // A link joins two cells, so its far end is a cell identity. A literal
+      // number or text would be minted into a fresh cell and linked as if the
+      // author had named one, which reads as success and wires the wrong cell.
+      if (std::holds_alternative<ScalarLiteral>(fn.args[1].kind)) {
+        throw QueryRefusal(
+            QueryErrorCategory::Unsupported,
+            "VQL link(" + dimName +
+                ", ...) takes a cell identity as its target; a numeric or "
+                "text literal is not a cell, so the link is refused");
+      }
       DimRef dim            = resolveDimension(dimName);
       const CellRef group   = beginMutationGroup("#CLONE_FANOUT_GROUP");
       const auto targetCell = compileValueExpr(fn.args[1], core_.home());

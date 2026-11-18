@@ -99,8 +99,17 @@ TEST_F(VQLSemanticsRepairTest, ScalarComparisonCoercionBoundariesRemainStable) {
   // Floating-point and integer comparisons are exact per R-NUM.
   EXPECT_FALSE(matches("9007199254740992 = 9007199254740993"));
   EXPECT_TRUE(matches("9007199254740992 != 9007199254740993"));
-  EXPECT_FALSE(matches(R"("nan" = "nan")"));
-  EXPECT_TRUE(matches(R"("nan" != "nan")"));
+  // Two text operands compare as text, so a string is never unequal to
+  // itself however much it reads like a number; text against a number still
+  // compares numerically.
+  EXPECT_TRUE(matches(R"("nan" = "nan")"));
+  EXPECT_FALSE(matches(R"("nan" != "nan")"));
+  EXPECT_TRUE(matches(R"("inf" = "inf")"));
+  EXPECT_FALSE(matches(R"("inf" != "inf")"));
+  EXPECT_FALSE(matches(R"("1" = "1.0")"));
+  EXPECT_TRUE(matches(R"("1" != "1.0")"));
+  EXPECT_TRUE(matches(R"("10" < "9")"));
+  EXPECT_FALSE(matches(R"("nan" = 1)"));
   EXPECT_FALSE(matches(R"("inf" < 1)"));
 }
 
@@ -345,6 +354,7 @@ TEST_F(VQLSemanticsRepairTest,
   const auto before = arena.cellCount();
   EXPECT_THROW(engine.execute("$s/link(+d.edge, 0)"), std::runtime_error);
   EXPECT_THROW(engine.execute("$s/link(+d.edge, -1)"), std::runtime_error);
+  EXPECT_THROW(engine.execute("$s/link(+d.edge, \"7\")"), std::runtime_error);
   EXPECT_EQ(arena.cellCount(), before);
   EXPECT_EQ(arena.linked(subject, dim, DimVector::POS), neighbor);
   EXPECT_THROW(engine.execute("$s/new(+d.edge)"), std::runtime_error);
@@ -372,16 +382,34 @@ TEST_F(VQLSemanticsRepairTest,
   EXPECT_THROW(engine.execute("$a><$a"), std::runtime_error);
 }
 
+TEST_F(VQLSemanticsRepairTest, CloneJoinAppendsAtTheEndOfTheMastersRank) {
+  const auto a = arena.makeCell("authority");
+  const auto b = arena.makeCell("b");
+  const auto d = arena.makeCell("d");
+  engine.setVariable("a", a);
+  engine.setVariable("b", b);
+  engine.setVariable("d", d);
+  ASSERT_EQ(engine.execute("$a><$b"), std::vector<zigzag::CellRef>{a});
+  // A mid-rank cell is not a master, and refusing leaves the rank intact.
+  EXPECT_THROW(engine.execute("$b><$d"), std::runtime_error);
+  EXPECT_FALSE(arena.linked(d, core.dims().clone, DimVector::NEG));
+  ASSERT_EQ(engine.execute("$a><$d"), std::vector<zigzag::CellRef>{a});
+  EXPECT_EQ(arena.linked(a, core.dims().clone, DimVector::POS), b);
+  EXPECT_EQ(arena.linked(b, core.dims().clone, DimVector::POS), d);
+}
+
 TEST_F(VQLSemanticsRepairTest, EmptyWalkDoesNotInvokeFunctionsOrLambdas) {
   engine.execute("def f($x) := ##/+d.unexpected%;");
   const auto dimension = engine.resolveDimension("d.unexpected");
   const auto missing   = engine.resolveDimension("d.missing");
   (void)missing;
+  const auto before = arena.cellCount();
   EXPECT_TRUE(engine.execute("##/+d.missing/f()").empty());
   EXPECT_TRUE(
       engine.execute("##/+d.missing / \\($x) ##/+d.unexpected%").empty());
   EXPECT_TRUE(engine.execute("$absent/f()").empty());
   EXPECT_TRUE(engine.execute("$absent/##").empty());
+  EXPECT_EQ(arena.cellCount(), before);
   EXPECT_FALSE(arena.linked(core.home(), dimension, DimVector::POS));
 }
 
@@ -390,7 +418,9 @@ TEST_F(VQLSemanticsRepairTest, EmptyFunctorWalkDoesNotInvokeItsLaterFunction) {
   const auto unexpected = engine.resolveDimension("d.unexpected");
   engine.resolveDimension("d.missing");
   engine.execute("let $walk := /+d.missing/f()");
+  const auto before = arena.cellCount();
   EXPECT_TRUE(engine.execute("##/$walk").empty());
+  EXPECT_EQ(arena.cellCount(), before);
   EXPECT_FALSE(arena.linked(core.home(), unexpected, DimVector::POS));
 }
 
@@ -612,6 +642,7 @@ TEST_F(VQLSemanticsRepairTest, EmptyMacroStepsNeverInvokeDownstreamBodies) {
   engine.execute("def f($x) := ##/+d.unexpected%;");
   engine.resolveDimension("d.missing");
   const auto unexpected = engine.resolveDimension("d.unexpected");
+  const auto before     = arena.cellCount();
   for (const auto query : {
            "##/(/+d.missing/f())",
            "##/(/(/+d.missing)/f())",
@@ -621,11 +652,13 @@ TEST_F(VQLSemanticsRepairTest, EmptyMacroStepsNeverInvokeDownstreamBodies) {
        }) {
     SCOPED_TRACE(query);
     EXPECT_TRUE(engine.execute(query).empty());
+    EXPECT_EQ(arena.cellCount(), before);
     EXPECT_FALSE(arena.linked(core.home(), unexpected, DimVector::POS));
   }
   for (const auto query : {"##/(/+d.missing/f())?", "##/(/+d.missing/f())*"}) {
     SCOPED_TRACE(query);
     EXPECT_EQ(engine.execute(query), std::vector<zigzag::CellRef>{core.home()});
+    EXPECT_EQ(arena.cellCount(), before);
     EXPECT_FALSE(arena.linked(core.home(), unexpected, DimVector::POS));
   }
 }
@@ -636,10 +669,13 @@ TEST_F(VQLSemanticsRepairTest, EmptyWalkOnlyRunsArgumentFreeBuiltinCount) {
   const auto counted    = engine.execute("##/d.missing/count()");
   ASSERT_EQ(counted.size(), 1U);
   EXPECT_EQ(arena.asInt64(counted.front()), 0);
+  const auto before = arena.cellCount();
   EXPECT_TRUE(engine.execute("##/d.missing/count(##/+d.unexpected%)").empty());
+  EXPECT_EQ(arena.cellCount(), before);
   EXPECT_FALSE(arena.linked(core.home(), unexpected, DimVector::POS));
   engine.execute("def count() := ##/+d.unexpected%;");
   EXPECT_TRUE(engine.execute("##/d.missing/count()").empty());
+  EXPECT_EQ(arena.cellCount(), before);
   EXPECT_FALSE(arena.linked(core.home(), unexpected, DimVector::POS));
 }
 

@@ -411,6 +411,10 @@ private:
                            bool allowInitialEmptyCall = false);
   std::optional<zigzag::CellRef>
   compileVersionPinnedPath(const PathExpression &path, zigzag::CellRef ctxCell);
+  /// Refuses a watch baseline no attached store has: a pin at such a version
+  /// answers nothing, but a baseline that is an empty snapshot would report
+  /// every live cell as new.
+  void requireWatchBaseline(const VersionExpr &since);
   std::optional<zigzag::CellRef>
   compileHistoricalAnchor(const AnchorNode &anchor);
   std::optional<zigzag::CellRef> compileVersionValue(const VersionExpr &version,
@@ -591,6 +595,12 @@ private:
                                                  zigzag::CellRef inStreamCell);
   zigzag::CellRef emitFirstCell(zigzag::CellRef input);
   zigzag::CellRef emitCellPresence(zigzag::CellRef candidate);
+  /// Fails the program, naming @p what, when @p extreme still has a neighbour
+  /// on @p dimension in @p direction. A rank walk stops at the first repeated
+  /// cell, so the "last" cell of a cycle still links onwards; attaching there
+  /// would splice into the loop and break the links already in it.
+  void emitRefuseCycle(zigzag::CellRef extreme, zigzag::DimRef dimension,
+                       zigzag::DimVector direction, std::string_view what);
   zigzag::CellRef
   emitContextFallback(zigzag::CellRef candidate,
                       std::optional<zigzag::CellRef> previousContext);

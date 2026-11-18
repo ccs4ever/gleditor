@@ -36,8 +36,11 @@ struct PinnedStore {
   MicroversionId genesis;
   MicroversionId cellVersion;
   MicroversionId linkedVersion;
+  MicroversionId removedVersion;
 
-  PinnedStore() {
+  /// @p unlink breaks the link after the linked version and opens the store at
+  /// that later state, so the live fold and the pinned one disagree.
+  explicit PinnedStore(const bool unlink = false) {
     config.storageDir = path / "permascroll";
     scroll            = std::make_shared<UserPermascroll>(config);
     store             = std::make_shared<Store>(scroll);
@@ -47,7 +50,12 @@ struct PinnedStore {
     const auto cell   = store->cellRefOf(cellVersion);
     linkedVersion     = store->setLink(cellVersion, store->homeCell().value(),
                                        dim.dim, DimVector::POS, cell.value());
-    coordinator.addStore("pin", "primary", store, linkedVersion);
+    removedVersion    = linkedVersion;
+    if (unlink) {
+      removedVersion = store->setLink(linkedVersion, store->homeCell().value(),
+                                      dim.dim, DimVector::POS, std::nullopt);
+    }
+    coordinator.addStore("pin", "primary", store, removedVersion);
   }
 
   ~PinnedStore() {
@@ -111,6 +119,35 @@ TEST(VQLHistoryVmTest, PinOnAPathStepSucceedsThroughVM) {
   EXPECT_EQ(fixture.coordinator.arena().textOf(results.front()), "born");
 }
 
+// A step pin asks "reachable at that version": the walk happens in the pinned
+// fold, so a link born later is invisible and a link removed since is found.
+TEST(VQLHistoryVmTest, StepPinDoesNotSeeALinkBornAfterThePinnedVersion) {
+  PinnedStore fixture;
+  EXPECT_TRUE(fixture.engine
+                  .execute("##/d.pin-test@(" + fixture.cellVersion.str() + ")")
+                  .empty());
+}
+
+TEST(VQLHistoryVmTest, StepPinAtGenesisFindsNothing) {
+  PinnedStore fixture;
+  EXPECT_TRUE(
+      fixture.engine.execute("##/d.pin-test@(" + fixture.genesis.str() + ")")
+          .empty());
+}
+
+TEST(VQLHistoryVmTest, StepPinFindsALinkTheLiveStoreNoLongerHas) {
+  PinnedStore fixture(true);
+  EXPECT_TRUE(fixture.engine.execute("##/d.pin-test").empty());
+  const auto pinned = fixture.engine.execute("##/d.pin-test@(" +
+                                             fixture.linkedVersion.str() + ")");
+  ASSERT_EQ(pinned.size(), 1U);
+  EXPECT_EQ(fixture.coordinator.arena().textOf(pinned.front()), "born");
+  EXPECT_TRUE(
+      fixture.engine
+          .execute("##/d.pin-test@(" + fixture.removedVersion.str() + ")")
+          .empty());
+}
+
 TEST(VQLHistoryVmTest, PinWithoutStoreRefusesInsteadOfAnsweringEmpty) {
   zigzag::ArenaManifold arena;
   VQLEngine engine(arena);
@@ -171,6 +208,36 @@ TEST(VQLHistoryVmTest, FailedCompileAfterAPinLeavesNoSpaceBehind) {
                 .execute("##@(" + fixture.linkedVersion.str() + ")/d.pin-test")
                 .size(),
             1U);
+}
+
+// The step-pin path folds as it compiles, so a refusal that comes after its
+// first fold must give that space back too.
+TEST(VQLHistoryVmTest, FailedCompileAfterAStepPinLeavesNoSpaceBehind) {
+  PinnedStore fixture;
+  const auto attached = fixture.coordinator.arena().spaceCount();
+  EXPECT_THROW(fixture.engine.execute("##/d.pin-test@(" +
+                                      fixture.linkedVersion.str() +
+                                      ")/d.pin-test@($unbound)"),
+               std::runtime_error);
+  EXPECT_EQ(fixture.coordinator.arena().spaceCount(), attached);
+  EXPECT_EQ(fixture.engine
+                .execute("##/d.pin-test@(" + fixture.linkedVersion.str() + ")")
+                .size(),
+            1U);
+}
+
+TEST(VQLHistoryVmTest,
+     ReusedSpaceIdAfterAFailedStepPinDoesNotAliasAnotherFold) {
+  PinnedStore fixture;
+  const auto earlier = "##/d.pin-test@(" + fixture.cellVersion.str() + ")";
+  const auto later   = "##/d.pin-test@(" + fixture.linkedVersion.str() + ")";
+  EXPECT_THROW(fixture.engine.execute("##/d.pin-test@(" +
+                                      fixture.cellVersion.str() +
+                                      ")/d.pin-test@($unbound)"),
+               std::runtime_error);
+  EXPECT_EQ(fixture.engine.execute(later).size(), 1U);
+  EXPECT_TRUE(fixture.engine.execute(earlier).empty());
+  EXPECT_EQ(fixture.engine.execute(later).size(), 1U);
 }
 
 TEST(VQLHistoryVmTest,

@@ -565,15 +565,26 @@ int main(int argc, char *argv[]) {
       auto &store         = *primStore->store;
       const auto &arena   = coordinator.arena();
       std::size_t written = 0;
-      for (const auto result : lastResults) {
-        if (!zigzag::isEphemeral(result) || arena.isProxy(result) ||
-            arena.resolveForeign(result)) {
-          continue;
+      try {
+        for (const auto result : lastResults) {
+          if (!zigzag::isEphemeral(result) || arena.isProxy(result) ||
+              arena.resolveForeign(result)) {
+            continue;
+          }
+          // Structure operations chain from the structure head: latest() names
+          // the greatest text branch, which a store with documents and a slice
+          // keeps on a different line of descent.
+          const auto head = store.structureHead().value_or(store.latest());
+          if (const auto promoted =
+                  zigzag::promote(store, head, arena, result)) {
+            written += promoted->cells.size();
+          }
         }
-        if (const auto promoted =
-                zigzag::promote(store, store.latest(), arena, result)) {
-          written += promoted->cells.size();
-        }
+      } catch (const std::exception &error) {
+        // An uncaught refusal here aborts the process after the query already
+        // ran; name it and leave the store unsaved.
+        std::cerr << "Error: in-place write refused: " << error.what() << "\n";
+        return 1;
       }
       if (0 == written) {
         std::cout << "Nothing to write in place: the query minted no cells\n";

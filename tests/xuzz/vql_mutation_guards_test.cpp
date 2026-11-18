@@ -200,13 +200,17 @@ TEST(VQLMutationGuardsTest,
   const CellRef owner = h.arena.makeCell("owner");
   const CellRef value = h.arena.makeScalarCell(std::int64_t{12});
   h.link(owner, "d.value", value);
+  // A link target is a cell identity; a text literal is refused at compile
+  // time, so the displacing target is a cell.
+  const CellRef replacement = h.arena.makeCell("replacement");
   constexpr std::string_view source =
-      "def weave replace($owner: Cell, $endpoint: Cell { -d.value: Cell }): "
-      "Cell := { weave { $owner/link(+d.value, \"replacement\") }; "
-      "return $owner; }; replace($owner, $endpoint)";
+      "def weave replace($owner: Cell, $endpoint: Cell { -d.value: Cell }, "
+      "$next: Cell): Cell := { weave { $owner/link(+d.value, $next) }; "
+      "return $owner; }; replace($owner, $endpoint, $next)";
 
-  const auto result =
-      h.run(source, {{"owner", {owner}}, {"endpoint", {value}}});
+  const auto result = h.run(
+      source,
+      {{"owner", {owner}}, {"endpoint", {value}}, {"next", {replacement}}});
   ASSERT_FALSE(result);
   EXPECT_EQ(result.error().category,
             QueryExecutionError::Category::TypeContract);

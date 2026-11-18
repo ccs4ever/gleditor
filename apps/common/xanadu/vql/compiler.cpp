@@ -677,6 +677,20 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   return compileExecutionBlock(std::get<ExecutionBlock>(query.expr));
 }
 
+namespace {
+
+/// Whether a context-anchored path reads from its context cell. A first step
+/// that names a variable alias (`/$p/...`) or a root selector supplies its own
+/// start, so only a bare `.` and a path opening on a plain dimension need one.
+bool walksFromContext(const PathExpression &path) {
+  if (path.steps.empty()) return true;
+  const auto *dimension =
+      std::get_if<SignedDimensionStep>(&path.steps.front().selector);
+  return dimension != nullptr && !dimension->dimName.starts_with('$');
+}
+
+} // namespace
+
 std::optional<CellRef>
 VQLCompiler::compilePathExpression(const PathExpression &path,
                                    CellRef ctxCell) {
@@ -710,6 +724,16 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
         stream = contextInputs_;
       else if (path.isInvocationRoot)
         stream.push_back(ctxCell);
+      else if (activeCalls_.empty() && walksFromContext(path))
+        // R-CTX: a context-relative path with nothing bound would otherwise
+        // compile into a walk from no cell and answer empty, which reads as
+        // "no matches" instead of "no context". A body compiled for a call
+        // takes its context from that call's arguments, so it is exempt.
+        throw QueryRefusal(
+            QueryErrorCategory::Unsupported,
+            "VQL context-relative path has no bound context: '.' and "
+            "steps without an anchor need a path, a weave or a call to supply "
+            "one; anchor the path at ## or a variable");
     } else if (const auto start = compileAnchor(path.anchor)) {
       stream.push_back(*start);
     }
@@ -751,16 +775,66 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
 
   if (path.cloneTail && !stream.empty()) {
     stream = emitMap(stream, [&](CellRef master) {
-      const CellRef group = beginMutationGroup("#CLONE_TAIL_GROUP");
+      const CellRef group     = beginMutationGroup("#CLONE_TAIL_GROUP");
+      const auto cloneDim     = core_.dims().clone;
+      const auto refuseUnless = [&](const CellRef condition,
+                                    const std::string_view message) {
+        const auto require = emitOp(OpcodeKind::Assert, "#CLONE_REFUSE");
+        emitInput(require, condition);
+        emitInputConstant(require, std::string{message});
+      };
+      // Reads the clone neighbour of @p cell and requires there be none.
+      const auto requireUnlinked = [&](const CellRef cell, const DimVector side,
+                                       const std::string_view message) {
+        const auto read = emitOp(OpcodeKind::Link, "#CLONE_PROBE");
+        emitInput(read, cell);
+        emitInputConstant(read, static_cast<std::int64_t>(cloneDim));
+        emitInputConstant(read, static_cast<std::int64_t>(toSign(side)));
+        const auto neighbor = core_.arena().makeCell();
+        emitOutput(read, neighbor);
+        const auto linked = emitCellPresence(neighbor);
+        const auto free   = core_.arena().makeCell();
+        const auto negate = emitOp(OpcodeKind::Not, "#CLONE_FREE");
+        emitInput(negate, linked);
+        emitOutput(negate, free);
+        refuseUnless(free, message);
+      };
+
+      // The leftmost cell is the authority: a join that starts mid-rank would
+      // give the rank two masters.
+      requireUnlinked(master, DimVector::NEG,
+                      "VQL clone join refused: the left operand is already a "
+                      "clone of another cell, so it is not the master");
+
+      // Each operand joins the end of the rank, so `a><b><c` is the chain
+      // a, b, c and every cell reads a's content.
+      const CellRef tail = emitExtreme(master, cloneDim, DimVector::POS);
       for (const auto &op : path.cloneTail->operands) {
         std::optional<CellRef> opCell;
         if (op.path) {
           opCell = compilePathExpression(*op.path, core_.home());
+          if (opCell) {
+            const auto same = core_.arena().makeCell();
+            const auto test = emitOp(OpcodeKind::SameCell, "#CLONE_SELF");
+            emitInput(test, master);
+            emitInput(test, *opCell);
+            emitOutput(test, same);
+            const auto distinct = core_.arena().makeCell();
+            const auto negate   = emitOp(OpcodeKind::Not, "#CLONE_DISTINCT");
+            emitInput(negate, same);
+            emitOutput(negate, distinct);
+            refuseUnless(distinct, "VQL clone join refused: a cell cannot be "
+                                   "joined to its own clone rank");
+            for (const auto side : {DimVector::NEG, DimVector::POS}) {
+              requireUnlinked(*opCell, side,
+                              "VQL clone join refused: the right operand "
+                              "already belongs to a clone rank");
+            }
+          }
         } else if (op.bareCreate) {
           CellRef newOp = emitOp(OpcodeKind::New, "#CLONE_TAIL_NEW");
-          emitInput(newOp, master);
-          emitInputConstant(newOp,
-                            static_cast<std::int64_t>(core_.dims().clone));
+          emitInput(newOp, tail);
+          emitInputConstant(newOp, static_cast<std::int64_t>(cloneDim));
           emitInputConstant(newOp, static_cast<std::int64_t>(1));
           opCell = core_.arena().makeCell();
           emitOutput(newOp, *opCell);
@@ -786,11 +860,13 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
 
         if (opCell) {
           CellRef linkOp = emitOp(OpcodeKind::Link, "#CLONE_JOIN");
-          emitInput(linkOp, master);
-          emitInputConstant(linkOp,
-                            static_cast<std::int64_t>(core_.dims().clone));
+          emitInput(linkOp, tail);
+          emitInputConstant(linkOp, static_cast<std::int64_t>(cloneDim));
           emitInputConstant(linkOp, static_cast<std::int64_t>(1));
           emitInput(linkOp, *opCell);
+          const auto advance = emitOp(OpcodeKind::CopyCellRefs, "#CLONE_TAIL");
+          emitInput(advance, *opCell);
+          emitOutput(advance, tail);
         }
       }
       endMutationGroup(group, "#CLONE_TAIL_GROUP_END");
@@ -1018,8 +1094,46 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
   return result;
 }
 
+namespace {
+
+/// The text of a string literal operand, when @p expr is exactly one.
+const std::string *textLiteral(const std::shared_ptr<ValueExpr> &expr) {
+  if (!expr) return nullptr;
+  const auto *literal = std::get_if<ScalarLiteral>(&expr->kind);
+  return literal == nullptr ? nullptr
+                            : std::get_if<std::string>(&literal->value);
+}
+
+bool compareText(const std::string &left, const CompOp op,
+                 const std::string &right) {
+  switch (op) {
+  case CompOp::Equal:
+    return left == right;
+  case CompOp::NotEqual:
+    return left != right;
+  case CompOp::LessThan:
+    return left < right;
+  case CompOp::LessEqual:
+    return left <= right;
+  case CompOp::GreaterThan:
+    return left > right;
+  case CompOp::GreaterEqual:
+    return left >= right;
+  }
+  return false;
+}
+
+} // namespace
+
 std::optional<CellRef>
 VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef) {
+  // Two string literals are text, so they compare as text. Minting a literal
+  // infers a number from text that looks like one, and "nan" then compared as
+  // an IEEE NaN, making a string unequal to itself.
+  if (const auto *left = textLiteral(comp.left)) {
+    if (const auto *right = textLiteral(comp.right))
+      return emitConstant(compareText(*left, comp.op, *right));
+  }
   const auto context             = ambientContext_;
   const std::vector<CellRef> lhs = comp.left
                                        ? compileArgument(*comp.left, context)

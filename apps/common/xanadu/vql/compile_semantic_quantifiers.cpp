@@ -16,7 +16,6 @@
 
 namespace xanadu::vql {
 using zigzag::CellRef;
-using zigzag::noCell;
 using zigzag::vortex::OpcodeKind;
 
 namespace {
@@ -203,7 +202,7 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
     streamBindings_["."] = {item};
 
     const auto compilePredicate = [&]() -> CellRef {
-      CellRef matchCell   = noCell;
+      std::optional<CellRef> matchCell;
       const auto &predArg = fn.args[1];
       if (const auto *lambda =
               std::get_if<std::shared_ptr<PathLambda>>(&predArg.kind);
@@ -260,7 +259,7 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
           const CellRef initialize =
               emitOp(OpcodeKind::CopyCellRefs, "#QUANTIFIER_SCALAR_FALSE");
           emitInput(initialize, emitConstant(false));
-          emitOutput(initialize, matchCell);
+          emitOutput(initialize, *matchCell);
           const CellRef absent =
               emitOp(OpcodeKind::BranchFalseCell, "#QUANTIFIER_SCALAR_ABSENT");
           emitInput(absent, present);
@@ -269,7 +268,7 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
               emitOp(OpcodeKind::And, "#QUANTIFIER_SCALAR_TRUTH");
           emitInput(truth, value);
           emitInput(truth, emitConstant(true));
-          emitOutput(truth, matchCell);
+          emitOutput(truth, *matchCell);
           appendOpcode(end);
         }
       } else if (const auto *path =
@@ -321,7 +320,7 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
           matchCell = results.front();
         }
       }
-      return matchCell;
+      return matchCell.value();
     };
 
     const CellRef predicate  = compilePredicate();
