@@ -3664,7 +3664,13 @@ ZigzagVisualizer::executeLogicQuery(const std::string_view query) {
     commandBarFeedbackIsError_ = true;
     return {};
   }
-  auto solutions = vortex_host_->solveLogic(query);
+  const auto answer = vortex_host_->solveLogic(query);
+  if (!answer) {
+    commandBarFeedback_        = "Logic error: " + answer.error().message;
+    commandBarFeedbackIsError_ = true;
+    return {};
+  }
+  const auto &solutions = *answer;
   if (!solutions.empty()) {
     commandBarFeedback_ =
         std::format("Logic query succeeded ({} solution(s))", solutions.size());

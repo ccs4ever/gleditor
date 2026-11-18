@@ -201,17 +201,42 @@ TEST(VortexHostTest, LogicBudgetFromStoreTripsASolve) {
   const std::string query =
       "X is 1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17+18.";
   VortexHost roomy;
-  EXPECT_EQ(roomy.solveLogic(query, 1).size(), 1U);
+  ASSERT_TRUE(roomy.solveLogic(query, 1));
+  EXPECT_EQ(roomy.solveLogic(query, 1)->size(), 1U);
 
   VortexHost tight;
   tight.loadConfigFromStore(store);
   EXPECT_EQ(tight.config().logicMaxCycles, 10U);
-  // solveLogic reports a spent budget as an empty answer (and on stderr).
-  testing::internal::CaptureStderr();
-  const auto sols       = tight.solveLogic(query, 1);
-  const std::string err = testing::internal::GetCapturedStderr();
-  EXPECT_TRUE(sols.empty());
-  EXPECT_NE(err.find("cycle budget"), std::string::npos) << err;
+  // A spent budget is an error that names the budget, not an empty answer.
+  const auto sols = tight.solveLogic(query, 1);
+  ASSERT_FALSE(sols.has_value());
+  EXPECT_NE(sols.error().message.find("cycle budget"), std::string::npos)
+      << sols.error().message;
+
+  // A refused goal names itself; a query with no solutions is still a
+  // success with an empty answer.
+  const auto refused = roomy.solveLogic("atom(a).", 1);
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_NE(refused.error().message.find("atom/1"), std::string::npos)
+      << refused.error().message;
+  const auto none = roomy.solveLogic("member(x, [a, b]).", 1);
+  ASSERT_TRUE(none.has_value());
+  EXPECT_TRUE(none->empty());
+
+  // The command bar's :logic path reports the failure instead of "0
+  // solutions".
+  const auto script = roomy.executeScript(":logic atom(a).");
+  EXPECT_FALSE(script.success);
+  EXPECT_NE(script.message.find("atom/1"), std::string::npos) << script.message;
+
+  // The batch keeps the failure of one query beside the answers of the rest.
+  const auto batch =
+      roomy.solveLogicBatchParallel({"member(E, [a, b]).", "atom(a)."}, 5);
+  ASSERT_EQ(batch.size(), 2U);
+  ASSERT_TRUE(batch[0].has_value());
+  EXPECT_EQ(batch[0]->size(), 2U);
+  ASSERT_FALSE(batch[1].has_value());
+  EXPECT_NE(batch[1].error().message.find("atom/1"), std::string::npos);
 }
 
 TEST(VortexHostTest, VQLCompilationAndAttachmentToArena) {
@@ -431,7 +456,8 @@ TEST(VortexHostTest, LogicSolvingAndOmnibarQueries) {
   host.bindStore(&store);
 
   auto solutions = host.solveLogic("setting('fontSize', Val)");
-  EXPECT_FALSE(solutions.empty());
+  ASSERT_TRUE(solutions.has_value());
+  EXPECT_FALSE(solutions->empty());
 
   auto res = host.executeScript(":logic setting('fontSize', Val)");
   EXPECT_TRUE(res.success) << res.message;
@@ -680,7 +706,8 @@ TEST(VortexHostTest, OrParallelLogicSearchIsDeterministic) {
   };
 
   // Baseline: flag OFF (default) runs serially on the primary context.
-  std::vector<std::vector<std::string>> baseline;
+  std::vector<std::expected<std::vector<std::string>, LogicQueryError>>
+      baseline;
   {
     VortexHost host;
     ASSERT_FALSE(host.config().orParallelSearch) << "default must be off";
@@ -689,10 +716,10 @@ TEST(VortexHostTest, OrParallelLogicSearchIsDeterministic) {
   ASSERT_EQ(baseline.size(), queries.size());
   // Sanity: the OR-backtracking queries produced multiple solutions and the
   // failing query produced none -- so the comparison below is meaningful.
-  EXPECT_EQ(baseline[0].size(), 3u) << "append(X,Y,[1,2]) solutions";
-  EXPECT_EQ(baseline[1].size(), 3u) << "member(E,[a,b,c]) solutions";
-  EXPECT_EQ(baseline[3].size(), 0u) << "member(x,[a,b]) must fail";
-  EXPECT_EQ(baseline[4].size(), 4u) << "append(X,Y,[p,q,r]) solutions";
+  EXPECT_EQ(baseline[0]->size(), 3u) << "append(X,Y,[1,2]) solutions";
+  EXPECT_EQ(baseline[1]->size(), 3u) << "member(E,[a,b,c]) solutions";
+  EXPECT_EQ(baseline[3]->size(), 0u) << "member(x,[a,b]) must fail";
+  EXPECT_EQ(baseline[4]->size(), 4u) << "append(X,Y,[p,q,r]) solutions";
 
   // Flag ON, across worker counts: must equal the serial baseline exactly,
   // including per-query solution ordering.

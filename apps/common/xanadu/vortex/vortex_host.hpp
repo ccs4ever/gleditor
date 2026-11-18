@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -38,6 +39,12 @@ namespace zigzag::vortex {
 using AppActionDelegate = std::function<bool(
     std::string_view action, std::optional<CellRef> focusCell,
     ViewAxisBinding &axes, std::optional<CellRef> &newFocusOut)>;
+
+/// Why a logic query produced no answer at all, as opposed to no solutions.
+struct LogicQueryError {
+  std::string message;
+  bool operator==(const LogicQueryError &) const = default;
+};
 
 struct VortexHostConfig {
   std::size_t schedulerCycleBudget{1000};
@@ -298,9 +305,12 @@ public:
 
   /**
    * @brief Solves a first-order logic goal query using VProlog and Vlog.
+   * A query that cannot be answered (a parse error, a refused goal, a spent
+   * cycle budget, a type or instantiation error) is an error naming the cause;
+   * an empty vector means the query ran and had no solutions.
    */
-  std::vector<LogicSolution> solveLogic(std::string_view goalQuery,
-                                        std::size_t maxSolutions = 50);
+  std::expected<std::vector<LogicSolution>, LogicQueryError>
+  solveLogic(std::string_view goalQuery, std::size_t maxSolutions = 50);
 
   /// Stage 5 (vortex-multithreading-study.md §6.4,
   /// design/vicon-andor-parallelism.md): opt-in OR-parallel logic search. Runs
@@ -316,7 +326,7 @@ public:
   /// (the default) it runs the queries SERIALLY on the primary context, so
   /// serial vprolog behaviour is unchanged. First-solution-wins is submission
   /// order: query 0's solutions precede query 1's.
-  std::vector<std::vector<std::string>>
+  std::vector<std::expected<std::vector<std::string>, LogicQueryError>>
   solveLogicBatchParallel(const std::vector<std::string> &goalQueries,
                           std::size_t maxSolutions = 50);
 
