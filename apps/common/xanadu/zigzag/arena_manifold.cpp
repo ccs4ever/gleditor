@@ -1367,7 +1367,31 @@ ArenaManifold *ArenaManifold::bindDimensionsByNameMatch() {
   }
 
   for (const auto &[name, members] : byName) {
-    if (members.size() <= 1) {
+    if (members.size() == 1) {
+      // A name only one space holds still has to resolve to that space once a
+      // second one is attached (a pin at a state before the dimension existed
+      // shares only d.dims with the live store). Only a name the arena
+      // already knows is bound: minting a cell for every dimension of every
+      // historical fold would cost more than the lookup it saves.
+      const auto &[spaceId, dim] = members.front();
+      const auto owner           = spaceAt(spaceId);
+      if (spaces_.size() < 2 || !owner) continue;
+      const auto known = owner->reader != nullptr
+                             ? dimensionNamed(name, *owner->reader)
+                             : dimensionNamed(name);
+      if (!known) continue;
+      const auto existing = boundDimensions_.find(*known);
+      const bool taken =
+          existing != boundDimensions_.end() &&
+          std::ranges::any_of(existing->second.members,
+                              [&](const BoundDimensionMember &m) {
+                                return m.space == spaceId;
+                              });
+      if (taken) continue;
+      bindDimension(*known, spaceId, dim, DimensionBindingMode::NameMatch);
+      auto &bound          = boundDimensions_.at(*known).members.back();
+      bound.solitary       = true;
+      bound.boundAfterMark = lastMarkSerial_;
       continue;
     }
     const auto arenaDim = ensureDimension(name);
@@ -2606,6 +2630,18 @@ MarkResult ArenaManifold::release(const Mark &m) noexcept {
       storesRankTail_.reset();
     else
       storesRankTail_ = spaces_.back().storeCell;
+  }
+
+  // A solitary binding made under this mark names a space that is still
+  // attached (the base, say), so the sweep above left it; it exists only
+  // because of an attach this mark undoes, and goes with it.
+  for (auto it = boundDimensions_.begin(); it != boundDimensions_.end();) {
+    auto &members  = it->second.members;
+    const bool had = !members.empty();
+    std::erase_if(members, [&](const BoundDimensionMember &b) {
+      return b.solitary && b.boundAfterMark >= m.serial;
+    });
+    it = had && members.empty() ? boundDimensions_.erase(it) : std::next(it);
   }
 
   // Reverse, so that a cell written more than once under this mark ends up

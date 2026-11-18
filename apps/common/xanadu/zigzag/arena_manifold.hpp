@@ -119,6 +119,12 @@ struct BoundDimensionMember {
   std::uint32_t space{0};
   DimRef dim{noCell};
   DimensionBindingMode mode{DimensionBindingMode::Explicit};
+  /// Bound only because no other space holds the name (a name in two or more
+  /// spaces is a real binding and stays). release() undoes these along with
+  /// the attach that made them, which is why they carry the mark they were
+  /// bound under.
+  bool solitary{false};
+  std::uint64_t boundAfterMark{0};
 
   bool operator==(const BoundDimensionMember &) const = default;
 };
