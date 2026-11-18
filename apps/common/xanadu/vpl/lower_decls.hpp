@@ -214,7 +214,8 @@ inline constexpr std::string_view conjunctions =
     "VPL conjunctions are unsupported by the VM";
 inline constexpr std::string_view quad = "VPL quad IO is unsupported by the VM";
 inline constexpr std::string_view nestedRanks =
-    "nested VPL ranks require explicit array lowering";
+    "VPL strand of ranks (a nested array) is unsupported by the VM: it awaits "
+    "enclose-based nesting, and joining ranks takes ,";
 } // namespace msg
 
 [[noreturn]] inline void refuse(std::string_view message) {

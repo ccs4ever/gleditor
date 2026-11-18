@@ -133,17 +133,15 @@ CellRef lowerCatenateDyadic(LowerContext &ctx, const DyadicExpr &expr) {
   return first;
 }
 
-Maybe lowerVectorOfRanks(LowerContext &ctx, const VectorExpr &,
-                         const std::vector<CellRef> &cells) {
-  const auto dim    = ctx.core().dims().step;
-  const auto result = beginResult(ctx, dim);
-  for (const auto cell : cells) {
-    appendOperand(ctx, result, cell);
-  }
-  const auto first      = endResult(ctx, result);
-  ctx.rankAxes()[first] = {DirectedDim{dim, DimVector::POS}};
-  emit::mergeRankInputDependencies(ctx, first, cells);
-  return first;
+// A strand with a rank in it is a nested array in APL: `(1 2) (3 4)` has two
+// items, not four. A nested value cannot be exact here. A box (enclose) is
+// marked on the single cell that stands for the whole value, so a rank whose
+// items are boxes cannot be told from one enclosed scalar, and flattening it
+// would answer 1 2 3 4 for a value of tally 2. Refused by name rather than
+// answered wrongly; `,` is the verb that joins ranks.
+Maybe lowerVectorOfRanks(LowerContext &, const VectorExpr &,
+                         const std::vector<CellRef> &) {
+  refuse(msg::nestedRanks);
 }
 
 } // namespace xanadu::vpl::lower

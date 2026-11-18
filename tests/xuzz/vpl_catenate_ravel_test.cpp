@@ -142,5 +142,21 @@ TEST_F(VplCatenateRavelTest, ScalarCatenationChainsStayIndependent) {
   EXPECT_EQ(values("R"), (Values{1, 2, 3}));
 }
 
+TEST_F(VplCatenateRavelTest, AStrandOfRanksIsRefusedByNameNotFlattened) {
+  const std::string form = "strand of ranks";
+  for (const auto *source : {"(1 2) (3 4)", "A ← 1 2; B ← 3 4; A B", "(1 2) 3",
+                             "1 (2 3)", "≢ (1 2) (3 4)"}) {
+    VPLEngine fresh;
+    try {
+      fresh.evaluate(source);
+      FAIL() << source << " was answered";
+    } catch (const std::exception &error) {
+      EXPECT_NE(std::string{error.what()}.find(form), std::string::npos)
+          << source << ": " << error.what();
+    }
+  }
+  EXPECT_EQ(values("1 2 3"), (Values{1, 2, 3}));
+}
+
 } // namespace
 } // namespace xanadu::vpl
