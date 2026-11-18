@@ -156,6 +156,12 @@ end instead would lose the bound: walked negward from A's last cell, the view wo
 first cell into the home cell, and `⍴⌽A` would be 6.) Nothing is minted or copied; the price is that
 a reversed read walks the rank twice (ruled 2026-11-13; cards V4 and V4b).
 
+`n ↑ A`, a negative `n ↓ A` and `↑`/`↓` of a reversed array are views too, with a bound at the far
+end: a stop cell found when the verb runs. They therefore read as the first (or last) cells *as of
+that moment* and do not grow when the rank does, while a positive `n ↓ A` on an unreversed array
+hops its origin and still grows. `n ↑ A` beyond the length and a negative take refuse by name; a
+view mints no fill (ruled 2026-11-18; card V5).
+
 **`\` and `⌸` write.** A scan mints a cell per intermediate and `⌸` links every group member onto a
 clone rank, so both appear in hypertime. APL trains the instinct that these are cheap traversals;
 here they are weaves, and §4.3 and §4.7 are about that.

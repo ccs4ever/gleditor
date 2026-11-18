@@ -543,6 +543,31 @@ O2 was split: O2a (cell-identity compare `SameCell`, arena space undo) is merged
 `PinHistorical`, program-cell release with copy-out, the `project` spike and the out-of-order
 release refusal.
 
+Ruled by the owner on 2026-11-18, after the work that landed while the coordinator was away
+(fifty-two commits, reviewed afterwards by range):
+
+- **Empty reduce (VPL):** `+/⍬` is 0 and `×/⍬` is 1; `⌈/` and `⌊/` of an empty rank refuse by name.
+- **Take is a view with a far-end bound:** `n ↑ A`, a negative drop and a take or drop of a reversed
+  rank are live views over A's cells with an optional per-axis bound (a stop cell); `graph_emit.hpp`
+  needed no change, `VplView` gained bounds. A bound is a fixed cell, so these fix their far end
+  when evaluated, while a positive `n ↓ A` on an unreversed rank grows with A. `n ↑ A` beyond the
+  length and a negative take refuse by name (no fill cells: a view mints nothing).
+- **VPL numeric repairs, in the lowering and not the VM:** `=`, `≠` and the grade tie-break compare
+  numbers by value (`2.0 = 2` is true) with a numeric guard so text does not coerce to 0; `÷` is
+  division on doubles and a zero divisor is a named failure; arithmetic on a text literal refuses at
+  compile time and on a non-numeric cell at run time. The VM's `Eq` is unchanged.
+- **Closure opcodes approved after the fact:** `CheckClosureCall`, `GroupBegin` and `GroupNext`, the
+  group frame ports, closure call modes, retained-group accounting and closure descriptor tag `/3`,
+  all from the closure-signature commits (named, variadic and lazy-default arguments).
+- **`Value` and `Splice`** refuse non-Int64 offsets and lengths by name instead of coercing.
+- **`wroteOlderCellSince` takes an optional second mark** (the program's own attach writes happen
+  after the first mark). Programs that compile a closure keep themselves (a named, documented limit
+  of about 142 cells per run) until a read-only VM accessor for closure values is approved.
+- **Versions that do not exist:** a pin at one yields nothing; `watch … since` refuses by name. A
+  path-step pin answers "reachable at that version" by walking the pinned fold.
+- **Arena mark order:** the approval of refusing out-of-order release by name covers `Mark::serial`
+  and the typed `MarkResult`.
+
 New cards from these rulings:
 
 | Card     | What                                                                                                                                                                                             | After |
