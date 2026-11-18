@@ -90,6 +90,8 @@ std::string_view compileErrorName(CompileError e) noexcept {
     return "BudgetExhausted";
   case CompileError::ArithFault:
     return "ArithFault";
+  case CompileError::InvalidArgument:
+    return "InvalidArgument";
   }
   return "Unknown";
 }

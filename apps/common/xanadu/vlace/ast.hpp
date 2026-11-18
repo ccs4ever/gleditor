@@ -265,6 +265,8 @@ enum class CompileError : std::uint8_t {
   BudgetExhausted,
   /// Appended: a run-time arithmetic fault (spec §6.6), division by zero.
   ArithFault,
+  /// Appended: a run-time argument the operation refuses (an empty name).
+  InvalidArgument,
 };
 
 [[nodiscard]] std::string_view compileErrorName(CompileError err) noexcept;
