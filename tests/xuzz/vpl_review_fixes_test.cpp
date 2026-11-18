@@ -98,4 +98,19 @@ TEST(VplReviewIndexTest, OutOfRangeAndNegativeStayNamed) {
   EXPECT_TRUE(mentions(runVpl("(10 20 30)[2 5]"), "VPL index out of range"));
 }
 
+TEST(VplReviewWhereTest, BooleansAndZeroOneIntegersAreAccepted) {
+  EXPECT_EQ(runVpl("⍸ 0 1 0 1 1"), "1 3 4\n");
+  EXPECT_EQ(runVpl("⍸ 1 2 3 = 2"), "1\n");
+  EXPECT_EQ(runVpl("⍸ 1 2 3 ≤ 2"), "0 1\n");
+  EXPECT_EQ(runVpl("⍸ 1.0 0.0 1.0"), "0 2\n");
+}
+
+TEST(VplReviewWhereTest, NonBooleanInputIsRefusedByName) {
+  for (const char *source : {"⍸ 2 0 3", "⍸ 0.5 0", "⍸ 0 ¯1 1", "⍸ 1 0 7"}) {
+    const auto out = runVpl(source);
+    EXPECT_TRUE(mentions(out, "VPL where requires booleans"))
+        << source << ": " << out;
+  }
+}
+
 } // namespace

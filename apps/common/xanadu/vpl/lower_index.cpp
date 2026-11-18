@@ -25,6 +25,9 @@ using zigzag::DimVector;
 using zigzag::DirectedDim;
 using zigzag::vortex::OpcodeKind;
 
+constexpr std::int64_t kBoolFalse = 0; ///< the integer value of a false cell
+constexpr std::int64_t kBoolTrue  = 1; ///< the integer value of a true cell
+
 constexpr std::string_view kIndexDimension =
     "VPL indexing with a dimension value is unsupported by the VM";
 constexpr std::string_view kIndexTargetDimension =
@@ -62,6 +65,9 @@ constexpr std::string_view kWhereEnclosed =
     "VPL where of an enclosed value is unsupported by the VM";
 constexpr std::string_view kWhereValence =
     "VPL where on a rank with more than one axis is unsupported by the VM";
+
+constexpr std::string_view kWhereNotBoolean =
+    "VPL where requires booleans: every cell must be exactly 0 or 1";
 
 constexpr std::string_view kMatchDimension =
     "VPL match of a dimension value is unsupported by the VM";
@@ -191,11 +197,24 @@ Maybe lowerWhereMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
   zero(ctx, iCell, "#WHERE_I_ZERO");
 
   walkView(ctx, rCell, axis, [&](CellRef item) {
-    const auto neqOp = ctx.emitOp(OpcodeKind::Neq, "#WHERE_NEQ");
-    ctx.emitInput(neqOp, item);
-    ctx.emitInputConstant(neqOp, std::int64_t{0});
-    const auto isNonZero = ctx.core().arena().makeCell();
-    ctx.emitOutput(neqOp, isNonZero);
+    // The spec defines where for booleans only, and a count-style reading of
+    // 2 0 3 would differ from APL's, so any cell that is not exactly 0 or 1 by
+    // value is refused. Neq on the stored types would also call the Bool
+    // false of a comparison unequal to the integer 0, hence order tests.
+    assertNumeric(ctx, item, "#WHERE_NUMBER", kWhereNotBoolean);
+    const auto isZero = emitBinaryOp(
+        ctx, OpcodeKind::And, "#WHERE_IS_ZERO",
+        emitBinaryOp(ctx, OpcodeKind::Lte, "#WHERE_ZERO_LTE", item, kBoolFalse),
+        emitBinaryOp(ctx, OpcodeKind::Gte, "#WHERE_ZERO_GTE", item,
+                     kBoolFalse));
+    const auto isOne = emitBinaryOp(
+        ctx, OpcodeKind::And, "#WHERE_IS_ONE",
+        emitBinaryOp(ctx, OpcodeKind::Lte, "#WHERE_ONE_LTE", item, kBoolTrue),
+        emitBinaryOp(ctx, OpcodeKind::Gte, "#WHERE_ONE_GTE", item, kBoolTrue));
+    assertCell(
+        ctx, emitBinaryOp(ctx, OpcodeKind::Or, "#WHERE_IS_BOOL", isZero, isOne),
+        "#WHERE_BOOLEAN", kWhereNotBoolean);
+    const auto isNonZero = isOne;
 
     const auto skipLabel = emit::mintLabel(ctx, "#WHERE_SKIP");
     emit::branchIfFalse(ctx, isNonZero, skipLabel, "#WHERE_BRANCH_SKIP");
