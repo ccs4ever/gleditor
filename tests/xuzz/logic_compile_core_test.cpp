@@ -362,7 +362,7 @@ TEST(LogicCompileCoreTest, UnloweredBuiltinsRefuseByNameButUnknownNamesFail) {
   // symbolic names as atoms. An entry deleted when its card lands drops out of
   // this sweep by itself.
   const auto owned = ownedGoalSignatures();
-  EXPECT_TRUE(owned.empty());
+  ASSERT_FALSE(owned.empty());
   for (const auto &[name, arity] : owned) {
     // Inside a quoted atom a backslash is an escape, so it is doubled.
     std::string quoted;
@@ -385,12 +385,56 @@ TEST(LogicCompileCoreTest, UnloweredBuiltinsRefuseByNameButUnknownNamesFail) {
       ADD_FAILURE() << goal << " did not refuse";
     } catch (const logic::LogicRefusal &refusal) {
       const std::string what = refusal.what();
-      EXPECT_NE(what.find(signature + " awaits P2/P3/P4"), std::string::npos)
+      EXPECT_NE(what.find(signature + " is not lowered to the VM"),
+                std::string::npos)
           << goal << ": " << what;
     }
   }
-  // With P3/P4 lowered, vortex_module(2) fails normally rather than refusing.
-  EXPECT_TRUE(h.all("known(X), vortex_module(2).", "X").empty());
+  try {
+    (void)h.all("known(X), atom(X).", "X");
+    ADD_FAILURE() << "a conjunction through a refused goal did not refuse";
+  } catch (const logic::LogicRefusal &refusal) {
+    EXPECT_NE(std::string(refusal.what()).find("atom/1 is not lowered"),
+              std::string::npos);
+  }
+  // The goals P2, P3 and P4 lowered must stay out of the refusal table: an
+  // example of each runs instead of refusing.
+  const std::vector<std::string> lowered{
+      "true.",
+      "fail.",
+      "X is 1 + 2.",
+      "1 < 2.",
+      "\\+ fail.",
+      "a \\= b.",
+      "var(X).",
+      "nonvar(a).",
+      "member(X, [a]).",
+      "append([a], [b], X).",
+      "length([a], X).",
+      "vortex_module(X).",
+      "stdlib_module(X).",
+      "vortex_function(X).",
+      "vortex_function(X, Y).",
+      "vortex_function(X, Y, Z).",
+      "stdlib_function(X).",
+      "stdlib_function(X, Y).",
+      "stdlib_function(X, Y, Z).",
+      "vortex_instruction(X, Y, Z).",
+      "vortex_contract(X, Y, Z).",
+      "vortex_param(X, Y, Z, W).",
+      "setting(X, Y).",
+      "setting_shape(X, Y).",
+      "setting_default(X, Y).",
+      "transclude(X, Y, Z).",
+      "xanalink(X, Y, Z).",
+      "cell_value(1, X).",
+      "cell_link(1, 2, X, Y).",
+      "cell_span(1, X).",
+      "bridge_edge(X, Y).",
+      "bridge_edge(X, Y, Z).",
+  };
+  for (const std::string &goal : lowered)
+    EXPECT_NO_THROW((void)h.all(goal, "X")) << goal;
   EXPECT_TRUE(h.all("nosuch(X).", "X").empty());
   EXPECT_TRUE(h.all("nosuch(X, 1, 2).", "X").empty());
   EXPECT_EQ(h.all("known(X).", "X").size(), 1u);

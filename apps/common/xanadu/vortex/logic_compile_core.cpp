@@ -61,20 +61,79 @@ constexpr std::size_t kLogicMaxDescriptorRecords = 2 * kLogicMaxLocalsPerFrame;
 // no structured field for it), so the driver matches it by name here.
 constexpr std::string_view kVmCycleBudgetMessage = "Exceeded max cycles";
 
-// Goals the old solver answered with a C++ arm checked BEFORE any clause (see
-// e9090999^ vortex_stdlib.cpp, solveQueryHelper). Each is owned by a later
-// card (P2: control and arithmetic, P3/P4: relations). Until its card lowers
-// it, a goal naming one must REFUSE by name, not fail like an unknown user
-// predicate, or the query silently has no answers. Delete an entry when its
-// card lands; the dispatch then reaches that card's emitter first. `=` is not
-// listed: it is a stdlib clause predicate that P1 lowers itself.
+// Standard (ISO and widely shipped) Prolog builtins that this compiler does
+// not lower. A program that calls one must be told so by name: failing like an
+// unknown user predicate turns `atom(a).` into a quiet `false.`, which reads as
+// a wrong answer. Names a user defines themselves never get here (user clauses
+// are tried first), and a name that is in no table keeps the recorded ruling:
+// an unknown predicate fails without an error. Delete a row when a card lowers
+// it; the dispatch then reaches that card's emitter first.
 struct OwnedGoal {
   std::string_view name;
   std::size_t arity;
 };
 // One row per line so a card deleting its rows touches nothing else.
 // clang-format off
-constexpr std::array<OwnedGoal, 0> kOwnedGoals{};
+constexpr std::array kOwnedGoals{
+    // type tests
+    OwnedGoal{"atom", 1}, OwnedGoal{"atomic", 1}, OwnedGoal{"number", 1},
+    OwnedGoal{"integer", 1}, OwnedGoal{"float", 1}, OwnedGoal{"compound", 1},
+    OwnedGoal{"callable", 1}, OwnedGoal{"is_list", 1}, OwnedGoal{"ground", 1},
+    // term comparison and construction
+    OwnedGoal{"==", 2}, OwnedGoal{"\\==", 2}, OwnedGoal{"@<", 2},
+    OwnedGoal{"@>", 2}, OwnedGoal{"@=<", 2}, OwnedGoal{"@>=", 2},
+    OwnedGoal{"compare", 3}, OwnedGoal{"functor", 3}, OwnedGoal{"arg", 3},
+    OwnedGoal{"=..", 2}, OwnedGoal{"copy_term", 2},
+    // control
+    OwnedGoal{"call", 1}, OwnedGoal{"call", 2}, OwnedGoal{"call", 3},
+    OwnedGoal{"call", 4}, OwnedGoal{"once", 1}, OwnedGoal{"ignore", 1},
+    OwnedGoal{";", 2}, OwnedGoal{"->", 2}, OwnedGoal{"*->", 2},
+    OwnedGoal{"catch", 3}, OwnedGoal{"throw", 1}, OwnedGoal{"forall", 2},
+    OwnedGoal{"halt", 0}, OwnedGoal{"halt", 1},
+    // all-solutions and counting
+    OwnedGoal{"findall", 3}, OwnedGoal{"findall", 4}, OwnedGoal{"bagof", 3},
+    OwnedGoal{"setof", 3}, OwnedGoal{"aggregate_all", 3},
+    OwnedGoal{"aggregate_all", 4}, OwnedGoal{"between", 3},
+    OwnedGoal{"succ", 2}, OwnedGoal{"plus", 3},
+    // clause database
+    OwnedGoal{"assert", 1}, OwnedGoal{"asserta", 1}, OwnedGoal{"assertz", 1},
+    OwnedGoal{"retract", 1}, OwnedGoal{"retractall", 1},
+    OwnedGoal{"abolish", 1},
+    // atoms and strings
+    OwnedGoal{"atom_length", 2}, OwnedGoal{"atom_chars", 2},
+    OwnedGoal{"atom_codes", 2}, OwnedGoal{"char_code", 2},
+    OwnedGoal{"atom_number", 2}, OwnedGoal{"number_codes", 2},
+    OwnedGoal{"number_chars", 2}, OwnedGoal{"atom_concat", 3},
+    OwnedGoal{"sub_atom", 5}, OwnedGoal{"upcase_atom", 2},
+    OwnedGoal{"atom_string", 2}, OwnedGoal{"string_concat", 3},
+    OwnedGoal{"string_chars", 2}, OwnedGoal{"string_codes", 2},
+    OwnedGoal{"string_to_atom", 2}, OwnedGoal{"term_to_atom", 2},
+    // input and output
+    OwnedGoal{"write", 1}, OwnedGoal{"print", 1}, OwnedGoal{"writeln", 1},
+    OwnedGoal{"writeq", 1}, OwnedGoal{"write_canonical", 1},
+    OwnedGoal{"nl", 0}, OwnedGoal{"tab", 1}, OwnedGoal{"put_char", 1},
+    OwnedGoal{"read", 1}, OwnedGoal{"format", 1}, OwnedGoal{"format", 2},
+    OwnedGoal{"format", 3},
+    // global variables
+    OwnedGoal{"nb_setval", 2}, OwnedGoal{"nb_getval", 2},
+    OwnedGoal{"b_setval", 2}, OwnedGoal{"b_getval", 2},
+    // list library
+    OwnedGoal{"memberchk", 2}, OwnedGoal{"reverse", 2},
+    OwnedGoal{"nth0", 3}, OwnedGoal{"nth1", 3}, OwnedGoal{"last", 2},
+    OwnedGoal{"select", 3}, OwnedGoal{"permutation", 2},
+    OwnedGoal{"flatten", 2}, OwnedGoal{"numlist", 3},
+    OwnedGoal{"sum_list", 2}, OwnedGoal{"sumlist", 2},
+    OwnedGoal{"max_list", 2}, OwnedGoal{"min_list", 2},
+    OwnedGoal{"list_to_set", 2}, OwnedGoal{"delete", 3},
+    OwnedGoal{"subtract", 3}, OwnedGoal{"msort", 2}, OwnedGoal{"sort", 2},
+    OwnedGoal{"sort", 4}, OwnedGoal{"predsort", 3}, OwnedGoal{"keysort", 2},
+    OwnedGoal{"include", 3}, OwnedGoal{"exclude", 3},
+    OwnedGoal{"partition", 4}, OwnedGoal{"maplist", 2},
+    OwnedGoal{"maplist", 3}, OwnedGoal{"maplist", 4}, OwnedGoal{"maplist", 5},
+    OwnedGoal{"foldl", 4}, OwnedGoal{"foldl", 5}, OwnedGoal{"foldl", 6},
+    // The relations (cell_value and the rest) are lowered by P3 and P4 and
+    // are deliberately absent.
+};
 // clang-format on
 
 [[nodiscard]] bool isOwnedGoal(const PredicateKey &key) {
@@ -597,7 +656,7 @@ void emitNonTermGoal(CompileContext &, FrameScope &, Chain &, CellRef) {
 void emitUnknownPredicate(CompileContext &ctx, FrameScope &scope, Chain &chain,
                           const PredicateKey &key) {
   if (isOwnedGoal(key))
-    refuseUnlowered("P1", key.display() + " awaits P2/P3/P4");
+    refuseUnlowered("P1", key.display() + " is not lowered to the VM");
   GLEDITOR_LOG_DEBUG("vortex.logic",
                      "unknown predicate {} fails without an error",
                      key.display());
