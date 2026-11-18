@@ -133,7 +133,8 @@ TEST_F(VplLowerFoldTest, ReduceOverReversedViews) {
 
   // Subtraction is not associative: APL folds from the right and this lowering
   // folds in walk order, so it is refused by name instead of answered wrongly.
-  expectCompileRefusal("-/ ⌽A", "supports only +, *, maximum, minimum, and, and or");
+  expectCompileRefusal("-/ ⌽A",
+                       "supports only +, *, maximum, minimum, and, and or");
 }
 
 TEST_F(VplLowerFoldTest, ScanOverReversedViewsMintsInReversedOrder) {
