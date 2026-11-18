@@ -104,14 +104,16 @@ CellRef emitUnary(LowerContext &ctx, TokenKind verb, CellRef item) {
   case TokenKind::Minus:
   case TokenKind::Magnitude:
   case TokenKind::Not: {
-    const bool negate = verb == TokenKind::Minus;
-    const bool absval = verb == TokenKind::Magnitude;
-    const auto op     = ctx.emitOp(negate   ? OpcodeKind::Neg
-                                   : absval ? OpcodeKind::Abs
-                                            : OpcodeKind::Not,
-                               negate   ? "#NEG"
-                                   : absval ? "#ABS"
-                                            : "#NOT");
+    OpcodeKind opcode      = OpcodeKind::Not;
+    std::string_view label = "#NOT";
+    if (verb == TokenKind::Minus) {
+      opcode = OpcodeKind::Neg;
+      label  = "#NEG";
+    } else if (verb == TokenKind::Magnitude) {
+      opcode = OpcodeKind::Abs;
+      label  = "#ABS";
+    }
+    const auto op = ctx.emitOp(opcode, label);
     ctx.emitInput(op, item);
     ctx.emitOutput(op, out);
     return out;

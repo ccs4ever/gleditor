@@ -68,7 +68,8 @@ TEST_F(VplDropCountsTest, ATextCountHeldInAVariableFailsAtRunTime) {
 
 TEST_F(VplDropCountsTest, ANonIntegerComputedCountFailsAtRunTime) {
   expectRefused("A ← 5⍳d.1; n ← 0.5+1; n ↓ A",
-                "drop count is not a whole number", ExecutionError::Stage::Runtime);
+                "drop count is not a whole number",
+                ExecutionError::Stage::Runtime);
   expectRefused("A ← 5⍳d.1; (0.5+1.25) ↓ A", "drop count is not a whole number",
                 ExecutionError::Stage::Runtime);
 }
