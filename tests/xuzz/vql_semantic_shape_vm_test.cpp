@@ -179,10 +179,12 @@ TEST_F(VQLSemanticShapeVmTest, ShapeHeldInAVariableRefusesByName) {
   expectUntouched();
 }
 
-TEST_F(VQLSemanticShapeVmTest, ProjectRefusesByNameWithoutEffects) {
-  const auto message = refusalOf("project($s, {+d.keep})");
+// project lowers to ProjectTopology (vortex_project_topology_test.cpp); what it
+// still refuses is a shape that assigns, which is apply_shape's.
+TEST_F(VQLSemanticShapeVmTest, ProjectRefusesAssignmentsByNameWithoutEffects) {
+  const auto message = refusalOf("project($s, {+d.keep: $s})");
   EXPECT_NE(message.find("project"), std::string::npos) << message;
-  EXPECT_NE(message.find("content spans"), std::string::npos) << message;
+  EXPECT_NE(message.find("apply_shape"), std::string::npos) << message;
   expectUntouched();
 }
 

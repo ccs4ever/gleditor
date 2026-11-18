@@ -45,6 +45,16 @@ public:
       : vm_(vm), mark_(vm.core().arena().mark()),
         dimensionsBefore_(vm.core().arena().dimensions().size()) {}
 
+  /// The program's opcode cells, once compiled: only to learn whether it can
+  /// make a closure value, which no result check can see from the arena.
+  void setProgram(std::span<const zigzag::CellRef> ops) {
+    createsClosures_ =
+        std::ranges::any_of(ops, [this](const zigzag::CellRef op) {
+          return vm_.getOpcodeKind(op) ==
+                 zigzag::vortex::OpcodeKind::CreateClosure;
+        });
+  }
+
   /// The program is compiled and attached to home; what the run writes from
   /// here is the run's. Attaching it wrote home (a +d.spin entry and a cursor
   /// on +d.cursors), which release() rightly undoes, so that write must not
@@ -87,6 +97,15 @@ public:
     std::vector<zigzag::CellRef> live{cells};
     for (const auto *extra : alsoLive)
       live.insert(live.end(), extra->begin(), extra->end());
+    // A closure value names its descriptor and environment cells by integer
+    // reference, which re-minting a cell would leave dangling, and a closure
+    // can sit behind any result or binding. Inspecting them costs arena work
+    // a tight budget notices, so a program that can make one keeps itself.
+    if (createsClosures_) {
+      retain();
+      return RetainedProgram{
+          "the program creates closure values, which name program cells"};
+    }
     auto captured = zigzag::CopyOut::capture(vm_.core().arena(), mark_, live);
     if (!captured) {
       retain();
@@ -132,6 +151,7 @@ private:
   zigzag::vortex::VortexVM &vm_;
   zigzag::Mark mark_;
   std::optional<zigzag::Mark> runMark_;
+  bool createsClosures_{false};
   std::size_t dimensionsBefore_;
   bool settled_{false};
 };
@@ -325,6 +345,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       });
     }
     const auto cursor = *result.cursor;
+    area.setProgram(result.generatedOpcodes);
     area.beginRun();
 
     std::vector<zigzag::CellRef> cells;
