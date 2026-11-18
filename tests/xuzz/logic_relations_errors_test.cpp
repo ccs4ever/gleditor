@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vortex/logic_compile.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
@@ -19,6 +21,12 @@
 #include "common/xanadu/vprolog/compiler.hpp"
 #include "common/xanadu/vprolog/parser.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+
+namespace zigzag::vortex::logic {
+// Defined in logic_relations.cpp: how many times a provider has built the
+// settings model from a bound store. A test seam, like ownedGoalSignatures().
+std::size_t settingsModelBuilds() noexcept;
+} // namespace zigzag::vortex::logic
 
 namespace {
 
@@ -189,6 +197,27 @@ TEST(LogicRelationScanTest, LinkAndSpanScansUseTheSameRange) {
     EXPECT_GE(std::stoull(id), floor) << id;
   for (const auto &id : h.all("bridge_edge(U, D, V).", "U"))
     EXPECT_GE(std::stoull(id), floor) << id;
+}
+
+// Enumerating the settings of a bound store used to rebuild the whole model on
+// every answer, quadratic in the settings. One solve builds it once, and the
+// next solve builds a fresh one (the store may have changed between them).
+TEST(LogicRelationSettingsTest, BoundStoreModelIsBuiltOncePerSolve) {
+  RelationHarness h;
+  xanadu::Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::Settings);
+  h.compiler.stdlib().setBoundStore(&store);
+
+  const std::size_t before = logic::settingsModelBuilds();
+  const auto names         = h.all("setting(K, V).", "K");
+  ASSERT_GE(names.size(), 5U);
+  EXPECT_EQ(logic::settingsModelBuilds() - before, 1U);
+
+  // The three relations of one solve share the model.
+  (void)h.all("setting(K, V), setting_default(K, D), setting_shape(K, S).",
+              "K");
+  EXPECT_EQ(logic::settingsModelBuilds() - before, 2U);
 }
 
 } // namespace

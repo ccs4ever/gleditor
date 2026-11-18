@@ -52,6 +52,10 @@ public:
     scanEnd_   = scanEnd;
   }
 
+  /// Called once as a solve begins, before its query is lowered: a provider
+  /// drops whatever it cached from the store or arena of an earlier solve.
+  virtual void beginSolve() {}
+
   /// Types of the arguments in position order; empty means unchecked.
   [[nodiscard]] virtual std::span<const ArgKind> signature() const noexcept {
     return {};
