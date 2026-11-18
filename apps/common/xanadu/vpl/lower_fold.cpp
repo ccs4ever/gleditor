@@ -63,10 +63,10 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
       opKind  = OpcodeKind::Min;
       opLabel = (adverb == TokenKind::Reduce) ? "#REDUCE_MIN" : "#SCAN_MIN";
     } else {
-      const auto v = scalarDyadicVerb(innerVerb);
-      if (!v) refuse(msg::reduceScanVerbs);
-      opKind  = v->opcode;
-      opLabel = v->label;
+      // APL folds from the right, so `-/` and `÷/` are not the left-to-right
+      // chain this lowering emits; only the associative verbs agree in both
+      // orders. Anything else is refused rather than answered differently.
+      refuse(msg::reduceScanVerbs);
     }
 
     if (const auto *vec =
