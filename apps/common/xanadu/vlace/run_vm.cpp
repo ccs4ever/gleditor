@@ -20,6 +20,11 @@ namespace {
 /// The Compiler-level run limit, kept in the Scalars card slot.
 struct RunState {
   std::optional<std::size_t> maxCycles;
+  /// The cursor every run of this Compiler uses. spawnCursor appends to the
+  /// tail of home's cursor rank, a walk over every cursor ever spawned, and
+  /// each finished run left its cursor there, so a fresh cursor per run made
+  /// each run slower than the one before. One cursor is re-pointed instead.
+  std::optional<zigzag::CellRef> cursor;
 };
 
 /// Every run is capped, even when the arena has its own work fuel: the arena
@@ -149,7 +154,13 @@ Lowered<Operand> runBlock(LowerContext &ctx, Block block, Operand result) {
   auto &vm = ctx.vm();
   const RunLimits limits(vm);
   beginEvaluation(ctx);
-  const auto cursor = vm.spawnCursor(*block.entry, "vlace_eval");
+  auto &state = ctx.state().cardState<RunState>(Card::Scalars);
+  if (!state.cursor || !ctx.arena().contains(*state.cursor)) {
+    state.cursor = vm.spawnCursor(*block.entry, "vlace_eval");
+  } else {
+    vm.setCursorOpcode(*state.cursor, *block.entry);
+  }
+  const auto cursor = *state.cursor;
   const CursorRelease release(vm, cursor);
   zigzag::vortex::ExecutionResult run;
   try {

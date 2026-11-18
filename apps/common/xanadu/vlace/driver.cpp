@@ -19,6 +19,26 @@ std::string Driver::formatError(const DriverError &e) {
                      compileErrorName(e.code), e.detail);
 }
 
+std::expected<std::string, DriverError>
+Driver::typeOf(std::string_view source) {
+  Parser parser(source);
+  auto prog = parser.parseProgram();
+  if (!prog) {
+    const auto &pe = prog.error();
+    return std::unexpected(DriverError{
+        .code = pe.code, .detail = pe.detail, .loc = pe.loc, .phase = "parse"});
+  }
+  if (!typeCheck_) return std::string{};
+  TypeChecker tc;
+  auto t = tc.checkProgram(*prog);
+  if (!t) {
+    const auto &te = t.error();
+    return std::unexpected(DriverError{
+        .code = te.code, .detail = te.detail, .loc = te.loc, .phase = "type"});
+  }
+  return *t;
+}
+
 std::expected<DriverResult, DriverError> Driver::run(std::string_view source) {
   // 1. Parse.
   Parser parser(source);

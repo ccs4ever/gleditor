@@ -36,6 +36,13 @@ public:
     return this;
   }
 
+  /// Parse and type-check without evaluating: the program's type, or the error.
+  /// Empty when type checking is off. The runner asks this first so an IO
+  /// program is performed, never rendered as a description (rendering forces
+  /// every operand, which performs no effect but can fault before one).
+  [[nodiscard]] std::expected<std::string, DriverError>
+  typeOf(std::string_view source);
+
   /// Parse and optionally type-check; execution refuses pending VM lowering.
   [[nodiscard]] std::expected<DriverResult, DriverError>
   run(std::string_view source);

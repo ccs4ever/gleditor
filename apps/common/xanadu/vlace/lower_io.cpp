@@ -17,15 +17,11 @@
 #include "common/xanadu/vlace/compiler.hpp"
 #include "common/xanadu/vlace/lower_cards.hpp"
 #include "common/xanadu/vlace/lower_context.hpp"
+#include "common/xanadu/vlace/render_error.hpp"
 
 namespace xanadu::vlace::lower {
 
 namespace {
-
-Lowered<Operand> toWhnf(LowerContext &ctx, Operand value, SourceLocation loc) {
-  if (value.state == Evaluation::Whnf) return value;
-  return forceOperand(ctx, value, loc);
-}
 
 ValuePtr makeUnit(Compiler &compiler) {
   LowerContext ctx(compiler);
@@ -39,6 +35,17 @@ ValuePtr makeUnit(Compiler &compiler) {
   if (op) fallback->cell = op->cell;
   fallback->ctorArity = 0;
   return fallback;
+}
+
+/// A thrown failure as the EvalError it carries: a render failure keeps its own
+/// code (an ArithFault forced while printing the result stays an ArithFault),
+/// and a spent budget keeps its name.
+EvalError exceptionToEval(const std::exception &error) {
+  if (const auto *render = dynamic_cast<const RenderFailure *>(&error))
+    return render->error();
+  if (auto budget = rewordBudgetFailure(error.what())) return *budget;
+  return EvalError{
+      .code = CompileError::UnexpectedToken, .detail = error.what(), .loc = {}};
 }
 
 struct Continuation {
@@ -58,17 +65,18 @@ Lowered<Operand> lowerIoBind(LowerContext &ctx, const EBinOp &e,
                 "unknown IO operator '" + e.op + "'", loc);
   }
   const std::string_view tag = (e.op == ">>=") ? "IO.Bind" : "IO.Then";
-  auto lhs                   = lowerExpr(ctx, *e.lhs);
+  // Both operands stay lazy fields of the description. Forcing them here ran
+  // the right operand while the action was only being built, so a later
+  // operand's fault surfaced before an earlier effect, and a recursive loop
+  // (`loop n = ... >> loop (n - 1)`) nested one frame per iteration until the
+  // activation depth limit. The runner forces each operand when it performs it
+  // and trampolines, so the depth stays constant.
+  auto lhs = lowerLazy(ctx, *e.lhs);
   if (!lhs) return lhs;
-  auto forcedL = toWhnf(ctx, *lhs, e.lhs->loc);
-  if (!forcedL) return forcedL;
-
-  auto rhs = lowerExpr(ctx, *e.rhs);
+  auto rhs = lowerLazy(ctx, *e.rhs);
   if (!rhs) return rhs;
-  auto forcedR = toWhnf(ctx, *rhs, e.rhs->loc);
-  if (!forcedR) return forcedR;
 
-  const std::array fields{*forcedL, *forcedR};
+  const std::array fields{*lhs, *rhs};
   return makeTerm(ctx, tag, fields, loc);
 }
 
@@ -93,6 +101,12 @@ std::expected<ValuePtr, EvalError> runIoOnVm(Compiler &compiler,
                 {});
   }
 
+  // The loop is a trampoline: each step forces one description and performs
+  // it, so the host and VM depth stay constant however long a recursive action
+  // runs. The time is another matter: every forcing is a VM run, and each run
+  // is slower than the last because the VM's frame opcodes copy tables that
+  // grow with the runs behind them (about 7 s for 1,600 steps); removing that
+  // needs a change under vortex/, not here.
   std::vector<Continuation> stack;
   ValuePtr curAction  = action;
   ValuePtr currentVal = nullptr;
@@ -173,7 +187,13 @@ std::expected<ValuePtr, EvalError> runIoOnVm(Compiler &compiler,
                         {});
           }
           std::string line;
-          std::getline(in, line);
+          // getLine :: IO String (spec 6.5) has no value for "no more input",
+          // and an empty line is a legitimate answer, so end of input is
+          // refused by name instead of read as "".
+          if (!std::getline(in, line)) {
+            return fail(CompileError::UnexpectedToken, "getLine: end of input",
+                        {});
+          }
           const auto cell = compiler.core().arena().makeCell();
           compiler.core().writeValue(cell, 0, std::nullopt,
                                      zigzag::vortex::CellValue{line});
@@ -331,20 +351,14 @@ std::expected<DriverResult, DriverError> driverEvaluateIO(const Program &prog,
   try {
     ran = compiler.runIO(value, in, out);
   } catch (const std::exception &error) {
-    return driverFailure(EvalError{.code   = CompileError::UnexpectedToken,
-                                   .detail = error.what(),
-                                   .loc    = {}},
-                         "eval");
+    return driverFailure(exceptionToEval(error), "eval");
   }
   if (!ran) return driverFailure(ran.error(), "eval");
 
   try {
     partial.value = compiler.render(*ran);
   } catch (const std::exception &error) {
-    return driverFailure(EvalError{.code   = CompileError::UnexpectedToken,
-                                   .detail = error.what(),
-                                   .loc    = {}},
-                         "eval");
+    return driverFailure(exceptionToEval(error), "eval");
   }
   return partial;
 }
