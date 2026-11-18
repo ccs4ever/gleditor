@@ -169,8 +169,14 @@ TEST_F(VplLowerElementwiseTest, DyadicArithmeticOnRanksOfMatchingLength) {
 
   // Division
   {
-    const auto r = run("10 20 30 % 2 4 5");
-    EXPECT_EQ(values(r.view), (Values{5, 5, 6}));
+    // Division is on doubles, as in APL (`5 ÷ 2` is 2.5), so the whole
+    // quotients are doubles with whole values, not integers.
+    const auto r         = run("10 20 30 % 2 4 5");
+    const auto quotients = r.view.collectCells(arena);
+    ASSERT_EQ(quotients.size(), 3U);
+    EXPECT_EQ(arena.asDouble(quotients[0]), 5.0);
+    EXPECT_EQ(arena.asDouble(quotients[1]), 5.0);
+    EXPECT_EQ(arena.asDouble(quotients[2]), 6.0);
   }
 
   // Modulo (magnitude dyadic)

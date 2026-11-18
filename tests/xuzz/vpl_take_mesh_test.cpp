@@ -70,5 +70,13 @@ TEST(VplTakeMeshTest, AReversedBoundedViewIsExportedAsTheWalkThatReadsIt) {
   EXPECT_EQ(exported("A ← 5 ⍳ d.1; ¯2 ↓ ⌽A"), (Values{5, 4, 3}));
 }
 
+TEST(VplTakeMeshTest, AFixedViewIsExportedAsItWasAfterTheRankGrows) {
+  EXPECT_EQ(exported("A ← 5 ⍳ d.1; Q ← 3 ↑ ⌽A; 3 ⍳ d.1; Q"), (Values{5, 4, 3}));
+  EXPECT_EQ(exported("A ← 5 ⍳ d.1; Q ← 3 ↑ A; 3 ⍳ d.1; Q"), (Values{1, 2, 3}));
+  EXPECT_EQ(exported("A ← 5 ⍳ d.1; Q ← 2 ↓ ⌽A; 3 ⍳ d.1; Q"), (Values{3, 2, 1}));
+  EXPECT_EQ(exported("A ← 5 ⍳ d.1; Q ← ¯1 ↓ A; 3 ⍳ d.1; Q"),
+            (Values{1, 2, 3, 4}));
+}
+
 } // namespace
 } // namespace zigzag::vortex::mesh

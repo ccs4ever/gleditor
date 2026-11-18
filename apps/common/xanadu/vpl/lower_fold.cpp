@@ -90,10 +90,23 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
       opKind   = OpcodeKind::Min;
       opLabel  = (adverb == TokenKind::Reduce) ? "#REDUCE_MIN" : "#SCAN_MIN";
       verbName = "minimum";
+    } else if (innerVerb == TokenKind::And) {
+      // Associative, so the left-to-right chain agrees with APL's right fold.
+      opKind   = OpcodeKind::And;
+      opLabel  = (adverb == TokenKind::Reduce) ? "#REDUCE_AND" : "#SCAN_AND";
+      identity = kProductIdentity;
+      verbName = "and";
+    } else if (innerVerb == TokenKind::Or) {
+      opKind   = OpcodeKind::Or;
+      opLabel  = (adverb == TokenKind::Reduce) ? "#REDUCE_OR" : "#SCAN_OR";
+      identity = kSumIdentity;
+      verbName = "or";
     } else {
       // APL folds from the right, so `-/` and `÷/` are not the left-to-right
       // chain this lowering emits; only the associative verbs agree in both
-      // orders. Anything else is refused rather than answered differently.
+      // orders (`=/` and `≠/` among those refused: `=` is not associative, so
+      // the two orders differ). Anything else is refused rather than answered
+      // differently.
       refuse(msg::reduceScanVerbs);
     }
 

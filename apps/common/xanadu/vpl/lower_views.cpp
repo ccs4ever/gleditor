@@ -16,7 +16,7 @@
  * the rank later), `⌽⌽X` is X, `⍴⌽X` is `⍴X`, and a reversal of a matrix holds
  * exactly the cells the matrix holds, so ragged rows cannot change what is
  * read. The price is paid by whoever reads a reversed axis: it finds the far
- * end from the origin and walks back to the origin (emit::walkAxis), so a
+ * end from the origin and walks back to the origin (axisWalkOf), so a
  * reversed read walks the rank twice.
  */
 #include <cstdint>

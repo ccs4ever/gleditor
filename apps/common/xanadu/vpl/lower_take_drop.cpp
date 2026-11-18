@@ -23,8 +23,13 @@
  *   ¯k ↓ A = back cut to len-k     n ↓ ⌽A = back cut to len-n
  *   ¯k ↓ ⌽A = front cut by k       n ↑ ⌽A = front cut by len-n
  *
- * A back cut ends at a fixed cell, so such a view does not grow past it,
- * where `n ↓ A` on an unreversed rank still does.
+ * The rule: take, negative drop and drop of a reversed rank fix their far end
+ * when they are evaluated, and a view does not grow past it. A back cut does
+ * so by its bound; a front cut on a reversed rank (`n ↑ ⌽A`, `¯k ↓ ⌽A`) takes
+ * the rank's far end as it is then, when the operand has no bound of its own.
+ * Only a positive drop of an unreversed rank (`n ↓ A`) grows with the rank.
+ * Growth at the origin end is not a thing a view can have: the first cells of
+ * a reversed rank are its last.
  *
  * The spec gives negative counts to drop only ("negative counts from the end,
  * as everywhere else" is the drop row; the take row says "the first n
@@ -82,27 +87,6 @@ void refuseBadLiteral(const AstNode *node, const VerbText &name,
   if (*value < 0.0 && !negativeAllowed) refuse(kTakeNegative);
 }
 
-CellRef emitArithmetic(LowerContext &ctx, OpcodeKind opcode,
-                       std::string_view label, CellRef left, CellRef right) {
-  const auto out = ctx.core().arena().makeCell();
-  const auto op  = ctx.emitOp(opcode, label);
-  ctx.emitInput(op, left);
-  ctx.emitInput(op, right);
-  ctx.emitOutput(op, out);
-  return out;
-}
-
-CellRef emitArithmetic(LowerContext &ctx, OpcodeKind opcode,
-                       std::string_view label, CellRef left,
-                       std::int64_t right) {
-  const auto out = ctx.core().arena().makeCell();
-  const auto op  = ctx.emitOp(opcode, label);
-  ctx.emitInput(op, left);
-  ctx.emitInputConstant(op, right);
-  ctx.emitOutput(op, out);
-  return out;
-}
-
 /// Emits the run-time checks that `count` is a whole number and returns an
 /// integer-typed register holding it. A count is read by the VM through
 /// arithmetic that coerces, so text such as "2" or "x" would otherwise be
@@ -111,27 +95,33 @@ CellRef checkedCount(LowerContext &ctx, CellRef count, const VerbText &name) {
   // Largest int64: truncating `count % max` leaves any in-range count as it
   // is, as an integer-typed value, whatever type it came in.
   constexpr std::int64_t kTruncate = std::numeric_limits<std::int64_t>::max();
+  // A count beyond this is clamped to it: no rank holds so many cells, a
+  // double is exact for every whole value up to 2^53 (about 9e15), and the
+  // clamp keeps `9223372036854775807 ↓ A` and `1e30 ↓ A` the empty array they
+  // mean instead of an arithmetic overflow.
+  constexpr double kLargestCount = 1e15;
 
-  // Add of a number and zero keeps its type, and of text turns it into an
-  // integer, so the sum equals the count exactly when the count is a number.
-  const auto sum = emitArithmetic(ctx, OpcodeKind::Add, "#COUNT_PLUS_ZERO",
-                                  count, std::int64_t{0});
-  const auto isNumber =
-      emitArithmetic(ctx, OpcodeKind::Eq, "#COUNT_IS_NUMBER", count, sum);
-  assertCell(ctx, isNumber, "#COUNT_NUMBER",
-             name.text(" count is not a number"));
+  assertNumeric(ctx, count, "#COUNT_NUMBER",
+                name.text(" count is not a number"));
+
+  const auto clamp = ctx.emitOp(OpcodeKind::Clamp, "#COUNT_CLAMP");
+  ctx.emitInput(clamp, count);
+  ctx.emitInputConstant(clamp, -kLargestCount);
+  ctx.emitInputConstant(clamp, kLargestCount);
+  const auto bounded = ctx.core().arena().makeCell();
+  ctx.emitOutput(clamp, bounded);
 
   const auto whole =
-      emitArithmetic(ctx, OpcodeKind::Mod, "#COUNT_TRUNCATE", count, kTruncate);
+      emitBinaryOp(ctx, OpcodeKind::Mod, "#COUNT_TRUNCATE", bounded, kTruncate);
   const auto fraction =
-      emitArithmetic(ctx, OpcodeKind::Sub, "#COUNT_FRACTION", count, whole);
+      emitBinaryOp(ctx, OpcodeKind::Sub, "#COUNT_FRACTION", bounded, whole);
   // Zero is compared by order, not Eq: Eq on a double 0.0 and an int 0 differ.
-  const auto atLeast = emitArithmetic(
-      ctx, OpcodeKind::Gte, "#COUNT_FRACTION_GE", fraction, std::int64_t{0});
-  const auto atMost = emitArithmetic(ctx, OpcodeKind::Lte, "#COUNT_FRACTION_LE",
-                                     fraction, std::int64_t{0});
+  const auto atLeast = emitBinaryOp(ctx, OpcodeKind::Gte, "#COUNT_FRACTION_GE",
+                                    fraction, kNoneYet);
+  const auto atMost  = emitBinaryOp(ctx, OpcodeKind::Lte, "#COUNT_FRACTION_LE",
+                                    fraction, kNoneYet);
   const auto isWhole =
-      emitArithmetic(ctx, OpcodeKind::And, "#COUNT_IS_WHOLE", atLeast, atMost);
+      emitBinaryOp(ctx, OpcodeKind::And, "#COUNT_IS_WHOLE", atLeast, atMost);
   assertCell(ctx, isWhole, "#COUNT_WHOLE",
              name.text(" count is not a whole number (DOMAIN ERROR)"));
   return whole;
@@ -175,13 +165,19 @@ Cut emptyCut(LowerContext &ctx) {
 /// An empty result gets no bound at all: a reversed read would otherwise start
 /// from it and, with no origin to stop at, run on past the rank.
 void frontCut(LowerContext &ctx, const AxisWalk &natural, CellRef skip,
-              const Cut &cut) {
+              const Cut &cut, bool fixFarEnd) {
   const auto nth = nthCell(ctx, natural, skip);
   copyRegister(ctx, nth.cell, cut.origin, "#FRONT_CUT_ORIGIN");
-  if (natural.stop) {
+  if (natural.stop || fixFarEnd) {
     const auto done = emit::mintLabel(ctx, "#FRONT_CUT_DONE");
     emit::branchIfFalse(ctx, nth.found, done, "#FRONT_CUT_IF_FOUND");
-    copyRegister(ctx, *natural.stop, cut.bound, "#FRONT_CUT_BOUND");
+    // The operand's own bound, or, for a view that must not grow, the rank's
+    // far end as it is now.
+    const auto far = natural.stop
+                         ? *natural.stop
+                         : emit::extreme(ctx, natural.anchor, natural.dimension,
+                                         natural.direction, std::nullopt);
+    copyRegister(ctx, far, cut.bound, "#FRONT_CUT_BOUND");
     emit::placeLabel(ctx, done);
   }
 }
@@ -190,13 +186,13 @@ void frontCut(LowerContext &ctx, const AxisWalk &natural, CellRef skip,
 /// when m is not positive.
 void backCut(LowerContext &ctx, const AxisWalk &natural, CellRef operand,
              CellRef keep, const Cut &cut) {
-  const auto positive = emitArithmetic(
-      ctx, OpcodeKind::Gt, "#BACK_CUT_POSITIVE", keep, std::int64_t{0});
+  const auto positive =
+      emitBinaryOp(ctx, OpcodeKind::Gt, "#BACK_CUT_POSITIVE", keep, kNoneYet);
   const auto done = emit::mintLabel(ctx, "#BACK_CUT_DONE");
   emit::branchIfFalse(ctx, positive, done, "#BACK_CUT_IF_ANY");
-  const auto last = emitArithmetic(ctx, OpcodeKind::Sub, "#BACK_CUT_LAST", keep,
-                                   std::int64_t{1});
-  const auto nth  = nthCell(ctx, natural, last);
+  const auto last =
+      emitBinaryOp(ctx, OpcodeKind::Sub, "#BACK_CUT_LAST", keep, kOneStep);
+  const auto nth = nthCell(ctx, natural, last);
   copyRegister(ctx, operand, cut.origin, "#BACK_CUT_ORIGIN");
   copyRegister(ctx, nth.cell, cut.bound, "#BACK_CUT_BOUND");
   emit::placeLabel(ctx, done);
@@ -265,22 +261,22 @@ CellRef lowerTakeDyadic(LowerContext &ctx, const DyadicExpr &expr) {
   const auto operands = compileOperands(ctx, expr, name, false);
   const auto whole    = checkedCount(ctx, operands.count, name);
   // Zero is the least count a take accepts.
-  const auto notNegative = emitArithmetic(
-      ctx, OpcodeKind::Gte, "#TAKE_NONNEGATIVE", whole, std::int64_t{0});
+  const auto notNegative =
+      emitBinaryOp(ctx, OpcodeKind::Gte, "#TAKE_NONNEGATIVE", whole, kNoneYet);
   assertCell(ctx, notNegative, "#TAKE_NONNEGATIVE", kTakeNegative);
 
   const auto natural = naturalWalk(ctx, operands.operand, operands.axis);
   const auto length  = emit::extentOf(ctx, natural.anchor, natural.dimension,
                                       natural.direction, natural.stop);
   const auto fits =
-      emitArithmetic(ctx, OpcodeKind::Lte, "#TAKE_FITS", whole, length);
+      emitBinaryOp(ctx, OpcodeKind::Lte, "#TAKE_FITS", whole, length);
   assertCell(ctx, fits, "#TAKE_FITS", kTakePads);
 
   const auto cut = emptyCut(ctx);
   if (operands.reversed) {
     const auto skip =
-        emitArithmetic(ctx, OpcodeKind::Sub, "#TAKE_SKIP", length, whole);
-    frontCut(ctx, natural, skip, cut);
+        emitBinaryOp(ctx, OpcodeKind::Sub, "#TAKE_SKIP", length, whole);
+    frontCut(ctx, natural, skip, cut, true);
   } else {
     backCut(ctx, natural, operands.operand, whole, cut);
   }
@@ -295,13 +291,13 @@ CellRef lowerDropDyadic(LowerContext &ctx, const DyadicExpr &expr) {
   const auto cut      = emptyCut(ctx);
 
   const auto emitFront = [&](CellRef skip) {
-    frontCut(ctx, natural, skip, cut);
+    frontCut(ctx, natural, skip, cut, operands.reversed);
   };
   const auto emitBack = [&](CellRef magnitude) {
     const auto length = emit::extentOf(ctx, natural.anchor, natural.dimension,
                                        natural.direction, natural.stop);
     const auto keep =
-        emitArithmetic(ctx, OpcodeKind::Sub, "#DROP_KEEP", length, magnitude);
+        emitBinaryOp(ctx, OpcodeKind::Sub, "#DROP_KEEP", length, magnitude);
     backCut(ctx, natural, operands.operand, keep, cut);
   };
   const auto magnitudeOf = [&](CellRef count) {
@@ -325,8 +321,8 @@ CellRef lowerDropDyadic(LowerContext &ctx, const DyadicExpr &expr) {
     return finishView(ctx, operands, cut);
   }
 
-  const auto negative = emitArithmetic(ctx, OpcodeKind::Lt, "#DROP_IS_NEGATIVE",
-                                       whole, std::int64_t{0});
+  const auto negative =
+      emitBinaryOp(ctx, OpcodeKind::Lt, "#DROP_IS_NEGATIVE", whole, kNoneYet);
   const auto magnitude = magnitudeOf(whole);
   // The back cut is the one a negative count on an unreversed rank, or a
   // non-negative one on a reversed rank, means.

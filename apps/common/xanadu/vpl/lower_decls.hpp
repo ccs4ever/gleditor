@@ -222,7 +222,7 @@ inline constexpr std::string_view dyadicOnRank =
 inline constexpr std::string_view customUnsupported =
     "unsupported VPL custom verb in VM compiler";
 inline constexpr std::string_view reduceScanVerbs =
-    "VPL VM reduce/scan supports only +, *, maximum, and minimum";
+    "VPL VM reduce/scan supports only +, *, maximum, minimum, and, and or";
 inline constexpr std::string_view eachUnsupported =
     "VPL VM each adverb is unsupported";
 inline constexpr std::string_view dimensionValues =

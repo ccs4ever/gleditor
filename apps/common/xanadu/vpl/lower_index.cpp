@@ -41,6 +41,7 @@ constexpr std::string_view kIndexMultiDim =
     "VPL multi-dimensional indexing is unsupported by the VM";
 constexpr std::string_view kIndexNegativeLiteral =
     "VPL indexing with a negative index is a DOMAIN ERROR";
+constexpr std::string_view kIndexOutOfRange = "VPL index out of range";
 constexpr std::string_view kIndexNonIntegerLiteral =
     "VPL indexing with a non-integer index is a DOMAIN ERROR";
 
@@ -123,11 +124,8 @@ Maybe lowerGradeMonadic(LowerContext &ctx, const MonadicExpr &expr,
       const auto cmpVal = ctx.core().arena().makeCell();
       ctx.emitOutput(cmpOp, cmpVal);
 
-      const auto eqOp = ctx.emitOp(OpcodeKind::Eq, "#GRADE_EQ");
-      ctx.emitInput(eqOp, jItem);
-      ctx.emitInput(eqOp, iItem);
-      const auto eqVal = ctx.core().arena().makeCell();
-      ctx.emitOutput(eqOp, eqVal);
+      // Equal by value: the int 2 and the double 2.0 tie.
+      const auto eqVal = emitEquals(ctx, jItem, iItem);
 
       const auto tieOp = ctx.emitOp(OpcodeKind::Lt, "#GRADE_TIE");
       ctx.emitInput(tieOp, jCell);
@@ -281,17 +279,15 @@ Maybe lowerIndexing(LowerContext &ctx, const IndexingExpr &expr) {
   assertNotNegative(ctx, *indexCell, "#INDEX_NONNEGATIVE",
                     "VPL index out of range: negative index");
 
-  const auto axis   = axes->front();
-  const auto walk   = axisWalkOf(ctx, *target);
-  const auto anchor = walk.anchor;
-  const auto dir    = walk.direction;
-  // A hop counts links and would run on past a far-end bound, so a bounded
-  // view is indexed by a walk that stops there; an unbounded one keeps the
-  // cheaper hop, whose cost is the index and not the rank.
-  const bool bounded = ctx.boundOf(*target, 0).has_value();
-  const auto at      = [&](CellRef position) {
-    return bounded ? nthCell(ctx, walk, position).cell
-                        : hop(ctx, anchor, position, axis.dim, dir);
+  const auto walk = axisWalkOf(ctx, *target);
+  // The cell at a position is found by a walk that stops at the view's bound,
+  // and a position the walk does not reach fails by name: a hop would run on
+  // past a bound, and past the rank's end it would answer an absent cell that
+  // reads as 0.
+  const auto at = [&](CellRef position) {
+    const auto found = nthCell(ctx, walk, position);
+    assertCell(ctx, found.found, "#INDEX_IN_RANGE", kIndexOutOfRange);
+    return found.cell;
   };
 
   if (!ctx.isRank(*indexCell)) {

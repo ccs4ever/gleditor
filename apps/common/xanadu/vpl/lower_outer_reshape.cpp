@@ -63,16 +63,6 @@ Side sideOf(LowerContext &ctx, CellRef cell) {
   return Side{cell, DirectedDim{dim, DimVector::POS}, false};
 }
 
-CellRef emitBinary(LowerContext &ctx, const ScalarVerb &verb, CellRef left,
-                   CellRef right) {
-  const auto op = ctx.emitOp(verb.opcode, verb.label);
-  ctx.emitInput(op, left);
-  ctx.emitInput(op, right);
-  const auto out = ctx.core().arena().makeCell();
-  ctx.emitOutput(op, out);
-  return out;
-}
-
 } // namespace
 
 CellRef lowerRhoDyadic(LowerContext &, const DyadicExpr &) {
@@ -115,7 +105,8 @@ CellRef lowerOuterProductDyadic(LowerContext &ctx, const DyadicExpr &,
     ctx.emitOutput(zeroOp, colIndex);
 
     walkView(ctx, rSide.origin, rSide.axis, [&](CellRef rItem) {
-      const auto val = emitBinary(ctx, *scalarVerb, lItem, rItem);
+      const auto val =
+          emitScalarDyadic(ctx, verbExpr->verb(), *scalarVerb, lItem, rItem);
 
       const auto isZero = ctx.core().arena().makeCell();
       const auto eqOp   = ctx.emitOp(OpcodeKind::Eq, "#OUTER_IS_FIRST_COL");

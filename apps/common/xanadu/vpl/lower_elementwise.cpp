@@ -77,16 +77,6 @@ CellRef finishRank(LowerContext &ctx, CellRef first, DimRef dimension,
   return first;
 }
 
-CellRef emitBinary(LowerContext &ctx, const ScalarVerb &verb, CellRef left,
-                   CellRef right) {
-  const auto op = ctx.emitOp(verb.opcode, verb.label);
-  ctx.emitInput(op, left);
-  ctx.emitInput(op, right);
-  const auto out = ctx.core().arena().makeCell();
-  ctx.emitOutput(op, out);
-  return out;
-}
-
 CellRef emitUnary(LowerContext &ctx, TokenKind verb, CellRef item) {
   const auto out = ctx.core().arena().makeCell();
   switch (verb) {
@@ -102,19 +92,17 @@ CellRef emitUnary(LowerContext &ctx, TokenKind verb, CellRef item) {
       opcode = OpcodeKind::Abs;
       label  = "#ABS";
     }
+    if (verb != TokenKind::Not) {
+      assertNumeric(ctx, item, "#UNARY_NUMBER", textArithmeticMessage(verb));
+    }
     const auto op = ctx.emitOp(opcode, label);
     ctx.emitInput(op, item);
     ctx.emitOutput(op, out);
     return out;
   }
-  case TokenKind::Divide: {
-    // The reciprocal is 1.0 / x, as the scalar path writes it.
-    const auto op = ctx.emitOp(OpcodeKind::Div, "#RECIPROCAL");
-    ctx.emitInputConstant(op, 1.0);
-    ctx.emitInput(op, item);
-    ctx.emitOutput(op, out);
-    return out;
-  }
+  case TokenKind::Divide:
+    assertNumeric(ctx, item, "#UNARY_NUMBER", textArithmeticMessage(verb));
+    return emitReciprocal(ctx, item);
   default:
     refuse(msg::monadicOnRank);
   }
@@ -209,7 +197,7 @@ CellRef lowerDyadicArithmeticOnRank(LowerContext &ctx, const DyadicExpr &expr,
     const auto left  = rankSide(ctx, lCell);
     const auto right = rankSide(ctx, rCell);
     const auto first = zipRanks(ctx, left, right, [&](CellRef a, CellRef b) {
-      return emitBinary(ctx, *verb, a, b);
+      return emitScalarDyadic(ctx, expr.verb(), *verb, a, b);
     });
     return finishRank(ctx, first, left.axis.dim, inputs);
   }
@@ -217,14 +205,14 @@ CellRef lowerDyadicArithmeticOnRank(LowerContext &ctx, const DyadicExpr &expr,
     const auto left = rankSide(ctx, lCell);
     const auto first =
         mapRank(ctx, left, rCell, [&](CellRef item, std::optional<CellRef> s) {
-          return emitBinary(ctx, *verb, item, *s);
+          return emitScalarDyadic(ctx, expr.verb(), *verb, item, *s);
         });
     return finishRank(ctx, first, left.axis.dim, inputs);
   }
   const auto right = rankSide(ctx, rCell);
   const auto first =
       mapRank(ctx, right, lCell, [&](CellRef item, std::optional<CellRef> s) {
-        return emitBinary(ctx, *verb, *s, item);
+        return emitScalarDyadic(ctx, expr.verb(), *verb, *s, item);
       });
   return finishRank(ctx, first, right.axis.dim, inputs);
 }
