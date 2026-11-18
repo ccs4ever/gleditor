@@ -162,6 +162,18 @@ that moment* and do not grow when the rank does, while a positive `n ↓ A` on a
 hops its origin and still grows. `n ↑ A` beyond the length and a negative take refuse by name; a
 view mints no fill (ruled 2026-11-18; card V5).
 
+**`⍟` as built.** The opcode is the arena's operation high-water mark when it runs, so `⍟A` is not
+"the microversion `A` was read at": the operand is evaluated for effect and its value ignored. Over
+a store the result is the base's folded-through count (the store's operation count), the same for
+every program over that base until the store gains an operation; over a bare arena it is the arena's
+cell count at that moment and is comparable only within one arena. `⍫` scrubbing, which needs a read
+pinned to a microversion, stays refused by name (card V12, ruled 2026-11-18).
+
+**Enclose and outer product as built.** A box is a flag on one cell, not a depth, so enclosing an
+enclosed value refuses by name, and an outer product with an empty operand refuses by name because a
+view with no origin cannot carry the other axis's extent. A reversed axis travels with the box.
+Indices must be whole numbers on one axis, and `⍸` accepts only 0 and 1 (cards V9–V11).
+
 **`\` and `⌸` write.** A scan mints a cell per intermediate and `⌸` links every group member onto a
 clone rank, so both appear in hypertime. APL trains the instinct that these are cheap traversals;
 here they are weaves, and §4.3 and §4.7 are about that.
