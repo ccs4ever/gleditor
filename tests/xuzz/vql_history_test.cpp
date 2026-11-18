@@ -148,9 +148,6 @@ TEST(VQLHistoryTest, WatchSinceFindsCellsAddedAfterItsHistoricalSnapshot) {
             "at cell birth");
 }
 
-// Genesis is deliberately not a baseline here: a pin at genesis leaves a later
-// live read of a one-store dimension empty (reported to the owner), so the
-// delta there would compare two empty answers.
 TEST(VQLHistoryTest, WatchSinceEveryRealBaselineReportsExactlyTheNewCell) {
   for (const auto pick : {0, 1}) {
     HistoryFixture fixture;
@@ -161,6 +158,25 @@ TEST(VQLHistoryTest, WatchSinceEveryRealBaselineReportsExactlyTheNewCell) {
                                baseline.str() + " { $cell }");
     EXPECT_EQ(changes.size(), 1U) << "@" << baseline.str();
   }
+}
+
+// A pin at genesis folds a state that predates the dimension, so that space
+// shares only the system dimensions with the live one. The live dimension is
+// named by exactly one space and must keep resolving after the attach.
+TEST(VQLHistoryTest, LiveDimensionStillResolvesAfterAPinAtGenesis) {
+  HistoryFixture fixture;
+  (void)fixture.engine.execute("##@(" + fixture.genesis.str() + ")");
+  const auto live = fixture.engine.execute("##/d.history-test");
+  ASSERT_EQ(live.size(), 1U);
+  EXPECT_EQ(fixture.coordinator.arena().textOf(live.front()), "at cell birth");
+}
+
+TEST(VQLHistoryTest, WatchSinceGenesisReportsExactlyTheNewCell) {
+  HistoryFixture fixture;
+  const auto changes =
+      fixture.engine.execute("watch ##/d.history-test as $cell since @" +
+                             fixture.genesis.str() + " { $cell }");
+  EXPECT_EQ(changes.size(), 1U);
 }
 
 // Owner ruling 2026-11-18: a baseline that names no version is refused, since

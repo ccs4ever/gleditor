@@ -203,6 +203,16 @@ ExecutionResult VortexVM::executeVqlCompare(const CellRef opcode,
       return {};
     }
 
+    // A plain text cell keeps its text origin: two of them compare as text, so
+    // a string is never unequal to itself and "1" differs from "1.0". Only a
+    // text-versus-number pair infers a number from the text. Typed scalar
+    // cells arrive already numeric and never take this branch.
+    if (const auto *l = std::get_if<std::string>(&*left)) {
+      if (const auto *r = std::get_if<std::string>(&*right)) {
+        outputs.emplace_back(applyComparison(*l <=> *r, kind));
+        return {};
+      }
+    }
     outputs.emplace_back(
         compareSameOrTextFallback(classify(*left), classify(*right), kind));
     return {};

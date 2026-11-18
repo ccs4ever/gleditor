@@ -1367,7 +1367,31 @@ ArenaManifold *ArenaManifold::bindDimensionsByNameMatch() {
   }
 
   for (const auto &[name, members] : byName) {
-    if (members.size() <= 1) {
+    if (members.size() == 1) {
+      // A name only one space holds still has to resolve to that space once a
+      // second one is attached (a pin at a state before the dimension existed
+      // shares only d.dims with the live store). Only a name the arena
+      // already knows is bound: minting a cell for every dimension of every
+      // historical fold would cost more than the lookup it saves.
+      const auto &[spaceId, dim] = members.front();
+      const auto owner           = spaceAt(spaceId);
+      if (spaces_.size() < 2 || !owner) continue;
+      const auto known = owner->reader != nullptr
+                             ? dimensionNamed(name, *owner->reader)
+                             : dimensionNamed(name);
+      if (!known) continue;
+      const auto existing = boundDimensions_.find(*known);
+      const bool taken =
+          existing != boundDimensions_.end() &&
+          std::ranges::any_of(existing->second.members,
+                              [&](const BoundDimensionMember &m) {
+                                return m.space == spaceId;
+                              });
+      if (taken) continue;
+      bindDimension(*known, spaceId, dim, DimensionBindingMode::NameMatch);
+      auto &bound          = boundDimensions_.at(*known).members.back();
+      bound.solitary       = true;
+      bound.boundAfterMark = lastMarkSerial_;
       continue;
     }
     const auto arenaDim = ensureDimension(name);
@@ -2608,6 +2632,18 @@ MarkResult ArenaManifold::release(const Mark &m) noexcept {
       storesRankTail_ = spaces_.back().storeCell;
   }
 
+  // A solitary binding made under this mark names a space that is still
+  // attached (the base, say), so the sweep above left it; it exists only
+  // because of an attach this mark undoes, and goes with it.
+  for (auto it = boundDimensions_.begin(); it != boundDimensions_.end();) {
+    auto &members  = it->second.members;
+    const bool had = !members.empty();
+    std::erase_if(members, [&](const BoundDimensionMember &b) {
+      return b.solitary && b.boundAfterMark >= m.serial;
+    });
+    it = had && members.empty() ? boundDimensions_.erase(it) : std::next(it);
+  }
+
   // Reverse, so that a cell written more than once under this mark ends up
   // holding the value it had when the mark was taken rather than the one it
   // held in between. Duplicates in the trail are what make this necessary and
@@ -2860,6 +2896,20 @@ std::optional<Promoted> promote(xanadu::Store &store,
                       "hazard for repoints)");
   }
 
+  // A proxy of a cell of the destination store is that cell under another
+  // name: the query reached it through the store's own space, and the cell
+  // already exists here. It maps to its own CellRef (R7: a ref is an ops
+  // index), so a link written on the proxy lands on the real cell instead of
+  // being dropped with the other external endpoints.
+  const auto ownStoreCell = [&](const CellRef cell) -> std::optional<CellRef> {
+    if (!from.isProxy(cell)) return std::nullopt;
+    const auto foreign = from.foreignOf(cell);
+    if (!foreign) return std::nullopt;
+    const auto space = from.spaceAt(foreign->space);
+    if (!space || space->store != &store) return std::nullopt;
+    return foreign->index;
+  };
+
   // Nothing is written until the walk has finished and the budget has held, so
   // a refusal leaves the store exactly as it was.
   std::unordered_map<CellRef, CellRef> real;
@@ -2873,6 +2923,10 @@ std::optional<Promoted> promote(xanadu::Store &store,
     // the evaluation invented is new.
     if (!isEphemeral(arena)) {
       real.emplace(arena, arena);
+      continue;
+    }
+    if (const auto own = ownStoreCell(arena)) {
+      real.emplace(arena, *own);
       continue;
     }
     if (from.isProxy(arena)) {
@@ -3012,7 +3066,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
   out.cells.clear();
   out.arena.clear();
   for (const auto cell : order) {
-    if (isEphemeral(cell)) {
+    if (isEphemeral(cell) && !ownStoreCell(cell)) {
       out.arena.push_back(cell);
       out.cells.push_back(real.at(cell));
     }
@@ -3028,8 +3082,10 @@ std::optional<Promoted> promote(xanadu::Store &store,
   // quadratic -- which is the exact trap store.hpp's `known` parameter exists
   // to let a caller avoid.
   auto known = store.rebuildManifold(out.version);
+  std::unordered_set<CellRef> usedDimensions;
   for (const CellRef arena : order) {
-    if (!from.holdsOwn(arena) || from.isProxy(arena)) {
+    const bool ownStoreProxy = ownStoreCell(arena).has_value();
+    if (!from.holdsOwn(arena) || (from.isProxy(arena) && !ownStoreProxy)) {
       continue;
     }
     // Per-cell emission policy. Only persistent shadowed cells (an owned slot
@@ -3067,12 +3123,19 @@ std::optional<Promoted> promote(xanadu::Store &store,
       if (dim == real.end()) {
         continue;
       }
+      if (isEphemeral(edge.dim)) usedDimensions.insert(edge.dim);
       if (isClear) {
         out.version = store.setLink(out.version, real.at(arena), dim->second,
                                     false, std::nullopt);
       } else {
         const auto to = real.find(edge.pos);
         if (to == real.end()) {
+          continue;
+        }
+        // A proxy also carries the edges its cell already has, which a
+        // second SetLink would only repeat.
+        if (ownStoreProxy && known.linked(real.at(arena), dim->second,
+                                          DimVector::POS) == to->second) {
           continue;
         }
         out.version = store.setLink(out.version, real.at(arena), dim->second,
@@ -3084,6 +3147,47 @@ std::optional<Promoted> promote(xanadu::Store &store,
         GLEDITOR_LOG_WARN("zigzag.arena",
                           "promote: the fold refused a link it just minted "
                           "(kind {}, {})",
+                          static_cast<int>(stepped.error().kind),
+                          toString(stepped.error().refusal));
+      }
+    }
+  }
+
+  // A dimension is a cell on the d.dims rank (R12), so one the evaluation
+  // minted is nameable after a reload only once the destination's rank
+  // reaches it. The arena's own rank is no guide (a composite arena need not
+  // file a minted dimension at all, and the walk above never follows d.dims
+  // because that rank holds every dimension of the document, not this
+  // answer's), so each promoted dimension that a written link runs along is
+  // filed at the destination's rank tail, as Store::makeDimension does.
+  const auto dimsRank = store.dimsDimension();
+  const auto homeCell = store.homeCell();
+  // The rank belongs to a store whose genesis predates this promotion. A store
+  // whose home and d.dims are the arena's own cells, minted just above, has no
+  // rank of the destination's to file onto.
+  const auto mintedHere = [&](const CellRef cell) {
+    return std::ranges::find(out.cells, cell) != out.cells.end();
+  };
+  if (dimsRank && homeCell && !mintedHere(*dimsRank) &&
+      !mintedHere(*homeCell) && known.contains(*homeCell) &&
+      known.contains(*dimsRank)) {
+    for (const CellRef arena : order) {
+      if (!isEphemeral(arena) || from.isProxy(arena) ||
+          !usedDimensions.contains(arena)) {
+        continue;
+      }
+      const auto dimCell = real.at(arena);
+      CellRef tail       = *homeCell;
+      for (auto step = known.cellCount() + 1; step > 0; step--) {
+        const auto next = known.linked(tail, *dimsRank, DimVector::POS);
+        if (!next || *next == dimCell || *next == *homeCell) break;
+        tail = *next;
+      }
+      out.version = store.setLink(out.version, tail, *dimsRank, false, dimCell);
+      if (const auto stepped = known.advance(store, out.version); !stepped) {
+        GLEDITOR_LOG_WARN("zigzag.arena",
+                          "promote: the fold refused a d.dims link it just "
+                          "minted (kind {}, {})",
                           static_cast<int>(stepped.error().kind),
                           toString(stepped.error().refusal));
       }
