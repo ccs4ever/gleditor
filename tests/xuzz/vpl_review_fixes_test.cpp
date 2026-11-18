@@ -135,4 +135,46 @@ TEST(VplReviewCompareTest, RefusalsNameTheirVerb) {
   EXPECT_TRUE(mentions(runVpl("1 2 ∘.⍳ 3"), "outer product of Iota"));
 }
 
+TEST(VplReviewOuterTest, EmptyOperandsRefuseByNameAndNeverLeakACell) {
+  for (const char *source :
+       {"1 2 ∘.× ⍳0", "(⍳0) ∘.× 1 2", "(⍳0) ∘.× ⍳0", "⍴ 1 2 ∘.× ⍳0",
+        "⍴ (⍳0) ∘.× 1 2", "⍴ (⍳0) ∘.× ⍳0"}) {
+    const auto out = runVpl(source);
+    EXPECT_FALSE(leaksCellHandle(out)) << source << ": " << out;
+    EXPECT_TRUE(mentions(out, "VPL outer product with an empty operand"))
+        << source << ": " << out;
+  }
+}
+
+TEST(VplReviewOuterTest, TransposeReadsEveryColumn) {
+  EXPECT_EQ(runVpl("⍉ 1 2 3 ∘.× 4 5"), "4 8 12\n5 10 15\n");
+  EXPECT_EQ(runVpl("⍴ ⍉ 1 2 3 ∘.× 4 5"), "2 3\n");
+  EXPECT_EQ(runVpl("⍉ ⍉ 1 2 3 ∘.× 4 5"), "4 5\n8 10\n12 15\n");
+  EXPECT_EQ(runVpl("⍉ 1 2 3 ∘.× 4"), "4 8 12\n");
+  EXPECT_EQ(runVpl("⍉ 7 ∘.× 4 5 6"), "28\n35\n42\n");
+}
+
+TEST(VplReviewOuterTest, ReversalsWorkInBothOrientations) {
+  EXPECT_EQ(runVpl("⌽ 1 2 3 ∘.× 4 5"), "12 15\n8 10\n4 5\n");
+  EXPECT_EQ(runVpl("⊖ 1 2 3 ∘.× 4 5"), "5 4\n10 8\n15 12\n");
+  EXPECT_EQ(runVpl("⌽ ⍉ 1 2 3 ∘.× 4 5"), "5 10 15\n4 8 12\n");
+  EXPECT_EQ(runVpl("⊖ ⍉ 1 2 3 ∘.× 4 5"), "12 8 4\n15 10 5\n");
+  EXPECT_EQ(runVpl("⍉ ⌽ 1 2 3 ∘.× 4 5"), "12 8 4\n15 10 5\n");
+}
+
+TEST(VplReviewOuterTest, ReduceAndScanOfAMatrixRefuseByNameOnBothAxes) {
+  for (const char *source :
+       {"+/ 1 2 3 ∘.× 4 5", "+⌿ 1 2 3 ∘.× 4 5", "+\\ 1 2 3 ∘.× 4 5",
+        "+/ ⍉ 1 2 3 ∘.× 4 5", "+⌿ ⍉ 1 2 3 ∘.× 4 5"}) {
+    const auto out = runVpl(source);
+    EXPECT_TRUE(mentions(out, "more than one axis")) << source << ": " << out;
+  }
+}
+
+TEST(VplReviewOuterTest, ResultDoesNotAliasAnOperandThatIsExtendedLater) {
+  EXPECT_EQ(runVpl("A←1 2\nM←A∘.×3 4\nA←A,9\nM"), "3 4\n6 8\n");
+  EXPECT_EQ(runVpl("A←1 2\nM←A∘.×3 4\nA←A,9\n⍴M"), "2 2\n");
+  EXPECT_EQ(runVpl("A←1 2\nM←A∘.×3 4\nA←A,9\n⍉M"), "3 6\n4 8\n");
+}
+
 } // namespace

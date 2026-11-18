@@ -350,6 +350,14 @@ inline void increment(LowerContext &ctx, zigzag::CellRef counter,
   ctx.emitOutput(op, counter);
 }
 
+/// Points the register `to` at the cell `from` references.
+inline void copyRegister(LowerContext &ctx, zigzag::CellRef from,
+                         zigzag::CellRef to, std::string_view label) {
+  const auto copy = ctx.emitOp(zigzag::vortex::OpcodeKind::CopyCellRefs, label);
+  ctx.emitInput(copy, from);
+  ctx.emitOutput(copy, to);
+}
+
 inline zigzag::CellRef hop(LowerContext &ctx, zigzag::CellRef origin,
                            zigzag::CellRef count, zigzag::DimRef dimension,
                            zigzag::DimVector direction) {

@@ -100,13 +100,6 @@ void clearRegister(LowerContext &ctx, CellRef target, std::string_view label) {
   ctx.emitOutput(clear, target);
 }
 
-void copyRegister(LowerContext &ctx, CellRef from, CellRef to,
-                  std::string_view label) {
-  const auto copy = ctx.emitOp(OpcodeKind::CopyCellRefs, label);
-  ctx.emitInput(copy, from);
-  ctx.emitOutput(copy, to);
-}
-
 /// The operand's natural walk: origin to the bound, or to the rank's end,
 /// whichever way the view is read.
 AxisWalk naturalWalk(LowerContext &ctx, CellRef operand,
