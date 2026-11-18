@@ -239,17 +239,34 @@ TEST_F(VQLCompilerTest, LiteralCreationSugar) {
   EXPECT_NE(result.disassembly.find("Beta"), std::string::npos);
 }
 
-TEST_F(VQLCompilerTest, BareCreationCompilesSuccessfully) {
+TEST_F(VQLCompilerTest, BareCreationMintsTheNamedCellsWhenRun) {
   VQLCompiler compiler(*core, *vm);
 
-  for (const auto *query : {"%\"Alpha\"", "%\"Alpha\"/d.child%\"Beta\""}) {
-    SCOPED_TRACE(query);
+  const auto run = [&](const char *query) {
     const auto result = compiler.compile(query);
     EXPECT_TRUE(result.success) << result.errorMessage;
-    EXPECT_TRUE(result.entryOpcode);
-    EXPECT_TRUE(result.disassembly.find("#NEW") != std::string::npos ||
-                result.disassembly.find("#VALUE") != std::string::npos);
-  }
+    const auto cursors = vm->activeCursors();
+    EXPECT_FALSE(cursors.empty());
+    const auto execution = vm->run(cursors.back(), 1000);
+    EXPECT_TRUE(execution.success) << execution.errorMessage;
+    const auto slots = core->inputsOf(result.generatedOpcodes.back());
+    return slots.empty() ? std::vector<CellRef>{}
+                         : vm->resultCells(slots.front());
+  };
+
+  const auto alpha = run("%\"Alpha\"");
+  ASSERT_EQ(alpha.size(), 1U);
+  EXPECT_EQ(arena.textOf(alpha.front()), "Alpha");
+
+  const auto beta = run("%\"Alpha\"/d.child%\"Beta\"");
+  ASSERT_EQ(beta.size(), 1U);
+  EXPECT_EQ(arena.textOf(beta.front()), "Beta");
+  const auto child = core->findDimension("d.child");
+  ASSERT_TRUE(child);
+  const auto parent = arena.linked(beta.front(), *child, true);
+  ASSERT_TRUE(parent);
+  EXPECT_EQ(arena.textOf(*parent), "Alpha");
+  EXPECT_NE(*parent, alpha.front());
 }
 
 TEST_F(VQLCompilerTest, LowersForAndWhereControlFlow) {
@@ -262,7 +279,27 @@ TEST_F(VQLCompilerTest, LowersForAndWhereControlFlow) {
   EXPECT_NE(result.disassembly.find("#STREAM_YIELD"), std::string::npos);
 }
 
-TEST_F(VQLCompilerTest, FLWORAndConditionals) {
+TEST_F(VQLCompilerTest, ForWhereReturnYieldsOnlyTheMatchingCells) {
+  const auto items = core->findOrMintDimension("d.items");
+  const CellRef a  = arena.makeCell("a");
+  const CellRef b  = arena.makeCell("b");
+  ASSERT_TRUE(arena.link(core->home(), items, false, a));
+  ASSERT_TRUE(arena.link(a, items, false, b));
+
+  VQLCompiler compiler(*core, *vm);
+  const auto result =
+      compiler.compile("for $x in ##/d.items where $x = \"b\" return $x");
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  const auto cursors = vm->activeCursors();
+  ASSERT_FALSE(cursors.empty());
+  const auto execution = vm->run(cursors.back(), 1000);
+  EXPECT_TRUE(execution.success) << execution.errorMessage;
+  const auto slots = core->inputsOf(result.generatedOpcodes.back());
+  ASSERT_EQ(slots.size(), 1U);
+  EXPECT_EQ(vm->resultCells(slots.front()), (std::vector<CellRef>{b}));
+}
+
+TEST_F(VQLCompilerTest, UnknownStoreGeneratorRefusesByName) {
   VQLCompiler compiler(*core, *vm);
   auto result = compiler.compile("topic(\"missing\")");
   EXPECT_FALSE(result.success);

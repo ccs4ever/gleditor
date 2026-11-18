@@ -210,6 +210,36 @@ TEST(VQLHistoryVmTest, FailedCompileAfterAPinLeavesNoSpaceBehind) {
             1U);
 }
 
+// The step-pin path folds as it compiles, so a refusal that comes after its
+// first fold must give that space back too.
+TEST(VQLHistoryVmTest, FailedCompileAfterAStepPinLeavesNoSpaceBehind) {
+  PinnedStore fixture;
+  const auto attached = fixture.coordinator.arena().spaceCount();
+  EXPECT_THROW(fixture.engine.execute("##/d.pin-test@(" +
+                                      fixture.linkedVersion.str() +
+                                      ")/d.pin-test@($unbound)"),
+               std::runtime_error);
+  EXPECT_EQ(fixture.coordinator.arena().spaceCount(), attached);
+  EXPECT_EQ(fixture.engine
+                .execute("##/d.pin-test@(" + fixture.linkedVersion.str() + ")")
+                .size(),
+            1U);
+}
+
+TEST(VQLHistoryVmTest,
+     ReusedSpaceIdAfterAFailedStepPinDoesNotAliasAnotherFold) {
+  PinnedStore fixture;
+  const auto earlier = "##/d.pin-test@(" + fixture.cellVersion.str() + ")";
+  const auto later   = "##/d.pin-test@(" + fixture.linkedVersion.str() + ")";
+  EXPECT_THROW(fixture.engine.execute("##/d.pin-test@(" +
+                                      fixture.cellVersion.str() +
+                                      ")/d.pin-test@($unbound)"),
+               std::runtime_error);
+  EXPECT_EQ(fixture.engine.execute(later).size(), 1U);
+  EXPECT_TRUE(fixture.engine.execute(earlier).empty());
+  EXPECT_EQ(fixture.engine.execute(later).size(), 1U);
+}
+
 TEST(VQLHistoryVmTest,
      ReusedSpaceIdAfterAFailedCompileDoesNotAliasAnotherFold) {
   PinnedStore fixture;

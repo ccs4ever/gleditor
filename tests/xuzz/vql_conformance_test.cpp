@@ -160,7 +160,9 @@ TEST(VQLConformanceTest, AcceptedSyntaxDoesNotImplyCompiledSemantics) {
     const auto result = compiler.compile(source);
     EXPECT_FALSE(result.success);
     EXPECT_NE(result.errorMessage.find(expectedSubstr), std::string::npos);
+    EXPECT_TRUE(result.generatedOpcodes.empty());
     EXPECT_EQ(arena.cellCount(), count);
+    EXPECT_TRUE(vm.activeCursors().empty());
   }
 }
 

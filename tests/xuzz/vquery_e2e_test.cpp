@@ -113,6 +113,15 @@ TEST_F(VQueryE2ETest, OnTheFlyVortexCompilation) {
   EXPECT_TRUE(res.output.ends_with("Alpha\nBeta\n")) << res.output;
 }
 
+// Whole-rank traversal used to be refused; it is lowered now, so the query is
+// held to its answer: the two cells the weave minted, in rank order.
+TEST_F(VQueryE2ETest, VortexLowersWholeRankTraversal) {
+  const auto rank = runVQuery("-e 'weave { ##/+d.items%\"A\"%\"B\" }; "
+                              "##/+d.items' --engine vortex --format text");
+  EXPECT_EQ(rank.exitCode, 0) << rank.output;
+  EXPECT_EQ(rank.output, "A\nB\n");
+}
+
 TEST_F(VQueryE2ETest, VortexRefusesUnimplementedSemantics) {
   const auto source = runVQuery("-e 'topic(\"missing\")' --engine vortex");
   EXPECT_EQ(source.exitCode, 1) << source.output;
