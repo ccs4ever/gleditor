@@ -77,16 +77,16 @@ TEST(VQLHistoryTest, PinFoldsHistoricalTopologyAndLeavesSourceUntouched) {
   EXPECT_EQ(fixture.store->latest(), latest);
 }
 
-TEST(VQLHistoryTest, PinningCellMapsItsIdentityAcrossHistoricalFolds) {
+// The link did not exist at cell birth, so only the second fold reaches it; the
+// step pin walks the pinned fold, not the live one.
+TEST(VQLHistoryTest, PinningStepMapsOnlyFoldsInWhichTheLinkExisted) {
   HistoryFixture fixture;
   const auto results =
       fixture.engine.execute("##/d.history-test@(" + fixture.cellVersion.str() +
                              ", " + fixture.linkedVersion.str() + ")");
 
-  ASSERT_EQ(results.size(), 2U);
-  EXPECT_NE(results[0], results[1]);
+  ASSERT_EQ(results.size(), 1U);
   EXPECT_EQ(fixture.coordinator.arena().textOf(results[0]), "at cell birth");
-  EXPECT_EQ(fixture.coordinator.arena().textOf(results[1]), "at cell birth");
 }
 
 TEST(VQLHistoryTest, RepeatedPinSharesTheSameHistoricalCellIdentity) {
