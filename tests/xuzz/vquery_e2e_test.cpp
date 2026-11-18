@@ -137,6 +137,13 @@ TEST_F(VQueryE2ETest, InPlaceWriteIntoAStoreWithDocumentsAndASliceSucceeds) {
                 "' --in-place -e '##/+d.c%\"a\"'");
   EXPECT_EQ(res.exitCode, 0) << res.output;
   EXPECT_NE(res.output.find("Wrote"), std::string::npos) << res.output;
+
+  // The written cells must be reachable from the existing home cell when the
+  // store is opened again, not merely present in it.
+  const auto again = runVQuery("'" + store.string() + "' --permascroll '" +
+                               scroll.string() + "' -e '##/+d.c'");
+  EXPECT_EQ(again.exitCode, 0) << again.output;
+  EXPECT_NE(again.output.find("a"), std::string::npos) << again.output;
 }
 
 TEST_F(VQueryE2ETest, VortexRefusesUnimplementedSemantics) {

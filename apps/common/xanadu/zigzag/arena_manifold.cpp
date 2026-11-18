@@ -2896,6 +2896,20 @@ std::optional<Promoted> promote(xanadu::Store &store,
                       "hazard for repoints)");
   }
 
+  // A proxy of a cell of the destination store is that cell under another
+  // name: the query reached it through the store's own space, and the cell
+  // already exists here. It maps to its own CellRef (R7: a ref is an ops
+  // index), so a link written on the proxy lands on the real cell instead of
+  // being dropped with the other external endpoints.
+  const auto ownStoreCell = [&](const CellRef cell) -> std::optional<CellRef> {
+    if (!from.isProxy(cell)) return std::nullopt;
+    const auto foreign = from.foreignOf(cell);
+    if (!foreign) return std::nullopt;
+    const auto space = from.spaceAt(foreign->space);
+    if (!space || space->store != &store) return std::nullopt;
+    return foreign->index;
+  };
+
   // Nothing is written until the walk has finished and the budget has held, so
   // a refusal leaves the store exactly as it was.
   std::unordered_map<CellRef, CellRef> real;
@@ -2909,6 +2923,10 @@ std::optional<Promoted> promote(xanadu::Store &store,
     // the evaluation invented is new.
     if (!isEphemeral(arena)) {
       real.emplace(arena, arena);
+      continue;
+    }
+    if (const auto own = ownStoreCell(arena)) {
+      real.emplace(arena, *own);
       continue;
     }
     if (from.isProxy(arena)) {
@@ -3048,7 +3066,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
   out.cells.clear();
   out.arena.clear();
   for (const auto cell : order) {
-    if (isEphemeral(cell)) {
+    if (isEphemeral(cell) && !ownStoreCell(cell)) {
       out.arena.push_back(cell);
       out.cells.push_back(real.at(cell));
     }
@@ -3064,8 +3082,10 @@ std::optional<Promoted> promote(xanadu::Store &store,
   // quadratic -- which is the exact trap store.hpp's `known` parameter exists
   // to let a caller avoid.
   auto known = store.rebuildManifold(out.version);
+  std::unordered_set<CellRef> usedDimensions;
   for (const CellRef arena : order) {
-    if (!from.holdsOwn(arena) || from.isProxy(arena)) {
+    const bool ownStoreProxy = ownStoreCell(arena).has_value();
+    if (!from.holdsOwn(arena) || (from.isProxy(arena) && !ownStoreProxy)) {
       continue;
     }
     // Per-cell emission policy. Only persistent shadowed cells (an owned slot
@@ -3103,12 +3123,19 @@ std::optional<Promoted> promote(xanadu::Store &store,
       if (dim == real.end()) {
         continue;
       }
+      if (isEphemeral(edge.dim)) usedDimensions.insert(edge.dim);
       if (isClear) {
         out.version = store.setLink(out.version, real.at(arena), dim->second,
                                     false, std::nullopt);
       } else {
         const auto to = real.find(edge.pos);
         if (to == real.end()) {
+          continue;
+        }
+        // A proxy also carries the edges its cell already has, which a
+        // second SetLink would only repeat.
+        if (ownStoreProxy && known.linked(real.at(arena), dim->second,
+                                          DimVector::POS) == to->second) {
           continue;
         }
         out.version = store.setLink(out.version, real.at(arena), dim->second,
@@ -3120,6 +3147,47 @@ std::optional<Promoted> promote(xanadu::Store &store,
         GLEDITOR_LOG_WARN("zigzag.arena",
                           "promote: the fold refused a link it just minted "
                           "(kind {}, {})",
+                          static_cast<int>(stepped.error().kind),
+                          toString(stepped.error().refusal));
+      }
+    }
+  }
+
+  // A dimension is a cell on the d.dims rank (R12), so one the evaluation
+  // minted is nameable after a reload only once the destination's rank
+  // reaches it. The arena's own rank is no guide (a composite arena need not
+  // file a minted dimension at all, and the walk above never follows d.dims
+  // because that rank holds every dimension of the document, not this
+  // answer's), so each promoted dimension that a written link runs along is
+  // filed at the destination's rank tail, as Store::makeDimension does.
+  const auto dimsRank = store.dimsDimension();
+  const auto homeCell = store.homeCell();
+  // The rank belongs to a store whose genesis predates this promotion. A store
+  // whose home and d.dims are the arena's own cells, minted just above, has no
+  // rank of the destination's to file onto.
+  const auto mintedHere = [&](const CellRef cell) {
+    return std::ranges::find(out.cells, cell) != out.cells.end();
+  };
+  if (dimsRank && homeCell && !mintedHere(*dimsRank) &&
+      !mintedHere(*homeCell) && known.contains(*homeCell) &&
+      known.contains(*dimsRank)) {
+    for (const CellRef arena : order) {
+      if (!isEphemeral(arena) || from.isProxy(arena) ||
+          !usedDimensions.contains(arena)) {
+        continue;
+      }
+      const auto dimCell = real.at(arena);
+      CellRef tail       = *homeCell;
+      for (auto step = known.cellCount() + 1; step > 0; step--) {
+        const auto next = known.linked(tail, *dimsRank, DimVector::POS);
+        if (!next || *next == dimCell || *next == *homeCell) break;
+        tail = *next;
+      }
+      out.version = store.setLink(out.version, tail, *dimsRank, false, dimCell);
+      if (const auto stepped = known.advance(store, out.version); !stepped) {
+        GLEDITOR_LOG_WARN("zigzag.arena",
+                          "promote: the fold refused a d.dims link it just "
+                          "minted (kind {}, {})",
                           static_cast<int>(stepped.error().kind),
                           toString(stepped.error().refusal));
       }
