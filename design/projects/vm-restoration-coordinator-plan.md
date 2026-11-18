@@ -475,6 +475,23 @@ nothing newly failing, 85 turned green against the baseline (33 since gate F, al
 VLace end-to-end, prelude and IO tests); `gleditor_test` and `zigzag_test` unchanged. The current
 failing list is `/data/git/gleditor-restore/.logs/w1/gate-g-xuzz-failed.txt`.
 
+Gates H to K (2026-11-18, after fifty-two commits of VQL, Prolog, VLace and VPL cards that landed
+while the coordinator was away, then reviewed by range and repaired): H at `207917d3` had
+`xuzz_test` 33 failures of 4468 (one real: the stale VLace phase test), I at the VQL and O2c repairs
+22 of 4584, J with the VLace and Prolog repairs 22 of 4616, K at `280dc9d5` with the VPL and core
+repairs 22 of 4648 (plus the timing-sensitive `ForeignRunDragCreatesAReaderOwnedStore`, which passes
+three of three alone). Nothing newly failing at any step; `gleditor_test` and `zigzag_test` show
+only their baseline failures. The 22 that remain are 11 Evidence and Subscription baseline failures
+and 11 VQL tests for unlowered forms that refuse by name (`find`, dynamic views, pivots, lens
+callbacks, shape assignments, user-defined function blocks). The current failing list is
+`/data/git/gleditor-restore/.logs/w1/gate-k-xuzz-failed.txt`.
+
+Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
+lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
+approval); `mesh::evaluate` of VQL source still runs `project` although a sealed portable artifact
+refuses it; closure-creating VQL queries keep their program; VLace has no `isEOF` form; nested
+enclose and an outer product with an empty operand refuse by name in VPL.
+
 **Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
 usage limit twice, and four exhausted it again. By the owner's instruction (2026-11-12), run at most
 two agents at a time, workers and reviewers counted together.
