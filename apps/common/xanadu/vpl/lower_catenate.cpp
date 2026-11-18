@@ -117,20 +117,12 @@ CellRef lowerCatenateDyadic(LowerContext &ctx, const DyadicExpr &expr) {
     return c0;
   }
 
-  // Prepended scalar to a compile-time rank (e.g. ready , unready , total).
-  if (!lRank && rRank && ctx.core().arena().contains(*rCell) &&
-      ctx.core().arena().linked(*rCell, dim, DimVector::POS).has_value()) {
-    const auto c0 = ctx.core().arena().makeCell();
-    emit::copyValue(ctx, *lCell, c0);
-    zigzag::expectWritten(
-        ctx.core().arena().link(c0, dim, DimVector::POS, *rCell));
-    ctx.cellDependencies()[c0] = ctx.rankDependenciesOf(*lCell);
-    ctx.rankAxes()[c0]         = {DirectedDim{dim, DimVector::POS}};
-    emit::mergeRankInputDependencies(ctx, c0, std::array{*lCell, *rCell});
-    return c0;
-  }
-
-  // General runtime catenation (ranks, mixed rank/scalar).
+  // Every case mints fresh cells. The spec's glyph table (vpl-array-language.md
+  // 3, 3.1) lists `,` in neither its view-returning rows (`⍉ ⌽ ↑ ↓`) nor its
+  // weaving ones, but 4.3 says a verb that produces a value mints cells, and
+  // VPLEngineTest.CatenateKeepsBudgetAndAliasesIntact pins copies. Linking a
+  // new cell into an operand's own cells would also make a second catenation
+  // steal the operand's NEG link and mutate the operand.
   const auto result = beginResult(ctx, dim);
   appendOperand(ctx, result, *lCell);
   appendOperand(ctx, result, *rCell);
