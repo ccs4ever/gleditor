@@ -342,6 +342,7 @@ TEST_F(VQLSemanticsRepairTest,
   const auto before = arena.cellCount();
   EXPECT_THROW(engine.execute("$s/link(+d.edge, 0)"), std::runtime_error);
   EXPECT_THROW(engine.execute("$s/link(+d.edge, -1)"), std::runtime_error);
+  EXPECT_THROW(engine.execute("$s/link(+d.edge, \"7\")"), std::runtime_error);
   EXPECT_EQ(arena.cellCount(), before);
   EXPECT_EQ(arena.linked(subject, dim, DimVector::POS), neighbor);
   EXPECT_THROW(engine.execute("$s/new(+d.edge)"), std::runtime_error);
