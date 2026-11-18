@@ -712,6 +712,14 @@ TypeChecker::inferRecordUpdate(const ERecordUpdate &ru, const EnvPtr &env,
 
 std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
                                                    const EnvPtr &env) {
+  // The parser bounds nesting, but a checker can be handed a tree directly.
+  const InferDepth depth(inferDepth_);
+  if (depth.exceeded()) {
+    return terr(CompileError::BudgetExhausted,
+                "expression nesting exceeds " + std::to_string(maxExprNesting) +
+                    " levels",
+                e.loc);
+  }
   auto lookup = [&](const std::string &name) -> const Scheme * {
     for (const TypeEnv *x = env.get(); x != nullptr; x = x->parent.get()) {
       const auto it = x->vars.find(name);
@@ -840,13 +848,27 @@ std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
             return r;
           }
           if (op == ":") {
-            auto h = infer(*node.lhs, env);
-            if (!h) return h;
-            auto t = infer(*node.rhs, env);
-            if (!t) return t;
-            auto u = unify(*t, tyList(*h), e.loc);
-            if (!u) return std::unexpected(u.error());
-            return tyList(*h);
+            // A list literal is a right spine as long as the list, so the
+            // spine is walked here and only each head recurses. The tails'
+            // types are built from the end, where [] gives the element type.
+            std::vector<const EBinOp *> spine;
+            const ExprNode *tail = &e;
+            while (const auto *link = std::get_if<EBinOp>(&tail->node)) {
+              if (link->op != ":") break;
+              spine.push_back(link);
+              tail = link->rhs.get();
+            }
+            auto tailTy = infer(*tail, env);
+            if (!tailTy) return tailTy;
+            TyPtr acc = *tailTy;
+            for (auto link = spine.rbegin(); link != spine.rend(); ++link) {
+              auto h = infer(*(*link)->lhs, env);
+              if (!h) return h;
+              auto u = unify(acc, tyList(*h), e.loc);
+              if (!u) return std::unexpected(u.error());
+              acc = tyList(*h);
+            }
+            return acc;
           }
           auto l = infer(*node.lhs, env);
           if (!l) return l;

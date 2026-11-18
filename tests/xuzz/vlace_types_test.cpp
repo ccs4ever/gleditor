@@ -217,3 +217,58 @@ TEST(VlaceTextIsNotNumericTest, ArithmeticOnNonNumbersIsRejected) {
   EXPECT_EQ(code("1 / \"x\""), "TypeMismatch");
   EXPECT_EQ(code("0 - \"x\""), "TypeMismatch");
 }
+
+// -- Long and deep programs do not crash the host ----------------------------
+
+namespace {
+// The parser's error code name, or "OK".
+std::string parseCode(std::string_view src) {
+  Parser parser(src);
+  auto prog = parser.parseProgram();
+  return prog ? "OK" : std::string(compileErrorName(prog.error().code));
+}
+std::string intList(std::size_t count) {
+  std::string src = "[";
+  for (std::size_t i = 0; i < count; ++i) {
+    if (i != 0) src += ", ";
+    src += std::to_string(i);
+  }
+  return src + "]";
+}
+} // namespace
+
+// A list literal of n elements used to parse into n nested `:` nodes that the
+// checker (and the AST destructor) walked recursively, so about 10,000 elements
+// overflowed the host stack. A flat literal is one node.
+TEST(VlaceDeepProgramsTest, LongFlatListLiteralsTypeCheck) {
+  EXPECT_EQ(ty(intList(10'000)), "[Int]");
+  EXPECT_EQ(ty(intList(100'000)), "[Int]");
+  EXPECT_EQ(code("[1, 2, \"three\"]"), "TypeMismatch");
+}
+
+// Nesting is bounded and refused by name, in the parser and in the checker,
+// instead of exhausting the stack.
+TEST(VlaceDeepProgramsTest, DeepNestingIsABudgetRefusalNotACrash) {
+  const std::string parens =
+      std::string(5000, '(') + "1" + std::string(5000, ')');
+  EXPECT_EQ(parseCode(parens), "BudgetExhausted");
+  std::string lambdas;
+  for (int i = 0; i < 5000; ++i) lambdas += "fn x => ";
+  lambdas += "1";
+  EXPECT_EQ(parseCode(lambdas), "BudgetExhausted");
+  std::string cons;
+  for (int i = 0; i < 5000; ++i) cons += "1 : ";
+  cons += "[]";
+  EXPECT_EQ(parseCode(cons), "BudgetExhausted");
+  // A long left-nested sum parses in a loop, so the checker's own guard is the
+  // one that refuses it; destroying the 100,000-deep tree must not crash
+  // either.
+  std::string sum = "1";
+  for (int i = 0; i < 1500; ++i) sum += " + 1";
+  EXPECT_NE(ty(sum).find("BudgetExhausted"), std::string::npos) << ty(sum);
+  std::string longSum = "1";
+  for (int i = 0; i < 100'000; ++i) longSum += " + 1";
+  EXPECT_NE(ty(longSum).find("BudgetExhausted"), std::string::npos);
+  // Within the limit still works.
+  EXPECT_EQ(ty(std::string(100, '(') + "1" + std::string(100, ')')), "Int");
+}

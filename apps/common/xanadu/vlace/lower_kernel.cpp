@@ -58,11 +58,11 @@ constexpr std::int64_t firstEpoch = 3;
 constexpr std::int64_t linkPosward = 1;
 
 /// How deeply one expression may nest before lowering (and copying a
-/// declaration) is refused. The parser does not bound nesting (the mesh
-/// evaluator bounds the source before parsing), and lowering recurses on the
-/// host stack, so a Compiler fed a pathological tree directly needs its own
-/// limit. Reported as BudgetExhausted like the other evaluation budgets.
-constexpr std::size_t maxAstDepth = 1000;
+/// declaration) is refused. The parser and the checker enforce the same bound,
+/// but lowering recurses on the host stack and a Compiler can be fed a tree
+/// directly, so it keeps its own guard. Reported as BudgetExhausted like the
+/// other evaluation budgets.
+constexpr std::size_t maxAstDepth = maxExprNesting;
 
 /// Host recursion depth of the functions that walk an expression tree.
 thread_local std::size_t astDepth = 0;
