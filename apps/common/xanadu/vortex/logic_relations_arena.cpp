@@ -77,8 +77,9 @@ public:
     }
 
     // Unbound CellId: scan all arena cells up to snapshot limit
-    const auto limit = request.limit.value_or(core_->arena().cellCount());
-    const std::size_t start = std::max<std::size_t>(1, request.position);
+    const auto limit = scanEnd();
+    const std::size_t start =
+        std::max<std::size_t>(scanBegin(), request.position);
 
     for (std::size_t c = start; c < limit; ++c) {
       core_->arena().consumeWork();
@@ -193,12 +194,12 @@ public:
     }
 
     // Unbound FromId: scan all cells
-    const auto limit = request.limit.value_or(core_->arena().cellCount());
+    const auto limit               = scanEnd();
     constexpr unsigned kSubBits    = 7;
     constexpr std::size_t kSubMask = (1U << kSubBits) - 1U;
 
     const std::size_t startC =
-        std::max<std::size_t>(1, request.position >> kSubBits);
+        std::max<std::size_t>(scanBegin(), request.position >> kSubBits);
     const std::size_t startSub = request.position & kSubMask;
 
     for (std::size_t c = startC; c < limit; ++c) {
@@ -277,12 +278,12 @@ public:
     }
 
     // Unbound CellId
-    const auto limit = request.limit.value_or(core_->arena().cellCount());
+    const auto limit               = scanEnd();
     constexpr unsigned kSubBits    = 7;
     constexpr std::size_t kSubMask = (1U << kSubBits) - 1U;
 
     const std::size_t startC =
-        std::max<std::size_t>(1, request.position >> kSubBits);
+        std::max<std::size_t>(scanBegin(), request.position >> kSubBits);
     const std::size_t startSub = request.position & kSubMask;
 
     for (std::size_t c = startC; c < limit; ++c) {
@@ -371,8 +372,9 @@ public:
     }
 
     // Unbound PresentationCell
-    const auto limit = request.limit.value_or(core_->arena().cellCount());
-    const std::size_t start = std::max<std::size_t>(1, request.position);
+    const auto limit = scanEnd();
+    const std::size_t start =
+        std::max<std::size_t>(scanBegin(), request.position);
 
     for (std::size_t c = start; c < limit; ++c) {
       core_->arena().consumeWork();
@@ -490,12 +492,12 @@ public:
     }
 
     // Unbound U
-    const auto limit = request.limit.value_or(core_->arena().cellCount());
+    const auto limit               = scanEnd();
     constexpr unsigned kSubBits    = 7;
     constexpr std::size_t kSubMask = (1U << kSubBits) - 1U;
 
     const std::size_t startC =
-        std::max<std::size_t>(1, request.position >> kSubBits);
+        std::max<std::size_t>(scanBegin(), request.position >> kSubBits);
     const std::size_t startSub = request.position & kSubMask;
 
     for (std::size_t c = startC; c < limit; ++c) {

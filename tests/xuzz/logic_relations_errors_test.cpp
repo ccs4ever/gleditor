@@ -121,4 +121,74 @@ TEST(LogicRelationErrorsTest, RelationAtTheWrongArityRefusesByName) {
   EXPECT_EQ(h.errorOf("nosuch_relation(1, 2, 3)."), "");
 }
 
+// The rule for a scan with an unbound cell argument: it visits the cells that
+// existed when the solve started and were minted after the engine's own
+// bootstrap, each once. Cells the query mints while it runs (terms, compiled
+// ops, activation frames) and the bootstrap machinery (dimensions, std
+// modules, seeded clauses) are never answers.
+TEST(LogicRelationScanTest, ScanSeesOnlyUserCellsExistingAtSolveStart) {
+  RelationHarness h;
+  auto &arena         = h.core.arena();
+  const CellRef alpha = arena.makeCell("alpha");
+  const CellRef seven = arena.makeScalarCell(std::int64_t{7});
+  const CellRef dim   = arena.makeCell("d.test");
+  ASSERT_TRUE(arena.link(alpha, dim, DimVector::POS, seven));
+
+  const auto compiled =
+      h.compiler.compileQuery("cell_value(C, V), T = f(C, V, g(C)).");
+  const std::size_t first = h.compiler.stdlib().bootstrapCellCount();
+  const std::size_t last  = arena.cellCount();
+  ASSERT_GT(last, first);
+
+  const auto idsOf = [&] {
+    std::vector<std::uint64_t> ids;
+    for (const auto &sol : h.compiler.solve(compiled, 100000))
+      ids.push_back(std::stoull(sol.formatted.at("C")));
+    return ids;
+  };
+  const auto firstRun = idsOf();
+  // The run minted terms and frames above the snapshot; none is visible, and a
+  // second run of the same query sees exactly the same cells.
+  EXPECT_EQ(arena.cellCount(), last);
+  EXPECT_EQ(idsOf(), firstRun);
+
+  std::set<std::uint64_t> distinct(firstRun.begin(), firstRun.end());
+  EXPECT_EQ(distinct.size(), firstRun.size()) << "a cell was visited twice";
+  EXPECT_EQ(firstRun.size(), last - std::max<std::size_t>(first, 1));
+  EXPECT_EQ(*distinct.begin(), ArenaManifold::refOf(static_cast<std::uint32_t>(
+                                   std::max<std::size_t>(first, 1))));
+  EXPECT_EQ(*distinct.rbegin(),
+            ArenaManifold::refOf(static_cast<std::uint32_t>(last - 1)));
+  EXPECT_TRUE(distinct.contains(alpha));
+  EXPECT_TRUE(distinct.contains(seven));
+
+  const auto values = h.all("cell_value(C, V).", "V");
+  EXPECT_NE(std::find(values.begin(), values.end(), "alpha"), values.end());
+  EXPECT_EQ(std::find(values.begin(), values.end(), "d.dims"), values.end())
+      << "an engine dimension cell was enumerated";
+}
+
+TEST(LogicRelationScanTest, LinkAndSpanScansUseTheSameRange) {
+  RelationHarness h;
+  auto &arena         = h.core.arena();
+  const CellRef alpha = arena.makeCell("alpha");
+  const CellRef beta  = arena.makeCell("beta");
+  const CellRef dim   = arena.makeCell("d.test");
+  ASSERT_TRUE(arena.link(alpha, dim, DimVector::POS, beta));
+
+  const auto from = h.all("cell_link(F, 'd.test', pos, T).", "F");
+  ASSERT_EQ(from.size(), 1U);
+  EXPECT_EQ(from.front(), std::to_string(alpha));
+  // No engine link (a dimension rank, a clause chain) appears for an unbound
+  // dimension either: every answer starts at a cell minted after bootstrap.
+  const std::uint64_t floor = ArenaManifold::refOf(static_cast<std::uint32_t>(
+      std::max<std::size_t>(h.compiler.stdlib().bootstrapCellCount(), 1)));
+  for (const auto &id : h.all("cell_link(F, D, R, T).", "F"))
+    EXPECT_GE(std::stoull(id), floor) << id;
+  for (const auto &id : h.all("cell_span(C, S).", "C"))
+    EXPECT_GE(std::stoull(id), floor) << id;
+  for (const auto &id : h.all("bridge_edge(U, D, V).", "U"))
+    EXPECT_GE(std::stoull(id), floor) << id;
+}
+
 } // namespace
