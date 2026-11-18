@@ -3,14 +3,14 @@
  * @brief Card V4 view verbs: transpose, reverse, dimension values,
  * rho-to-dimensions.
  *
- * A view is (origin, axes, reversed flags), so these verbs mint no value cells
- * and copy none, and none walks anything when the program runs. A transpose
- * or a dimension relabelling changes the compile-time axis list (the flags
- * travel with their axes); a reverse toggles the flag of the flipped axis and
- * leaves the origin where it is, which is what the spec means by changing an
- * axis's sign (card V4b). Each result gets a register of its own (an alias of
- * the operand's), because rankAxes_ is keyed by register and two views over
- * one origin would otherwise share a key.
+ * A view is (origin, axes, reversed flags, far-end bounds), so these verbs mint
+ * no value cells and copy none, and none walks anything when the program runs.
+ * A transpose or a dimension relabelling changes the compile-time axis list
+ * (the flags travel with their axes); a reverse toggles the flag of the flipped
+ * axis and leaves the origin where it is, which is what the spec means by
+ * changing an axis's sign (card V4b). Each result gets a register of its own
+ * (an alias of the operand's), because rankAxes_ is keyed by register and two
+ * views over one origin would otherwise share a key.
  *
  * Because nothing moves, a reversed view is live (it shows cells appended to
  * the rank later), `⌽⌽X` is X, `⍴⌽X` is `⍴X`, and a reversal of a matrix holds
@@ -68,11 +68,17 @@ CellRef clearedRegister(LowerContext &ctx) {
 // The result register of a view over `operand`: its own key in rankAxes_,
 // the operand's input dependencies.
 CellRef viewOver(LowerContext &ctx, CellRef origin, CellRef operand,
-                 std::vector<DirectedDim> axes, AxisReversed reversed = {}) {
+                 std::vector<DirectedDim> axes, AxisReversed reversed = {},
+                 AxisBounds bounds = {}) {
   const auto view      = emit::aliasRegister(ctx, origin);
   ctx.rankAxes()[view] = std::move(axes);
   if (std::ranges::any_of(reversed, [](const bool flag) { return flag; })) {
     ctx.rankReversed()[view] = std::move(reversed);
+  }
+  // The view reads the same cells, so it ends where the operand ended.
+  if (std::ranges::any_of(bounds,
+                          [](const auto &stop) { return stop.has_value(); })) {
+    ctx.rankBounds()[view] = std::move(bounds);
   }
   const std::array inputs{operand};
   emit::mergeRankInputDependencies(ctx, view, inputs);
@@ -128,7 +134,13 @@ Maybe lowerTransposeMonadic(LowerContext &ctx, const MonadicExpr &expr) {
     flags = *held;
     std::ranges::reverse(flags);
   }
-  return viewOver(ctx, operand, operand, std::move(reversed), std::move(flags));
+  AxisBounds stops;
+  if (const auto *held = ctx.boundsOf(operand)) {
+    stops = *held;
+    std::ranges::reverse(stops);
+  }
+  return viewOver(ctx, operand, operand, std::move(reversed), std::move(flags),
+                  std::move(stops));
 }
 
 Maybe lowerReverseMonadic(LowerContext &ctx, const MonadicExpr &expr) {
@@ -146,7 +158,10 @@ Maybe lowerReverseMonadic(LowerContext &ctx, const MonadicExpr &expr) {
     flags.resize(axes->size(), false);
   }
   flags[index] = !flags[index];
-  return viewOver(ctx, operand, operand, *axes, std::move(flags));
+  AxisBounds stops;
+  if (const auto *held = ctx.boundsOf(operand)) stops = *held;
+  return viewOver(ctx, operand, operand, *axes, std::move(flags),
+                  std::move(stops));
 }
 
 CellRef lowerRhoViewDyadic(LowerContext &ctx, const DyadicExpr &expr) {
@@ -188,6 +203,7 @@ CellRef lowerTransposeDyadic(LowerContext &ctx, const DyadicExpr &expr,
   std::vector<bool> seen(axes->size(), false);
   std::vector<DirectedDim> permuted;
   AxisReversed permutedFlags;
+  AxisBounds permutedBounds;
   permuted.reserve(axes->size());
   for (const auto index : *permutation) {
     if (index < 0 || static_cast<std::size_t>(index) >= axes->size() ||
@@ -198,9 +214,11 @@ CellRef lowerTransposeDyadic(LowerContext &ctx, const DyadicExpr &expr,
     permuted.push_back((*axes)[static_cast<std::size_t>(index)]);
     permutedFlags.push_back(
         ctx.isReversed(rCell, static_cast<std::size_t>(index)));
+    permutedBounds.push_back(
+        ctx.boundOf(rCell, static_cast<std::size_t>(index)));
   }
   return viewOver(ctx, rCell, rCell, std::move(permuted),
-                  std::move(permutedFlags));
+                  std::move(permutedFlags), std::move(permutedBounds));
 }
 
 CellRef lowerDimension(LowerContext &ctx, const DimensionExpr &expr) {

@@ -670,12 +670,17 @@ std::optional<CellRef> VPLCompiler::compileProgram(const Program &prog) {
     lastResultCells_.push_back(*lastRes);
     lastResultAxes_.clear();
     lastResultReversed_.clear();
+    lastResultBounds_.clear();
     if (const auto axes = rankAxes_.find(*lastRes); axes != rankAxes_.end()) {
       lastResultAxes_ = axes->second;
     }
     if (const auto flags = rankReversed_.find(*lastRes);
         flags != rankReversed_.end()) {
       lastResultReversed_ = flags->second;
+    }
+    if (const auto stops = rankBounds_.find(*lastRes);
+        stops != rankBounds_.end()) {
+      lastResultBounds_ = stops->second;
     }
     lastResultDependencies_ = rankDependenciesOf(*lastRes);
     recordResultFacts(*lastRes);
@@ -760,6 +765,12 @@ VPLCompiler::compileIdentifier(const IdentifierExpr &expr) {
       } else {
         rankReversed_.erase(*it->second);
       }
+      if (const auto stops = varBounds_.find(expr.name());
+          stops != varBounds_.end()) {
+        rankBounds_[*it->second] = stops->second;
+      } else {
+        rankBounds_.erase(*it->second);
+      }
       if (varEnclosed_.contains(expr.name())) {
         enclosedCells_.insert(*it->second);
       }
@@ -805,6 +816,16 @@ std::optional<CellRef> VPLCompiler::compileAssign(const AssignExpr &expr) {
       flags != rankReversed_.end()) {
     bindingReversed = flags->second;
   }
+  AxisBounds bindingBounds;
+  if (const auto stops = rankBounds_.find(*valCell);
+      stops != rankBounds_.end()) {
+    bindingBounds = stops->second;
+  }
+  if (bindingBounds.empty()) {
+    varBounds_.erase(expr.target());
+  } else {
+    varBounds_[expr.target()] = bindingBounds;
+  }
   if (bindingAxes.empty()) {
     varAxes_.erase(expr.target());
   } else {
@@ -833,6 +854,7 @@ std::optional<CellRef> VPLCompiler::compileAssign(const AssignExpr &expr) {
       .cell            = *valCell,
       .axes            = bindingAxes,
       .reversed        = std::move(bindingReversed),
+      .bounds          = std::move(bindingBounds),
       .dependencies    = rankDependenciesOf(*valCell),
       .enclosed        = enclosed,
       .dimensionValues = std::move(dimensionValues),
@@ -1128,8 +1150,10 @@ CompilationResult VPLCompiler::compile(const Program &program,
   varBindings_.clear();
   varAxes_.clear();
   varReversed_.clear();
+  varBounds_.clear();
   rankAxes_.clear();
   rankReversed_.clear();
+  rankBounds_.clear();
   rankDependencies_.clear();
   cellDependencies_.clear();
   assignedBindings_.clear();
@@ -1143,6 +1167,7 @@ CompilationResult VPLCompiler::compile(const Program &program,
   lastResultCells_.clear();
   lastResultAxes_.clear();
   lastResultReversed_.clear();
+  lastResultBounds_.clear();
   lastResultDependencies_.clear();
   optimize_ = options.optimize;
 
@@ -1188,6 +1213,12 @@ CompilationResult VPLCompiler::compile(const Program &program,
         rankReversed_[*cell] = binding.reversed();
         varReversed_[name]   = binding.reversed();
       }
+      // A stored bound is the bound cell itself, used as its own register as
+      // an origin is.
+      if (!binding.bounds().empty()) {
+        rankBounds_[*cell] = binding.bounds();
+        varBounds_[name]   = binding.bounds();
+      }
     }
     if (cell && binding.isEnclosed()) {
       enclosedCells_.insert(*cell);
@@ -1206,6 +1237,10 @@ CompilationResult VPLCompiler::compile(const Program &program,
       if (const auto flags = rankReversed_.find(*resultCell);
           flags != rankReversed_.end()) {
         lastResultReversed_ = flags->second;
+      }
+      if (const auto stops = rankBounds_.find(*resultCell);
+          stops != rankBounds_.end()) {
+        lastResultBounds_ = stops->second;
       }
       lastResultDependencies_ = rankDependenciesOf(*resultCell);
       recordResultFacts(*resultCell);
@@ -1241,6 +1276,7 @@ CompilationResult VPLCompiler::compile(const Program &program,
         .resultSlots           = lastResultCells_,
         .resultAxes            = lastResultAxes_,
         .resultReversed        = lastResultReversed_,
+        .resultBounds          = lastResultBounds_,
         .resultDependencies    = lastResultDependencies_,
         .cellDependencies      = cellDependencies_,
         .assignedBindings      = assignedBindings_,

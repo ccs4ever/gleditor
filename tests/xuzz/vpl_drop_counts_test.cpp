@@ -93,8 +93,9 @@ TEST_F(VplDropCountsTest, ACountBeyondTheLengthDropsEverythingCheaply) {
   EXPECT_LT(engine.totalCycles() - before, 5000u);
 }
 
-TEST_F(VplDropCountsTest, ANegativeCountIsStillRefused) {
-  EXPECT_FALSE(refusal("A ← 5⍳d.1; n ← 0-1; n ↓ A").empty());
+TEST_F(VplDropCountsTest, ANegativeCountCountsFromTheEnd) {
+  EXPECT_EQ(values("A ← 5⍳d.1; n ← 0-1; n ↓ A"), (Values{1, 2, 3, 4}));
+  EXPECT_EQ(values("A ← 5⍳d.1; ¯1000000000 ↓ A").size(), 0u);
 }
 
 TEST_F(VplDropCountsTest, AScalarOrARankCountOrOperandIsRefusedByName) {

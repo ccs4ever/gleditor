@@ -28,11 +28,13 @@ private:
 // `scalarInt()` while the result is still a rank of one cell.
 VplView makeRankView(std::optional<zigzag::CellRef> origin,
                      const std::vector<zigzag::DirectedDim> &axes,
-                     const AxisReversed &reversed,
+                     const AxisReversed &reversed, const AxisBounds &bounds,
                      zigzag::ArenaManifold &arena) {
   VplView view{origin, axes};
   if (!origin) return view;
   view.setReversed(reversed);
+  // Before the extents: an extent counts up to the bound.
+  view.setBounds(bounds);
   if (const auto value = arena.asInt64(*origin)) {
     view.setScalarPayload(*value);
   } else if (const auto value = arena.asDouble(*origin)) {
@@ -45,6 +47,8 @@ VplView makeRankView(std::optional<zigzag::CellRef> origin,
 struct ViewFacts {
   std::vector<zigzag::DirectedDim> axes;
   AxisReversed reversed;
+  /// The bound cells themselves, read from their registers after the run.
+  AxisBounds bounds;
   bool enclosed{false};
   const std::optional<std::vector<zigzag::DirectedDim>> *dimensionValues{
       nullptr};
@@ -72,12 +76,12 @@ VplView makeView(std::optional<zigzag::CellRef> cell, const ViewFacts &facts,
       box.enclose(std::make_shared<VplView>(makeView(content, {}, core)));
     } else {
       box.enclose(std::make_shared<VplView>(
-          makeRankView(content, facts.axes, {}, arena)));
+          makeRankView(content, facts.axes, {}, {}, arena)));
     }
     return box;
   }
   if (!facts.axes.empty()) {
-    return makeRankView(cell, facts.axes, facts.reversed, arena);
+    return makeRankView(cell, facts.axes, facts.reversed, facts.bounds, arena);
   }
 
   if (const auto value = arena.asInt64(*cell)) {
@@ -179,7 +183,15 @@ Executor::run(CompilationResult compiled, std::size_t maxCycles) {
           ExecutionError{stage, std::move(execution.errorMessage)});
     }
 
-    auto &arena           = core_.arena();
+    auto &arena = core_.arena();
+    // A bound register that holds no cell at run time bounds nothing.
+    const auto boundCells = [&](const AxisBounds &registers) {
+      AxisBounds cells;
+      for (const auto &stop : registers) {
+        cells.push_back(stop ? vm_.resultCell(*stop) : std::nullopt);
+      }
+      return cells;
+    };
     const auto resultCell = vm_.resultCell(compiled.resultSlots.front());
     // A cleared result register is an empty array when the program said the
     // result has axes, and a failure otherwise.
@@ -196,6 +208,7 @@ Executor::run(CompilationResult compiled, std::size_t maxCycles) {
     auto view = makeView(resultCell,
                          {.axes            = compiled.resultAxes,
                           .reversed        = compiled.resultReversed,
+                          .bounds          = boundCells(compiled.resultBounds),
                           .enclosed        = compiled.resultEnclosed,
                           .dimensionValues = &compiled.resultDimensionValues},
                          core_);
@@ -236,9 +249,10 @@ Executor::run(CompilationResult compiled, std::size_t maxCycles) {
         addDependency(updatedDependencies[*cell], *cell);
       }
       VplView assigned = makeView(cell,
-                                  {.axes            = binding.axes,
-                                   .reversed        = binding.reversed,
-                                   .enclosed        = binding.enclosed,
+                                  {.axes     = binding.axes,
+                                   .reversed = binding.reversed,
+                                   .bounds   = boundCells(binding.bounds),
+                                   .enclosed = binding.enclosed,
                                    .dimensionValues = &binding.dimensionValues},
                                   core_);
       recordUnion(assigned, bindingDependencies);

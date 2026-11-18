@@ -197,17 +197,11 @@ Maybe lowerFoldMonadic(LowerContext &ctx, const MonadicExpr &expr) {
     if (axes == nullptr || axes->size() != 1) {
       refuse(kValence);
     }
-    const auto axis     = axes->front();
-    const bool reversed = ctx.isReversed(*rCell, 0);
-
-    CellRef anchor              = *rCell;
-    DimVector dir               = axis.dir;
-    std::optional<CellRef> stop = std::nullopt;
-    if (reversed) {
-      anchor = emit::extreme(ctx, *rCell, axis.dim, axis.dir, std::nullopt);
-      dir    = -axis.dir;
-      stop   = *rCell;
-    }
+    const auto axis      = axes->front();
+    const auto walk      = axisWalkOf(ctx, *rCell);
+    const CellRef anchor = walk.anchor;
+    const DimVector dir  = walk.direction;
+    const auto stop      = walk.stop;
 
     // 1 when the walk has a first cell, 0 for an empty rank (an absent
     // anchor): the anchor is its own stop, so the count cannot pass one.
@@ -308,19 +302,9 @@ Maybe lowerTallyMonadic(LowerContext &ctx, const MonadicExpr &, CellRef rCell) {
   if (axes == nullptr || axes->size() != 1) {
     refuse(kValence);
   }
-  const auto axis     = axes->front();
-  const bool reversed = ctx.isReversed(rCell, 0);
-
-  CellRef anchor              = rCell;
-  DimVector dir               = axis.dir;
-  std::optional<CellRef> stop = std::nullopt;
-  if (reversed) {
-    anchor = emit::extreme(ctx, rCell, axis.dim, axis.dir, std::nullopt);
-    dir    = -axis.dir;
-    stop   = rCell;
-  }
-
-  return emit::extentOf(ctx, anchor, axis.dim, dir, stop);
+  const auto axis = axes->front();
+  const auto walk = axisWalkOf(ctx, rCell);
+  return emit::extentOf(ctx, walk.anchor, axis.dim, walk.direction, walk.stop);
 }
 
 CellRef lowerFoldDyadic(LowerContext &ctx, const DyadicExpr &,

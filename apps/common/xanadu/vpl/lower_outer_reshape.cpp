@@ -103,53 +103,46 @@ CellRef lowerOuterProductDyadic(LowerContext &ctx, const DyadicExpr &,
   const auto dCol      = ctx.core().findOrMintDimension("d.2");
   const auto rowResult = beginResult(ctx, dRow);
 
-  emit::walkAxis(
-      ctx, lSide.origin, lSide.axis.dim, lSide.axis.dir, lSide.reversed,
-      [&](CellRef lItem) {
-        const auto rowHead =
-            emit::mintAfter(ctx, rowResult.tail, dRow, DimVector::POS);
-        const auto colTail = emit::aliasRegister(ctx, rowHead);
+  walkView(ctx, lSide.origin, lSide.axis, [&](CellRef lItem) {
+    const auto rowHead =
+        emit::mintAfter(ctx, rowResult.tail, dRow, DimVector::POS);
+    const auto colTail = emit::aliasRegister(ctx, rowHead);
 
-        const auto colIndex = ctx.core().arena().makeCell();
-        const auto zeroOp   = ctx.emitOp(OpcodeKind::Add, "#OUTER_COL_ZERO");
-        ctx.emitInputConstant(zeroOp, std::int64_t{0});
-        ctx.emitInputConstant(zeroOp, std::int64_t{0});
-        ctx.emitOutput(zeroOp, colIndex);
+    const auto colIndex = ctx.core().arena().makeCell();
+    const auto zeroOp   = ctx.emitOp(OpcodeKind::Add, "#OUTER_COL_ZERO");
+    ctx.emitInputConstant(zeroOp, std::int64_t{0});
+    ctx.emitInputConstant(zeroOp, std::int64_t{0});
+    ctx.emitOutput(zeroOp, colIndex);
 
-        emit::walkAxis(
-            ctx, rSide.origin, rSide.axis.dim, rSide.axis.dir, rSide.reversed,
-            [&](CellRef rItem) {
-              const auto val = emitBinary(ctx, *scalarVerb, lItem, rItem);
+    walkView(ctx, rSide.origin, rSide.axis, [&](CellRef rItem) {
+      const auto val = emitBinary(ctx, *scalarVerb, lItem, rItem);
 
-              const auto isZero = ctx.core().arena().makeCell();
-              const auto eqOp =
-                  ctx.emitOp(OpcodeKind::Eq, "#OUTER_IS_FIRST_COL");
-              ctx.emitInput(eqOp, colIndex);
-              ctx.emitInputConstant(eqOp, std::int64_t{0});
-              ctx.emitOutput(eqOp, isZero);
+      const auto isZero = ctx.core().arena().makeCell();
+      const auto eqOp   = ctx.emitOp(OpcodeKind::Eq, "#OUTER_IS_FIRST_COL");
+      ctx.emitInput(eqOp, colIndex);
+      ctx.emitInputConstant(eqOp, std::int64_t{0});
+      ctx.emitOutput(eqOp, isZero);
 
-              const auto notFirstLabel =
-                  emit::mintLabel(ctx, "#OUTER_NOT_FIRST_COL");
-              const auto doneLabel = emit::mintLabel(ctx, "#OUTER_COL_DONE");
+      const auto notFirstLabel = emit::mintLabel(ctx, "#OUTER_NOT_FIRST_COL");
+      const auto doneLabel     = emit::mintLabel(ctx, "#OUTER_COL_DONE");
 
-              emit::branchIfFalse(ctx, isZero, notFirstLabel,
-                                  "#OUTER_BRANCH_NOT_FIRST");
-              emit::copyValue(ctx, val, rowHead);
-              emit::branchAlways(ctx, doneLabel, "#OUTER_GOTO_DONE");
+      emit::branchIfFalse(ctx, isZero, notFirstLabel,
+                          "#OUTER_BRANCH_NOT_FIRST");
+      emit::copyValue(ctx, val, rowHead);
+      emit::branchAlways(ctx, doneLabel, "#OUTER_GOTO_DONE");
 
-              emit::placeLabel(ctx, notFirstLabel);
-              const auto colCell =
-                  emit::mintAfter(ctx, colTail, dCol, DimVector::POS);
-              emit::copyValue(ctx, val, colCell);
+      emit::placeLabel(ctx, notFirstLabel);
+      const auto colCell = emit::mintAfter(ctx, colTail, dCol, DimVector::POS);
+      emit::copyValue(ctx, val, colCell);
 
-              emit::placeLabel(ctx, doneLabel);
+      emit::placeLabel(ctx, doneLabel);
 
-              const auto incOp = ctx.emitOp(OpcodeKind::Add, "#OUTER_COL_INC");
-              ctx.emitInput(incOp, colIndex);
-              ctx.emitInputConstant(incOp, std::int64_t{1});
-              ctx.emitOutput(incOp, colIndex);
-            });
-      });
+      const auto incOp = ctx.emitOp(OpcodeKind::Add, "#OUTER_COL_INC");
+      ctx.emitInput(incOp, colIndex);
+      ctx.emitInputConstant(incOp, std::int64_t{1});
+      ctx.emitOutput(incOp, colIndex);
+    });
+  });
 
   const auto root      = endResult(ctx, rowResult);
   ctx.rankAxes()[root] = {

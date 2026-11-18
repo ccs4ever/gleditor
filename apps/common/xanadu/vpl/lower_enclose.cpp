@@ -29,6 +29,9 @@ using zigzag::vortex::OpcodeKind;
 
 constexpr std::string_view kEncloseDimension =
     "VPL enclose of a dimension value is unsupported by the VM";
+constexpr std::string_view kEncloseBounded =
+    "VPL enclose of a bounded view (a take or a negative drop) is unsupported "
+    "by the VM: the box would lose the bound";
 constexpr std::string_view kDiscloseDimension =
     "VPL disclose of a dimension value is unsupported by the VM";
 
@@ -53,6 +56,10 @@ Maybe lowerEncloseMonadic(LowerContext &ctx, const MonadicExpr &expr) {
   if (ctx.dimensionValuesOf(*rCell) != nullptr) {
     refuse(kEncloseDimension);
   }
+
+  // The box holds the rank's origin only, so a far-end bound would be lost
+  // and the enclosed value would be the whole rank.
+  if (ctx.isBounded(*rCell)) refuse(kEncloseBounded);
 
   const auto dimEnclosure =
       ctx.core().findOrMintDimension(enclosureDimensionName);

@@ -37,6 +37,18 @@ namespace xanadu::vpl {
 using AxisReversed = std::vector<bool>;
 
 /**
+ * The far-end bound of each axis, parallel to the axis list; the vector is
+ * empty when no axis has one. A bound is the LAST cell of the axis's walk from
+ * the origin, inclusive, so `n ↑ A` is the origin and the n-th cell as bound,
+ * and `¯k ↓ A` is the origin and the cell k before the end. An axis without a
+ * bound runs to the end of the rank and stays live as the rank grows; a bound
+ * is a fixed cell, so a bounded view does not grow past it. A reversed axis
+ * is read from the bound (or the rank's far end when there is none) back to
+ * the origin.
+ */
+using AxisBounds = std::vector<std::optional<zigzag::CellRef>>;
+
+/**
  * @brief Represents a VPL multidimensional view or scalar value.
  *
  * A VPL value is either a scalar cell (valence 0, empty axes) or a view
@@ -148,6 +160,26 @@ public:
     return index < reversed_.size() && reversed_[index];
   }
 
+  /// The far-end bound of each axis (see AxisBounds); empty when none is.
+  [[nodiscard]] const AxisBounds &bounds() const noexcept { return bounds_; }
+  VplView *setBounds(AxisBounds bounds) {
+    if (!bounds.empty() && bounds.size() != axes_.size()) {
+      throw std::invalid_argument(
+          "VPL view bounds must be parallel to its axes");
+    }
+    bounds_ = std::move(bounds);
+    if (std::ranges::none_of(
+            bounds_, [](const auto &stop) { return stop.has_value(); })) {
+      bounds_.clear();
+    }
+    return this;
+  }
+  [[nodiscard]] std::optional<zigzag::CellRef>
+  bound(std::size_t index) const noexcept {
+    if (index >= bounds_.size()) return std::nullopt;
+    return bounds_[index];
+  }
+
   /// Valence: number of dimensions indexed along (APL rank).
   [[nodiscard]] std::size_t valence() const noexcept { return axes_.size(); }
 
@@ -193,6 +225,7 @@ public:
   void transpose() {
     std::ranges::reverse(axes_);
     std::ranges::reverse(reversed_);
+    std::ranges::reverse(bounds_);
     if (!extents_.empty()) {
       std::ranges::reverse(extents_);
     }
@@ -210,6 +243,7 @@ public:
     newAxes.reserve(axes_.size());
     std::vector<std::size_t> newExtents;
     AxisReversed newReversed;
+    AxisBounds newBounds;
     if (!extents_.empty() && extents_.size() == axes_.size()) {
       newExtents.reserve(extents_.size());
     }
@@ -217,12 +251,14 @@ public:
       if (p >= axes_.size()) return false;
       newAxes.push_back(axes_[p]);
       if (!reversed_.empty()) newReversed.push_back(reversed_[p]);
+      if (!bounds_.empty()) newBounds.push_back(bounds_[p]);
       if (!newExtents.empty()) {
         newExtents.push_back(extents_[p]);
       }
     }
     axes_     = std::move(newAxes);
     reversed_ = std::move(newReversed);
+    bounds_   = std::move(newBounds);
     if (!newExtents.empty()) {
       extents_ = std::move(newExtents);
     }
@@ -261,15 +297,20 @@ public:
     std::vector<std::size_t> dims;
     dims.reserve(axes_.size());
 
+    // Cells from `start` along axis `a`, ending after the axis's bound.
+    const auto walkCount = [&](std::optional<zigzag::CellRef> start,
+                               std::size_t a, std::size_t limit) {
+      std::size_t count = 0;
+      while (start && limit-- > 0) {
+        count++;
+        if (bound(a) == start) break;
+        start = arena.linked(*start, axes_[a].dim, axes_[a].dir);
+      }
+      return count;
+    };
+
     // Walk primary axis
-    std::size_t count0                 = 0;
-    std::optional<zigzag::CellRef> cur = origin_;
-    std::size_t limit                  = arena.cellCount() + 1;
-    while (cur && limit-- > 0) {
-      count0++;
-      cur = arena.linked(*cur, axes_[0].dim, axes_[0].dir);
-    }
-    dims.push_back(count0);
+    dims.push_back(walkCount(origin_, 0, arena.cellCount() + 1));
 
     // If higher valence, measure secondary extents along subsequent axes
     for (std::size_t a = 1; a < axes_.size(); ++a) {
@@ -281,13 +322,7 @@ public:
       std::optional<zigzag::CellRef> rowCur = origin_;
       std::size_t rowLimit                  = arena.cellCount() + 1;
       while (rowCur && rowLimit-- > 0) {
-        std::size_t extent               = 0;
-        std::optional<zigzag::CellRef> c = rowCur;
-        std::size_t l                    = arena.cellCount() + 1;
-        while (c && l-- > 0) {
-          extent++;
-          c = arena.linked(*c, axes_[a].dim, axes_[a].dir);
-        }
+        const auto extent = walkCount(rowCur, a, arena.cellCount() + 1);
         if (!extentSet) {
           firstExtent = extent;
           extentSet   = true;
@@ -323,6 +358,17 @@ public:
       for (std::size_t i = 0; i < natural.size() && i < sh.size(); ++i) {
         if (isReversed(i)) {
           natural[i] = static_cast<std::int64_t>(sh[i]) - 1 - natural[i];
+        }
+      }
+    }
+    // A position past a bounded axis's last cell is not in the view, however
+    // far the rank behind it runs.
+    if (!bounds_.empty()) {
+      const auto sh = shape(arena);
+      for (std::size_t i = 0; i < natural.size() && i < sh.size(); ++i) {
+        if (bound(i) && (natural[i] < 0 ||
+                         natural[i] >= static_cast<std::int64_t>(sh[i]))) {
+          return std::nullopt;
         }
       }
     }
@@ -381,16 +427,17 @@ public:
   }
 
   /**
-   * @brief The same cells in the same order as a view nothing is reversed in
-   * (origin at the far end, axes flipped), or nullopt when no such view reads
-   * them. For the wire, which carries an origin, directions and extents and
-   * no flag. Exact for any reversed rank-1 view and for rectangular arrays;
-   * a ragged array may not survive the move of the origin, which is checked
-   * by reading both and comparing, never assumed.
+   * @brief The same cells in the same order as a view nothing is reversed or
+   * bounded in (origin at the far end, axes flipped; extents carry the count a
+   * bound stood for), or nullopt when no such view reads them. For the wire,
+   * which carries an origin, directions and extents and no flag. Exact for any
+   * reversed rank-1 view and for rectangular arrays; a ragged array may not
+   * survive the move of the origin, which is checked by reading both and
+   * comparing, never assumed.
    */
   [[nodiscard]] std::optional<VplView>
   walkable(const zigzag::ArenaManifold &arena) const {
-    if (reversed_.empty()) return *this;
+    if (reversed_.empty() && bounds_.empty()) return *this;
     const auto cells = collectCells(arena);
     VplView out{cells.empty() ? std::nullopt
                               : std::optional<zigzag::CellRef>{cells.front()},
@@ -443,6 +490,7 @@ private:
   std::optional<zigzag::CellRef> origin_;
   std::vector<zigzag::DirectedDim> axes_;
   AxisReversed reversed_;
+  AxisBounds bounds_;
   std::vector<std::size_t> extents_;
   std::vector<zigzag::CellRef> dependencies_;
   bool isRagged_{false};

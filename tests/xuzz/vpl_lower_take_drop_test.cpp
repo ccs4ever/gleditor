@@ -172,28 +172,30 @@ TEST_F(VplTakeDropTest, DropKeepsTheOperandsInputDependencies) {
   EXPECT_EQ(r.view.dependencies(), a.view.dependencies());
 }
 
-TEST_F(VplTakeDropTest, NegativeDropIsRefusedAtCompileAndFailsAtRunTime) {
+TEST_F(VplTakeDropTest, NegativeDropCountsFromTheEnd) {
+  // Ruled 2026-11-18 with the view bound: the spec's "negative counts from the
+  // end" is now lowered, so what this test pinned as a refusal is a result.
   run("A ← 5⍳d.1");
-  expectCompileRefusal("¯2 ↓ A", "drop of a negative count is unsupported");
-  expectCompileRefusal("(-2) ↓ A", "drop of a negative count is unsupported");
-  const auto computed = executor->execute("n ← 0 - 2; n ↓ A", kBudget);
-  ASSERT_FALSE(computed.has_value());
-  EXPECT_EQ(computed.error().stage, ExecutionError::Stage::Runtime);
-  EXPECT_NE(computed.error().message.find("negative count is unsupported"),
-            std::string::npos)
-      << computed.error().message;
+  EXPECT_EQ(values(run("¯2 ↓ A").view), (Values{1, 2, 3}));
+  EXPECT_EQ(values(run("(-2) ↓ A").view), (Values{1, 2, 3}));
+  EXPECT_EQ(values(run("n ← 0 - 2; n ↓ A").view), (Values{1, 2, 3}));
 }
 
-TEST_F(VplTakeDropTest, FormsThatNeedAViewBoundAreRefusedByName) {
+TEST_F(VplTakeDropTest, FormsThatStillCannotBeAViewAreRefusedByName) {
   run("A ← 5⍳d.1");
-  expectCompileRefusal("3 ↑ A", "take is unsupported");
-  expectCompileRefusal("3 {. A", "take is unsupported");
-  expectCompileRefusal("¯3 ↑ A", "take is unsupported");
-  expectCompileRefusal("2 ↓ ⌽A", "drop of a reversed rank");
+  expectCompileRefusal("¯3 ↑ A", "take of a negative count is unsupported");
   expectCompileRefusal("2.5 ↓ A", "non-integer count");
   expectCompileRefusal("2 ↓ 7", "drop of a scalar");
   expectCompileRefusal("1 2 ↓ A", "rank as its count");
   expectCompileRefusal("d.1 ↓ A", "dimension value as its count");
+}
+
+TEST_F(VplTakeDropTest, TakeIsAViewWithAFarEndBound) {
+  run("A ← 5⍳d.1");
+  const auto r = run("3 ↑ A");
+  ASSERT_EQ(r.view.bounds().size(), 1U);
+  EXPECT_TRUE(r.view.bounds()[0].has_value());
+  EXPECT_EQ(values(r.view), (Values{1, 2, 3}));
 }
 
 TEST_F(VplTakeDropTest, DropOfAMatrixIsRefusedByName) {

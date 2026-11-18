@@ -54,14 +54,6 @@ struct Side {
   bool reversed;
 };
 
-// Where and how a side's walk runs: from the origin, or from the far end back
-// to the origin when reversed (the stop is the origin, as walkAxis does).
-struct Walk {
-  CellRef anchor;
-  DimVector direction;
-  std::optional<CellRef> stop;
-};
-
 void refuseOperandKind(LowerContext &ctx, CellRef cell) {
   if (ctx.dimensionValuesOf(cell) != nullptr) refuse(kDimension);
   if (ctx.isEnclosed(cell)) refuse(kEnclosed);
@@ -74,11 +66,8 @@ Side rankSide(LowerContext &ctx, CellRef cell) {
   return Side{cell, axes->front(), ctx.isReversed(cell, 0)};
 }
 
-Walk walkOf(LowerContext &ctx, const Side &side) {
-  if (!side.reversed) return Walk{side.origin, side.axis.dir, std::nullopt};
-  const auto far = emit::extreme(ctx, side.origin, side.axis.dim, side.axis.dir,
-                                 std::nullopt);
-  return Walk{far, -side.axis.dir, side.origin};
+AxisWalk walkOf(LowerContext &ctx, const Side &side) {
+  return axisWalkOf(ctx, side.origin, side.axis, 0);
 }
 
 CellRef finishRank(LowerContext &ctx, CellRef first, DimRef dimension,

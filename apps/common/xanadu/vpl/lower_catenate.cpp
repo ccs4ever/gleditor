@@ -40,19 +40,8 @@ void appendOperand(LowerContext &ctx, const Minting &result, CellRef cell) {
   if (ctx.isRank(cell)) {
     const auto *axes = ctx.axesOf(cell);
     if (axes == nullptr || axes->size() != 1) refuse(kValence);
-    const auto axis             = axes->front();
-    const bool reversed         = ctx.isReversed(cell, 0);
-    CellRef anchor              = cell;
-    DimVector dir               = axis.dir;
-    std::optional<CellRef> stop = std::nullopt;
-    if (reversed) {
-      anchor = emit::extreme(ctx, cell, axis.dim, axis.dir, std::nullopt);
-      dir    = -axis.dir;
-      stop   = cell;
-    }
-    emit::walkRank(
-        ctx, anchor, axis.dim, dir,
-        [&](CellRef item) { mintValue(ctx, result, item); }, stop);
+    walkView(ctx, cell, axes->front(),
+             [&](CellRef item) { mintValue(ctx, result, item); });
   } else {
     const auto fresh              = mintValue(ctx, result, cell);
     ctx.cellDependencies()[fresh] = ctx.rankDependenciesOf(cell);
