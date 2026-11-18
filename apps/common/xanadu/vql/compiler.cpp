@@ -675,6 +675,20 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   return compileExecutionBlock(std::get<ExecutionBlock>(query.expr));
 }
 
+namespace {
+
+/// Whether a context-anchored path reads from its context cell. A first step
+/// that names a variable alias (`/$p/...`) or a root selector supplies its own
+/// start, so only a bare `.` and a path opening on a plain dimension need one.
+bool walksFromContext(const PathExpression &path) {
+  if (path.steps.empty()) return true;
+  const auto *dimension =
+      std::get_if<SignedDimensionStep>(&path.steps.front().selector);
+  return dimension != nullptr && !dimension->dimName.starts_with('$');
+}
+
+} // namespace
+
 std::optional<CellRef>
 VQLCompiler::compilePathExpression(const PathExpression &path,
                                    CellRef ctxCell) {
@@ -708,6 +722,16 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
         stream = contextInputs_;
       else if (path.isInvocationRoot)
         stream.push_back(ctxCell);
+      else if (activeCalls_.empty() && walksFromContext(path))
+        // R-CTX: a context-relative path with nothing bound would otherwise
+        // compile into a walk from no cell and answer empty, which reads as
+        // "no matches" instead of "no context". A body compiled for a call
+        // takes its context from that call's arguments, so it is exempt.
+        throw QueryRefusal(
+            QueryErrorCategory::Unsupported,
+            "VQL context-relative path has no bound context: '.' and "
+            "steps without an anchor need a path, a weave or a call to supply "
+            "one; anchor the path at ## or a variable");
     } else if (const auto start = compileAnchor(path.anchor)) {
       stream.push_back(*start);
     }
