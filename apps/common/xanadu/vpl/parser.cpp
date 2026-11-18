@@ -129,6 +129,23 @@ std::shared_ptr<AstNode> Parser::parseSubExpr() {
   return leftNoun;
 }
 
+namespace {
+
+/// ASCII `<` and `>` lex as Enclose and Disclose, the monadic meaning in the
+/// glyph table. A verb with a left operand (or one folded by an adverb, which
+/// applies it dyadically) is the comparison, as in J.
+TokenKind dyadicKindOf(const Token &verb) noexcept {
+  if (verb.kind == TokenKind::Enclose && verb.text == "<") {
+    return TokenKind::LessThan;
+  }
+  if (verb.kind == TokenKind::Disclose && verb.text == ">") {
+    return TokenKind::GreaterThan;
+  }
+  return verb.kind;
+}
+
+} // namespace
+
 std::shared_ptr<AstNode>
 Parser::parseVerbOrDerived(std::shared_ptr<AstNode> leftNoun) {
   SourceLocation loc = peek().location;
@@ -142,7 +159,8 @@ Parser::parseVerbOrDerived(std::shared_ptr<AstNode> leftNoun) {
     Token verbTok    = advance();
     auto derivedVerb = std::make_shared<ConjunctionExpr>(
         loc, TokenKind::OuterProduct,
-        std::make_shared<VerbExpr>(verbTok.location, verbTok.kind), nullptr);
+        std::make_shared<VerbExpr>(verbTok.location, dyadicKindOf(verbTok)),
+        nullptr);
 
     auto right = parseSubExpr();
     if (leftNoun) {
@@ -178,7 +196,7 @@ Parser::parseVerbOrDerived(std::shared_ptr<AstNode> leftNoun) {
     Token advTok = advance();
     customVerb   = std::make_shared<AdverbExpr>(
         advTok.location, advTok.kind,
-        std::make_shared<VerbExpr>(verbTok.location, verbTok.kind));
+        std::make_shared<VerbExpr>(verbTok.location, dyadicKindOf(verbTok)));
   } else if (!isAtEnd() && isConjunction(peek().kind)) {
     // Followed by conjunction: ⍤ (rank) or ⌸ (key)
     Token conjTok = advance();
@@ -200,8 +218,8 @@ Parser::parseVerbOrDerived(std::shared_ptr<AstNode> leftNoun) {
       return std::make_shared<DyadicExpr>(loc, customVerb, std::move(leftNoun),
                                           std::move(right));
     }
-    return std::make_shared<DyadicExpr>(loc, verbTok.kind, std::move(leftNoun),
-                                        std::move(right));
+    return std::make_shared<DyadicExpr>(loc, dyadicKindOf(verbTok),
+                                        std::move(leftNoun), std::move(right));
   }
 
   if (customVerb) {

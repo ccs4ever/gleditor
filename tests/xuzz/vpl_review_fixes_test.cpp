@@ -113,4 +113,26 @@ TEST(VplReviewWhereTest, NonBooleanInputIsRefusedByName) {
   }
 }
 
+TEST(VplReviewCompareTest, DyadicAngleBracketsAreComparisons) {
+  EXPECT_EQ(runVpl("1 < 2"), "1\n");
+  EXPECT_EQ(runVpl("2 < 1"), "0\n");
+  EXPECT_EQ(runVpl("3 > 2"), "1\n");
+  EXPECT_EQ(runVpl("1 2 < 2 3"), "1 1\n");
+  EXPECT_EQ(runVpl("1 2 3 > 2"), "0 0 1\n");
+  EXPECT_EQ(runVpl("1 2 ∘.< 2 1"), "1 0\n0 0\n");
+  EXPECT_EQ(runVpl("1 2 ∘.> 2 1"), "0 0\n0 1\n");
+}
+
+TEST(VplReviewCompareTest, MonadicAngleBracketsStayEncloseAndDisclose) {
+  EXPECT_EQ(runVpl("<1 2 3"), "< 1 2 3 >\n");
+  EXPECT_EQ(runVpl(">1 2 3"), "1 2 3\n");
+}
+
+TEST(VplReviewCompareTest, RefusalsNameTheirVerb) {
+  EXPECT_TRUE(mentions(runVpl("1 ⍟ 2"), "⍟"));
+  EXPECT_TRUE(mentions(runVpl("1 2 ⍟ 3 4"), "⍟"));
+  EXPECT_TRUE(mentions(runVpl("1 2 ∘., 3 4"), "outer product of Catenate"));
+  EXPECT_TRUE(mentions(runVpl("1 2 ∘.⍳ 3"), "outer product of Iota"));
+}
+
 } // namespace

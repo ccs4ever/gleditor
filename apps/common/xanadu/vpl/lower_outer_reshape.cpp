@@ -36,6 +36,7 @@ constexpr std::string_view kDimension =
     "VPL outer product on a dimension value is unsupported by the VM";
 constexpr std::string_view kVerbUnsupported =
     "VPL outer product requires a supported scalar dyadic verb";
+constexpr std::string_view kVerbNamed = "VPL outer product of ";
 constexpr std::string_view kMonadicUnsupported =
     "VPL outer product is dyadic only: it requires left and right operands";
 constexpr std::string_view kReshapeUnsupported =
@@ -84,7 +85,11 @@ CellRef lowerOuterProductDyadic(LowerContext &ctx, const DyadicExpr &,
       dynamic_cast<const VerbExpr *>(conjunction.left().get());
   if (!verbExpr) refuse(kVerbUnsupported);
   const auto scalarVerb = scalarDyadicVerb(verbExpr->verb());
-  if (!scalarVerb) refuse(kVerbUnsupported);
+  if (!scalarVerb) {
+    refuse(std::string(kVerbNamed) +
+           std::string(tokenKindToString(verbExpr->verb())) +
+           " is unsupported: it requires a supported scalar dyadic verb");
+  }
 
   const auto lSide = sideOf(ctx, lCell);
   const auto rSide = sideOf(ctx, rCell);

@@ -241,6 +241,13 @@ inline constexpr std::string_view nestedRanks =
   throw std::invalid_argument(std::string(message));
 }
 
+/// A shared refusal text with the verb it was raised for appended, so the
+/// message names the form; tests still match the shared text as a substring.
+[[nodiscard]] inline std::string namedRefusal(std::string_view message,
+                                              std::string_view verb) {
+  return std::string(message) + ": " + std::string(verb);
+}
+
 /// Post-operand monadic refusal: the rank message for a rank operand, else the
 /// generic unsupported-verb message.
 [[noreturn]] inline void refuseMonadicOperand(const LowerContext &ctx,

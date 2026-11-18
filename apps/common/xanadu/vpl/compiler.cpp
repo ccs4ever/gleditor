@@ -1112,13 +1112,17 @@ CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
       return lower::lowerDyadicArithmeticOnRank(ctx, expr, *lCell, *rCell);
     default:
       // No card owns this verb on ranks (Where, Tally, Hypertime, ...):
-      // keep today's refusal.
-      lower::refuse(lower::msg::dyadicOnRank);
+      // keep today's refusal, naming the verb.
+      lower::refuse(lower::namedRefusal(lower::msg::dyadicOnRank,
+                                        tokenKindToString(expr.verb())));
     }
   }
 
   const auto scalarVerb = lower::scalarDyadicVerb(expr.verb());
-  if (!scalarVerb) lower::refuse(lower::msg::dyadicUnsupported);
+  if (!scalarVerb) {
+    lower::refuse(lower::namedRefusal(lower::msg::dyadicUnsupported,
+                                      tokenKindToString(expr.verb())));
+  }
   return lower::emitScalarDyadic(ctx, expr.verb(), *scalarVerb, *lCell, *rCell);
 }
 
