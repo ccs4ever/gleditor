@@ -122,6 +122,23 @@ TEST_F(VQueryE2ETest, VortexLowersWholeRankTraversal) {
   EXPECT_EQ(rank.output, "A\nB\n");
 }
 
+// A store holding documents and a slice keeps its text branches and its
+// structure on different lines of descent; the in-place write must chain from
+// the structure head instead of aborting on the greatest text version.
+TEST_F(VQueryE2ETest, InPlaceWriteIntoAStoreWithDocumentsAndASliceSucceeds) {
+  const fs::path store  = testDir / "store";
+  const fs::path scroll = testDir / "permascroll";
+  fs::copy("tests/samples/xudu/core_hypertext/unified_store", store,
+           fs::copy_options::recursive);
+  fs::copy("tests/samples/xudu/permascroll", scroll,
+           fs::copy_options::recursive);
+  const auto res =
+      runVQuery("'" + store.string() + "' --permascroll '" + scroll.string() +
+                "' --in-place -e '##/+d.c%\"a\"'");
+  EXPECT_EQ(res.exitCode, 0) << res.output;
+  EXPECT_NE(res.output.find("Wrote"), std::string::npos) << res.output;
+}
+
 TEST_F(VQueryE2ETest, VortexRefusesUnimplementedSemantics) {
   const auto source = runVQuery("-e 'topic(\"missing\")' --engine vortex");
   EXPECT_EQ(source.exitCode, 1) << source.output;
