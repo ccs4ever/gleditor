@@ -41,8 +41,10 @@ public:
     std::string because;
   };
 
-  explicit ProgramArea(zigzag::vortex::VortexVM &vm)
-      : vm_(vm), mark_(vm.core().arena().mark()),
+  /// @p retained is told why whenever the program is kept, by any path.
+  ProgramArea(zigzag::vortex::VortexVM &vm,
+              std::optional<std::string> &retained)
+      : vm_(vm), retainedSink_(retained), mark_(vm.core().arena().mark()),
         dimensionsBefore_(vm.core().arena().dimensions().size()) {}
 
   /// The program's opcode cells, once compiled: only to learn whether it can
@@ -68,9 +70,13 @@ public:
     if (settled_) return;
     // A run that fails after a committed mutation keeps that mutation, as it
     // did before: release() would undo it.
-    if (mintedDimensions() || wroteOlderCell())
+    if (mintedDimensions()) {
+      retainedSink_ = std::string{dimensionReason};
       retain();
-    else
+    } else if (wroteOlderCell()) {
+      retainedSink_ = std::string{olderCellReason};
+      retain();
+    } else
       release();
   }
 
@@ -85,14 +91,14 @@ public:
     // writes, not names, so this is the one question it cannot answer.
     if (mintedDimensions()) {
       retain();
-      return RetainedProgram{"the run named a dimension the session keeps"};
+      return RetainedProgram{std::string{dimensionReason}};
     }
     // release() undoes every write the run made to a cell older than the
     // mark, which is a mutation's intended effect (a sort, an apply_shape, a
     // weave). The arena says exactly whether there was one.
     if (wroteOlderCell()) {
       retain();
-      return RetainedProgram{"the run writes cells that existed before it"};
+      return RetainedProgram{std::string{olderCellReason}};
     }
     std::vector<zigzag::CellRef> live{cells};
     for (const auto *extra : alsoLive)
@@ -101,12 +107,16 @@ public:
     // reference, which re-minting a cell would leave dangling, and a closure
     // can sit behind any result or binding. Inspecting them costs arena work
     // a tight budget notices, so a program that can make one keeps itself.
+    // Known leak: such a query keeps its program (about 142 cells a run)
+    // until a read-only VM accessor for closure values is approved, which
+    // would let the check be exact and work-free.
     if (createsClosures_) {
       retain();
       return RetainedProgram{
           "the program creates closure values, which name program cells"};
     }
-    auto captured = zigzag::CopyOut::capture(vm_.core().arena(), mark_, live);
+    auto captured = zigzag::CopyOut::capture(
+        vm_.core().arena(), mark_, live, vm_.core().dims().runtimeObjectClaim);
     if (!captured) {
       retain();
       return RetainedProgram{zigzag::toString(captured.error())};
@@ -148,7 +158,13 @@ private:
     vm_.pruneAssemblyState();
   }
 
+  static constexpr std::string_view dimensionReason =
+      "the run named a dimension the session keeps";
+  static constexpr std::string_view olderCellReason =
+      "the run writes cells that existed before it";
+
   zigzag::vortex::VortexVM &vm_;
+  std::optional<std::string> &retainedSink_;
   zigzag::Mark mark_;
   std::optional<zigzag::Mark> runMark_;
   bool createsClosures_{false};
@@ -233,6 +249,8 @@ QueryExecutor::QueryExecutor(VQLEngine &session, zigzag::vortex::VortexVM &vm,
 std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
 QueryExecutor::execute(const std::string_view source,
                        const std::vector<zigzag::CellRef> &contextCells) {
+  // A parse error runs nothing, so it must not report the last query's reason.
+  programRetained_.reset();
   try {
     const auto query = Parser(source).parseQuery();
     return execute(query, contextCells);
@@ -250,6 +268,7 @@ std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
 QueryExecutor::execute(const QueryExpression &query,
                        const std::vector<zigzag::CellRef> &contextCells) {
   disassembly_.clear();
+  programRetained_.reset();
   if (&coordinator_.core() != &vm_.core()) {
     return std::unexpected(QueryExecutionError{
         .category = QueryExecutionError::Category::Runtime,
@@ -328,7 +347,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       return std::vector<zigzag::CellRef>{};
     }
     programRetained_.reset();
-    ProgramArea area(vm_);
+    ProgramArea area(vm_, programRetained_);
     const auto result = compiler.compile(query, compilation);
     disassembly_      = result.disassembly;
     if (!result.success) {

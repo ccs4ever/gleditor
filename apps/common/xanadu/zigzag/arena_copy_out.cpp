@@ -2,9 +2,31 @@
 
 #include <algorithm>
 #include <format>
+#include <limits>
 #include <unordered_set>
 
+#include "common/xanadu/zigzag/query_scalar.hpp"
+
 namespace zigzag {
+
+bool carriesRuntimeObjectClaim(const ArenaManifold &arena, const CellRef cell,
+                               const std::optional<DimRef> claimDimension) {
+  const auto claimed = [&](const CellRef candidate) {
+    if (!arena.contains(candidate)) return false;
+    if (claimDimension &&
+        (arena.linked(candidate, *claimDimension, DimVector::POS) ||
+         arena.linked(candidate, *claimDimension, DimVector::NEG)))
+      return true;
+    return arena.textOf(candidate) == zigzag::runtimeObjectProbeText;
+  };
+  if (claimed(cell)) return true;
+  if (arena.valueKindOf(cell) != xanadu::ValueKind::Int64) return false;
+  const auto named = arena.asInt64(cell);
+  return named && *named > 0 &&
+         static_cast<std::uint64_t>(*named) <=
+             std::numeric_limits<CellRef>::max() &&
+         claimed(static_cast<CellRef>(*named));
+}
 
 std::string toString(const CopyOutRefused &refused) {
   return std::format("result cell {} cannot be copied out of the program: {}",
@@ -13,7 +35,8 @@ std::string toString(const CopyOutRefused &refused) {
 
 std::expected<CopyOut, CopyOutRefused>
 CopyOut::capture(const ArenaManifold &arena, const Mark &floor,
-                 std::span<const CellRef> cells) {
+                 std::span<const CellRef> cells,
+                 const std::optional<DimRef> runtimeObjectClaim) {
   CopyOut out;
   std::unordered_set<CellRef> seen;
   const auto dimensions = arena.dimensions();
@@ -39,6 +62,8 @@ CopyOut::capture(const ArenaManifold &arena, const Mark &floor,
       return refuse(CopyOutRefusal::DimensionCell);
     const auto slot = arena.slot(ref);
     if (!slot) return refuse(CopyOutRefusal::QuotedCell);
+    if (carriesRuntimeObjectClaim(arena, ref, runtimeObjectClaim))
+      return refuse(CopyOutRefusal::RuntimeObject);
     const auto kind = static_cast<xanadu::ValueKind>(slot->valueKind);
     if (kind == xanadu::ValueKind::OpHandle ||
         kind == xanadu::ValueKind::ExternRef ||
@@ -62,7 +87,10 @@ CopyOut::capture(const ArenaManifold &arena, const Mark &floor,
         described.run.push_back(Piece{.span = span});
     } else {
       for (const auto &span : arena.contentOf(ref)) {
-        if (span.scroll == xanadu::scratchScroll)
+        // Scratch below the floor survives the release, so such a span is
+        // shared as it is; only bytes the program interned are re-interned.
+        if (span.scroll == xanadu::scratchScroll &&
+            span.start >= floor.scratchSize)
           described.run.push_back(
               Piece{.span      = span,
                     .scratch   = std::string{arena.scratchTextOf(span)},

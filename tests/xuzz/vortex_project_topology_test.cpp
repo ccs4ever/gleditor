@@ -14,6 +14,7 @@
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/mesh_evaluator.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/arena_topology_copy.hpp"
@@ -335,6 +336,65 @@ TEST(ProjectTopologyOpcodeTest, AQuoteCopyKeepsItsSpansAndSpace) {
     EXPECT_EQ(ours->store, theirs->store);
     EXPECT_EQ(ours->spans, theirs->spans);
     EXPECT_EQ(arena.textOf(copied.front()), "quoted bytes");
+  }
+  std::filesystem::remove_all(directory);
+}
+
+TEST(ProjectTopologyOpcodeTest, ThePortableArtifactRefusesTheOpcodeByName) {
+  namespace mesh = zigzag::vortex::mesh;
+  mesh::VortexProgram program;
+  program.cells        = {{.value = std::monostate{}, .links = {}},
+                          {.value = std::monostate{}, .links = {}}};
+  program.instructions = {{.cell    = 0,
+                           .opcode  = vortex::OpcodeKind::ProjectTopology,
+                           .inputs  = {1},
+                           .outputs = {1},
+                           .next    = std::nullopt}};
+  program.entry        = 0;
+  const auto sealed    = mesh::sealVortexProgram(program);
+  ASSERT_FALSE(sealed);
+  EXPECT_NE(sealed.error().find("ProjectTopology"), std::string::npos)
+      << sealed.error();
+}
+
+TEST(ProjectTopologyOpcodeTest,
+     ARefusedCopyMayHaveMintedProxiesAndNothingElse) {
+  // The walk reads a foreign neighbour through linkedMinting, which mints its
+  // proxy; that is an ordinary read in this arena, so a refusal leaves no copy
+  // and writes no source cell, but the proxies the walk needed remain.
+  const auto directory =
+      std::filesystem::temp_directory_path() / "project_topology_proxy_test";
+  std::filesystem::remove_all(directory);
+  {
+    xanadu::UserPermascroll::Config config;
+    config.storageDir  = directory;
+    auto scroll        = std::make_shared<xanadu::UserPermascroll>(config);
+    auto store         = std::make_shared<xanadu::Store>(scroll);
+    const auto genesis = store->sliceGenesis(xanadu::MicroversionId{});
+    const auto dim     = store->makeDimension(genesis, "d.text");
+    const auto cell    = store->makeCell(dim.version, "quoted bytes");
+    const auto linked = store->setLink(cell, store->homeCell().value(), dim.dim,
+                                       false, store->cellRefOf(cell).value());
+    xanadu::MultiStoreCoordinator coordinator;
+    coordinator.addStore("source", "primary", store, linked);
+    VQLEngine engine(coordinator);
+    const auto home = engine.execute("##source");
+    ASSERT_EQ(home.size(), 1U);
+    auto &arena        = coordinator.arena();
+    const auto textDim = engine.resolveDimension("d.text");
+    const auto before  = arena.cellCount();
+    arena.setAllocationLimitForTesting(static_cast<std::uint32_t>(before + 1));
+    const std::array subjects{home.front()};
+    const auto copied = copyTopology(
+        arena, subjects,
+        EdgeSelection{.everything = false,
+                      .add        = {DirectedDim{textDim, DimVector::POS}},
+                      .remove     = {}},
+        coordinator.core().dims().clone);
+    ASSERT_FALSE(copied);
+    EXPECT_EQ(copied.error().reason, TopologyCopyRefusal::AllocationLimit);
+    // One proxy for the foreign neighbour, and no copy.
+    EXPECT_EQ(arena.cellCount(), before + 1U);
   }
   std::filesystem::remove_all(directory);
 }

@@ -755,7 +755,8 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
     }
 
     auto copied =
-        copyTopology(core_.arena(), subjects, selection, core_.dims().clone);
+        copyTopology(core_.arena(), subjects, selection, core_.dims().clone,
+                     core_.dims().runtimeObjectClaim);
     if (!copied) {
       return invalidStreamOperation("ProjectTopology refused: " +
                                     toString(copied.error()));

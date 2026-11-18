@@ -23,6 +23,8 @@ enum class CopyOutRefusal : std::uint8_t {
               ///< the release un-names
   DimensionCell, ///< is an arena dimension, which release() un-names
   HandleValue,   ///< its value is a handle into the program being released
+  RuntimeObject, ///< claims to be a runtime object (a closure or bindings
+                 ///< record), which names cells by integer reference
 };
 
 [[nodiscard]] constexpr const char *toString(CopyOutRefusal why) noexcept {
@@ -37,6 +39,8 @@ enum class CopyOutRefusal : std::uint8_t {
     return "dimension cell";
   case CopyOutRefusal::HandleValue:
     return "handle-valued cell";
+  case CopyOutRefusal::RuntimeObject:
+    return "runtime object, which names program cells by reference";
   }
   return "unknown";
 }
@@ -47,6 +51,19 @@ struct CopyOutRefused {
 };
 
 [[nodiscard]] std::string toString(const CopyOutRefused &refused);
+
+/**
+ * @brief Whether @p cell is, or is an integer naming, a runtime object: the
+ *        `<runtime-object>` root of a closure or bindings record, or a cell
+ *        with a link on the runtime-object claim dimension.
+ *
+ * Such an object holds cell references as integers, so copying its cells
+ * (even exactly) leaves those integers pointing at cells that are gone or
+ * different. A plain integer that happens to name one is refused too.
+ */
+[[nodiscard]] bool
+carriesRuntimeObjectClaim(const ArenaManifold &arena, CellRef cell,
+                          std::optional<DimRef> claimDimension);
 
 /**
  * @brief Cells a program minted under a mark, read out so they can outlive
@@ -68,7 +85,8 @@ public:
   /// stays one cell.
   [[nodiscard]] static std::expected<CopyOut, CopyOutRefused>
   capture(const ArenaManifold &arena, const Mark &floor,
-          std::span<const CellRef> cells);
+          std::span<const CellRef> cells,
+          std::optional<DimRef> runtimeObjectClaim);
 
   /// Mint the described cells in @p arena, which has been released to the
   /// floor, and answer the replacement of each cell captured.

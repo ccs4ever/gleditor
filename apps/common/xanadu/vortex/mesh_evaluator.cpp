@@ -349,6 +349,10 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
     if (instruction.opcode == OpcodeKind::VqlMaskLinks)
       throw std::runtime_error(
           "Vortex mesh does not support shape projection mutations");
+    if (instruction.opcode == OpcodeKind::ProjectTopology)
+      throw std::runtime_error(
+          "Vortex mesh does not support ProjectTopology: it mints cells on "
+          "every run");
     if (!pureOpcode(instruction.opcode) ||
         !instructions.insert(instruction.cell).second)
       throw std::runtime_error(

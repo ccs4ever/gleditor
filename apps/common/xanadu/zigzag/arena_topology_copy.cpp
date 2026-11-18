@@ -6,6 +6,8 @@
 #include <optional>
 #include <unordered_map>
 
+#include "common/xanadu/zigzag/arena_copy_out.hpp"
+
 namespace zigzag {
 
 bool EdgeSelection::selects(const DirectedDim edge) const noexcept {
@@ -77,7 +79,8 @@ std::optional<std::uint32_t> spaceOfStore(const ArenaManifold &arena,
 
 std::expected<std::vector<CellRef>, TopologyCopyRefused>
 copyTopology(ArenaManifold &arena, const std::span<const CellRef> subjects,
-             const EdgeSelection &selection, const DimRef cloneDim) {
+             const EdgeSelection &selection, const DimRef cloneDim,
+             const std::optional<DimRef> runtimeObjectClaim) {
   const auto refuse = [](const TopologyCopyRefusal why, const CellRef cell) {
     return std::unexpected{TopologyCopyRefused{.reason = why, .cell = cell}};
   };
@@ -105,6 +108,8 @@ copyTopology(ArenaManifold &arena, const std::span<const CellRef> subjects,
       return refuse(TopologyCopyRefusal::UnknownSubject, source);
     if (arena.isQuoteOccurrence(source))
       return refuse(TopologyCopyRefusal::QuoteOccurrence, source);
+    if (carriesRuntimeObjectClaim(arena, source, runtimeObjectClaim))
+      return refuse(TopologyCopyRefusal::RuntimeObject, source);
     Node node{.source = source};
     readValue(arena, source, node);
     if (isHandle(node.kind))

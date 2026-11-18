@@ -33,6 +33,8 @@ enum class TopologyCopyRefusal : std::uint8_t {
   UnknownSubject,  ///< a subject is not a cell the arena holds
   QuoteOccurrence, ///< a presentation cell, whose edges are view-induced
   HandleValue,     ///< a handle names the program, not a value to copy
+  RuntimeObject,   ///< a closure or bindings record, which holds cell
+                   ///< references as integers a copy would leave dangling
   AllocationLimit, ///< the copy would not fit under the arena's cell limit
 };
 
@@ -44,6 +46,8 @@ enum class TopologyCopyRefusal : std::uint8_t {
     return "quote occurrence cell";
   case TopologyCopyRefusal::HandleValue:
     return "handle-valued cell";
+  case TopologyCopyRefusal::RuntimeObject:
+    return "runtime object, which names cells by reference";
   case TopologyCopyRefusal::AllocationLimit:
     return "copy exceeds the arena's cell allocation limit";
   }
@@ -69,12 +73,16 @@ struct TopologyCopyRefused {
  * that cell's reciprocal edge -- and no source cell is written. Shared cells
  * and cycles stay shared and finite, memoised by source cell.
  *
- * The walk is read-only and finishes before the first cell is minted, so a
- * refusal leaves the arena exactly as it was. Each cell and each edge probed
- * consumes work, which bounds a copy by the arena's execution limits.
+ * The walk writes no existing cell and finishes before the first copy is
+ * minted, so a refusal leaves no copy and no source touched. It is not
+ * byte-for-byte as it was: a foreign neighbour is read with linkedMinting,
+ * which mints the proxy standing for it, and that proxy stays. Each cell and
+ * each edge probed consumes work, which bounds a copy by the arena's execution
+ * limits.
  */
 [[nodiscard]] std::expected<std::vector<CellRef>, TopologyCopyRefused>
 copyTopology(ArenaManifold &arena, std::span<const CellRef> subjects,
-             const EdgeSelection &selection, DimRef cloneDim);
+             const EdgeSelection &selection, DimRef cloneDim,
+             std::optional<DimRef> runtimeObjectClaim = std::nullopt);
 
 } // namespace zigzag
