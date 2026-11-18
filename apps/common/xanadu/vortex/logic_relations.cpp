@@ -282,6 +282,10 @@ private:
   std::optional<xanadu::SystemStoreModel> model_;
 };
 
+// Module names carry a colon ("std:math"), which the Prolog lexer reads as an
+// operator, so a goal spells one as a quoted atom: vortex_module('std:math').
+// Teaching the lexer an unquoted module-qualified atom would claim `:` before
+// the language decides what module-qualified calls mean.
 class VortexModuleProvider : public CoreBoundProvider {
 public:
   explicit VortexModuleProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}

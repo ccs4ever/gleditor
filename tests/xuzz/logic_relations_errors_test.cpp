@@ -220,4 +220,17 @@ TEST(LogicRelationSettingsTest, BoundStoreModelIsBuiltOncePerSolve) {
   EXPECT_EQ(logic::settingsModelBuilds() - before, 2U);
 }
 
+// Module names contain a colon, which the Prolog lexer reads as an operator,
+// so `std:math` does not parse as an atom. The supported spelling is the quoted
+// atom; the answers print the module unquoted.
+TEST(LogicRelationErrorsTest, ModuleNamesAreWrittenAsQuotedAtoms) {
+  RelationHarness h;
+  EXPECT_EQ(h.all("vortex_module('std:math').", "X").size(), 1U);
+  EXPECT_EQ(h.all("vortex_module(M), M = 'std:math'.", "M"),
+            std::vector<std::string>{"std:math"});
+  EXPECT_TRUE(h.all("\\+ vortex_module('std:math').", "X").empty());
+  EXPECT_EQ(h.all("\\+ vortex_module('std:nosuch').", "X").size(), 1U);
+  EXPECT_THROW((void)h.all("vortex_module(std:math).", "X"), std::exception);
+}
+
 } // namespace
