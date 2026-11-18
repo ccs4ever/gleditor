@@ -102,6 +102,25 @@ CellRef VQLCompiler::emitExtreme(CellRef anchor, DimRef dimension,
   return extreme;
 }
 
+void VQLCompiler::emitRefuseCycle(const CellRef extreme, const DimRef dimension,
+                                  const DimVector direction,
+                                  const std::string_view what) {
+  const auto onward = emitOp(OpcodeKind::Link, "#CYCLE_PROBE");
+  emitInput(onward, extreme);
+  emitInputConstant(onward, static_cast<std::int64_t>(dimension));
+  emitInputConstant(onward, static_cast<std::int64_t>(toSign(direction)));
+  const auto neighbor = core_.arena().makeCell();
+  emitOutput(onward, neighbor);
+  const auto looped = emitCellPresence(neighbor);
+  const auto open   = core_.arena().makeCell();
+  const auto negate = emitOp(OpcodeKind::Not, "#CYCLE_OPEN");
+  emitInput(negate, looped);
+  emitOutput(negate, open);
+  const auto require = emitOp(OpcodeKind::Assert, "#CYCLE_REFUSE");
+  emitInput(require, open);
+  emitInputConstant(require, std::string{what});
+}
+
 CellRef VQLCompiler::emitRank(CellRef anchor, DimRef dimension,
                               DimVector direction) {
   const auto result = emitStreamClear();

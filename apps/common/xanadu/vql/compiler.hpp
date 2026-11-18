@@ -592,6 +592,12 @@ private:
                                                  zigzag::CellRef inStreamCell);
   zigzag::CellRef emitFirstCell(zigzag::CellRef input);
   zigzag::CellRef emitCellPresence(zigzag::CellRef candidate);
+  /// Fails the program, naming @p what, when @p extreme still has a neighbour
+  /// on @p dimension in @p direction. A rank walk stops at the first repeated
+  /// cell, so the "last" cell of a cycle still links onwards; attaching there
+  /// would splice into the loop and break the links already in it.
+  void emitRefuseCycle(zigzag::CellRef extreme, zigzag::DimRef dimension,
+                       zigzag::DimVector direction, std::string_view what);
   zigzag::CellRef
   emitContextFallback(zigzag::CellRef candidate,
                       std::optional<zigzag::CellRef> previousContext);

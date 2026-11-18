@@ -87,6 +87,9 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         const CellRef group = beginMutationGroup("#CREATE_CELL_GROUP");
         std::vector<CellRef> createdCells;
         CellRef attachPoint = emitExtreme(current, dim, zigzag::DimVector::POS);
+        emitRefuseCycle(attachPoint, dim, zigzag::DimVector::POS,
+                        "VQL append refused: the rank is a cycle, so it has no "
+                        "end to append at");
         for (const auto &createVal : sd.creates) {
           std::optional<CellRef> initialValue;
           if (createVal.kind == CreateValue::Kind::Expression && createVal.expr)
