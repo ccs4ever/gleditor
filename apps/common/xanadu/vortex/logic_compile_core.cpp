@@ -68,6 +68,10 @@ constexpr std::string_view kVmCycleBudgetMessage = "Exceeded max cycles";
 // are tried first), and a name that is in no table keeps the recorded ruling:
 // an unknown predicate fails without an error. Delete a row when a card lowers
 // it; the dispatch then reaches that card's emitter first.
+// The widest relation (vortex_param/4, cell_link/4) plus headroom for a
+// provider a later card adds; only bounds the wrong-arity lookup below.
+constexpr std::size_t kMaxRelationArity = 8;
+
 struct OwnedGoal {
   std::string_view name;
   std::size_t arity;
@@ -657,6 +661,15 @@ void emitUnknownPredicate(CompileContext &ctx, FrameScope &scope, Chain &chain,
                           const PredicateKey &key) {
   if (isOwnedGoal(key))
     refuseUnlowered("P1", key.display() + " is not lowered to the VM");
+  // A relation called at an arity it lacks is a mistake about a builtin the
+  // system does own, so it is named instead of failing like an unknown user
+  // predicate (which keeps the recorded fail-quietly ruling).
+  for (std::size_t arity = 0; arity <= kMaxRelationArity; ++arity) {
+    if (arity != key.arity &&
+        ctx.relations.find(PredicateKey{key.name, arity}) != nullptr)
+      refuseUnlowered("P1", key.display() + " is not a relation; " + key.name +
+                                "/" + std::to_string(arity) + " is");
+  }
   GLEDITOR_LOG_DEBUG("vortex.logic",
                      "unknown predicate {} fails without an error",
                      key.display());

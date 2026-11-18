@@ -295,6 +295,12 @@ public:
   [[nodiscard]] std::size_t logicCycleBudget() const noexcept {
     return logicMaxCycles_;
   }
+  /// Arena cells that existed when construction finished: the dimensions, the
+  /// std modules and the seeded clauses. The relations over cells never
+  /// enumerate below this, since those are the engine's own machinery.
+  [[nodiscard]] std::size_t bootstrapCellCount() const noexcept {
+    return bootstrapCells_;
+  }
   /// A compile context over this library's core, VM and bound store, for the
   /// logic lowering (logic_compile.hpp).
   [[nodiscard]] logic::CompileContext
@@ -561,7 +567,8 @@ private:
   CellRef predMember_{noCell};
   CellRef predAppend_{noCell};
   CellRef predLength_{noCell};
-  CellRef predEval_{noCell}; ///< '$eval'/2, internal; never exported
+  std::size_t bootstrapCells_{0}; ///< cell count when the constructor ended
+  CellRef predEval_{noCell};      ///< '$eval'/2, internal; never exported
   CellRef predVortexFunction_{noCell};
   CellRef predVortexModule_{noCell};
   CellRef predVortexInstruction_{noCell};

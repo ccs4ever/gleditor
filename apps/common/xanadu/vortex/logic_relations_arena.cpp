@@ -4,6 +4,7 @@
  * bridge_edge, lens and SQL fact enumeration).
  */
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -31,6 +32,12 @@ public:
   explicit CellValueProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Integer,
+                                                   ArgKind::Any};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -111,6 +118,12 @@ public:
   explicit CellLinkProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 4; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 4> kKinds{
+        ArgKind::Integer, ArgKind::Atom, ArgKind::Atom, ArgKind::Integer};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -219,6 +232,12 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Integer,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_) return std::nullopt;
@@ -308,6 +327,12 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Integer,
+                                                   ArgKind::Integer};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_) return std::nullopt;
@@ -392,6 +417,12 @@ public:
   explicit BridgeEdgeProvider3(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{
+        ArgKind::Integer, ArgKind::Atom, ArgKind::Integer};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {

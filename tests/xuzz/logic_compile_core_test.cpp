@@ -428,7 +428,7 @@ TEST(LogicCompileCoreTest, UnloweredBuiltinsRefuseByNameButUnknownNamesFail) {
       "transclude(X, Y, Z).",
       "xanalink(X, Y, Z).",
       "cell_value(1, X).",
-      "cell_link(1, 2, X, Y).",
+      "cell_link(1, d, X, Y).",
       "cell_span(1, X).",
       "bridge_edge(X, Y).",
       "bridge_edge(X, Y, Z).",

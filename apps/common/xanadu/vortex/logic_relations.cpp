@@ -265,6 +265,11 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 1; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 1> kKinds{ArgKind::Atom};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_) return std::nullopt;
@@ -297,6 +302,11 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 1; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 1> kKinds{ArgKind::Atom};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_) return std::nullopt;
@@ -328,6 +338,12 @@ public:
   explicit VortexFunctionProvider2(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Atom,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -364,6 +380,12 @@ public:
   explicit VortexFunctionProvider3(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{ArgKind::Atom, ArgKind::Atom,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -405,6 +427,12 @@ public:
   explicit VortexInstructionProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{
+        ArgKind::Atom, ArgKind::Integer, ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -454,6 +482,12 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{ArgKind::Atom, ArgKind::Atom,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_) return std::nullopt;
@@ -498,6 +532,12 @@ public:
   explicit VortexParamProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 4; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 4> kKinds{
+        ArgKind::Atom, ArgKind::Atom, ArgKind::Integer, ArgKind::Integer};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -555,6 +595,11 @@ public:
   explicit SettingProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Atom, ArgKind::Any};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -627,6 +672,11 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Atom, ArgKind::Any};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_ || stdlib_.boundStore() == nullptr) return std::nullopt;
@@ -682,6 +732,11 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 2; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 2> kKinds{ArgKind::Atom, ArgKind::Any};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_ || stdlib_.boundStore() == nullptr) return std::nullopt;
@@ -732,6 +787,12 @@ public:
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
 
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{ArgKind::Atom, ArgKind::Atom,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
+
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
     if (!core_ || stdlib_.boundStore() == nullptr) return std::nullopt;
@@ -768,6 +829,12 @@ public:
   explicit XanalinkProvider(VortexStdLib &stdlib) : stdlib_(stdlib) {}
 
   [[nodiscard]] std::size_t arity() const noexcept override { return 3; }
+
+  [[nodiscard]] std::span<const ArgKind> signature() const noexcept override {
+    static constexpr std::array<ArgKind, 3> kKinds{ArgKind::Atom, ArgKind::Atom,
+                                                   ArgKind::Atom};
+    return kKinds;
+  }
 
   [[nodiscard]] std::optional<RelationAnswer>
   next(const RelationRequest &request) override {
@@ -920,6 +987,9 @@ void emitRelationGoal(CompileContext &ctx, FrameScope &scope, Chain &chain,
 }
 
 void installRelationProvider(CompileContext &ctx) {
+  // Taken here, before the query is lowered, so the compiled program and
+  // everything the run mints sit above it and stay invisible to a scan.
+  const std::size_t scanEnd = ctx.core.arena().cellCount();
   for (const auto nameView : kAllRelationNames) {
     const std::string name(nameView);
     bool hasAny = false;
@@ -928,6 +998,7 @@ void installRelationProvider(CompileContext &ctx) {
         hasAny = true;
         if (auto *bound = dynamic_cast<CoreBoundProvider *>(provider)) {
           bound->bindCore(&ctx.core);
+          bound->bindScan(ctx.stdlib.bootstrapCellCount(), scanEnd);
         }
       }
     }
@@ -953,6 +1024,15 @@ void installRelationProvider(CompileContext &ctx) {
                            : std::optional<std::size_t>(
                                  static_cast<std::size_t>(query.limit)),
           };
+          if (const auto *bound =
+                  dynamic_cast<const CoreBoundProvider *>(provider)) {
+            try {
+              checkArguments(ctx.stdlib, ctx.core.arena(), key,
+                             bound->signature(), query.arguments);
+            } catch (const RelationError &err) {
+              return std::unexpected(std::string(err.what()));
+            }
+          }
           const auto ans = provider->next(req);
           if (!ans) {
             return std::optional<zigzag::vortex::RelationAnswer>(std::nullopt);
