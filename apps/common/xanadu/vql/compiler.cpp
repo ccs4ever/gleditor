@@ -773,16 +773,66 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
 
   if (path.cloneTail && !stream.empty()) {
     stream = emitMap(stream, [&](CellRef master) {
-      const CellRef group = beginMutationGroup("#CLONE_TAIL_GROUP");
+      const CellRef group     = beginMutationGroup("#CLONE_TAIL_GROUP");
+      const auto cloneDim     = core_.dims().clone;
+      const auto refuseUnless = [&](const CellRef condition,
+                                    const std::string_view message) {
+        const auto require = emitOp(OpcodeKind::Assert, "#CLONE_REFUSE");
+        emitInput(require, condition);
+        emitInputConstant(require, std::string{message});
+      };
+      // Reads the clone neighbour of @p cell and requires there be none.
+      const auto requireUnlinked = [&](const CellRef cell, const DimVector side,
+                                       const std::string_view message) {
+        const auto read = emitOp(OpcodeKind::Link, "#CLONE_PROBE");
+        emitInput(read, cell);
+        emitInputConstant(read, static_cast<std::int64_t>(cloneDim));
+        emitInputConstant(read, static_cast<std::int64_t>(toSign(side)));
+        const auto neighbor = core_.arena().makeCell();
+        emitOutput(read, neighbor);
+        const auto linked = emitCellPresence(neighbor);
+        const auto free   = core_.arena().makeCell();
+        const auto negate = emitOp(OpcodeKind::Not, "#CLONE_FREE");
+        emitInput(negate, linked);
+        emitOutput(negate, free);
+        refuseUnless(free, message);
+      };
+
+      // The leftmost cell is the authority: a join that starts mid-rank would
+      // give the rank two masters.
+      requireUnlinked(master, DimVector::NEG,
+                      "VQL clone join refused: the left operand is already a "
+                      "clone of another cell, so it is not the master");
+
+      // Each operand joins the end of the rank, so `a><b><c` is the chain
+      // a, b, c and every cell reads a's content.
+      const CellRef tail = emitExtreme(master, cloneDim, DimVector::POS);
       for (const auto &op : path.cloneTail->operands) {
         std::optional<CellRef> opCell;
         if (op.path) {
           opCell = compilePathExpression(*op.path, core_.home());
+          if (opCell) {
+            const auto same = core_.arena().makeCell();
+            const auto test = emitOp(OpcodeKind::SameCell, "#CLONE_SELF");
+            emitInput(test, master);
+            emitInput(test, *opCell);
+            emitOutput(test, same);
+            const auto distinct = core_.arena().makeCell();
+            const auto negate   = emitOp(OpcodeKind::Not, "#CLONE_DISTINCT");
+            emitInput(negate, same);
+            emitOutput(negate, distinct);
+            refuseUnless(distinct, "VQL clone join refused: a cell cannot be "
+                                   "joined to its own clone rank");
+            for (const auto side : {DimVector::NEG, DimVector::POS}) {
+              requireUnlinked(*opCell, side,
+                              "VQL clone join refused: the right operand "
+                              "already belongs to a clone rank");
+            }
+          }
         } else if (op.bareCreate) {
           CellRef newOp = emitOp(OpcodeKind::New, "#CLONE_TAIL_NEW");
-          emitInput(newOp, master);
-          emitInputConstant(newOp,
-                            static_cast<std::int64_t>(core_.dims().clone));
+          emitInput(newOp, tail);
+          emitInputConstant(newOp, static_cast<std::int64_t>(cloneDim));
           emitInputConstant(newOp, static_cast<std::int64_t>(1));
           opCell = core_.arena().makeCell();
           emitOutput(newOp, *opCell);
@@ -808,11 +858,13 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
 
         if (opCell) {
           CellRef linkOp = emitOp(OpcodeKind::Link, "#CLONE_JOIN");
-          emitInput(linkOp, master);
-          emitInputConstant(linkOp,
-                            static_cast<std::int64_t>(core_.dims().clone));
+          emitInput(linkOp, tail);
+          emitInputConstant(linkOp, static_cast<std::int64_t>(cloneDim));
           emitInputConstant(linkOp, static_cast<std::int64_t>(1));
           emitInput(linkOp, *opCell);
+          const auto advance = emitOp(OpcodeKind::CopyCellRefs, "#CLONE_TAIL");
+          emitInput(advance, *opCell);
+          emitOutput(advance, tail);
         }
       }
       endMutationGroup(group, "#CLONE_TAIL_GROUP_END");

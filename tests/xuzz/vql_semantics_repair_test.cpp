@@ -370,6 +370,22 @@ TEST_F(VQLSemanticsRepairTest,
   EXPECT_THROW(engine.execute("$a><$a"), std::runtime_error);
 }
 
+TEST_F(VQLSemanticsRepairTest, CloneJoinAppendsAtTheEndOfTheMastersRank) {
+  const auto a = arena.makeCell("authority");
+  const auto b = arena.makeCell("b");
+  const auto d = arena.makeCell("d");
+  engine.setVariable("a", a);
+  engine.setVariable("b", b);
+  engine.setVariable("d", d);
+  ASSERT_EQ(engine.execute("$a><$b"), std::vector<zigzag::CellRef>{a});
+  // A mid-rank cell is not a master, and refusing leaves the rank intact.
+  EXPECT_THROW(engine.execute("$b><$d"), std::runtime_error);
+  EXPECT_FALSE(arena.linked(d, core.dims().clone, DimVector::NEG));
+  ASSERT_EQ(engine.execute("$a><$d"), std::vector<zigzag::CellRef>{a});
+  EXPECT_EQ(arena.linked(a, core.dims().clone, DimVector::POS), b);
+  EXPECT_EQ(arena.linked(b, core.dims().clone, DimVector::POS), d);
+}
+
 TEST_F(VQLSemanticsRepairTest, EmptyWalkDoesNotInvokeFunctionsOrLambdas) {
   engine.execute("def f($x) := ##/+d.unexpected%;");
   const auto dimension = engine.resolveDimension("d.unexpected");
