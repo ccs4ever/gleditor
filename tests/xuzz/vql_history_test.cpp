@@ -148,6 +148,38 @@ TEST(VQLHistoryTest, WatchSinceFindsCellsAddedAfterItsHistoricalSnapshot) {
             "at cell birth");
 }
 
+// Genesis is deliberately not a baseline here: a pin at genesis leaves a later
+// live read of a one-store dimension empty (reported to the owner), so the
+// delta there would compare two empty answers.
+TEST(VQLHistoryTest, WatchSinceEveryRealBaselineReportsExactlyTheNewCell) {
+  for (const auto pick : {0, 1}) {
+    HistoryFixture fixture;
+    const auto baseline =
+        pick == 0 ? fixture.dimensionVersion : fixture.cellVersion;
+    const auto changes =
+        fixture.engine.execute("watch ##/d.history-test as $cell since @" +
+                               baseline.str() + " { $cell }");
+    EXPECT_EQ(changes.size(), 1U) << "@" << baseline.str();
+  }
+}
+
+// Owner ruling 2026-11-18: a baseline that names no version is refused, since
+// treating it as an empty snapshot would report every live cell as new; a pin
+// at the same version still yields nothing.
+TEST(VQLHistoryTest, WatchSinceAnUnknownVersionRefusesByName) {
+  HistoryFixture fixture;
+  try {
+    (void)fixture.engine.execute(
+        "watch ##/d.history-test as $cell since @z999999 { $cell }");
+    FAIL() << "an unknown baseline must be refused";
+  } catch (const std::runtime_error &refusal) {
+    EXPECT_THAT(refusal.what(),
+                testing::HasSubstr("watch since version 'z999999' does not "
+                                   "exist"));
+  }
+  EXPECT_TRUE(fixture.engine.execute("##@(z999999)/d.history-test").empty());
+}
+
 TEST(VQLHistoryTest,
      StoreProxyMaskPreservesSelectedDimensionWithoutStoreWrites) {
   HistoryFixture fixture;

@@ -366,6 +366,28 @@ std::vector<CellRef> VQLCompiler::compileVersionPinnedStep(
   return nextStream;
 }
 
+void VQLCompiler::requireWatchBaseline(const VersionExpr &since) {
+  const auto variable = [this](const std::string &name) {
+    return versionVariable(core_, varBindings_, name);
+  };
+  VersionPin pin;
+  pin.versions.push_back(since);
+  const auto versions = pinnedVersions(pin, variable, core_.arena());
+  const bool exists   = std::ranges::any_of(versions, [&](const auto &version) {
+    return std::ranges::any_of(
+        coordinator_->stores(), [&](const StoreInfo &info) {
+          if (!info.store) return false;
+          const auto available = info.store->allVersions();
+          return std::ranges::find(available, version) != available.end();
+        });
+  });
+  if (exists) return;
+  const auto spelled =
+      versions.empty() ? since.versionStr : versions.front().str();
+  throw QueryRefusal(QueryErrorCategory::Unsupported,
+                     "watch since version '" + spelled + "' does not exist");
+}
+
 std::optional<CellRef>
 VQLCompiler::compileVersionPinnedPath(const PathExpression &path,
                                       const CellRef ctxCell) {

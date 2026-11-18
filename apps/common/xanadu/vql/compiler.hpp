@@ -411,6 +411,10 @@ private:
                            bool allowInitialEmptyCall = false);
   std::optional<zigzag::CellRef>
   compileVersionPinnedPath(const PathExpression &path, zigzag::CellRef ctxCell);
+  /// Refuses a watch baseline no attached store has: a pin at such a version
+  /// answers nothing, but a baseline that is an empty snapshot would report
+  /// every live cell as new.
+  void requireWatchBaseline(const VersionExpr &since);
   std::optional<zigzag::CellRef>
   compileHistoricalAnchor(const AnchorNode &anchor);
   std::optional<zigzag::CellRef> compileVersionValue(const VersionExpr &version,
