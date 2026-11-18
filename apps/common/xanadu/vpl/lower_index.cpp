@@ -37,6 +37,10 @@ constexpr std::string_view kIndexScalar =
     "VPL indexing on a scalar is unsupported by the VM";
 constexpr std::string_view kIndexValence =
     "VPL indexing on a rank with more than one axis is unsupported by the VM";
+constexpr std::string_view kIndexIndexValence =
+    "VPL indexing with a rank of more than one axis is unsupported by the VM";
+constexpr std::string_view kIndexNotNumber =
+    "VPL index is not a number (DOMAIN ERROR)";
 constexpr std::string_view kIndexMultiDim =
     "VPL multi-dimensional indexing is unsupported by the VM";
 constexpr std::string_view kIndexNegativeLiteral =
@@ -276,8 +280,22 @@ Maybe lowerIndexing(LowerContext &ctx, const IndexingExpr &expr) {
     refuse(kIndexIndexEnclosed);
   }
 
-  assertNotNegative(ctx, *indexCell, "#INDEX_NONNEGATIVE",
-                    "VPL index out of range: negative index");
+  // A matrix of positions would be read along its first axis only and answer
+  // a wrong-shaped vector, so it is refused rather than half read.
+  if (const auto *indexAxes = ctx.axesOf(*indexCell);
+      indexAxes != nullptr && indexAxes->size() > 1) {
+    refuse(kIndexIndexValence);
+  }
+
+  // Computed positions get the same whole-number test a literal count does,
+  // so 1.0 and 4÷2 index and 3÷2 is the DOMAIN ERROR that [1.5] is.
+  const auto checkedPosition = [&](CellRef position) {
+    const auto whole = checkedWholeNumber(ctx, position, kIndexNotNumber,
+                                          kIndexNonIntegerLiteral);
+    assertNotNegative(ctx, whole, "#INDEX_NONNEGATIVE",
+                      "VPL index out of range: negative index");
+    return whole;
+  };
 
   const auto walk = axisWalkOf(ctx, *target);
   // The cell at a position is found by a walk that stops at the view's bound,
@@ -285,7 +303,7 @@ Maybe lowerIndexing(LowerContext &ctx, const IndexingExpr &expr) {
   // past a bound, and past the rank's end it would answer an absent cell that
   // reads as 0.
   const auto at = [&](CellRef position) {
-    const auto found = nthCell(ctx, walk, position);
+    const auto found = nthCell(ctx, walk, checkedPosition(position));
     assertCell(ctx, found.found, "#INDEX_IN_RANGE", kIndexOutOfRange);
     return found.cell;
   };

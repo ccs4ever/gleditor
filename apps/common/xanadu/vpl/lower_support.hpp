@@ -11,6 +11,7 @@
 #define COMMON_XANADU_VPL_LOWER_SUPPORT_HPP
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -182,6 +183,48 @@ inline void assertNumeric(LowerContext &ctx, CellRef value,
                           std::string_view label, std::string_view message) {
   if (isKnownNumber(ctx, value)) return;
   assertCell(ctx, emitIsNumeric(ctx, value), label, message);
+}
+
+/// Emits the run-time checks that `count` is a whole number and returns an
+/// integer-typed register holding it. A count is read by the VM through
+/// arithmetic that coerces, so text such as "2" or "x" would otherwise be
+/// taken for a number; the checks use only the variant type of the values.
+/// Take, drop and indexing share it so a literal and a computed count agree.
+inline CellRef checkedWholeNumber(LowerContext &ctx, CellRef count,
+                                  std::string_view notNumber,
+                                  std::string_view notWhole) {
+  using zigzag::vortex::OpcodeKind;
+  // Largest int64: truncating `count % max` leaves any in-range count as it
+  // is, as an integer-typed value, whatever type it came in.
+  constexpr std::int64_t kTruncate = std::numeric_limits<std::int64_t>::max();
+  // A count beyond this is clamped to it: no rank holds so many cells, a
+  // double is exact for every whole value up to 2^53 (about 9e15), and the
+  // clamp keeps `9223372036854775807 ↓ A` and `1e30 ↓ A` the empty array they
+  // mean instead of an arithmetic overflow.
+  constexpr double kLargestCount = 1e15;
+
+  assertNumeric(ctx, count, "#COUNT_NUMBER", notNumber);
+
+  const auto clamp = ctx.emitOp(OpcodeKind::Clamp, "#COUNT_CLAMP");
+  ctx.emitInput(clamp, count);
+  ctx.emitInputConstant(clamp, -kLargestCount);
+  ctx.emitInputConstant(clamp, kLargestCount);
+  const auto bounded = ctx.core().arena().makeCell();
+  ctx.emitOutput(clamp, bounded);
+
+  const auto whole =
+      emitBinaryOp(ctx, OpcodeKind::Mod, "#COUNT_TRUNCATE", bounded, kTruncate);
+  const auto fraction =
+      emitBinaryOp(ctx, OpcodeKind::Sub, "#COUNT_FRACTION", bounded, whole);
+  // Zero is compared by order, not Eq: Eq on a double 0.0 and an int 0 differ.
+  const auto atLeast = emitBinaryOp(ctx, OpcodeKind::Gte, "#COUNT_FRACTION_GE",
+                                    fraction, kNoneYet);
+  const auto atMost  = emitBinaryOp(ctx, OpcodeKind::Lte, "#COUNT_FRACTION_LE",
+                                    fraction, kNoneYet);
+  const auto isWhole =
+      emitBinaryOp(ctx, OpcodeKind::And, "#COUNT_IS_WHOLE", atLeast, atMost);
+  assertCell(ctx, isWhole, "#COUNT_WHOLE", notWhole);
+  return whole;
 }
 
 /// A Bool register: `left = right`. Two numbers compare by value, so the int 2

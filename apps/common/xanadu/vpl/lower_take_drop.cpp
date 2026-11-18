@@ -87,44 +87,12 @@ void refuseBadLiteral(const AstNode *node, const VerbText &name,
   if (*value < 0.0 && !negativeAllowed) refuse(kTakeNegative);
 }
 
-/// Emits the run-time checks that `count` is a whole number and returns an
-/// integer-typed register holding it. A count is read by the VM through
-/// arithmetic that coerces, so text such as "2" or "x" would otherwise be
-/// taken for a number; the checks use only the variant type of the values.
+/// Take and drop share the whole-count check with indexing; see
+/// checkedWholeNumber.
 CellRef checkedCount(LowerContext &ctx, CellRef count, const VerbText &name) {
-  // Largest int64: truncating `count % max` leaves any in-range count as it
-  // is, as an integer-typed value, whatever type it came in.
-  constexpr std::int64_t kTruncate = std::numeric_limits<std::int64_t>::max();
-  // A count beyond this is clamped to it: no rank holds so many cells, a
-  // double is exact for every whole value up to 2^53 (about 9e15), and the
-  // clamp keeps `9223372036854775807 ↓ A` and `1e30 ↓ A` the empty array they
-  // mean instead of an arithmetic overflow.
-  constexpr double kLargestCount = 1e15;
-
-  assertNumeric(ctx, count, "#COUNT_NUMBER",
-                name.text(" count is not a number"));
-
-  const auto clamp = ctx.emitOp(OpcodeKind::Clamp, "#COUNT_CLAMP");
-  ctx.emitInput(clamp, count);
-  ctx.emitInputConstant(clamp, -kLargestCount);
-  ctx.emitInputConstant(clamp, kLargestCount);
-  const auto bounded = ctx.core().arena().makeCell();
-  ctx.emitOutput(clamp, bounded);
-
-  const auto whole =
-      emitBinaryOp(ctx, OpcodeKind::Mod, "#COUNT_TRUNCATE", bounded, kTruncate);
-  const auto fraction =
-      emitBinaryOp(ctx, OpcodeKind::Sub, "#COUNT_FRACTION", bounded, whole);
-  // Zero is compared by order, not Eq: Eq on a double 0.0 and an int 0 differ.
-  const auto atLeast = emitBinaryOp(ctx, OpcodeKind::Gte, "#COUNT_FRACTION_GE",
-                                    fraction, kNoneYet);
-  const auto atMost  = emitBinaryOp(ctx, OpcodeKind::Lte, "#COUNT_FRACTION_LE",
-                                    fraction, kNoneYet);
-  const auto isWhole =
-      emitBinaryOp(ctx, OpcodeKind::And, "#COUNT_IS_WHOLE", atLeast, atMost);
-  assertCell(ctx, isWhole, "#COUNT_WHOLE",
-             name.text(" count is not a whole number (DOMAIN ERROR)"));
-  return whole;
+  return checkedWholeNumber(
+      ctx, count, name.text(" count is not a number"),
+      name.text(" count is not a whole number (DOMAIN ERROR)"));
 }
 
 void clearRegister(LowerContext &ctx, CellRef target, std::string_view label) {

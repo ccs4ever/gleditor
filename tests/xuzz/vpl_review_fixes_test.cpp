@@ -69,4 +69,33 @@ TEST(VplReviewEncloseTest, DiscloseOfANonEnclosedValueIsIdentity) {
   EXPECT_EQ(runVpl("⊃ 7"), "7\n");
 }
 
+TEST(VplReviewIndexTest, MatrixIndexIsRefusedByName) {
+  for (const char *source :
+       {"(10 20 30)[(0 1)∘.+(0 1)]", "(10 20 30)[(1 2)∘.+(0 1)]"}) {
+    const auto out = runVpl(source);
+    EXPECT_TRUE(mentions(out, "VPL indexing with a rank of more than one axis"))
+        << source << ": " << out;
+  }
+}
+
+TEST(VplReviewIndexTest, WholeValuedDoublesIndexLikeIntegers) {
+  EXPECT_EQ(runVpl("(10 20 30)[1.0]"), "20\n");
+  EXPECT_EQ(runVpl("(10 20 30)[4÷2]"), "30\n");
+  EXPECT_EQ(runVpl("(10 20 30)[0 2.0]"), "10 30\n");
+  EXPECT_EQ(runVpl("(10 20 30)[(4÷2) 0]"), "30 10\n");
+}
+
+TEST(VplReviewIndexTest, ComputedAndLiteralFractionsAgree) {
+  EXPECT_TRUE(mentions(runVpl("(10 20 30)[1.5]"), "DOMAIN ERROR"));
+  EXPECT_TRUE(mentions(runVpl("(10 20 30)[3÷2]"), "DOMAIN ERROR"));
+  EXPECT_TRUE(mentions(runVpl("(10 20 30)[(3÷2) 0]"), "DOMAIN ERROR"));
+  EXPECT_FALSE(mentions(runVpl("(10 20 30)[3÷2]"), "out of range"));
+}
+
+TEST(VplReviewIndexTest, OutOfRangeAndNegativeStayNamed) {
+  EXPECT_TRUE(mentions(runVpl("(10 20 30)[5]"), "VPL index out of range"));
+  EXPECT_TRUE(mentions(runVpl("(10 20 30)[1 ¯1]"), "negative index"));
+  EXPECT_TRUE(mentions(runVpl("(10 20 30)[2 5]"), "VPL index out of range"));
+}
+
 } // namespace
