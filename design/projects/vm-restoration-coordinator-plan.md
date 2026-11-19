@@ -547,6 +547,29 @@ Evidence or Subscription baseline test, and no VQL test is red. Rulings with the
   on `ArenaManifold` (core) is approved to follow, to close the stale-source hole. Shapes and lenses
   stay on the table; each move needs its own approval.
 
+Gate O (2026-11-19, shared branch after the V12 merge, adding CELLINT, EPOCH and V12): `xuzz_test`
+11 failures of 4917, nothing newly failing, no VQL test red; all 11 are the Evidence and
+Subscription baseline. Rulings with these cards:
+
+- **CELLINT:** `CellOfInt` and `IntOfCell` (appended after `VqlMaskProbe`) bridge Int64 ref-boxes
+  and cells. `CellOfInt` answers only a cell's birth number; any other number names no cell. Both
+  are mesh-impure (a cell number depends on the evaluating arena's snapshot), refused at seal and at
+  export for a constant operand, and refused by vagent by ordinal (no arity rows; owner approval for
+  vagent arity covered only `ProjectTopology` and `VqlMaskProbe`).
+- **EPOCH:** `ArenaManifold::releaseEpoch()` and `epochOfCell()`; an epoch is bumped by a truncating
+  release, `hydratePrefix` and arena assignment (strictly monotone). `discard()` truncates no cells
+  and does not bump. The VQL handle table drops an entry whose recorded epoch no longer matches.
+- **V12 (views as cells):** a view cell holds its rules on `d.vql.rule`; a handle carries source and
+  view Int64 boxes (`d.vql.view`, `d.vql.of`) and a witness rank `d.vql.epoch`. Steps on streams
+  that may hold handles run a two-branch guard over shared fold, wrap and resolve subroutines built
+  once per program (about 57 ops per step site, pinned at 60). Views over run-time sources work; the
+  view entries are gone from the compile-time table except `ComputedViewRules`, keyed by the view
+  cell. A stale or foreign handle refuses by name when a step on a constant handle is compiled,
+  including by literal id. Pivot and mask handles from another engine or after `clearVariables()`
+  step, since the handle carries its view and source. Open: no in-graph epoch read (the reviewer
+  argues no reachable program needs one); a handle copied by value without its witnesses is
+  unchecked; shapes and lenses remain on the table, each move needing its own approval.
+
 Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
 lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
 approval); `mesh::evaluate` of VQL source still runs `project` although a sealed portable artifact
