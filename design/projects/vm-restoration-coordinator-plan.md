@@ -511,6 +511,22 @@ Ruled by the owner on 2026-11-18 and 2026-11-19, after gate K:
   release exactly) and, as its own pass, vagent arity-table entries for `ProjectTopology` and
   `VqlMaskProbe`.
 
+Gate M (2026-11-19, shared branch at `6cec00bc`, adding Q-SHAPEVAR, O2d and Q-LENS): `xuzz_test` 14
+failures of 4790, nothing newly failing, 192 turned green against the baseline list. Three VQL tests
+remain (two pivot, one computed dimension); the rest are Evidence and Subscription baseline
+failures. Rulings with these cards:
+
+- **O2d:** `VortexVM::closureReferences` is a read-only, work-free accessor; a program that only
+  creates closures is released, and one whose result or session binding holds a closure it minted is
+  kept with a reason naming the holder. A session-level `let` closure stays in the arena (re-minting
+  its descriptor would be a core change, not taken). Open: the accessor is called once per result
+  cell naming an older closure, uncharged (memoise per object in `settle`).
+- **Q-LENS:** lenses live in the compile-time handle table beside shapes. A lens callback may not
+  capture variables (refused at bind by name), a lens may not be created inside a function body or
+  escape through a closure or a def result, a lens step takes no yield mode, a bare `%` put carries
+  no replacement and refuses, and a put with several replacements answers the source once per
+  replacement.
+
 Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
 lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
 approval); `mesh::evaluate` of VQL source still runs `project` although a sealed portable artifact
