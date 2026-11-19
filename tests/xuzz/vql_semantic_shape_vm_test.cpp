@@ -177,9 +177,18 @@ TEST_F(VQLSemanticShapeVmTest, ValuePositionUseLowersThroughTheValuePath) {
   EXPECT_EQ(arena.linked(subject, keep, DimVector::POS), kept);
 }
 
+// A shape variable is resolved while compiling (Q-SHAPEVAR), so what refuses
+// here is a variable nothing bound, and it is named.
 TEST_F(VQLSemanticShapeVmTest, ShapeHeldInAVariableRefusesByName) {
   const auto message = refusalOf("apply_shape($s, $shape)");
-  EXPECT_NE(message.find("literal shape"), std::string::npos) << message;
+  EXPECT_NE(message.find("$shape is not bound"), std::string::npos) << message;
+  expectUntouched();
+}
+
+TEST_F(VQLSemanticShapeVmTest, ShapeValueOfAnotherFormRefusesByName) {
+  const auto message = refusalOf("apply_shape($s, ./+d.shape)");
+  EXPECT_NE(message.find("requires a shape literal"), std::string::npos)
+      << message;
   expectUntouched();
 }
 
