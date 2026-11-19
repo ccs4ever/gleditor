@@ -276,6 +276,22 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
 
     if (step.rangeClamp) nextStream = emitClamp(nextStream, *step.rangeClamp);
 
+    if (view && creationStep) {
+      // The created cell is a plain cell, not a handle (a handle needs a
+      // compile-time source). Marking it makes a later step from it refuse by
+      // name rather than walk it without the view's rules.
+      const auto marker =
+          static_cast<std::int64_t>(resolveDimension(viewMarkerDimension));
+      nextStream = emitMap(nextStream, [&](const CellRef created) {
+        const CellRef group = beginMutationGroup("#VIEW_MARK_GROUP");
+        const auto mint     = emitOp(OpcodeKind::New, "#VIEW_MARK");
+        emitInput(mint, created);
+        emitInputConstant(mint, marker);
+        emitInputConstant(mint, std::int64_t{1});
+        endMutationGroup(group, "#VIEW_MARK_GROUP_END");
+        return std::vector<CellRef>{created};
+      });
+    }
     if (creationStep) {
       if (step.yieldMode == YieldMode::Keep) {
         // Keep the incoming context while retaining the selector's writes.

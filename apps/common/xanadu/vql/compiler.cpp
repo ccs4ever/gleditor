@@ -748,6 +748,10 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       stream.push_back(*start);
     }
   }
+  // A predicate filters into fresh program cells, so a handle in front of it
+  // would reach the steps as a plain cell with the view dropped.
+  if (!path.anchorPredicates.empty())
+    refuseViewHandles(stream, "a predicate on the path's anchor");
   for (const auto &predicate : path.anchorPredicates) {
     stream = emitMap(stream, [&](const CellRef candidate) {
       const CellRef result = core_.arena().makeCell();
@@ -766,6 +770,8 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       return std::vector<CellRef>{result};
     });
   }
+  if (path.anchor.derefMaster)
+    refuseViewHandles(stream, "a master dereference of the path's anchor");
   if (path.anchor.derefMaster) {
     stream = emitMap(stream, [&](CellRef candidate) {
       return std::vector<CellRef>{emitDereference(candidate)};

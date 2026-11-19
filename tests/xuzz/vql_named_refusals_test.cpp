@@ -55,7 +55,7 @@ TEST_F(VQLNamedRefusalTest, PivotAndComputedDimensionNameTheirForms) {
   // A pivot lowers to a dynamic view now (vql_dynamic_view_lowering_test.cpp);
   // it still refuses inside project() and apply_shape().
   EXPECT_THAT(refusalOf("project($task, { d.1 <=> d.priority })"),
-              testing::HasSubstr("pivot"));
+              testing::HasSubstr("pivot, computed-dimension"));
   EXPECT_THAT(refusalOf("$task{ +d.label := ./value() }"),
               testing::HasSubstr("computed dimension"));
 }

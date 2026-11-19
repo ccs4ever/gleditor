@@ -470,6 +470,13 @@ private:
   void refuseViewHandleArgument(const ValueExpr &argument) const;
   void refuseViewEscape(std::span<const zigzag::CellRef> stream,
                         const std::string &what) const;
+  /// Every view handle, and every cell created through a view, carries a
+  /// link along this dimension. The compile-time table knows which handles
+  /// this session made; the marker is how a handle it does not know (another
+  /// engine's, one held across clearVariables()) is still recognised and
+  /// refused by name instead of walking as a plain cell.
+  static constexpr const char *viewMarkerDimension = "d.vql.view";
+  [[nodiscard]] bool carriesViewMarker(zigzag::CellRef cell) const;
   std::unordered_set<zigzag::CellRef> sessionCells_;
   std::unordered_map<zigzag::CellRef, ViewMark> viewStreams_;
   std::vector<zigzag::CellRef> compileLensStep(const PathStep &step,

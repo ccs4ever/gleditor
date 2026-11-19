@@ -173,7 +173,8 @@ VQLCompiler::lowerDynamicView(const ShapeLiteral &shape,
               ": ...') cannot be mixed with a pivot or computed rule in one "
               "projection: a view writes nothing, an assignment does");
   }
-  const auto view = std::make_shared<const ViewDescriptor>(shape);
+  const auto view             = std::make_shared<const ViewDescriptor>(shape);
+  const zigzag::DimRef marker = resolveDimension(viewMarkerDimension);
   std::vector<std::pair<CellRef, CellRef>> made;
   std::vector<CellRef> handles;
   for (const CellRef owner : owners) {
@@ -200,6 +201,10 @@ VQLCompiler::lowerDynamicView(const ShapeLiteral &shape,
       continue;
     }
     const CellRef handle = core_.arena().makeCell(core_.arena().textOf(owner));
+    // The marker's far end is a program cell too, so this writes nothing the
+    // program's release would not undo.
+    zigzag::expectWritten(
+        core_.arena().link(handle, marker, false, core_.arena().makeCell()));
     shapeHandles_.emplace(handle, ViewHandle{.source = owner, .view = view});
     made.emplace_back(owner, handle);
     handles.push_back(handle);
@@ -225,6 +230,14 @@ VQLCompiler::viewOfStream(std::vector<CellRef> &stream) {
       mark = reached->second;
     }
     if (!mark) {
+      if (carriesViewMarker(cell))
+        throw QueryRefusal(QueryErrorCategory::Unsupported,
+                           "VQL a dynamic view handle this session cannot "
+                           "resolve, or a cell created through a view, is "
+                           "not a cell a step can walk: step the view's "
+                           "handle instead (a handle from another engine "
+                           "or from before its variables were cleared is "
+                           "not statically known)");
       plain = true;
       continue;
     }
@@ -307,6 +320,16 @@ VQLCompiler::planViewStep(const ViewMark &view, const PathStep &step) const {
   return {.step = std::move(rewritten), .endsView = false};
 }
 
+bool VQLCompiler::carriesViewMarker(const CellRef cell) const {
+  // The core's dimension directory is shared by every engine over it, so a
+  // handle another engine made is found; an engine with a core of its own
+  // names its own dimensions and shares nothing to be confused with.
+  const auto marker = core_.findDimension(viewMarkerDimension);
+  return marker && core_.arena()
+                       .linked(cell, *marker, zigzag::DimVector::POS)
+                       .has_value();
+}
+
 void VQLCompiler::markViewStream(const std::span<const CellRef> stream,
                                  const ViewMark &view) {
   // A session cell is a source the program did not make: marking it would
@@ -320,9 +343,9 @@ void VQLCompiler::refuseViewHandles(const std::span<const CellRef> cells,
                                     const std::string &where) const {
   for (const CellRef cell : cells) {
     const auto handle = shapeHandles_.find(cell);
-    if (handle == shapeHandles_.end() ||
-        !std::holds_alternative<ViewHandle>(handle->second))
-      continue;
+    const bool known  = handle != shapeHandles_.end() &&
+                       std::holds_alternative<ViewHandle>(handle->second);
+    if (!known && !carriesViewMarker(cell)) continue;
     throw QueryRefusal(
         QueryErrorCategory::Unsupported,
         "VQL a dynamic view handle cannot be used by " + where +
