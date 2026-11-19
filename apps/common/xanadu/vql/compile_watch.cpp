@@ -393,8 +393,9 @@ void VQLCompiler::compileMountDeclarations(const QueryExpression &query) {
       refuseUnsupported("a mount anchor argument must be a text literal");
     return *text;
   };
-  // The oracle's resolveStoreAnchor for the anchors that name this process's
-  // own stores; the roots are cells that already exist, so a mount mints none.
+  // The deleted host interpreter's resolveStoreAnchor, now only in history, for
+  // the anchors that name this process's own stores; the roots are cells that
+  // already exist, so a mount mints none.
   const auto resolveRoots =
       [&](const StoreAnchor &anchor) -> std::vector<CellRef> {
     std::vector<CellRef> roots;

@@ -14,9 +14,9 @@
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 // Shape predicates that count a cell's links: `{}`, `{*}` and the exact forms
-// after `!*` (spec 4.8.1). The expectations follow the specification table and
-// shape_eval.cpp; the pre-cutoff engine treated `{}` and `{*}` as always true
-// and `{!*, ...}` as always false, which the specification contradicts.
+// after `!*` (spec 4.8.1). The expectations follow the specification table; the
+// pre-cutoff host interpreter, since deleted, treated `{}` and `{*}` as always
+// true and `{!*, ...}` as always false, which the specification contradicts.
 namespace xanadu::vql {
 namespace {
 
