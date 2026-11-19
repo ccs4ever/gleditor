@@ -31,10 +31,11 @@ struct VQLNamedRefusalTest : testing::Test {
 };
 
 TEST_F(VQLNamedRefusalTest, ShapeValuedVariableNamesTheForm) {
-  // `##{ $s }` lowers now (Q-SHAPEVAR); a shape variable as a predicate is the
-  // form that still refuses, and it names itself.
+  // `##{ $s }` lowers (Q-SHAPEVAR) and so does a shape variable as a
+  // predicate (Q-SHAPEPRED); a variable holding a pivot is the shape form
+  // that still refuses as a predicate, and it names itself.
   const auto message =
-      refusalOf("let $s := { +d.a } return ##/d.items[{ $s }]");
+      refusalOf("let $s := { d.a<=>d.b } return ##/d.items[{ $s }]");
   EXPECT_THAT(message, testing::HasSubstr("shape"));
   EXPECT_THAT(message, testing::Not(testing::HasSubstr("graph lowering")));
 }

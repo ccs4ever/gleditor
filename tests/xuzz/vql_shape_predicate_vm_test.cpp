@@ -225,9 +225,8 @@ TEST(VQLShapePredicateVMTest,
 TEST(VQLShapePredicateVMTest, UnsupportedShapePredicateFormsRefuseCompilation) {
   ShapeFixture h;
   for (const auto query :
-       {"##/d.items[{+d.tag: $target}]", "##/d.items[{$shape}]",
-        "##/d.items[{some(.)}]", "##/d.items[{+d.tag: ##/d.value}]",
-        "##/d.items[{d.old<=>d.new}]", "##/d.items[{d.tag := \"value\"}]"}) {
+       {"##/d.items[{+d.tag: ##/d.value}]", "##/d.items[{d.old<=>d.new}]",
+        "##/d.items[{d.tag := \"value\"}]"}) {
     SCOPED_TRACE(query);
     const auto result = h.execute(query);
     ASSERT_FALSE(result);

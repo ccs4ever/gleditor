@@ -1,5 +1,7 @@
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/contracts.hpp"
 
+#include <algorithm>
 #include <array>
 #include <map>
 #include <optional>
@@ -53,8 +55,8 @@ std::size_t validateShape(const ShapeLiteral &shape, std::size_t depth,
       const auto *dimension = std::get_if<DimensionShapeRule>(&entry.rule);
       if (!dimension) {
         throw std::invalid_argument(
-            "compiled shape predicates do not support variable, function, "
-            "pivot, or virtual rules");
+            "compiled shape predicates do not support pivot or virtual "
+            "rules");
       }
       if (!dimension->dimName.starts_with("d.") ||
           dimension->dimName.size() <= 2) {
@@ -98,8 +100,142 @@ std::size_t validateShape(const ShapeLiteral &shape, std::size_t depth,
 }
 } // namespace
 
-CellRef VQLCompiler::compileShapePredicate(const ShapeLiteral &shape,
+bool VQLCompiler::variableHoldsHandle(const std::string &name) const {
+  const auto holds = [&](const CellRef cell) {
+    return handleKindOf(cell) != HandleKind::None;
+  };
+  if (const auto found = streamBindings_.find(name);
+      found != streamBindings_.end())
+    return std::ranges::any_of(found->second, holds);
+  if (const auto found = varBindings_.find(name);
+      found != varBindings_.end() && found->second)
+    return holds(*found->second);
+  return false;
+}
+
+bool VQLCompiler::variableHoldsShape(const std::string &spelled) const {
+  const std::string name =
+      spelled.starts_with('$') ? spelled.substr(1) : spelled;
+  const auto isShape = [&](const CellRef cell) {
+    return handleKindOf(cell) == HandleKind::Shape;
+  };
+  if (const auto found = streamBindings_.find(name);
+      found != streamBindings_.end())
+    return std::ranges::any_of(found->second, isShape);
+  if (const auto found = varBindings_.find(name);
+      found != varBindings_.end() && found->second)
+    return isShape(*found->second);
+  return false;
+}
+
+bool VQLCompiler::returnsShapeLiteral(const DefDeclaration &definition) {
+  const auto *body = std::get_if<std::shared_ptr<ValueExpr>>(&definition.body);
+  return body && *body &&
+         std::holds_alternative<std::shared_ptr<ShapeLiteral>>((*body)->kind);
+}
+
+std::optional<CellRef>
+VQLCompiler::compileShapePredicateValue(const ValueExpr &expression,
+                                        const CellRef candidate) {
+  if (const auto *spelled = std::get_if<std::string>(&expression.kind)) {
+    const std::string name =
+        spelled->starts_with('$') ? spelled->substr(1) : *spelled;
+    // A variable bound to no handle is an ordinary value: its truthiness is
+    // what the caller computes. A handle that is not a shape (a lens, a view)
+    // is refused by shapeOfVariable rather than read as a truthy cell.
+    if (!variableHoldsHandle(name)) return std::nullopt;
+    expandedPredicateShapes_.push_back(
+        expandPredicateShape(shapeOfVariable(name)));
+    return compileShapePredicate(expandedPredicateShapes_.back(), candidate);
+  }
+  if (const auto *call =
+          std::get_if<std::shared_ptr<FunctionInvocation>>(&expression.kind);
+      call && *call) {
+    const auto definition = definitions_.find((*call)->name);
+    if (definition == definitions_.end()) return std::nullopt;
+    auto shape = resolveShapeValue(expression);
+    if (!shape) return std::nullopt;
+    expandedPredicateShapes_.push_back(expandPredicateShape(*shape));
+    return compileShapePredicate(expandedPredicateShapes_.back(), candidate);
+  }
+  return std::nullopt;
+}
+
+std::optional<ShapeLiteral>
+VQLCompiler::shapeNamedByTarget(const ValueExpr &target) {
+  if (const auto *spelled = std::get_if<std::string>(&target.kind)) {
+    const std::string name =
+        spelled->starts_with('$') ? spelled->substr(1) : *spelled;
+    // A target variable is only supported as a shape. An unbound one would
+    // have to be bound by the match (spec 4.8.2), which is not lowered.
+    if (!variableHoldsHandle(name) && !streamBindings_.contains(name) &&
+        !varBindings_.contains(name))
+      throw TypeContractError(
+          "shape predicate target $" + name +
+          " is not bound (binding a variable from a shape predicate is not "
+          "supported)");
+    return shapeOfVariable(name);
+  }
+  if (const auto *call =
+          std::get_if<std::shared_ptr<FunctionInvocation>>(&target.kind);
+      call && *call && definitions_.contains((*call)->name))
+    return resolveShapeValue(target);
+  return std::nullopt;
+}
+
+ShapeLiteral VQLCompiler::expandPredicateShape(const ShapeLiteral &shape) {
+  ShapeLiteral flat = expandShape(shape);
+  for (auto &entry : flat.rules) {
+    auto *dimension = std::get_if<DimensionShapeRule>(&entry.rule);
+    if (!dimension || !dimension->targetValue) continue;
+    const ValueExpr &target = *dimension->targetValue;
+    std::optional<ShapeLiteral> inner;
+    if (const auto *nested =
+            std::get_if<std::shared_ptr<ShapeLiteral>>(&target.kind);
+        nested && *nested)
+      inner = expandPredicateShape(**nested);
+    else
+      inner = shapeNamedByTarget(target);
+    if (!inner) continue;
+    // The rule is a copy of the author's; only its target changes.
+    dimension->targetValue = std::make_shared<ValueExpr>(
+        ValueExpr{.kind = std::make_shared<ShapeLiteral>(std::move(*inner))});
+  }
+  return flat;
+}
+
+namespace {
+bool namesAValue(const ShapeLiteral &shape) {
+  return std::ranges::any_of(shape.rules, [](const ShapeRule &entry) {
+    if (std::holds_alternative<std::string>(entry.rule) ||
+        std::holds_alternative<std::shared_ptr<FunctionInvocation>>(
+            entry.rule) ||
+        std::holds_alternative<std::shared_ptr<ShapeLiteral>>(entry.rule))
+      return true;
+    const auto *dimension = std::get_if<DimensionShapeRule>(&entry.rule);
+    if (!dimension || !dimension->targetValue) return false;
+    const auto &target = dimension->targetValue->kind;
+    if (std::holds_alternative<std::string>(target) ||
+        std::holds_alternative<std::shared_ptr<FunctionInvocation>>(target))
+      return true;
+    const auto *nested = std::get_if<std::shared_ptr<ShapeLiteral>>(&target);
+    return nested && *nested && namesAValue(**nested);
+  });
+}
+} // namespace
+
+const ShapeLiteral &
+VQLCompiler::resolvedPredicateShape(const ShapeLiteral &shape) {
+  if (!namesAValue(shape)) return shape;
+  expandedPredicateShapes_.push_back(expandPredicateShape(shape));
+  return expandedPredicateShapes_.back();
+}
+
+CellRef VQLCompiler::compileShapePredicate(const ShapeLiteral &written,
                                            const CellRef candidate) {
+  // Resolve names first: validation and emission both read the resolved
+  // shape, so a variable lowers as the literal it stands for.
+  const ShapeLiteral &shape = resolvedPredicateShape(written);
   std::unordered_set<const ShapeLiteral *> active;
   const auto expanded =
       validateShape(shape, 1, active, remainingShapePredicateValidationNodes_);

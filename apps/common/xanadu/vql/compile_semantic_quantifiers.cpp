@@ -271,6 +271,9 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
           emitOutput(truth, *matchCell);
           appendOpcode(end);
         }
+      } else if (const auto named = compileShapePredicateValue(predArg, item)) {
+        // A shape named by a variable or a call; a literal is below.
+        matchCell = *named;
       } else if (const auto *path =
                      std::get_if<std::shared_ptr<PathExpression>>(
                          &predArg.kind);

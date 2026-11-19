@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -779,6 +780,25 @@ private:
                              std::span<const zigzag::CellRef> right);
   zigzag::CellRef compileShapePredicate(const ShapeLiteral &shape,
                                         zigzag::CellRef candidate);
+  /// Q-SHAPEPRED, compile_shape_predicate.cpp. A predicate that is a shape
+  /// held by a variable, or returned by a call, lowers as the literal it
+  /// stands for; nullopt when @p expression is neither (an ordinary value, a
+  /// functor, a variable bound to no handle), which the caller keeps handling
+  /// as before.
+  std::optional<zigzag::CellRef>
+  compileShapePredicateValue(const ValueExpr &expression,
+                             zigzag::CellRef candidate);
+  /// @p shape with every variable, call and nested-literal rule (also inside
+  /// targets) replaced by the rules it names. Returns @p shape itself when it
+  /// names nothing, so a plain literal compiles exactly as before.
+  const ShapeLiteral &resolvedPredicateShape(const ShapeLiteral &shape);
+  ShapeLiteral expandPredicateShape(const ShapeLiteral &shape);
+  std::optional<ShapeLiteral> shapeNamedByTarget(const ValueExpr &target);
+  bool variableHoldsHandle(const std::string &name) const;
+  /// True when @p name is bound to a cell the table records as a shape.
+  bool variableHoldsShape(const std::string &name) const;
+  /// True when @p definition's whole body is a shape literal.
+  static bool returnsShapeLiteral(const DefDeclaration &definition);
 
   // Library / Executable structure emission
   zigzag::CellRef linkAsExecutable(zigzag::CellRef entryOp);
@@ -810,6 +830,9 @@ private:
   /// is bounded by the distinct shape values one query writes.
   CompiledHandleTable shapeHandles_;
   std::unordered_set<const ShapeLiteral *> shapesExpanding_;
+  /// Shapes a predicate expanded; the predicate compiler keys caches by
+  /// address, so these must outlive the compile and never move.
+  std::deque<ShapeLiteral> expandedPredicateShapes_;
   std::vector<std::string> shapeCallsActive_;
   zigzag::CellRef compileShapePredicateImpl(const ShapeLiteral &shape,
                                             zigzag::CellRef candidate);

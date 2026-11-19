@@ -470,6 +470,7 @@ CompilationResult VQLCompiler::compileOnce(const QueryExpression &query,
   remainingShapePredicateRules_    = maxCompiledShapePredicateRules;
   remainingShapePredicateValidationNodes_ = maxCompiledShapePredicateRules;
   shapeTargetConstants_.clear();
+  expandedPredicateShapes_.clear();
   entryOp_.reset();
   currentOp_.reset();
   allOps_.clear();
@@ -1117,6 +1118,9 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
                       shape && *shape) {
                     return compileShapePredicate(**shape, ctxCell);
                   }
+                  if (const auto named =
+                          compileShapePredicateValue(*t, ctxCell))
+                    return named;
                   const auto value = compileValueExpr(*t, ctxCell);
                   return value ? *value : emitConstant(false);
                 }
@@ -1128,7 +1132,11 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
               } else if constexpr (std::is_same_v<T, std::shared_ptr<
                                                                FunctionInvocation>>) {
                 if (t) {
-                  return compileValueExpr(ValueExpr{.kind = t}, ctxCell);
+                  const ValueExpr call{.kind = t};
+                  if (const auto named =
+                          compileShapePredicateValue(call, ctxCell))
+                    return named;
+                  return compileValueExpr(call, ctxCell);
                 }
                 return emitConstant(false);
               } else {
