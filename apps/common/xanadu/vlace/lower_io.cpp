@@ -88,6 +88,7 @@ lowerIoBuiltin(LowerContext &ctx, std::string_view name, SourceLocation loc) {
   if (name == "putStr") return termBuilder(ctx, "IO.PutStr", 1, loc);
   if (name == "putStrLn") return termBuilder(ctx, "IO.PutStrLn", 1, loc);
   if (name == "getLine") return termBuilder(ctx, "IO.GetLine", 0, loc);
+  if (name == "isEOF") return termBuilder(ctx, "IO.IsEOF", 0, loc);
   return std::nullopt;
 }
 
@@ -203,6 +204,25 @@ std::expected<ValuePtr, EvalError> runIoOnVm(Compiler &compiler,
           strVal->s    = std::move(line);
           currentVal   = strVal;
           curAction    = nullptr;
+        } else if (tag == "IO.IsEOF") {
+          if (!curAction->args.empty()) {
+            return fail(CompileError::TypeMismatch,
+                        "runIO: 'IO.IsEOF' wants 0 argument(s), got " +
+                            std::to_string(curAction->args.size()),
+                        {});
+          }
+          // C++ and not Vortex because it interfaces the host stream: the VM
+          // has no handle on `in`, which only this runner owns (as for
+          // getLine). peek() looks at the next character without extracting it,
+          // so the line a following getLine returns is unchanged. It is the
+          // only test that is right for a final line with no newline (the
+          // stream still holds characters) and for input that is a lone newline
+          // (one empty line, not the end).
+          auto flag  = std::make_shared<Value>();
+          flag->kind = Value::Kind::Bool;
+          flag->b    = in.peek() == std::istream::traits_type::eof();
+          currentVal = flag;
+          curAction  = nullptr;
         } else {
           // L8 effect leaf fallback
           LowerContext ctx(compiler);

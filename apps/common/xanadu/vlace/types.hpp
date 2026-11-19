@@ -144,9 +144,9 @@ private:
     std::size_t &depth_;
   };
   // Built-in value identifiers (not constructors): the typed IO primitives
-  // pure/bind/then/putStr/putStrLn/getLine (§6.5). Looked up for an EVar after
-  // the lexical env and before failing, so a program references them without
-  // import but a user binding of the same name shadows them.
+  // pure/bind/then/putStr/putStrLn/getLine/isEOF (§6.5). Looked up for an EVar
+  // after the lexical env and before failing, so a program references them
+  // without import but a user binding of the same name shadows them.
   std::unordered_map<std::string, Scheme> builtins_;
 };
 
