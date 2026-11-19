@@ -465,6 +465,47 @@ private:
   /// Refuses, by name, a handle used where the graph would compute with a
   /// value; @p op is the operator.
   void refuseHandleOperand(HandleKind kind, std::string_view op) const;
+
+  /// A marked shape handle may be read only where a shape is consumed (a shape
+  /// rule or target, a predicate, any/all/none, project/apply_shape, a call
+  /// argument or let that passes it on, a top-level return). Every other read
+  /// of a variable that holds one refuses through refuseShapeCells with this
+  /// one message family. A consumer says so for the very next read only:
+  /// compileArgument and compilePathExpression take the flag on entry, so
+  /// nothing nested inherits it.
+  struct ShapeUse {
+    bool consumes{false};
+    std::string_view use{"a value here"};
+  };
+  ShapeUse shapeUse_{};
+  ShapeUse takeShapeUse() {
+    const ShapeUse taken = shapeUse_;
+    shapeUse_            = {};
+    return taken;
+  }
+  struct ShapeUseScope {
+    ShapeUseScope(VQLCompiler &compiler, const bool consumes,
+                  const std::string_view use)
+        : compiler_(compiler), saved_(compiler.shapeUse_) {
+      compiler.shapeUse_ = {consumes, use};
+    }
+    ~ShapeUseScope() { compiler_.shapeUse_ = saved_; }
+    ShapeUseScope(const ShapeUseScope &)            = delete;
+    ShapeUseScope &operator=(const ShapeUseScope &) = delete;
+
+  private:
+    VQLCompiler &compiler_;
+    ShapeUse saved_;
+  };
+  void refuseShapeCells(std::span<const zigzag::CellRef> cells,
+                        std::string_view use) const;
+  /// True for `$name` alone, as a value or as a path with nothing after it.
+  static bool namesBareVariable(const ValueExpr &expression);
+  static bool namesBareVariable(const PathExpression &path);
+  /// Refuses a bare shape variable among the factors of @p condition, where no
+  /// candidate exists for it to be tested against.
+  void refuseShapeConditions(const BooleanExpr &condition,
+                             std::string_view use) const;
   /// The view dimensions when the core names them; absent while no view was
   /// ever made, which means no handle exists and no step needs a guard.
   [[nodiscard]] std::optional<ViewDimensions> viewDimensions() const;

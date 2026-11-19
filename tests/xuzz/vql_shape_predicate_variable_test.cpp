@@ -416,6 +416,94 @@ TEST_F(VQLShapePredicateVariableTest, ScalarTargetVariableIsDiagnosedAsSuch) {
               testing::HasSubstr("only a shape-valued variable"));
 }
 
+// Structural rule: a marked handle is read only where a shape is consumed.
+TEST_F(VQLShapePredicateVariableTest, ShapeReadAsAValueRefusesByName) {
+  const std::string s0 = "let $s := { +d.tag } ";
+  for (const auto &query :
+       {// lambda frames (D1)
+        s0 + "return $s / \\($m) ##/d.items[$m]",
+        s0 + "return $s / \\($m) any(##/d.items, $m)",
+        s0 + "let $f := \\($m) ##/d.items[$m] return $s / $f",
+        // builtins and wrapped arguments (D2)
+        "def f($m) := ##/d.items[$m]; " + s0 + "return f(first($s))",
+        "def f($m) := ##/d.items[$m]; " + s0 + "return f(string($s))",
+        s0 + "let $m := first($s) return ##/d.items[$m]",
+        s0 + "return ##/d.items[count($s) = 1]",
+        s0 + "return ##/d.items[contains(., $s)]", s0 + "return string($s)",
+        s0 + "return count($s)", s0 + "return value($s)",
+        "def f($m) := count($m); " + s0 + "return f($s)",
+        // operators and aliases (D3, D6)
+        s0 + "return 1 + $s", s0 + "return $s + $s",
+        s0 + "for $i in ##/d.items return $i + $s",
+        s0 + "return ##/d.items / $s",
+        // sources and conditions (D4)
+        s0 + "for $v in $s return 1",
+        s0 + "for $v in ##/d.items for $w in $s return 1",
+        s0 + "let $x := 3 if $s return $x", s0 + "return any($s, .)",
+        s0 + "return $s/d.tag"}) {
+    SCOPED_TRACE(query);
+    EXPECT_THAT(refusalOf(query),
+                testing::HasSubstr("a shape value cannot be used as"));
+  }
+}
+
+TEST_F(VQLShapePredicateVariableTest, ShapeConsumingFormsStillWork) {
+  const std::string s0 = "let $s := { +d.tag } ";
+  EXPECT_EQ(run(s0 + "return ##/d.items[$s]"), (std::vector<CellRef>{a, b}));
+  EXPECT_EQ(run(s0 + "let $t := $s return ##/d.items[{ $t, +d.keep }]"),
+            (std::vector<CellRef>{b}));
+  EXPECT_EQ(run(s0 + "return $s").size(), 1u);
+  EXPECT_EQ(run("def f($m) := ##/d.items[$m]; " + s0 + "return f($s)"),
+            (std::vector<CellRef>{a, b}));
+  EXPECT_EQ(run(s0 + "for $x in ##/d.items where $s return $x"),
+            (std::vector<CellRef>{a, b}));
+}
+
+TEST_F(VQLShapePredicateVariableTest, FirstShapeQueryKeepsNoProgram) {
+  // The marker dimension is named when the engine is made, so the first shape
+  // of a session costs what the next one does.
+  const auto before = arena.cellCount();
+  (void)run("let $s := { +d.tag } return ##/d.items[$s]");
+  const auto first = arena.cellCount() - before;
+  (void)run("let $s := { +d.tag } return ##/d.items[$s]");
+  const auto second = arena.cellCount() - before - first;
+  EXPECT_LE(first, second + 1);
+}
+
+TEST_F(VQLShapePredicateVariableTest, InlineLambdaMayConsumeAShape) {
+  const auto answer = run("let $s := { +d.tag } return any(##/d.items, "
+                          "\\($c) ##/d.items[$s])");
+  ASSERT_EQ(answer.size(), 1u);
+  EXPECT_EQ(truthOf(answer.front()), std::optional{true});
+}
+
+TEST_F(VQLShapePredicateVariableTest, ClosureCapturingAShapeRefusesByName) {
+  for (const std::string query :
+       {"let $s := { +d.tag } return any(##/d.items, \\($c) $s)",
+        "let $s := { +d.tag } return ##/d.items / \\($i) $s"}) {
+    SCOPED_TRACE(query);
+    EXPECT_THAT(refusalOf(query),
+                testing::HasSubstr("a shape value cannot be used as"));
+  }
+}
+
+// D5: a variable is a bare number, so it carries its handle's epoch.
+TEST_F(VQLShapePredicateVariableTest, HeldHandleWhoseCellWasReleasedRefuses) {
+  const auto mark   = arena.mark();
+  const auto handle = run("let $s := { +d.tag } return $s");
+  ASSERT_EQ(handle.size(), 1u);
+  engine.setVariable("held", handle);
+  zigzag::expectMarkOrder(arena.release(mark));
+  // The number is reused by a new handle that means something else.
+  (void)run("let $s := { +d.keep } return $s");
+  for (const std::string query :
+       {"##/d.items[$held]", "def g($m) := ##/d.items[$m]; g($held)",
+        "any(##/d.items, $held)"}) {
+    SCOPED_TRACE(query);
+    EXPECT_THAT(refusalOf(query), testing::HasSubstr("not statically known"));
+  }
+}
+
 // Foreign-owner proxies carry a store-ref index link that is bookkeeping: `{}`
 // holds on a proxy with no user links, and the variable form must agree.
 struct Foreign {

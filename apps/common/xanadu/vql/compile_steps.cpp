@@ -172,6 +172,7 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                    bound != varBindings_.end() && bound->second) {
           aliases.push_back(*bound->second);
         }
+        refuseShapeCells(aliases, "a path step or a dimension modifier");
         for (const CellRef alias : aliases)
           if (handleKindOf(alias) == HandleKind::ViewHandle)
             throw QueryRefusal(

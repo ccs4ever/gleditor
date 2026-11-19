@@ -162,10 +162,11 @@ const ShapeLiteral &VQLCompiler::shapeOfHandle(const CellRef cell,
   case HandleKind::Shape:
     return std::get<ShapeLiteral>(shapeHandles_.find(cell)->second);
   case HandleKind::UnrecordedShape:
-    refuseShape("shape value '$" + name +
-                "' is not statically known: it is a shape handle the compiler "
-                "has no record of (the session was cleared, or it came from "
-                "another session or engine)");
+    refuseShape(
+        "shape value '$" + name +
+        "' is not statically known: it is a shape handle the compiler "
+        "has no record of (the session was cleared, its cell was released, "
+        "or it came from another session or engine)");
   case HandleKind::ViewHandle:
     throw TypeContractError("variable $" + name +
                             " does not contain a Shape value (it is a "

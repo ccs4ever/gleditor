@@ -297,6 +297,8 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
           const auto walked = compileSteps(found->second, {item}, true);
           matchCell         = emitStreamPresence(walked);
         } else {
+          // The predicate is the one place a quantifier consumes a shape.
+          const ShapeUseScope consumed{*this, true, "a quantifier predicate"};
           const auto results = compileArgument(predArg, item);
           if (results.empty()) {
             matchCell = emitConstant(false);

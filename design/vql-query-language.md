@@ -953,8 +953,15 @@ neighborhood shapes:
   known"). The same resolution serves a shape held by a variable or returned by a call wherever a
   predicate takes one: `[$s]`, `[{ $s, +d.x }]`, `?$s`, and the second argument of `any`, `all` and
   `none`; a `{}` or `{*}` reached that way is tested exactly as the literal is (the foreign-owner
-  store-reference link is skipped). A shape handle is not a value: it cannot be an operand of `+` or
-  of a comparison, and a definition handed one is compiled inline rather than as a call frame.
+  store-reference link is skipped). A shape handle is not a value. It is read only where a shape is
+  consumed: a shape rule or target, a predicate (`[ ]`, `?`, `where`), the second argument of
+  `any`/`all`/`none`, `project` and `apply_shape`, a call argument that is then used as a shape, a
+  `let`, and a top-level `return` of the handle itself. Every other read of a variable that holds
+  one (a builtin argument, an operand of `+` or a comparison, a path anchor, step or `for` source,
+  an `if` condition, a closure) refuses with "a shape value cannot be used as ...". A definition
+  handed a shape is compiled inline rather than as a call frame. A variable that still names a
+  handle whose cell was released refuses as "not statically known" instead of meaning whatever now
+  sits at that number.
 
 #### 4.8.2 Short-Form Shape Matching and Predicate Invariants
 

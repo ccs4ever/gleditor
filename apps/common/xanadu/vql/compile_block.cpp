@@ -64,10 +64,15 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
 
     functorBindings_.erase(let.varName);
     std::vector<CellRef> values;
+    // `let $t := $s` passes a shape on; anything else reading it is a use.
     if (functorPath) {
+      const ShapeUseScope passesOn{*this, namesBareVariable(*functorPath),
+                                   "a let source"};
       compilePathExpression(*functorPath, core_.home());
       values = lastResultCells_;
     } else if (functorValue) {
+      const ShapeUseScope passesOn{*this, namesBareVariable(*functorValue),
+                                   "a let source"};
       values = compileArgument(*functorValue, ambientContext_);
     }
     streamBindings_[let.varName] = values;
@@ -92,6 +97,11 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
           if constexpr (std::is_same_v<Clause, ReturnClause>) {
             for (const auto &item : clause.items) {
               if (const auto *path = std::get_if<PathExpression>(&item.item)) {
+                // Returning the handle itself is allowed at the top of the
+                // query; inside a definition it would be a copy of the cell.
+                const ShapeUseScope returned{
+                    *this, activeCalls_.empty() && namesBareVariable(*path),
+                    "a definition's returned value"};
                 compilePathExpression(*path, core_.home());
                 emitAppendStream(resultStream, lastResultCells_);
               } else if (const auto *value =
@@ -107,6 +117,11 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
                   throw std::invalid_argument(
                       "path functors cannot be returned as values");
                 }
+                const ShapeUseScope returned{
+                    *this,
+                    activeCalls_.empty() &&
+                        namesBareVariable(value->expression),
+                    "a definition's returned value"};
                 const auto values =
                     compileArgument(value->expression, ambientContext_);
                 emitAppendStream(resultStream, values);
@@ -136,6 +151,8 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
             }
             endMutationGroup(group, "#EXPLICIT_WEAVE_GROUP_END");
           } else if constexpr (std::is_same_v<Clause, ConditionalClause>) {
+            // An if has no candidate for a shape to be tested against.
+            refuseShapeConditions(clause.condition, "an if condition");
             const auto condition = compileBooleanExpr(
                 clause.condition, ambientContext_.value_or(core_.home()));
             if (!condition) {

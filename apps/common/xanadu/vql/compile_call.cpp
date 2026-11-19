@@ -197,17 +197,21 @@ VQLCompiler::compileBuiltinInvocation(const FunctionInvocation &invocation,
 std::vector<CellRef>
 VQLCompiler::compileArgument(const ValueExpr &argument,
                              std::optional<CellRef> context) {
+  const ShapeUse shapeUse = takeShapeUse();
   if (const auto *name = std::get_if<std::string>(&argument.kind)) {
+    std::vector<CellRef> held;
     if (const auto found = streamBindings_.find(*name);
         found != streamBindings_.end())
-      return found->second;
-    if (const auto found = varBindings_.find(*name);
-        found != varBindings_.end() && found->second)
-      return {*found->second};
-    return {};
+      held = found->second;
+    else if (const auto found = varBindings_.find(*name);
+             found != varBindings_.end() && found->second)
+      held = {*found->second};
+    if (!shapeUse.consumes) refuseShapeCells(held, shapeUse.use);
+    return held;
   }
   if (const auto *path =
           std::get_if<std::shared_ptr<PathExpression>>(&argument.kind)) {
+    const ShapeUseScope pass{*this, shapeUse.consumes, shapeUse.use};
     const auto saved = ambientContext_;
     ambientContext_  = context;
     const RestoreScope restore{[&] { ambientContext_ = saved; }};
@@ -635,6 +639,8 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
           std::holds_alternative<std::string>(parameter.target))
         functor = functorArgument(argument);
     }
+    const ShapeUseScope passesOn{*this, namesBareVariable(argument),
+                                 "an argument of a call"};
     values.push_back(functor ? std::vector<CellRef>{}
                              : compileArgument(argument, context));
     functors.push_back(std::move(functor));
@@ -794,6 +800,10 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   std::vector<CellRef> bodyResults;
   if (const auto *value =
           std::get_if<std::shared_ptr<ValueExpr>>(&definition.body)) {
+    const ShapeUseScope bodyUse{
+        *this, false,
+        "a definition's result (only a definition whose whole body is a "
+        "shape, a parameter or a call of one is followed)"};
     bodyResults = compileArgument(
         **value, ambientContext_.has_value() ? ambientContext_ : context);
   } else {
@@ -1354,20 +1364,8 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
         (program != key.staticFunctorPrograms.end() &&
          program->formalIndex == actualFormalIndex))
       actuals.emplace_back();
-    else {
+    else
       actuals.push_back(compileArgument(argument, context));
-      // A frame carries a copy of the cell, which is not the handle: refuse a
-      // shape that still reached one (for instance through a call result).
-      for (const CellRef cell : actuals.back())
-        if (const auto kind = handleKindOf(cell);
-            kind == HandleKind::Shape || kind == HandleKind::UnrecordedShape)
-          throw QueryRefusal(
-              QueryErrorCategory::Unsupported,
-              "a shape value cannot be passed to the call frame of '" +
-                  definition.name +
-                  "': a frame carries only the handle cell, and a shape is "
-                  "resolved while the query is compiled");
-    }
     ++actualFormalIndex;
   }
 

@@ -113,6 +113,29 @@ bool VQLCompiler::variableHoldsHandle(const std::string &name) const {
   return false;
 }
 
+void VQLCompiler::refuseShapeConditions(const BooleanExpr &condition,
+                                        const std::string_view use) const {
+  for (const auto &term : condition.terms)
+    for (const auto &factor : term.factors) {
+      const auto *test = std::get_if<PredicateTest>(&factor.test);
+      const auto *value =
+          test ? std::get_if<std::shared_ptr<ValueExpr>>(&test->kind) : nullptr;
+      if (!value || !*value) continue;
+      const auto *spelled = std::get_if<std::string>(&(*value)->kind);
+      if (!spelled) continue;
+      const std::string name =
+          spelled->starts_with('$') ? spelled->substr(1) : *spelled;
+      std::vector<CellRef> held;
+      if (const auto found = streamBindings_.find(name);
+          found != streamBindings_.end())
+        held = found->second;
+      else if (const auto found = varBindings_.find(name);
+               found != varBindings_.end() && found->second)
+        held = {*found->second};
+      refuseShapeCells(held, use);
+    }
+}
+
 bool VQLCompiler::argumentNamesShape(const ValueExpr &argument) const {
   if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(argument.kind))
     return true;

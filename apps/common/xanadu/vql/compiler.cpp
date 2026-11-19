@@ -763,6 +763,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
                 path.anchor.kind == AnchorKind::Context ||
                 path.anchor.kind == AnchorKind::LiteralCellId ||
                 static_cast<bool>(path.anchorProjection);
+  const ShapeUse shapeUse = takeShapeUse();
   std::vector<CellRef> stream;
   if (path.anchor.kind == AnchorKind::Variable &&
       streamBindings_.contains(path.anchor.name)) {
@@ -789,6 +790,11 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       stream.push_back(*start);
     }
   }
+  if (path.anchor.kind == AnchorKind::Variable &&
+      !(shapeUse.consumes && namesBareVariable(path)))
+    refuseShapeCells(stream, shapeUse.consumes
+                                 ? shapeUse.use
+                                 : "a path anchor, a source or a step");
   // A predicate filters into fresh program cells, so a handle in front of it
   // would reach the steps as a plain cell with the view dropped.
   if (!path.anchorPredicates.empty()) {
@@ -1212,16 +1218,49 @@ bool compareText(const std::string &left, const CompOp op,
 
 } // namespace
 
+void VQLCompiler::refuseShapeCells(const std::span<const CellRef> cells,
+                                   const std::string_view use) const {
+  for (const CellRef cell : cells) {
+    const auto kind = handleKindOf(cell);
+    if (kind != HandleKind::Shape && kind != HandleKind::UnrecordedShape)
+      continue;
+    throw QueryRefusal(
+        QueryErrorCategory::Unsupported,
+        "a shape value cannot be used as " + std::string{use} +
+            ": it is syntax resolved while the query is compiled, not a "
+            "value the graph computes with (use it in a shape rule or "
+            "target, a predicate, any/all/none, project or apply_shape, a "
+            "call argument that is used as a shape, a let, or return it)");
+  }
+}
+
+bool VQLCompiler::namesBareVariable(const ValueExpr &expression) {
+  if (std::holds_alternative<std::string>(expression.kind)) return true;
+  const auto *path =
+      std::get_if<std::shared_ptr<PathExpression>>(&expression.kind);
+  return path && *path && namesBareVariable(**path);
+}
+
+bool VQLCompiler::namesBareVariable(const PathExpression &path) {
+  return path.anchor.kind == AnchorKind::Variable && path.steps.empty() &&
+         path.anchorPredicates.empty() && !path.anchorProjection &&
+         !path.isFunctor;
+}
+
 void VQLCompiler::refuseHandleOperand(const HandleKind kind,
                                       const std::string_view op) const {
   if (kind == HandleKind::None) return;
+  if (kind == HandleKind::ViewHandle || kind == HandleKind::Lens)
+    throw QueryRefusal(
+        QueryErrorCategory::Unsupported,
+        std::string{"a "} +
+            (kind == HandleKind::ViewHandle ? "dynamic view" : "lens") +
+            " value cannot be an operand of '" + std::string{op} +
+            "': it is syntax resolved while the query is compiled, not a "
+            "value the graph computes with");
   throw QueryRefusal(
       QueryErrorCategory::Unsupported,
-      std::string{"a "} +
-          (kind == HandleKind::ViewHandle ? "dynamic view"
-           : kind == HandleKind::Lens     ? "lens"
-                                          : "shape") +
-          " value cannot be an operand of '" + std::string{op} +
+      "a shape value cannot be used as an operand of '" + std::string{op} +
           "': it is syntax resolved while the query is compiled, not a value "
           "the graph computes with");
 }
@@ -1255,13 +1294,16 @@ VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef) {
     if (const auto *right = textLiteral(comp.right))
       return emitConstant(compareText(*left, comp.op, *right));
   }
-  const auto context             = ambientContext_;
-  const std::vector<CellRef> lhs = comp.left
-                                       ? compileArgument(*comp.left, context)
-                                       : std::vector<CellRef>{core_.home()};
-  const std::vector<CellRef> rhs = comp.right
-                                       ? compileArgument(*comp.right, context)
-                                       : std::vector<CellRef>{core_.home()};
+  const auto context = ambientContext_;
+  const std::string operand =
+      "an operand of '" + std::string{compOpText(comp.op)} + "'";
+  const auto compileOperand = [&](const std::shared_ptr<ValueExpr> &side) {
+    if (!side) return std::vector<CellRef>{core_.home()};
+    const ShapeUseScope scope{*this, false, operand};
+    return compileArgument(*side, context);
+  };
+  const std::vector<CellRef> lhs = compileOperand(comp.left);
+  const std::vector<CellRef> rhs = compileOperand(comp.right);
 
   using Comparison      = zigzag::vortex::VqlComparisonKind;
   Comparison comparison = Comparison::Equal;
@@ -1488,6 +1530,10 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           // VariableRef
           auto it = varBindings_.find(val);
           if (it != varBindings_.end()) {
+            if (it->second) {
+              const std::array<CellRef, 1> held{*it->second};
+              refuseShapeCells(held, "a value here");
+            }
             return it->second ? std::optional{emitFirstCell(*it->second)}
                               : std::nullopt;
           }
@@ -1544,8 +1590,10 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           if (functorArgument(*val->left) || functorArgument(*val->right))
             throw std::invalid_argument("VQL + does not accept path functors");
 
-          const auto leftValues     = compileArgument(*val->left, ctxCell);
-          const CellRef leftStream  = normalizeFrameStream(leftValues);
+          const ShapeUseScope leftUse{*this, false, "an operand of '+'"};
+          const auto leftValues    = compileArgument(*val->left, ctxCell);
+          const CellRef leftStream = normalizeFrameStream(leftValues);
+          const ShapeUseScope rightUse{*this, false, "an operand of '+'"};
           const auto rightValues    = compileArgument(*val->right, ctxCell);
           const CellRef rightStream = normalizeFrameStream(rightValues);
           for (const auto *operand : {&leftValues, &rightValues})

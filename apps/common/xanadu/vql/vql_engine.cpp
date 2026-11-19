@@ -19,6 +19,7 @@
 
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/vql/view_cells.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include <gleditor/cpp26_concat.hpp>
 #include <gleditor/logging.hpp>
@@ -26,17 +27,26 @@
 namespace xanadu::vql {
 using zigzag::DimVector;
 
+// The shape marker dimension is named here rather than by the first shape, so
+// the first shape query does not count as minting a dimension and keep its
+// whole program (a one-time cost of every cell that program made).
 VQLEngine::VQLEngine(MultiStoreCoordinator &coordinator)
-    : coordinator_(coordinator), core_(&coordinator.core()) {}
+    : coordinator_(coordinator), core_(&coordinator.core()) {
+  (void)core_->findOrMintDimension(shapeMarkerDimension);
+}
 
 VQLEngine::VQLEngine(zigzag::vortex::VortexCore &core)
     : ownedCoordinator_(std::make_unique<MultiStoreCoordinator>(core)),
-      coordinator_(*ownedCoordinator_), core_(&core) {}
+      coordinator_(*ownedCoordinator_), core_(&core) {
+  (void)core_->findOrMintDimension(shapeMarkerDimension);
+}
 
 VQLEngine::VQLEngine(zigzag::ArenaManifold &arena)
     : ownedCore_(std::make_unique<zigzag::vortex::VortexCore>(arena)),
       ownedCoordinator_(std::make_unique<MultiStoreCoordinator>(*ownedCore_)),
-      coordinator_(*ownedCoordinator_), core_(ownedCore_.get()) {}
+      coordinator_(*ownedCoordinator_), core_(ownedCore_.get()) {
+  (void)core_->findOrMintDimension(shapeMarkerDimension);
+}
 
 zigzag::DimRef VQLEngine::resolveDimension(std::string_view name) {
   return coordinator_.resolveDimension(name);
@@ -67,6 +77,7 @@ void VQLEngine::clearVariables() noexcept {
   // Records describe the entries just cleared; a leftover one would condemn
   // a fresh handle that happens to reuse the number.
   shapeEpochs_.clear();
+  heldEpochs_.clear();
 }
 
 std::unordered_map<std::string, std::vector<PathStep>>
@@ -108,10 +119,50 @@ void VQLEngine::publishCompilerBindings(
   }
   env_.swap(nextEnv);
   functors_.swap(nextFunctors);
+  witnessHeldHandles();
+}
+
+void VQLEngine::witnessHeldHandles() {
+  // A variable is a bare number, so it carries the epoch its handle was minted
+  // in: the table's own witness covers entries, not what a variable names.
+  // A witness already recorded for the same variable and cell is kept, so a
+  // stale one is not renewed by being published again.
+  decltype(heldEpochs_) next;
+  for (const auto &[name, cells] : env_)
+    for (const auto cell : cells) {
+      if (!carriesShapeMarker(arena(), cell)) continue;
+      const auto key   = std::pair{name, cell};
+      const auto found = heldEpochs_.find(key);
+      if (found != heldEpochs_.end()) {
+        next.emplace(*found);
+      } else if (const auto born = arena().epochOfCell(cell)) {
+        next.emplace(key, *born);
+      }
+    }
+  heldEpochs_.swap(next);
 }
 
 std::vector<zigzag::CellRef> VQLEngine::pruneStaleShapes() {
   std::vector<zigzag::CellRef> dropped;
+  // A variable whose handle's cell was released (and may now be a different
+  // cell) is rebound to a marked handle nothing records, so reading it refuses
+  // by name instead of meaning whatever now sits at that number.
+  for (auto &[name, cells] : env_)
+    for (auto &cell : cells) {
+      const auto held = heldEpochs_.find(std::pair{name, cell});
+      if (held == heldEpochs_.end() ||
+          arena().epochOfCell(cell) == held->second)
+        continue;
+      GLEDITOR_LOG_DEBUG("vql.execution", "variable {} held handle {}: {}",
+                         name, cell, staleHandleReason);
+      heldEpochs_.erase(held);
+      const auto poisoned = arena().makeCell();
+      zigzag::expectWritten(arena().link(
+          poisoned, core_->findOrMintDimension(shapeMarkerDimension),
+          zigzag::DimVector::POS, poisoned));
+      cell = poisoned;
+      heldEpochs_.emplace(std::pair{name, cell}, *arena().epochOfCell(cell));
+    }
   const auto stale = [&](const zigzag::CellRef cell) {
     const auto recorded = shapeEpochs_.find(cell);
     return recorded != shapeEpochs_.end() &&
@@ -241,7 +292,10 @@ std::vector<zigzag::CellRef> VQLEngine::execute(const QueryExpression &query) {
 void VQLEngine::bindName(const std::string &name,
                          std::vector<zigzag::CellRef> cells) {
   functors_.erase(name);
+  for (auto it = heldEpochs_.begin(); it != heldEpochs_.end();)
+    it = it->first.first == name ? heldEpochs_.erase(it) : std::next(it);
   env_[name] = std::move(cells);
+  witnessHeldHandles();
 }
 
 std::vector<zigzag::CellRef>
