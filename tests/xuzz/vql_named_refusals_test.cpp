@@ -39,12 +39,13 @@ TEST_F(VQLNamedRefusalTest, ShapeValuedVariableNamesTheForm) {
   EXPECT_THAT(message, testing::Not(testing::HasSubstr("graph lowering")));
 }
 
+// lens(get:, put:) lowers since Q-LENS; what still refuses is a host lens
+// provider, and it names itself as one.
 TEST_F(VQLNamedRefusalTest, LensNamesItselfAndIsNotATypo) {
   const auto message =
-      refusalOf("let $editable := lens(get: \\(.) ./value(), "
-                "put: \\(cell, val) $cell/value($val)) return ##");
-  EXPECT_THAT(message, testing::HasSubstr("lens(...)"));
-  EXPECT_THAT(message, testing::HasSubstr("is not compiled to Vortex"));
+      refusalOf("let $provider := lens(\"xanadoc\", \"a\") return ##");
+  EXPECT_THAT(message, testing::HasSubstr("lens(\"xanadoc\", ...)"));
+  EXPECT_THAT(message, testing::HasSubstr("host lens provider"));
   EXPECT_THAT(message, testing::Not(testing::HasSubstr("unknown")));
 }
 
