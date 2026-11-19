@@ -589,9 +589,23 @@ baseline. Rulings with these cards:
 
 Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
 lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
-approval); `mesh::evaluate` of VQL source still runs `project` although a sealed portable artifact
-refuses it; closure-creating VQL queries keep their program; VLace has no `isEOF` form; nested
-enclose and an outer product with an empty operand refuse by name in VPL.
+approval); `mesh::evaluate` of VQL source runs `project` by the owner's ruling, and a sealed
+portable artifact refuses `ProjectTopology` by name at seal and at decode (pinned by
+`ProjectTopologyOpcodeTest.MeshEvaluateOfVqlSourceRunsProject` and
+`...ADecodedArtifactNamingItIsRefusedByName`). The two differ because VQL source is evaluated in the
+evaluator's own private arena, where the detached copies `copyTopology` mints are unobservable
+outside the run, while an artifact is bytes that must answer alike in any arena and memoise by
+content, which fresh cells on every run defeat. `CellOfInt`, `IntOfCell` and `EpochOfCell` are
+refused the same way, for the same portability reason. The residual shape interpreter
+(`vql/shape_eval.cpp`) by code reading counts the store-ref index link on a foreign-owner proxy
+(`{}` is false, `{*}` is true through `dimensionsOf`), unlike the VM's `VqlMaskProbe`, but it is
+dead: `evaluateShapePredicate` is private, reached only from `evaluateFactor`, `evaluateTerm` and
+`evaluatePredicate`, whose roots (`executeBlock`, `executeScriptBody`, `evaluateBindings`) have no
+caller in `apps/`, `tests/` or `tools/`, and every public entry (`execute`, `tryExecute`,
+`evaluatePath`, `pollWatch`) compiles and runs on the VM. No query, host-API call or test reaches
+it, so the quirk is confirmed but moot; deleting the residual interpreter as a whole is the cleanup,
+not a fix to this file; closure-creating VQL queries keep their program; VLace has no `isEOF` form;
+nested enclose and an outer product with an empty operand refuse by name in VPL.
 
 **Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
 usage limit twice, and four exhausted it again. By the owner's instruction (2026-11-12), run at most
