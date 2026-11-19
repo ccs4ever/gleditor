@@ -477,6 +477,9 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   ambientContext_ = std::nullopt;
   functorBindings_.clear();
   functorBindings_ = options.initialFunctors;
+  shapeHandles_    = options.initialShapes;
+  shapesExpanding_.clear();
+  shapeCallsActive_.clear();
   lastResultCells_.clear();
   dynamicStreams_.clear();
 
@@ -524,6 +527,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
         .terminalOpcode   = terminal,
         .cursor           = cursor,
         .resultSlots      = lastResultCells_,
+        .shapes           = shapeHandles_,
     };
     for (const auto &[name, slots] : streamBindings_) {
       if (name == ".") continue;
@@ -881,7 +885,10 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
 
 std::vector<CellRef>
 VQLCompiler::applyShapeProjection(std::span<const CellRef> owners,
-                                  const ShapeLiteral &shape) {
+                                  const ShapeLiteral &written) {
+  // Variables, shape-returning calls and nested shapes are expanded first, so
+  // validation and lowering see only the rules the static path knows.
+  const ShapeLiteral shape = expandShape(written);
   validateShapeProjection(shape);
   return emitMap(owners, [&](const CellRef owner) {
     compileShapeProjection(shape, owner);
@@ -1395,6 +1402,7 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
                                               : QueryErrorCategory::Unknown);
           }
           requirePositionalArguments(*val);
+          if (const auto shape = compileShapeCall(*val)) return shape;
           const auto results =
               compileCall(definition->second, val->args, ctxCell, false);
           return results.empty()
@@ -1422,7 +1430,16 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           const CellRef leftStream  = normalizeFrameStream(leftValues);
           const auto rightValues    = compileArgument(*val->right, ctxCell);
           const CellRef rightStream = normalizeFrameStream(rightValues);
-          const CellRef add         = emitOp(OpcodeKind::VqlAdd, "#VQL_ADD");
+          for (const auto *operand : {&leftValues, &rightValues})
+            if (std::ranges::any_of(*operand, [this](const CellRef cell) {
+                  return shapeHandles_.contains(cell);
+                }))
+              throw QueryRefusal(
+                  QueryErrorCategory::Unsupported,
+                  "a shape value cannot be an operand of '+': a shape is "
+                  "syntax resolved while the query is compiled, not a value "
+                  "the graph computes with");
+          const CellRef add = emitOp(OpcodeKind::VqlAdd, "#VQL_ADD");
           emitInput(add, leftStream);
           emitInput(add, rightStream);
           const CellRef result = core_.arena().makeCell();

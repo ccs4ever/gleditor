@@ -77,6 +77,9 @@ struct CompilationOptions {
   std::vector<zigzag::CellRef> contextCells;
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> initialBindings;
   std::unordered_map<std::string, std::vector<PathStep>> initialFunctors;
+  /// The shape handles earlier queries of the session left, handle cell to
+  /// expanded shape, so a shape bound once can be projected by a later query.
+  std::unordered_map<zigzag::CellRef, ShapeLiteral> initialShapes;
   /// The session's mounts, by dimension name; the compiler consults them for
   /// every dimension step and adds the query's own declarations in order.
   std::unordered_map<std::string, Mount> mounts;
@@ -105,6 +108,10 @@ struct CompilationResult {
   std::optional<zigzag::CellRef> cursor;
   std::vector<zigzag::CellRef> resultSlots;
   std::vector<SessionBinding> sessionBindings;
+  /// The compile-time shape table at the end of the query: `initialShapes`
+  /// plus the handles this query minted. Cells here are program cells until
+  /// the executor settles the program, which may re-mint the live ones.
+  std::unordered_map<zigzag::CellRef, ShapeLiteral> shapes;
   /// Set exactly when success is false.
   std::optional<QueryErrorCategory> category;
 };
@@ -440,6 +447,22 @@ private:
                                                   zigzag::CellRef ctxCell);
   std::optional<zigzag::CellRef> compileShapeValue(const ShapeLiteral &shape,
                                                    zigzag::CellRef ctxCell);
+  /// Q-SHAPEVAR, compile_shape_value.cpp. A shape is syntax: it is expanded
+  /// (variables, shape-returning calls and nested literals concatenated, right
+  /// most rule last) while compiling and handed to the static projection
+  /// paths. `registerShape` gives an expanded shape a handle cell.
+  zigzag::CellRef registerShape(ShapeLiteral expanded);
+  void appendShapeRules(ShapeLiteral &result, const ShapeLiteral &from);
+  ShapeLiteral shapeOfVariable(const std::string &name);
+  ShapeLiteral expandShape(const ShapeLiteral &shape);
+  ShapeLiteral staticShapeOfCall(const FunctionInvocation &call);
+  /// A literal, a variable or a call of a shape-returning definition as a
+  /// shape; nullopt when @p expression is none of those.
+  std::optional<ShapeLiteral> resolveShapeValue(const ValueExpr &expression);
+  /// The handle of a call to a definition whose body is a shape literal;
+  /// nullopt when @p call names no such definition.
+  std::optional<zigzag::CellRef>
+  compileShapeCall(const FunctionInvocation &call);
   /// Q9, compile_field_weave.cpp.
   void compileFieldWeave(const FieldWeave &weave, zigzag::CellRef resultStream);
   /// S1, compile_semantic_shape.cpp: project, apply_shape.
@@ -650,6 +673,13 @@ private:
   std::size_t nextContractValidatorId_{};
   bool compilingGraphContract_{false};
   std::unordered_map<const ValueExpr *, zigzag::CellRef> shapeTargetConstants_;
+  /// Handle cell to expanded shape (decision D4: shapes are syntax, so the
+  /// compiler resolves them and the VM never holds one). Seeded from
+  /// CompilationOptions::initialShapes and grown only by registerShape, so it
+  /// is bounded by the distinct shape values one query writes.
+  std::unordered_map<zigzag::CellRef, ShapeLiteral> shapeHandles_;
+  std::unordered_set<const ShapeLiteral *> shapesExpanding_;
+  std::vector<std::string> shapeCallsActive_;
   zigzag::CellRef compileShapePredicateImpl(const ShapeLiteral &shape,
                                             zigzag::CellRef candidate);
 };

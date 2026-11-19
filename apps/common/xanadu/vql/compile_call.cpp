@@ -236,6 +236,7 @@ VQLCompiler::compileArgument(const ValueExpr &argument,
                                   : QueryErrorCategory::Unknown);
     }
     requirePositionalArguments(**function);
+    if (const auto shape = compileShapeCall(**function)) return {*shape};
     return compileCall(found->second, (*function)->args, context, false);
   }
   if (const auto *closure =

@@ -31,10 +31,12 @@ struct VQLNamedRefusalTest : testing::Test {
 };
 
 TEST_F(VQLNamedRefusalTest, ShapeValuedVariableNamesTheForm) {
-  EXPECT_THAT(refusalOf("let $s := { +d.a } return ##{ $s }"),
-              testing::HasSubstr("shape-valued"));
-  EXPECT_THAT(refusalOf("let $s := { +d.a } return ##{ $s }"),
-              testing::Not(testing::HasSubstr("graph lowering")));
+  // `##{ $s }` lowers now (Q-SHAPEVAR); a shape variable as a predicate is the
+  // form that still refuses, and it names itself.
+  const auto message =
+      refusalOf("let $s := { +d.a } return ##/d.items[{ $s }]");
+  EXPECT_THAT(message, testing::HasSubstr("shape"));
+  EXPECT_THAT(message, testing::Not(testing::HasSubstr("graph lowering")));
 }
 
 TEST_F(VQLNamedRefusalTest, LensNamesItselfAndIsNotATypo) {

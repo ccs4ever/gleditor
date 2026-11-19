@@ -1,4 +1,5 @@
-// Q5: dynamic shape projection, lens put/get, shape values.
+// Q5: dynamic shape projection, lens put/get. Shape values are in
+// compile_shape_value.cpp.
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 
@@ -26,28 +27,13 @@ namespace {
 } // namespace
 
 void VQLCompiler::compileDynamicShapeProjection(const ShapeLiteral &shape) {
-  const auto bound = [this](const std::string &name) {
-    return streamBindings_.contains(name) || varBindings_.contains(name) ||
-           functorBindings_.contains(name);
-  };
-  // The first rule the static projection cannot take names the refusal; the
-  // rules are walked in source order so the message points at the leftmost one.
+  // Variables, shape-returning calls and nested shapes were expanded before
+  // this point (compile_shape_value.cpp), so what is left is a rule the static
+  // projection cannot take. The first one in source order names the refusal.
   for (const ShapeRule &entry : shape.rules) {
     if (const auto *wildcard = std::get_if<ShapeWildcard>(&entry.rule)) {
       (void)wildcard;
       continue;
-    }
-    if (const auto *name = std::get_if<std::string>(&entry.rule)) {
-      if (!bound(*name))
-        throw TypeContractError("shape variable $" + *name + " is not bound");
-      refuseForm("shape-valued variable '$" + *name +
-                 "' in a shape projection (its rules are known only at run "
-                 "time)");
-    }
-    if (const auto *call =
-            std::get_if<std::shared_ptr<FunctionInvocation>>(&entry.rule)) {
-      refuseForm("shape function call '" + (*call ? (*call)->name : "") +
-                 "(...)' in a shape projection");
     }
     if (const auto *pivot = std::get_if<DimensionPivotRule>(&entry.rule)) {
       refuseForm("dimension pivot '" + pivot->fromDim + " -> " + pivot->toDim +
@@ -57,9 +43,6 @@ void VQLCompiler::compileDynamicShapeProjection(const ShapeLiteral &shape) {
             std::get_if<VirtualDimensionDefRule>(&entry.rule)) {
       refuseForm("computed dimension '" + computed->dimName +
                  "' in a shape projection");
-    }
-    if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(entry.rule)) {
-      refuseForm("a nested shape in a shape projection");
     }
     if (const auto *rule = std::get_if<DimensionShapeRule>(&entry.rule)) {
       if (rule->targetValue && (rule->negated || rule->isBidir))
@@ -89,12 +72,6 @@ std::optional<CellRef>
 VQLCompiler::compileLensValue(const FunctionInvocation &fn,
                               const CellRef /*ctxCell*/) {
   refuseLens(fn);
-}
-
-std::optional<CellRef>
-VQLCompiler::compileShapeValue(const ShapeLiteral & /*shape*/,
-                               const CellRef /*ctxCell*/) {
-  refuseForm("a shape-valued variable or argument ('{ ... }' as a value)");
 }
 
 } // namespace xanadu::vql
