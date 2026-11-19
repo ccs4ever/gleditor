@@ -516,6 +516,14 @@ QueryExecutor::executeVortex(const QueryExpression &query,
                            *programRetained_);
       }
     }
+    // A handle that leaves the run names its source and view by number; the
+    // epochs of those cells are recorded now, for the number to be checked
+    // against whenever the handle is next stepped.
+    if (const auto viewDims = findViewDimensions(vm_.core())) {
+      recordViewWitnesses(vm_.core().arena(), *viewDims, cells);
+      for (const auto &[name, values] : published)
+        recordViewWitnesses(vm_.core().arena(), *viewDims, values);
+    }
     if (session_) {
       publishMounts(session_, result.sessionBindings);
       session_->publishCompilerBindings(std::move(published),

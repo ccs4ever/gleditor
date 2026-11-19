@@ -10,7 +10,7 @@ using zigzag::DimVector;
 std::optional<ViewDimensions>
 findViewDimensions(const zigzag::vortex::VortexCore &core) {
   ViewDimensions dims;
-  const std::array<std::pair<zigzag::DimRef *, std::string_view>, 9> names{{
+  const std::array<std::pair<zigzag::DimRef *, std::string_view>, 10> names{{
       {&dims.marker, viewMarkerDimension},
       {&dims.of, viewOfDimension},
       {&dims.rule, viewRuleDimension},
@@ -20,6 +20,7 @@ findViewDimensions(const zigzag::vortex::VortexCore &core) {
       {&dims.bidir, viewBidirDimension},
       {&dims.dir, viewDirDimension},
       {&dims.base, viewBaseDimension},
+      {&dims.epoch, viewEpochDimension},
   }};
   for (const auto &[slot, name] : names) {
     const auto found = core.findDimension(name);
@@ -40,6 +41,7 @@ ViewDimensions ensureViewDimensions(zigzag::vortex::VortexCore &core) {
       .bidir  = core.findOrMintDimension(viewBidirDimension),
       .dir    = core.findOrMintDimension(viewDirDimension),
       .base   = core.findOrMintDimension(viewBaseDimension),
+      .epoch  = core.findOrMintDimension(viewEpochDimension),
   };
 }
 
@@ -83,6 +85,71 @@ std::optional<HandleParts> handleParts(const zigzag::ArenaManifold &arena,
                      .view      = *view,
                      .sourceBox = *sourceBox,
                      .viewBox   = *viewBox};
+}
+
+} // namespace xanadu::vql
+
+namespace xanadu::vql {
+
+namespace {
+
+/// The cell a box names, without requiring that it still exists (a stale
+/// number is what the witness is for).
+std::optional<CellRef> numberIn(const zigzag::ArenaManifold &arena,
+                                const CellRef box) {
+  const auto number = arena.asInt64(box);
+  if (!number || *number < 0 ||
+      static_cast<std::uint64_t>(*number) > std::numeric_limits<CellRef>::max())
+    return std::nullopt;
+  return static_cast<CellRef>(*number);
+}
+
+} // namespace
+
+void recordViewWitnesses(zigzag::ArenaManifold &arena,
+                         const ViewDimensions &dims,
+                         const std::span<const CellRef> cells) {
+  for (const CellRef cell : cells) {
+    if (!arena.contains(cell)) continue;
+    if (arena.linked(cell, dims.epoch, DimVector::POS)) continue;
+    const auto parts = handleParts(arena, dims, cell);
+    if (!parts) continue;
+    CellRef previous = cell;
+    for (const CellRef named : {parts->source, parts->view}) {
+      const auto born = arena.epochOfCell(named);
+      if (!born) break;
+      const CellRef witness =
+          arena.makeScalarCell(static_cast<std::int64_t>(*born));
+      zigzag::expectWritten(arena.link(previous, dims.epoch, false, witness));
+      previous = witness;
+    }
+  }
+}
+
+std::optional<std::string> staleHandleReason(const zigzag::ArenaManifold &arena,
+                                             const ViewDimensions &dims,
+                                             const CellRef cell) {
+  if (!arena.contains(cell)) return std::nullopt;
+  const auto sourceBox = arena.linked(cell, dims.marker, DimVector::POS);
+  const auto viewBox   = arena.linked(cell, dims.of, DimVector::POS);
+  const auto first     = arena.linked(cell, dims.epoch, DimVector::POS);
+  if (!sourceBox || !viewBox || !first) return std::nullopt;
+  const auto second  = arena.linked(*first, dims.epoch, DimVector::POS);
+  const auto differs = [&](const CellRef box, const CellRef witness) {
+    const auto named    = numberIn(arena, box);
+    const auto recorded = arena.asInt64(witness);
+    if (!named || !recorded) return false;
+    const auto now = arena.epochOfCell(*named);
+    return !now || static_cast<std::int64_t>(*now) != *recorded;
+  };
+  if (differs(*sourceBox, *first))
+    return "VQL a dynamic view handle's source cell was released and its "
+           "number reused: the handle no longer names the cell it was made "
+           "over";
+  if (second && differs(*viewBox, *second))
+    return "VQL a dynamic view handle's view cell was released and its number "
+           "reused: the handle no longer names the view it was made with";
+  return std::nullopt;
 }
 
 } // namespace xanadu::vql

@@ -10,12 +10,16 @@
 
 namespace {
 
-using xanadu::vql::ViewHandle;
+using xanadu::vql::ComputedViewRules;
 
+// The table's one remaining kind keyed by a cell that outlives its program is a
+// view's computed rules (keyed by the view cell); the epoch bookkeeping is the
+// same for any entry, so the tests use that kind. The second argument is kept
+// so each case still reads as "handle over source".
 xanadu::vql::VQLEngine::ShapeTable tableOf(const zigzag::CellRef handle,
-                                           const zigzag::CellRef source) {
+                                           const zigzag::CellRef /*source*/) {
   xanadu::vql::VQLEngine::ShapeTable table;
-  table.emplace(handle, ViewHandle{.source = source, .view = nullptr});
+  table.emplace(handle, ComputedViewRules{});
   return table;
 }
 

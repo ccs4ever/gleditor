@@ -471,14 +471,29 @@ TEST_F(VQLDynamicViewRuntimeTest, TheStepProgramGrowsByABoundedAmountPerStep) {
   }
 }
 
-// -- the known hole ----------------------------------------------------------
+// -- stale numbers
+// --------------------------------------------------------------
 
-TEST_F(VQLDynamicViewRuntimeTest, AReusedSourceNumberReadsTheReusingCell) {
-  // KNOWN HOLE, recorded as behaviour and not as a wish: a handle names its
-  // source by number, and nothing yet says that the cell now holding that
-  // number is the one the handle was made over. The owner-approved release
-  // epoch card closes it; when it lands this test must flip to a refusal by
-  // name. Until then a reused number is read as whatever cell holds it.
+namespace {
+/// Repoints a box at a cell number the arena has since reused, as a handle
+/// made over a cell that was released before the number was handed out again.
+void repoint(zigzag::ArenaManifold &arena, VQLEngine &engine,
+             const zigzag::CellRef handle, const std::string &dimension,
+             const std::int64_t number) {
+  const auto box = arena.linked(handle, engine.resolveDimension(dimension),
+                                zigzag::DimVector::POS);
+  ASSERT_TRUE(box.has_value());
+  ASSERT_TRUE(
+      engine.core()
+          .writeValue(*box, 0, std::nullopt, zigzag::vortex::CellValue{number})
+          .has_value());
+}
+} // namespace
+
+TEST_F(VQLDynamicViewRuntimeTest, AReusedSourceNumberRefusesByName) {
+  // A handle names its source by number and records, beside it, the epoch the
+  // source was minted in. A number reused by a later cell answers another
+  // epoch, so the step refuses instead of reading the reusing cell.
   warm();
   const auto view = engine.execute("$task{ d.1 <=> d.priority }");
   ASSERT_EQ(view.size(), 1u);
@@ -487,23 +502,53 @@ TEST_F(VQLDynamicViewRuntimeTest, AReusedSourceNumberReadsTheReusingCell) {
   const auto freed = static_cast<std::int64_t>(gone);
   ASSERT_TRUE(arena.release(mark).has_value());
   const auto reused = arena.makeCell("reused");
-  ASSERT_EQ(static_cast<std::int64_t>(reused), freed)
-      << "release must hand the number to the next cell minted";
-  zigzag::expectWritten(arena.link(reused,
-                                   engine.resolveDimension("d.priority"), false,
-                                   arena.makeCell("from the reusing cell")));
-  // Repoint the handle's source box at the reused number, as a handle made
-  // over `gone` before the release would still hold it.
-  const auto box =
-      arena.linked(view.front(), engine.resolveDimension("d.vql.view"),
-                   zigzag::DimVector::POS);
-  ASSERT_TRUE(box.has_value());
-  ASSERT_TRUE(
-      engine.core()
-          .writeValue(*box, 0, std::nullopt, zigzag::vortex::CellValue{freed})
-          .has_value());
+  ASSERT_EQ(static_cast<std::int64_t>(reused), freed);
+  repoint(arena, engine, view.front(), "d.vql.view", freed);
   engine.setVariable("v", view);
-  EXPECT_EQ(textsOf("$v/+d.1/value()"), "from the reusing cell");
+  EXPECT_THAT(refusalOf("$v/+d.1/value()"),
+              testing::HasSubstr("source cell was released and its number "
+                                 "reused"));
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, AReusedViewNumberRefusesByName) {
+  warm();
+  const auto view = engine.execute("$task{ d.1 <=> d.priority }");
+  ASSERT_EQ(view.size(), 1u);
+  const auto mark  = arena.mark();
+  const auto gone  = arena.makeCell("minted after the mark");
+  const auto freed = static_cast<std::int64_t>(gone);
+  ASSERT_TRUE(arena.release(mark).has_value());
+  ASSERT_EQ(static_cast<std::int64_t>(arena.makeCell("reused")), freed);
+  repoint(arena, engine, view.front(), "d.vql.of", freed);
+  engine.setVariable("v", view);
+  EXPECT_THAT(refusalOf("$v/+d.1/value()"),
+              testing::HasSubstr("view cell was released and its number "
+                                 "reused"));
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, AHandleSurvivesReleasesAboveItAndAClear) {
+  warm();
+  const auto view = engine.execute("$task{ d.1 <=> d.priority }");
+  ASSERT_EQ(view.size(), 1u);
+  for (int round = 0; round < 3; ++round) {
+    const auto mark = arena.mark();
+    arena.makeCell("scratch");
+    ASSERT_TRUE(arena.release(mark).has_value());
+  }
+  engine.clearVariables();
+  engine.setVariable("v", view);
+  EXPECT_EQ(textsOf("$v/+d.1/value()"), "low");
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, ARunTimeViewOfTheHomeCellKeepsItsWitness) {
+  const auto view = engine.execute("##{ d.1 <=> d.priority }");
+  ASSERT_EQ(view.size(), 1u);
+  engine.setVariable("v", view);
+  EXPECT_EQ(textsOf("$v/+d.1/value()"), "high,urgent");
+  const auto mark = arena.mark();
+  arena.makeCell("scratch");
+  ASSERT_TRUE(arena.release(mark).has_value());
+  EXPECT_EQ(textsOf("$v/+d.1/value()"), "high,urgent");
 }
 
 // -- the shape of what is emitted -------------------------------------------

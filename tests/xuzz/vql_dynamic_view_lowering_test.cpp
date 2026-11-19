@@ -241,8 +241,9 @@ TEST_F(VQLDynamicViewLoweringTest, ProgramIsReleasedAfterReadsAndProjections) {
   ASSERT_TRUE(view) << view.error().message;
   EXPECT_FALSE(executor.programRetainedBecause());
   // The handle, the two boxes naming its source and its view, the view, its
-  // base flag, and six cells for its one rule.
-  EXPECT_EQ(arena.cellCount(), cells + 11);
+  // base flag, six cells for its one rule, and the two epoch
+  // witnesses recorded when the handle left the run.
+  EXPECT_EQ(arena.cellCount(), cells + 13);
   engine.setVariable("v", *view);
   const auto read = executor.execute("$v/+d.1/value()");
   ASSERT_TRUE(read) << read.error().message;

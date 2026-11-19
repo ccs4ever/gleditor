@@ -17,6 +17,8 @@
 
 #include <array>
 #include <optional>
+#include <span>
+#include <string>
 #include <string_view>
 
 #include "common/xanadu/vortex/vortex_core.hpp"
@@ -36,6 +38,10 @@ inline constexpr std::string_view viewNegDimension    = "d.vql.neg";
 inline constexpr std::string_view viewBidirDimension  = "d.vql.bidir";
 inline constexpr std::string_view viewDirDimension    = "d.vql.dir";
 inline constexpr std::string_view viewBaseDimension   = "d.vql.base";
+/// The witness rank of a handle: the release epoch its source was minted in,
+/// then the one its view was. A number held as an Int64 names the same cell
+/// only while the cell's epoch is the one recorded beside it.
+inline constexpr std::string_view viewEpochDimension = "d.vql.epoch";
 
 /// What a rule does, as the text a rule's kind cell holds. A computed rule is
 /// listed so the fold can see that a step meets one; its expression is not
@@ -60,6 +66,7 @@ struct ViewDimensions {
   zigzag::DimRef bidir{};
   zigzag::DimRef dir{};
   zigzag::DimRef base{};
+  zigzag::DimRef epoch{};
 };
 
 /// The view dimensions when the core already names them all, minting nothing:
@@ -83,6 +90,21 @@ struct HandleParts {
 [[nodiscard]] std::optional<HandleParts>
 handleParts(const zigzag::ArenaManifold &arena, const ViewDimensions &dims,
             zigzag::CellRef cell);
+
+/// Records, on each handle of @p cells that has none, the epochs of the cells
+/// its boxes name. No opcode reads an epoch, so the host records them once the
+/// handle is a result or a binding; a handle made inside a program is
+/// witnessed when the program settles, and nothing releases beneath it while
+/// it runs.
+void recordViewWitnesses(zigzag::ArenaManifold &arena,
+                         const ViewDimensions &dims,
+                         std::span<const zigzag::CellRef> cells);
+
+/// Why @p cell, if a handle, can no longer be trusted: a box names a cell
+/// whose epoch is not the one recorded, so the number was released and reused.
+[[nodiscard]] std::optional<std::string>
+staleHandleReason(const zigzag::ArenaManifold &arena,
+                  const ViewDimensions &dims, zigzag::CellRef cell);
 
 /// True when @p cell carries a link on a dimension named like the marker.
 /// Looked up by the name on the cell's own links, not through a core's
