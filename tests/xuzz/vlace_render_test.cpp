@@ -45,6 +45,24 @@ TEST(VlaceRenderTest, ALongLiteralListRendersToTheBudgetInSeconds) {
   EXPECT_LT(seconds, 30.0);
 }
 
+// A lazily built list of 4,000 elements: each tail is its own VM run. Before
+// the frame opcodes journalled their changes this took quadratic time, and past
+// about 3,500 elements the VM's lifetime backing-cell count (1,048,576) refused
+// the run.
+TEST(VlaceRenderTest, ALazilyBuiltListPastTheOldBackingCellLimitRenders) {
+  const auto start = std::chrono::steady_clock::now();
+  Driver d;
+  const auto r = d.run(
+      "from n = n : from (n + 1) ; take k xs = if k == 0 then [] else case xs "
+      "of [] => [] ; (h : t) => h : take (k - 1) t ; take 4000 (from 1)");
+  ASSERT_TRUE(r.has_value()) << r.error().detail;
+  EXPECT_EQ(r->value.substr(0, 14), "[1, 2, 3, 4, 5");
+  const auto seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+          .count();
+  EXPECT_LT(seconds, 60.0);
+}
+
 // A list that fits the budget has no truncation marker.
 TEST(VlaceRenderTest, AListWithinTheBudgetIsNotTruncated) {
   Driver d;

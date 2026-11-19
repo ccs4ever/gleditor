@@ -77,14 +77,14 @@ TEST(VlaceIoLazinessTest, ABuiltDescriptionRunsNothing) {
 // A recursive loop is trampolined by the runner, one step at a time, so its
 // depth does not grow with the iteration count. The activation-depth budget is
 // 512 frames and the strict build of the action hit it between 500 and 1,000
-// iterations. 1,000 stays here because each step still costs more than the one
-// before (the VM keeps per-run tables the frame opcodes copy, as for rendering
-// a lazy list), so 100,000 iterations run in constant depth but not in
-// reasonable time; see the note in lower_io.cpp.
+// iterations. Each step costs about what the one before did (the frame opcodes
+// journal what they change) and RunLimits raises the VM's lifetime backing-cell
+// ceiling, so 5,000 iterations, which the default 1,048,576 refused, run in
+// constant depth and a few seconds.
 TEST(VlaceIoLazinessTest, ALongRecursiveLoopRunsInConstantFrameDepth) {
   const auto start = std::chrono::steady_clock::now();
   const auto r     = perform("loop n = if n == 0 then pure 0 else putStr \"\" "
-                                 ">> loop (n - 1) ; loop 1000");
+                                 ">> loop (n - 1) ; loop 5000");
   EXPECT_FALSE(r.error.has_value())
       << (r.error ? Driver::formatError(*r.error) : "");
   EXPECT_EQ(r.value, "0");

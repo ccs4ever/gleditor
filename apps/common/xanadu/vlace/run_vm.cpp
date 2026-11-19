@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <exception>
 #include <functional>
+#include <limits>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
@@ -54,21 +55,43 @@ private:
 };
 
 /// The VM's own safety limits are sized for small programs: its frame depth
-/// (128) is below what lazy recursion needs, and it refuses to create more than
-/// 65,536 closure values (a lazy program makes two per thunk). Raise them for
-/// one run and restore the caller's on every exit, failure included, so a
+/// (128) is below what lazy recursion needs, it refuses to create more than
+/// 65,536 closure values (a lazy program makes two per thunk), and it counts
+/// backing cells over its whole lifetime (see backingCellCeiling). Raise them
+/// for one run and restore the caller's on every exit, failure included, so a
 /// VLace run leaves no trace in a VM shared with other languages. The cycle
 /// and frame-depth budgets are what bound a VLace run; the closure ceilings
 /// only keep the VM's limits from firing first.
 inline constexpr std::size_t closureValueCeiling       = 1U << 24;
 inline constexpr std::size_t closureEnvironmentCeiling = 1U << 28;
 
+/// The VM counts every backing cell its frames ever allocate, across all runs
+/// of its lifetime, against FrameLimits::maxBackingCells (1,048,576 by
+/// default): a lazy list or an IO loop of a few thousand steps spends about 250
+/// per step and was refused with "activation frame backing-cell limit
+/// exceeded" long before the cycle budget. The ceiling a VLace run raises it to
+/// is the most one run can allocate: a run executes at most defaultMaxCycles
+/// opcodes, an InvokeFrame is one opcode, and it allocates at most
+/// maxLocalsPerFrame cells. The cycle cap and the arena's own work fuel are
+/// what bound a run; this ceiling only keeps the VM's lifetime counter from
+/// firing first. Saturates on a platform whose size_t cannot hold the product.
+[[nodiscard]] constexpr std::size_t
+backingCellCeiling(const std::size_t maxLocalsPerFrame) noexcept {
+  if (maxLocalsPerFrame != 0 &&
+      defaultMaxCycles >
+          std::numeric_limits<std::size_t>::max() / maxLocalsPerFrame)
+    return std::numeric_limits<std::size_t>::max();
+  return defaultMaxCycles * maxLocalsPerFrame;
+}
+
 class RunLimits {
 public:
   explicit RunLimits(zigzag::vortex::VortexVM &vm)
       : vm_(vm), frame_(vm.frameLimits()), closure_(vm.closureLimits()) {
-    auto frame     = frame_;
-    frame.maxDepth = evaluationNestingBudget;
+    auto frame            = frame_;
+    frame.maxDepth        = evaluationNestingBudget;
+    frame.maxBackingCells = std::max(
+        frame.maxBackingCells, backingCellCeiling(frame.maxLocalsPerFrame));
     vm_.setFrameLimits(frame);
     auto closure = closure_;
     closure.maxValuesCreated =

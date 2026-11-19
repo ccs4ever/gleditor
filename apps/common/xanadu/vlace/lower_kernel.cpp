@@ -1048,13 +1048,11 @@ std::expected<ValuePtr, EvalError> forceValueOnVm(Compiler &compiler,
   if (auto direct = readbackCell(compiler, *value->cell);
       !direct || (*direct)->kind != Value::Kind::Thunk)
     return direct;
-  // Remaining limit, card L-RENDER: each run of a genuinely lazy tail (a list
-  // built by recursion) still costs time proportional to every earlier run.
-  // VortexVM::executeFrameOpcode copies the VM's cell-reference, cursor and
-  // activation tables on every InvokeFrame/ReturnFrame (vortex_frames.cpp), and
-  // nothing erases the entries a finished run leaves keyed by cells that stay
-  // alive, so rendering n forced tails is quadratic (about 2 s at 3,000 and
-  // 47 s at 12,000). Removing it needs a change under vortex/, not here.
+  // Each run of a genuinely lazy tail (a list built by recursion) costs about
+  // what the one before did: the VM's frame opcodes journal the entries they
+  // change instead of copying its tables (card VM-FRAME), and RunLimits raises
+  // the VM's lifetime backing-cell count to a ceiling a run cannot reach. A
+  // lazy list of 4,000 elements renders in a few seconds, linearly.
   LowerContext ctx(compiler);
   try {
     auto forced = forceOperand(ctx, Operand(*value->cell), {});

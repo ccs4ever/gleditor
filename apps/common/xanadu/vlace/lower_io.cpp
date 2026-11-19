@@ -103,10 +103,10 @@ std::expected<ValuePtr, EvalError> runIoOnVm(Compiler &compiler,
 
   // The loop is a trampoline: each step forces one description and performs
   // it, so the host and VM depth stay constant however long a recursive action
-  // runs. The time is another matter: every forcing is a VM run, and each run
-  // is slower than the last because the VM's frame opcodes copy tables that
-  // grow with the runs behind them (about 7 s for 1,600 steps); removing that
-  // needs a change under vortex/, not here.
+  // runs. Every forcing is a VM run; since the frame opcodes journal only what
+  // they change (card VM-FRAME) a step costs about the same as the one before
+  // (about 1 ms), and RunLimits raises the VM's lifetime backing-cell count so
+  // a loop is bounded by the cycle budget, not by that count.
   std::vector<Continuation> stack;
   ValuePtr curAction  = action;
   ValuePtr currentVal = nullptr;

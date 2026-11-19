@@ -2,6 +2,7 @@
  * @file vortex_frames.cpp
  * @brief Versioned frame descriptors and cursor-owned activation storage.
  */
+#include "common/xanadu/vortex/table_undo.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
 #include <algorithm>
@@ -468,19 +469,52 @@ ExecutionResult VortexVM::invokeFramePrepared(
   ActivationFrame frame(descriptorCell, nextActivationId_, guardBaseline);
   frame.returnOpcode = continuation;
   frame.parentResultSlots.assign(resultSlots.begin(), resultSlots.end());
-  frame.resultPorts               = descriptor.resultPorts;
-  bool committed                  = false;
-  auto previousReferences         = cellReferences_;
-  auto previousStreams            = streams_;
-  auto previousIterators          = iterators_;
-  auto previousGroupIterators     = groupIterators_;
-  auto previousGroupOwners        = groupOwners_;
-  auto previousStreamSlots        = streamSlots_;
-  auto previousIteratorSlots      = iteratorSlots_;
-  auto previousGroupIteratorSlots = groupIteratorSlots_;
-  auto previousFrames             = activationFrames_;
-  auto previousCursorPC           = cursorPC_;
+  frame.resultPorts = descriptor.resultPorts;
+  // Rollback design (card VM-FRAME). A call changes: the backing cells of its
+  // locals (fresh cells, but a stale key from a released arena may name one, so
+  // the prior entry is still recorded), the argument slots among them, the
+  // calling cursor's frame stack and program counter, and, when a stream or
+  // Groups port is involved, the stream-cursor owner. Everything else in the
+  // VM tables belongs to other cells and cannot be affected, so those entries
+  // are logged and restored on failure instead of copying each table.
+  // The one exception is requireStreamCursor handing the stream-cursor role
+  // over, which clears four whole tables; only then are they copied.
+  bool committed = false;
+  MapUndo<CellReferenceMap> references(cellReferences_, frameProbe_);
+  MapUndo<StreamMap> streams(streams_, frameProbe_);
+  MapUndo<GroupOwnerMap> groupOwners(groupOwners_, frameProbe_);
+  SetUndo streamSlots(streamSlots_, frameProbe_);
+  MapUndo<std::unordered_map<CellRef, std::optional<CellRef>>> programCounters(
+      cursorPC_, frameProbe_);
   const auto previousStreamCursor = streamCursor_;
+  const std::size_t previousDepth = depth;
+  bool pushedFrame                = false;
+  struct StreamOwnershipSnapshot {
+    StreamMap streams;
+    IteratorMap iterators;
+    GroupIteratorMap groupIterators;
+    std::unordered_set<CellRef> groupIteratorSlots;
+  };
+  std::optional<StreamOwnershipSnapshot> ownership;
+  const auto rollBack = [&] {
+    references.rollback();
+    streams.rollback();
+    groupOwners.rollback();
+    streamSlots.rollback();
+    programCounters.rollback();
+    if (pushedFrame) {
+      auto &stack = activationFrames_.at(cursor);
+      stack.pop_back();
+      if (previousDepth == 0) activationFrames_.erase(cursor);
+    }
+    if (ownership) {
+      streams_.swap(ownership->streams);
+      iterators_.swap(ownership->iterators);
+      groupIterators_.swap(ownership->groupIterators);
+      groupIteratorSlots_.swap(ownership->groupIteratorSlots);
+    }
+    streamCursor_ = previousStreamCursor;
+  };
   if (std::ranges::any_of(descriptor.argumentPorts,
                           [](const FramePort &port) {
                             return port.kind != FramePortKind::Cell;
@@ -488,6 +522,13 @@ ExecutionResult VortexVM::invokeFramePrepared(
       std::ranges::any_of(descriptor.resultPorts, [](const FramePort &port) {
         return port.kind == FramePortKind::Stream;
       })) {
+    if (streamCursor_ && *streamCursor_ != cursor) {
+      ownership = StreamOwnershipSnapshot{streams_, iterators_, groupIterators_,
+                                          groupIteratorSlots_};
+      frameProbe_.entries += streams_.size() + iterators_.size() +
+                             groupIterators_.size() +
+                             groupIteratorSlots_.size();
+    }
     try {
       requireStreamCursor(cursor);
     } catch (const std::exception &error) {
@@ -496,19 +537,10 @@ ExecutionResult VortexVM::invokeFramePrepared(
   }
   zigzag::Mark mark;
   try {
+    frameProbe_.hit(); // after the stream-cursor handover, before any change
     mark = arena.mark();
   } catch (const std::exception &error) {
-    cellReferences_.swap(previousReferences);
-    streams_.swap(previousStreams);
-    iterators_.swap(previousIterators);
-    groupIterators_.swap(previousGroupIterators);
-    groupOwners_.swap(previousGroupOwners);
-    streamSlots_.swap(previousStreamSlots);
-    iteratorSlots_.swap(previousIteratorSlots);
-    groupIteratorSlots_.swap(previousGroupIteratorSlots);
-    activationFrames_.swap(previousFrames);
-    cursorPC_.swap(previousCursorPC);
-    streamCursor_ = previousStreamCursor;
+    rollBack();
     return fail(error.what());
   }
   try {
@@ -516,8 +548,9 @@ ExecutionResult VortexVM::invokeFramePrepared(
     for (const auto logical : descriptor.locals) {
       arena.consumeWork();
       const CellRef backing = arena.makeCell();
+      frameProbe_.hit();
       frame.localBacking.emplace(logical, backing);
-      cellReferences_[backing] = std::nullopt;
+      references.set(backing, std::nullopt);
     }
     for (std::size_t index = 0; index < descriptor.argumentPorts.size();
          ++index) {
@@ -558,23 +591,30 @@ ExecutionResult VortexVM::invokeFramePrepared(
         values->push_back(cell);
       }
       if (descriptor.argumentPorts[index].kind == FramePortKind::Stream) {
-        streams_[target] = std::move(values);
-        streamSlots_.insert(target);
+        streams.set(target, std::move(values));
+        streamSlots.insert(target);
       } else {
         if (values->size() > 1)
           throw std::runtime_error(
               "InvokeFrame cell argument resolved to multiple cells");
-        cellReferences_[target] =
-            values->empty() ? std::nullopt : std::optional{values->front()};
+        references.set(target, values->empty()
+                                   ? std::nullopt
+                                   : std::optional{values->front()});
       }
     }
     auto frameOwner = std::make_shared<const ActivationFrame>(std::move(frame));
     for (const auto &[backing, payload] : frameOwner->groupsByBacking) {
       (void)payload;
-      groupOwners_[backing] = frameOwner;
+      groupOwners.set(backing, frameOwner);
     }
     activationFrames_[cursor].push_back(std::move(frameOwner));
+    // Nothing that can throw may sit between the push_back above and this
+    // flag, or rollBack() would not know to pop the frame.
+    pushedFrame = true;
+    frameProbe_.hit();
+    programCounters.touch(cursor);
     setCursorOpcode(cursor, descriptor.entry.value());
+    frameProbe_.hit();
     zigzag::expectMarkOrder(arena.discard(mark));
     frameBackingCellsAllocated_ += descriptor.locals.size();
     ++nextActivationId_;
@@ -582,19 +622,8 @@ ExecutionResult VortexVM::invokeFramePrepared(
     return {};
   } catch (const std::exception &error) {
     if (!committed) {
-      cellReferences_.swap(previousReferences);
-      streams_.swap(previousStreams);
-      iterators_.swap(previousIterators);
-      groupIterators_.swap(previousGroupIterators);
-      groupOwners_.swap(previousGroupOwners);
-      streamSlots_.swap(previousStreamSlots);
-      iteratorSlots_.swap(previousIteratorSlots);
-      groupIteratorSlots_.swap(previousGroupIteratorSlots);
-      activationFrames_.swap(previousFrames);
-      cursorPC_.swap(previousCursorPC);
-      streamCursor_ = previousStreamCursor;
+      rollBack();
       zigzag::expectMarkOrder(arena.release(mark));
-      return fail(error.what());
     }
     return fail(error.what());
   }
@@ -751,19 +780,48 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
     results.push_back({port.kind, std::move(cells)});
   }
 
-  auto previousGuardScopes        = guardScopes_;
-  auto previousGuards             = guardStacks_;
-  auto previousReferences         = cellReferences_;
-  auto previousStreams            = streams_;
-  auto previousIterators          = iterators_;
-  auto previousGroupIterators     = groupIterators_;
-  auto previousGroupOwners        = groupOwners_;
-  auto previousStreamSlots        = streamSlots_;
-  auto previousIteratorSlots      = iteratorSlots_;
-  auto previousGroupIteratorSlots = groupIteratorSlots_;
-  auto previousFrames             = activationFrames_;
-  auto previousCursorPC           = cursorPC_;
+  // Rollback design (card VM-FRAME): see InvokeFrame. A return changes the
+  // destination slots in the caller's registers, the frame's own backing cells
+  // (erased), the cursor's frame stack, program counter and guard state; each
+  // change is journalled on its key and replayed backwards on failure.
+  MapUndo<GuardScopeMap> guardScopes(guardScopes_, frameProbe_);
+  MapUndo<GuardStackMap> guardStacks(guardStacks_, frameProbe_);
+  MapUndo<CellReferenceMap> references(cellReferences_, frameProbe_);
+  MapUndo<StreamMap> streams(streams_, frameProbe_);
+  MapUndo<IteratorMap> iterators(iterators_, frameProbe_);
+  MapUndo<GroupIteratorMap> groupIterators(groupIterators_, frameProbe_);
+  MapUndo<GroupOwnerMap> groupOwners(groupOwners_, frameProbe_);
+  SetUndo streamSlots(streamSlots_, frameProbe_);
+  SetUndo iteratorSlots(iteratorSlots_, frameProbe_);
+  SetUndo groupIteratorSlots(groupIteratorSlots_, frameProbe_);
+  MapUndo<std::unordered_map<CellRef, std::optional<CellRef>>> programCounters(
+      cursorPC_, frameProbe_);
   const auto previousStreamCursor = streamCursor_;
+  bool poppedFrame                = false;
+  const auto rollBack             = [&] {
+    guardScopes.rollback();
+    guardStacks.rollback();
+    references.rollback();
+    streams.rollback();
+    iterators.rollback();
+    groupIterators.rollback();
+    groupOwners.rollback();
+    streamSlots.rollback();
+    iteratorSlots.rollback();
+    groupIteratorSlots.rollback();
+    programCounters.rollback();
+    if (poppedFrame) activationFrames_[cursor].push_back(frameOwner);
+    streamCursor_ = previousStreamCursor;
+  };
+  // clearTypedRegister, journalled.
+  const auto clearTyped = [&](const CellRef slot) {
+    streamSlots.erase(slot);
+    iteratorSlots.erase(slot);
+    groupIteratorSlots.erase(slot);
+    streams.erase(slot);
+    iterators.erase(slot);
+    groupIterators.erase(slot);
+  };
   zigzag::Mark mark;
   try {
     mark = arena.mark();
@@ -775,44 +833,56 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
       const auto destination = frame.parentResultSlots[i];
       if (results[i].kind == FramePortKind::Stream) {
         auto stream = std::make_shared<std::vector<CellRef>>(results[i].cells);
-        streams_[destination] = std::move(stream);
-        streamSlots_.insert(destination);
-        iteratorSlots_.erase(destination);
-        groupIteratorSlots_.erase(destination);
-        groupIterators_.erase(destination);
-        iterators_.erase(destination);
-        cellReferences_.erase(destination);
+        streams.set(destination, std::move(stream));
+        streamSlots.insert(destination);
+        iteratorSlots.erase(destination);
+        groupIteratorSlots.erase(destination);
+        groupIterators.erase(destination);
+        iterators.erase(destination);
+        references.erase(destination);
       } else {
-        cellReferences_[destination] =
-            results[i].cells.empty() ? std::nullopt
-                                     : std::optional{results[i].cells.front()};
-        clearTypedRegister(destination);
+        references.set(destination,
+                       results[i].cells.empty()
+                           ? std::nullopt
+                           : std::optional{results[i].cells.front()});
+        clearTyped(destination);
       }
     }
 
+    if (guardScopes_.contains(cursor)) guardScopes.touch(cursor);
     trimGuardScopes(cursor, frame.activationId);
+    frameProbe_.hit();
     if (retainedGuards) {
+      guardStacks.touch(cursor);
       if ((*retainedGuards)->empty())
         guardStacks_.erase(cursor);
       else
         guardStacks_[cursor] = *retainedGuards;
+      frameProbe_.hit();
     }
     auto &frames            = activationFrames_.at(cursor);
     const auto returnOpcode = frame.returnOpcode;
     frames.pop_back();
+    // Nothing that can throw may sit between the pop_back above and this
+    // flag, or rollBack() would not know to push the frame back.
+    poppedFrame = true;
+    frameProbe_.hit();
     for (const auto &[logical, backing] : frame.localBacking) {
       (void)logical;
-      cellReferences_.erase(backing);
-      streams_.erase(backing);
-      iterators_.erase(backing);
-      groupIterators_.erase(backing);
-      groupOwners_.erase(backing);
-      streamSlots_.erase(backing);
-      iteratorSlots_.erase(backing);
-      groupIteratorSlots_.erase(backing);
+      references.erase(backing);
+      streams.erase(backing);
+      iterators.erase(backing);
+      groupIterators.erase(backing);
+      groupOwners.erase(backing);
+      streamSlots.erase(backing);
+      iteratorSlots.erase(backing);
+      groupIteratorSlots.erase(backing);
     }
     if (frames.empty()) activationFrames_.erase(cursor);
+    frameProbe_.hit();
+    programCounters.touch(cursor);
     cursorPC_[cursor] = returnOpcode;
+    frameProbe_.hit();
     if (arena.contains(cursor)) {
       if (returnOpcode) {
         zigzag::expectWritten(
@@ -823,22 +893,11 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
             arena.setValueBits(cursor, xanadu::ValueKind::None, 0));
       }
     }
+    frameProbe_.hit();
     zigzag::expectMarkOrder(arena.discard(mark));
   } catch (const std::exception &error) {
     zigzag::expectMarkOrder(arena.release(mark));
-    guardScopes_.swap(previousGuardScopes);
-    guardStacks_.swap(previousGuards);
-    cellReferences_.swap(previousReferences);
-    streams_.swap(previousStreams);
-    iterators_.swap(previousIterators);
-    groupIterators_.swap(previousGroupIterators);
-    groupOwners_.swap(previousGroupOwners);
-    streamSlots_.swap(previousStreamSlots);
-    iteratorSlots_.swap(previousIteratorSlots);
-    groupIteratorSlots_.swap(previousGroupIteratorSlots);
-    activationFrames_.swap(previousFrames);
-    cursorPC_.swap(previousCursorPC);
-    streamCursor_ = previousStreamCursor;
+    rollBack();
     return fail(error.what());
   }
   return {};

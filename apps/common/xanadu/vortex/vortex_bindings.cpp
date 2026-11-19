@@ -234,15 +234,19 @@ ExecutionResult VortexVM::executeRestoreBindings(const CellRef opcode,
   if (!valid) return fail("RestoreBindings has invalid continuation metadata");
   if (!cursorPC_.contains(cursor))
     return fail("RestoreBindings requires a managed VM cursor");
-  const auto previous          = cursorPC_.at(cursor);
-  auto oldCellReferences       = cellReferences_;
-  auto oldStreams              = streams_;
-  auto oldIterators            = iterators_;
-  auto oldGroupIterators       = groupIterators_;
-  auto oldGroupOwners          = groupOwners_;
-  auto oldGroupIteratorSlots   = groupIteratorSlots_;
-  auto oldStreamSlots          = streamSlots_;
-  auto oldIteratorSlots        = iteratorSlots_;
+  const auto previous        = cursorPC_.at(cursor);
+  auto oldCellReferences     = cellReferences_;
+  auto oldStreams            = streams_;
+  auto oldIterators          = iterators_;
+  auto oldGroupIterators     = groupIterators_;
+  auto oldGroupOwners        = groupOwners_;
+  auto oldGroupIteratorSlots = groupIteratorSlots_;
+  auto oldStreamSlots        = streamSlots_;
+  auto oldIteratorSlots      = iteratorSlots_;
+  frameProbe_.entries += cellReferences_.size() + streams_.size() +
+                         iterators_.size() + groupIterators_.size() +
+                         groupOwners_.size() + groupIteratorSlots_.size() +
+                         streamSlots_.size() + iteratorSlots_.size();
   const auto oldStreamCursor   = streamCursor_;
   const auto oldRestoreCount   = bindingRestores_;
   const auto oldSlotCount      = bindingSlotsRestored_;

@@ -504,6 +504,10 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
     auto nextStreamSlots        = streamSlots_;
     auto nextStreams            = streams_;
     auto nextReferences         = cellReferences_;
+    frameProbe_.entries += groupIteratorSlots_.size() + iteratorSlots_.size() +
+                           groupIterators_.size() + iterators_.size() +
+                           streamSlots_.size() + streams_.size() +
+                           cellReferences_.size();
     nextGroupIteratorSlots.insert(target);
     nextIteratorSlots.insert(target);
     nextGroupIterators[target] = std::move(state);
@@ -579,6 +583,10 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
     auto nextGroupIteratorSlots = groupIteratorSlots_;
     auto nextStreamSlots        = streamSlots_;
     auto nextOrdinaryIterators  = iterators_;
+    frameProbe_.entries += streams_.size() + cellReferences_.size() +
+                           groupIterators_.size() + iteratorSlots_.size() +
+                           groupIteratorSlots_.size() + streamSlots_.size() +
+                           iterators_.size();
     try {
       requireStreamCursor(*cursor);
     } catch (const std::exception &error) {
