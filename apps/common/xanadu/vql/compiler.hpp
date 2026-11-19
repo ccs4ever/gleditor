@@ -459,7 +459,22 @@ private:
   struct ViewStepPlan {
     std::optional<PathStep> step; ///< empty: the mask hides the step
     bool endsView{false};         ///< value() and count() leave the view
+    /// Q-VIEW-B: the step reads a computed dimension; the rule, not the
+    /// source's links, answers it.
+    const VirtualDimensionDefRule *computed{nullptr};
   };
+  /// Refuses a computed rule whose expression is not a literal or a plain
+  /// path from the source: anything else would be compiled at the use site's
+  /// bindings, not the binding scope's.
+  static void requireStaticComputedRule(const VirtualDimensionDefRule &rule);
+  /// Lowers one traversal of a computed dimension: the expression evaluated
+  /// against each source cell, copied to a fresh cell as the oracle did.
+  std::vector<zigzag::CellRef>
+  compileComputedDimension(const VirtualDimensionDefRule &rule,
+                           std::span<const zigzag::CellRef> sources);
+  /// A computed result is a fresh cell; only value() and count() may follow.
+  static void requireComputedResultEnds(const VirtualDimensionDefRule &rule,
+                                        std::span<const PathStep> rest);
   ViewStepPlan planViewStep(const ViewMark &view, const PathStep &step) const;
   void markViewStream(std::span<const zigzag::CellRef> stream,
                       const ViewMark &view);
