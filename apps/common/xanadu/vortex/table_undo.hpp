@@ -66,7 +66,19 @@ private:
 /// call cost the size of everything earlier runs had left behind. Each change
 /// now goes through here, which records the prior state of that one key first;
 /// rollback replays the records newest first, so a key touched twice ends at
-/// its oldest recorded state. Rollback restores contents, not bucket order.
+/// its oldest recorded state.
+///
+/// Rollback restores contents, not hash iteration order: a key that was erased
+/// and re-inserted may sit elsewhere in its bucket, so enumerating the table
+/// afterwards can differ from before the failed call, where the whole-table
+/// swap it replaced kept the order. Every success path, and every failure that
+/// happens before the first change (a refusal, a work-budget stop in the
+/// arena), leaves the order untouched; only a failure after a change, which
+/// today means an allocation failure or an armed failpoint, can reorder. Two
+/// readers enumerate these tables (snapshotBindings, and through it
+/// makeBindingsDescriptor, which mints records in that order); neither is
+/// reachable in the middle of a call. The deviation is accepted, and
+/// vortex_group_journal_test.cpp compares contents, not order.
 ///
 /// rollback() is noexcept yet re-inserts entries, so an allocation failure
 /// during it ends in std::terminate. That is an accepted trade: the whole-table

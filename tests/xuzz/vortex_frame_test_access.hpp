@@ -177,9 +177,25 @@ struct FrameTestAccess {
       vm.streams_[key]        = std::make_shared<std::vector<CellRef>>(1, key);
       vm.iterators_[key] =
           std::make_shared<IteratorState>(SequenceIteratorState{});
+      vm.groupIterators_[key] =
+          std::make_shared<GroupIteratorState>(nullptr, nullptr, 0, key, key);
+      vm.groupOwners_[key] = std::weak_ptr<const ActivationFrame>{};
       vm.streamSlots_.insert(key);
       vm.iteratorSlots_.insert(key);
+      vm.groupIteratorSlots_.insert(key);
     }
+  }
+
+  /// Takes @p slot out of the stream slot set only, so that a call which makes
+  /// it a stream output journals an insert as well as the erases.
+  static void eraseStreamSlot(VortexVM &vm, const CellRef slot) {
+    vm.streamSlots_.erase(slot);
+  }
+  /// Takes @p slot out of both iterator slot sets, so that GroupBegin journals
+  /// an insert into each.
+  static void eraseIteratorSlots(VortexVM &vm, const CellRef slot) {
+    vm.iteratorSlots_.erase(slot);
+    vm.groupIteratorSlots_.erase(slot);
   }
 
   /// Makes @p cursor (or nobody) the stream owner, as an earlier run of another

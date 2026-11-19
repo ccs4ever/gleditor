@@ -5,7 +5,11 @@
 //    the keys a call touches, so the entries
 //    VortexVM::frameTableEntriesCopied() counts for one call is bounded by
 //    those keys and does not grow with what earlier work left in the tables.
-//    Counts only; nothing here asserts time.
+//    RestoreBindings replaces whole tables, so what it counts is the entries a
+//    table still holds after it was meant to be moved aside (a copy leaves
+//    them behind). Counts only; nothing here asserts time. Measured once, by
+//    hand, with 10,000 entries in each table: GroupBegin 3.3-3.8 ms before and
+//    13 us after, GroupNext 1.7-2.1 ms before and 6-7 us after (about 250x).
 //  - Equivalence. Seeded random sequences of group, stream, choice and binding
 //    opcodes, with stale entries seeded where a call writes, produce the same
 //    results, refusal messages and table contents as before the change. The
@@ -18,10 +22,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -56,7 +60,12 @@ struct Scenario {
   VortexVM vm{core};
   CellRef cursor{};
   CellRef other{}; // a finished cursor that can own the streams
+  /// The frame's backing cells: what the group opcodes really write.
+  std::vector<CellRef> backings;
   CellRef groups{}, it1{}, it2{}, m1{}, p1{}, m2{}, p2{}, value{}, plain{};
+  /// Backing cell of each logical local, indexed as in enterFrame.
+  enum Local : std::size_t { gGroups, gIt1, gIt2, gM1, gP1, gM2, gP2, gPlain };
+  CellRef backing(const Local local) const { return backings.at(local); }
   CellRef begin{}, childNext{}, outerDescriptor{};
   std::vector<std::pair<std::string, CellRef>> pool;
 
@@ -175,6 +184,10 @@ struct Scenario {
     for (std::size_t index = 0; index < chain.size(); ++index)
       ASSERT_TRUE(vm.step(cursor).success) << "setup step " << index;
     ASSERT_EQ(vm.getCursorOpcode(cursor), begin);
+    const auto top = FrameTestAccess::top(vm, cursor);
+    ASSERT_TRUE(top);
+    for (const auto logical : {groups, it1, it2, m1, p1, m2, p2, plain})
+      backings.push_back(top->localBacking.at(logical));
   }
 
   void buildPool() {
@@ -301,23 +314,27 @@ std::string runSequence(const std::uint64_t seed, MessageTable &messages) {
   std::ostringstream log;
   log << "sequence " << seed << '\n';
   for (std::size_t index = 0; index < stepsEach; ++index) {
-    // Stale entries where a call will write or erase them, so a restore of a
-    // prior value and not only of an absent key is checked.
+    // Stale entries on the backing cells the calls write or erase, so a restore
+    // of a prior value and not only of an absent key is checked.
     switch (rng.below(24)) {
     case 0:
-      FrameTestAccess::seedRegisters(
-          s.vm, s.m1, FrameTestAccess::top(s.vm, s.cursor), false);
-      break;
     case 1:
-      FrameTestAccess::seedStaleReference(s.vm, s.it2);
+      FrameTestAccess::seedRegisters(
+          s.vm, s.backings[rng.below(s.backings.size())],
+          FrameTestAccess::top(s.vm, s.cursor), false);
       break;
     case 2:
-      FrameTestAccess::seedStaleStreamArgument(s.vm, s.p1);
+      FrameTestAccess::seedStaleReference(
+          s.vm, s.backings[rng.below(s.backings.size())]);
       break;
     case 3:
-      FrameTestAccess::setStreamCursor(s.vm, s.other);
+      FrameTestAccess::seedStaleStreamArgument(
+          s.vm, s.backings[rng.below(s.backings.size())]);
       break;
     case 4:
+      FrameTestAccess::setStreamCursor(s.vm, s.other);
+      break;
+    case 5:
       FrameTestAccess::setStreamCursor(s.vm, std::nullopt);
       break;
     default:
@@ -473,17 +490,26 @@ Counts countsWith(const std::size_t bulk) {
   return counts;
 }
 
-/// Entries one call touches: its own keys, never the table sizes.
-constexpr std::size_t keysTouchedBound = 12;
+/// Journal records one call can make, derived from its body, one per table
+/// key it writes or erases: GroupBegin touches the target slot in seven tables
+/// (insert into two slot sets, set the group iterator, erase from the iterator,
+/// stream-slot, stream and reference tables). GroupNext sets the group
+/// iterator, then for the stream output sets its stream, erases it from four
+/// tables and inserts it into the stream slots (7), and for the presence
+/// output erases it from five tables (5): 1 + 7 + 5 = 13.
+constexpr std::size_t groupBeginRecords = 7;
+constexpr std::size_t groupNextRecords  = 13;
+/// A restore moves its eight tables aside and counts what a copy would leave.
+constexpr std::size_t restoreResidue = 0;
 
 TEST(VortexGroupJournalTest, GroupBeginCopiesOnlyTheKeysItTouches) {
-  EXPECT_LE(countsWith(bulkEntries).begin, keysTouchedBound);
+  EXPECT_LE(countsWith(bulkEntries).begin, groupBeginRecords);
 }
 TEST(VortexGroupJournalTest, GroupNextCopiesOnlyTheKeysItTouches) {
-  EXPECT_LE(countsWith(bulkEntries).next, keysTouchedBound);
+  EXPECT_LE(countsWith(bulkEntries).next, groupNextRecords);
 }
-TEST(VortexGroupJournalTest, RestoreBindingsCopiesNoWholeTable) {
-  EXPECT_LE(countsWith(bulkEntries).restore, keysTouchedBound);
+TEST(VortexGroupJournalTest, RestoreBindingsLeavesNothingBehindWhenItMoves) {
+  EXPECT_EQ(countsWith(bulkEntries).restore, restoreResidue);
 }
 
 TEST(VortexGroupJournalTest, TheCostDoesNotScaleWithTheTableSize) {
@@ -494,71 +520,115 @@ TEST(VortexGroupJournalTest, TheCostDoesNotScaleWithTheTableSize) {
   EXPECT_EQ(small.restore, large.restore);
 }
 
-/// Prints, and asserts nothing: wall time of one call of each opcode with the
-/// tables full, for the commit message and reports.
-TEST(VortexGroupJournalTest, ReportsMicrosecondsPerCallWithFullTables) {
-  const auto time = [](const auto &call) {
-    const auto start = std::chrono::steady_clock::now();
-    call();
-    return std::chrono::duration_cast<std::chrono::microseconds>(
-               std::chrono::steady_clock::now() - start)
-        .count();
-  };
+TEST(VortexGroupJournalTest, TheWorstCaseCallsJournalExactlyTheDerivedRecords) {
   Scenario s;
   s.enterFrame(2);
   s.buildPool();
-  FrameTestAccess::seedBulk(s.vm, bulkEntries, bulkFirstKey);
-  const auto step = [&](const CellRef opcode) {
-    s.vm.setCursorOpcode(s.cursor, opcode);
-    return [&s] { s.vm.step(s.cursor); };
-  };
-  const auto begin = time(step(s.begin));
-  const auto next  = time(step(s.childNext));
-  GTEST_LOG_(INFO) << "GroupBegin " << begin << " us, GroupNext " << next
-                   << " us with " << bulkEntries << " entries per table";
+  // Every table already holds the target, so each statement records a prior
+  // value; the slot sets lack it where the call inserts.
+  FrameTestAccess::seedRegisters(s.vm, s.backing(Scenario::gIt1), nullptr,
+                                 false);
+  FrameTestAccess::eraseIteratorSlots(s.vm, s.backing(Scenario::gIt1));
+  EXPECT_EQ(copiedBy(s, s.begin), groupBeginRecords);
+  FrameTestAccess::seedRegisters(s.vm, s.backing(Scenario::gM1), nullptr,
+                                 false);
+  FrameTestAccess::seedRegisters(s.vm, s.backing(Scenario::gP1), nullptr,
+                                 false);
+  FrameTestAccess::eraseStreamSlot(s.vm, s.backing(Scenario::gM1));
+  EXPECT_EQ(copiedBy(s, s.childNext), groupNextRecords);
 }
 
 // ---- rollback ---------------------------------------------------------
 
-TEST(VortexGroupJournalTest, AFailedGroupCallLeavesEveryTableAsItFoundIt) {
-  for (const char *which : {"begin1", "next1"}) {
+/// Sweeps the failpoint over every statement of @p opcode and requires each
+/// failed step to leave the digest and the arena as they were.
+std::size_t sweepExact(Scenario &s, const CellRef opcode,
+                       const std::string &name) {
+  s.vm.setCursorOpcode(s.cursor, opcode);
+  const auto digest = FrameTestAccess::digest(s.vm);
+  const auto cells  = s.arena.cellCount();
+  std::size_t stops = 0;
+  for (std::size_t nth = 1; nth <= sweepLimit; ++nth) {
+    s.vm.setCursorOpcode(s.cursor, opcode);
+    FrameTestAccess::arm(s.vm, nth);
+    const auto result = s.vm.step(s.cursor);
+    FrameTestAccess::arm(s.vm, std::nullopt);
+    if (result.success) break;
+    EXPECT_NE(result.errorMessage.find("failpoint"), std::string::npos)
+        << name << " statement " << nth << ": " << result.errorMessage;
+    EXPECT_EQ(FrameTestAccess::digest(s.vm), digest)
+        << name << " failing after statement " << nth;
+    EXPECT_EQ(s.arena.cellCount(), cells);
+    ++stops;
+  }
+  return stops;
+}
+
+TEST(VortexGroupJournalTest, AFailedGroupBeginLeavesEveryTableAsItFoundIt) {
+  Scenario s;
+  s.enterFrame(2);
+  s.buildPool();
+  // Stale entries on the backing the call writes, in every table, so prior
+  // values (and not only absent keys) are what rollback must bring back.
+  FrameTestAccess::seedRegisters(s.vm, s.backing(Scenario::gIt1), nullptr,
+                                 false);
+  FrameTestAccess::eraseIteratorSlots(s.vm, s.backing(Scenario::gIt1));
+  EXPECT_EQ(sweepExact(s, s.begin, "begin"), groupBeginRecords);
+}
+
+TEST(VortexGroupJournalTest, AFailedGroupNextLeavesEveryTableAsItFoundIt) {
+  Scenario s;
+  s.enterFrame(2);
+  s.buildPool();
+  s.vm.setCursorOpcode(s.cursor, s.begin);
+  ASSERT_TRUE(s.vm.step(s.cursor).success);
+  FrameTestAccess::seedRegisters(s.vm, s.backing(Scenario::gM1), nullptr,
+                                 false);
+  FrameTestAccess::seedRegisters(s.vm, s.backing(Scenario::gP1), nullptr,
+                                 false);
+  FrameTestAccess::eraseStreamSlot(s.vm, s.backing(Scenario::gM1));
+  EXPECT_EQ(sweepExact(s, s.childNext, "next"), groupNextRecords);
+}
+
+TEST(VortexGroupJournalTest, AFailedGroupNextAfterAHandoverLeavesTheWipe) {
+  // Another, finished cursor owned the streams. requireStreamCursor wipes four
+  // tables and a later failure does not bring them back; the other tables
+  // return to what they were and the stream cursor stays handed over.
+  const std::vector<std::string> wiped{"streams", "iterators", "groupIterators",
+                                       "groupIteratorSlots"};
+  for (std::size_t nth = 1; nth <= sweepLimit; ++nth) {
     Scenario s;
     s.enterFrame(2);
     s.buildPool();
-    if (std::string_view{which} == "next1") {
-      s.vm.setCursorOpcode(s.cursor, s.begin);
-      ASSERT_TRUE(s.vm.step(s.cursor).success);
+    s.vm.setCursorOpcode(s.cursor, s.begin);
+    ASSERT_TRUE(s.vm.step(s.cursor).success);
+    FrameTestAccess::seedRegisters(s.vm, s.backing(Scenario::gM1), nullptr,
+                                   false);
+    FrameTestAccess::seedRegisters(s.vm, s.backing(Scenario::gP1), nullptr,
+                                   false);
+    FrameTestAccess::setStreamCursor(s.vm, s.other);
+    s.vm.setCursorOpcode(s.cursor, s.childNext);
+    const auto before = FrameTestAccess::sections(s.vm);
+    FrameTestAccess::arm(s.vm, nth);
+    const auto result = s.vm.step(s.cursor);
+    FrameTestAccess::arm(s.vm, std::nullopt);
+    if (result.success) {
+      EXPECT_GE(nth, 4u) << "the call has several journalled statements";
+      return;
     }
-    const auto chosen = std::ranges::find(s.pool, std::string{which},
-                                          &decltype(s.pool)::value_type::first);
-    ASSERT_NE(chosen, s.pool.end());
-    // Stale entries in the tables the call writes, so prior values are
-    // restored.
-    FrameTestAccess::seedRegisters(s.vm, s.m1,
-                                   FrameTestAccess::top(s.vm, s.cursor), false);
-    FrameTestAccess::seedRegisters(s.vm, s.p1,
-                                   FrameTestAccess::top(s.vm, s.cursor), false);
-    FrameTestAccess::seedRegisters(s.vm, s.it1,
-                                   FrameTestAccess::top(s.vm, s.cursor), false);
-    s.vm.setCursorOpcode(s.cursor, chosen->second);
-    const auto digest = FrameTestAccess::digest(s.vm);
-    const auto cells  = s.arena.cellCount();
-    std::size_t stops = 0;
-    for (std::size_t nth = 1; nth <= sweepLimit; ++nth) {
-      s.vm.setCursorOpcode(s.cursor, chosen->second);
-      FrameTestAccess::arm(s.vm, nth);
-      const auto result = s.vm.step(s.cursor);
-      FrameTestAccess::arm(s.vm, std::nullopt);
-      if (result.success) break;
-      EXPECT_NE(result.errorMessage.find("failpoint"), std::string::npos)
-          << which << " statement " << nth << ": " << result.errorMessage;
-      EXPECT_EQ(FrameTestAccess::digest(s.vm), digest)
-          << which << " failing after statement " << nth;
-      EXPECT_EQ(s.arena.cellCount(), cells);
-      ++stops;
+    const auto after = FrameTestAccess::sections(s.vm);
+    ASSERT_EQ(before.size(), after.size());
+    for (std::size_t index = 0; index < before.size(); ++index) {
+      const auto &name = before[index].first;
+      if (std::ranges::find(wiped, name) != wiped.end())
+        EXPECT_TRUE(after[index].second.empty())
+            << name << " survived the wipe after statement " << nth;
+      else if (name != "scalars")
+        EXPECT_EQ(after[index].second, before[index].second)
+            << name << " after statement " << nth;
     }
-    EXPECT_GE(stops, 3u) << which;
   }
+  ADD_FAILURE() << "the failpoint never stopped firing";
 }
 
 TEST(VortexGroupJournalTest, AFailedRestoreLeavesEveryTableAsItFoundIt) {
@@ -573,21 +643,11 @@ TEST(VortexGroupJournalTest, AFailedRestoreLeavesEveryTableAsItFoundIt) {
   s.next(restore, halt);
   s.cursor = s.vm.spawnCursor(restore, "restore_rollback");
   FrameTestAccess::seedBulk(s.vm, 20, bulkFirstKey);
-  FrameTestAccess::seedRegisters(s.vm, key, nullptr, false);
-  const auto digest = FrameTestAccess::digest(s.vm);
-  std::size_t stops = 0;
-  for (std::size_t nth = 1; nth <= sweepLimit; ++nth) {
-    s.vm.setCursorOpcode(s.cursor, restore);
-    FrameTestAccess::arm(s.vm, nth);
-    const auto result = s.vm.step(s.cursor);
-    FrameTestAccess::arm(s.vm, std::nullopt);
-    if (result.success) break;
-    EXPECT_NE(result.errorMessage.find("failpoint"), std::string::npos)
-        << result.errorMessage;
-    EXPECT_EQ(FrameTestAccess::digest(s.vm), digest) << "statement " << nth;
-    ++stops;
-  }
-  EXPECT_GE(stops, 1u);
+  // The group tables too: groupOwners_, groupIterators_ and the slot sets are
+  // cleared by a restore and must come back.
+  FrameTestAccess::seedRegisters(s.vm, key, nullptr, true);
+  FrameTestAccess::seedRegisters(s.vm, stream, nullptr, true);
+  EXPECT_GE(sweepExact(s, restore, "restore"), 3u);
 }
 
 } // namespace
