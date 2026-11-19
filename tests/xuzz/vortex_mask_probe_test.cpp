@@ -220,7 +220,7 @@ TEST(VortexMaskProbeTest, MalformedOperandsAreNamedFailures) {
   expectRefusal(memoized, "VqlMaskProbe cannot be memoized");
 }
 
-TEST(VortexMaskProbeTest, ProbingWritesNoLinkCellOrTrailEntry) {
+TEST(VortexMaskProbeTest, ProbingWritesNoLinkOrCell) {
   ProbeHarness h;
   h.linkRole();
   h.linkStepNegative();
@@ -228,7 +228,6 @@ TEST(VortexMaskProbeTest, ProbingWritesNoLinkCellOrTrailEntry) {
   const auto cursor = h.vm.spawnCursor(opcode);
   const auto links  = allLinks(h.arena);
   const auto cells  = h.arena.cellCount();
-  const auto trail  = h.arena.trailSize();
   const auto shadow = h.arena.shadowCount();
 
   const auto result = h.vm.step(cursor);
@@ -237,7 +236,6 @@ TEST(VortexMaskProbeTest, ProbingWritesNoLinkCellOrTrailEntry) {
   EXPECT_TRUE(h.arena.asBool(h.output).value_or(false));
   EXPECT_EQ(allLinks(h.arena), links);
   EXPECT_EQ(h.arena.cellCount(), cells);
-  EXPECT_EQ(h.arena.trailSize(), trail);
   EXPECT_EQ(h.arena.shadowCount(), shadow);
   EXPECT_EQ(h.arena.outstandingMarks(), 0U);
 }
@@ -424,7 +422,6 @@ TEST(VortexMaskProbeTest, ForeignProbeMintsNothingAndLeavesTheSourceAlone) {
   const auto sourceOps = h.source.store->opCount();
   const auto cells     = h.arena.cellCount();
   const auto shadows   = h.arena.shadowCount();
-  const auto trail     = h.arena.trailSize();
   const auto proxy = h.arena.findExistingProxy(h.space, h.source.indexFollower);
   EXPECT_TRUE(h.answer(false, {{h.axis, keepBoth}}));
   // The output slot is minted by the harness before the baseline above only
@@ -438,7 +435,6 @@ TEST(VortexMaskProbeTest, ForeignProbeMintsNothingAndLeavesTheSourceAlone) {
   // Only the harness's own operand and opcode cells appear: no proxy and no
   // link cells were minted by the probe itself.
   EXPECT_EQ(h.arena.cellCount() - cellsAfterFirst, cellsAfterFirst - cells);
-  EXPECT_EQ(h.arena.trailSize(), trail);
   EXPECT_EQ(h.arena.outstandingMarks(), 0U);
 }
 

@@ -234,20 +234,22 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
       const auto inputs = core.inputsOf(opcode);
       const std::size_t expectedOutputs =
           *kind == OpcodeKind::VqlMaskProbe ? 1U : 0U;
+      const std::string name =
+          *kind == OpcodeKind::VqlMaskProbe ? "VqlMaskProbe" : "VqlMaskLinks";
       if (inputs.size() < 2 || (inputs.size() - 2) % 2 != 0 ||
           core.outputsOf(opcode).size() != expectedOutputs)
-        throw std::runtime_error("invalid VqlMaskLinks operand layout");
+        throw std::runtime_error("invalid " + name + " operand layout");
       for (std::size_t index = 2; index < inputs.size(); index += 2) {
         const auto value = arena.asInt64(inputs[index]);
         if (!value || *value < 0 ||
             static_cast<std::uint64_t>(*value) >=
                 std::numeric_limits<DimRef>::max() ||
             !arena.contains(static_cast<DimRef>(*value)))
-          throw std::runtime_error(
-              "VqlMaskLinks dimension operand is not relocatable");
+          throw std::runtime_error(name +
+                                   " dimension operand is not relocatable");
         const auto bits = arena.asInt64(inputs[index + 1]);
         if (!bits || *bits < 0 || *bits > 3)
-          throw std::runtime_error("invalid VqlMaskLinks keep bits");
+          throw std::runtime_error("invalid " + name + " keep bits");
         dimensionOperands.emplace(inputs[index], static_cast<DimRef>(*value));
       }
     }
