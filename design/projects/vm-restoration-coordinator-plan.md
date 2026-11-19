@@ -486,6 +486,31 @@ and 11 VQL tests for unlowered forms that refuse by name (`find`, dynamic views,
 callbacks, shape assignments, user-defined function blocks). The current failing list is
 `/data/git/gleditor-restore/.logs/w1/gate-k-xuzz-failed.txt`.
 
+Gate L (2026-11-19, shared branch at `860cef27`, adding Q-FIND, Q-APPLYSHAPE-MULTI, VM-FRAME and
+Q-CORPUS): `xuzz_test` 18 failures of 4732, six fewer than gate K and nothing newly failing
+(`ChronofiladeBenchmarkTest.ScalabilityAndSpeedup` is timing and passes three of three alone). Seven
+VQL tests remain for unlowered forms (dynamic views, pivots, computed dimensions, lens callbacks,
+shape-valued functions); the rest are Evidence and Subscription baseline failures.
+
+Ruled by the owner on 2026-11-18 and 2026-11-19, after gate K:
+
+- **`find` as an anchor** lowers with `RelationNext` over a registered prose-hits provider
+  (manifold-cell text first, then document lines, per store); `find` as a path step stays refused.
+- **`VqlMaskProbe`** (appended after `ProjectTopology`): a read-only Bool opcode sharing
+  `VqlMaskLinks`'s planner; it skips the store-ref index link on a foreign owner unconditionally.
+  `{}` and `{*}` follow spec §4.8.1, not the pre-cutoff interpreter.
+- **VM-FRAME:** the frame opcodes journal per key instead of copying eleven tables; VLace's
+  `RunLimits` raises `maxBackingCells` to a large finite ceiling per run; the remaining whole-table
+  copies (`GroupBegin`, `GroupNext`, `RestoreBindings`) are counted and open.
+- **Core changes accepted without further review:** `promote` files minted dimensions on `d.dims`
+  and maps the store's own proxy home cell; `BoundDimensionMember` has `solitary` and
+  `boundAfterMark`.
+- **Shape values** live in a compile-time table keyed by handle cell, persisted by the session: a
+  deliberate exception to the cells-and-dimensions preference, to be moved to cells later.
+- **Approved next:** a read-only VM accessor for closure values (so closure-creating programs
+  release exactly) and, as its own pass, vagent arity-table entries for `ProjectTopology` and
+  `VqlMaskProbe`.
+
 Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
 lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
 approval); `mesh::evaluate` of VQL source still runs `project` although a sealed portable artifact
