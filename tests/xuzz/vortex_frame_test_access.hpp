@@ -167,6 +167,21 @@ struct FrameTestAccess {
     }
   }
 
+  /// @p count entries in every table the group and binding opcodes edit, keyed
+  /// from @p firstKey, none of them a cell the calls under test use.
+  static void seedBulk(VortexVM &vm, const std::size_t count,
+                       const CellRef firstKey) {
+    for (std::size_t index = 0; index < count; ++index) {
+      const auto key          = firstKey + static_cast<CellRef>(index);
+      vm.cellReferences_[key] = key;
+      vm.streams_[key]        = std::make_shared<std::vector<CellRef>>(1, key);
+      vm.iterators_[key] =
+          std::make_shared<IteratorState>(SequenceIteratorState{});
+      vm.streamSlots_.insert(key);
+      vm.iteratorSlots_.insert(key);
+    }
+  }
+
   static std::vector<CellRef> destinations(const VortexVM &vm,
                                            const CellRef cursor) {
     const auto frame = top(vm, cursor);
