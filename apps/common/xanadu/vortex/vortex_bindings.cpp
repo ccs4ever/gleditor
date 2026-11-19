@@ -234,15 +234,26 @@ ExecutionResult VortexVM::executeRestoreBindings(const CellRef opcode,
   if (!valid) return fail("RestoreBindings has invalid continuation metadata");
   if (!cursorPC_.contains(cursor))
     return fail("RestoreBindings requires a managed VM cursor");
-  const auto previous        = cursorPC_.at(cursor);
-  auto oldCellReferences     = cellReferences_;
-  auto oldStreams            = streams_;
-  auto oldIterators          = iterators_;
-  auto oldGroupIterators     = groupIterators_;
-  auto oldGroupOwners        = groupOwners_;
-  auto oldGroupIteratorSlots = groupIteratorSlots_;
-  auto oldStreamSlots        = streamSlots_;
-  auto oldIteratorSlots      = iteratorSlots_;
+  const auto previous = cursorPC_.at(cursor);
+  // A restore replaces the eight binding tables outright, so what it must be
+  // able to give back is the tables themselves. They are moved aside, which
+  // costs nothing per entry, not copied as the old code did on every call.
+  // Destroying the old tables when the restore succeeds is still linear in
+  // their size; that is the removal the restore asks for, not a copy.
+  // The move leaves the live tables empty while requireStreamCursor and
+  // restoreBindings run. Neither reads them to decide anything the checks
+  // above have not already decided (getOpcodeKind consults them only for a
+  // cell that is both an opcode and a bound slot).
+  auto oldCellReferences     = std::move(cellReferences_);
+  auto oldStreams            = std::move(streams_);
+  auto oldIterators          = std::move(iterators_);
+  auto oldGroupIterators     = std::move(groupIterators_);
+  auto oldGroupOwners        = std::move(groupOwners_);
+  auto oldGroupIteratorSlots = std::move(groupIteratorSlots_);
+  auto oldStreamSlots        = std::move(streamSlots_);
+  auto oldIteratorSlots      = std::move(iteratorSlots_);
+  // A table that was copied, not moved, still holds its entries here. Counting
+  // them is what makes the cost tests able to see such a regression.
   frameProbe_.entries += cellReferences_.size() + streams_.size() +
                          iterators_.size() + groupIterators_.size() +
                          groupOwners_.size() + groupIteratorSlots_.size() +
@@ -253,13 +264,16 @@ ExecutionResult VortexVM::executeRestoreBindings(const CellRef opcode,
   const auto oldReferenceCount = bindingReferencesRestored_;
   ArenaSavepoint savepoint(arena);
   try {
+    frameProbe_.hit(); // tables moved aside, nothing replaced yet
     requireStreamCursor(cursor);
     restoreBindings(descriptor->snapshot);
+    frameProbe_.hit(); // new tables in place
     arena.consumeWork();
     expectWritten(arena.setValueBits(
         cursor, next ? xanadu::ValueKind::Int64 : xanadu::ValueKind::None,
         next ? static_cast<std::uint64_t>(*next) : 0));
     cursorPC_.at(cursor) = next;
+    frameProbe_.hit(); // cursor advanced
     savepoint.commit();
   } catch (...) {
     cellReferences_.swap(oldCellReferences);

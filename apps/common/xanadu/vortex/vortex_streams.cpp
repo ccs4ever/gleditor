@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <stdexcept>
+#include <unordered_set>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/arena_savepoint.hpp"
@@ -497,31 +499,34 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
     }
     auto state = std::make_shared<GroupIteratorState>(
         owner, payload->second, owner->activationId, *cursor, source);
-    auto nextGroupIteratorSlots = groupIteratorSlots_;
-    auto nextIteratorSlots      = iteratorSlots_;
-    auto nextGroupIterators     = groupIterators_;
-    auto nextIterators          = iterators_;
-    auto nextStreamSlots        = streamSlots_;
-    auto nextStreams            = streams_;
-    auto nextReferences         = cellReferences_;
-    frameProbe_.entries += groupIteratorSlots_.size() + iteratorSlots_.size() +
-                           groupIterators_.size() + iterators_.size() +
-                           streamSlots_.size() + streams_.size() +
-                           cellReferences_.size();
-    nextGroupIteratorSlots.insert(target);
-    nextIteratorSlots.insert(target);
-    nextGroupIterators[target] = std::move(state);
-    nextIterators.erase(target);
-    nextStreamSlots.erase(target);
-    nextStreams.erase(target);
-    nextReferences.erase(target);
-    groupIteratorSlots_.swap(nextGroupIteratorSlots);
-    iteratorSlots_.swap(nextIteratorSlots);
-    groupIterators_.swap(nextGroupIterators);
-    iterators_.swap(nextIterators);
-    streamSlots_.swap(nextStreamSlots);
-    streams_.swap(nextStreams);
-    cellReferences_.swap(nextReferences);
+    // The call touches one slot in seven tables. Journalling those keys costs
+    // what the call changes; the whole-table copies it replaces cost the size
+    // of every binding the VM holds.
+    SetUndo groupIteratorSlots(groupIteratorSlots_, frameProbe_);
+    SetUndo iteratorSlots(iteratorSlots_, frameProbe_);
+    MapUndo<GroupIteratorMap> groupIterators(groupIterators_, frameProbe_);
+    MapUndo<IteratorMap> iterators(iterators_, frameProbe_);
+    SetUndo streamSlots(streamSlots_, frameProbe_);
+    MapUndo<StreamMap> streams(streams_, frameProbe_);
+    MapUndo<CellReferenceMap> references(cellReferences_, frameProbe_);
+    try {
+      groupIteratorSlots.insert(target);
+      iteratorSlots.insert(target);
+      groupIterators.set(target, std::move(state));
+      iterators.erase(target);
+      streamSlots.erase(target);
+      streams.erase(target);
+      references.erase(target);
+    } catch (...) {
+      groupIteratorSlots.rollback();
+      iteratorSlots.rollback();
+      groupIterators.rollback();
+      iterators.rollback();
+      streamSlots.rollback();
+      streams.rollback();
+      references.rollback();
+      throw;
+    }
     break;
   }
   case OpcodeKind::GroupNext: {
@@ -576,45 +581,76 @@ VortexVM::executeStreamOpcode(const OpcodeKind kind, const CellRef opcode,
         getOpcodeKind(streamOutput) || getOpcodeKind(presenceOutput))
       return invalidStreamOperation("GroupNext output slot is invalid");
 
-    auto nextStreams            = streams_;
-    auto nextReferences         = cellReferences_;
-    auto nextIterators          = groupIterators_;
-    auto nextIteratorSlots      = iteratorSlots_;
-    auto nextGroupIteratorSlots = groupIteratorSlots_;
-    auto nextStreamSlots        = streamSlots_;
-    auto nextOrdinaryIterators  = iterators_;
-    frameProbe_.entries += streams_.size() + cellReferences_.size() +
-                           groupIterators_.size() + iteratorSlots_.size() +
-                           groupIteratorSlots_.size() + streamSlots_.size() +
-                           iterators_.size();
+    // requireStreamCursor wipes four tables when another, finished cursor owns
+    // the streams. The code this replaced took its table copies first and put
+    // them back at the end, so a handover left those tables as they were on
+    // success and wiped them on failure. Keep exactly that, copying only in the
+    // handover case, which is the one cost that does grow with the tables.
+    struct Handover {
+      StreamMap streams;
+      IteratorMap iterators;
+      GroupIteratorMap groupIterators;
+      std::unordered_set<CellRef> groupIteratorSlots;
+    };
+    std::optional<Handover> handover;
+    if (streamCursor_ && *streamCursor_ != *cursor) {
+      handover =
+          Handover{streams_, iterators_, groupIterators_, groupIteratorSlots_};
+      frameProbe_.entries += streams_.size() + iterators_.size() +
+                             groupIterators_.size() +
+                             groupIteratorSlots_.size();
+    }
     try {
       requireStreamCursor(*cursor);
     } catch (const std::exception &error) {
       return invalidStreamOperation(error.what());
     }
-    nextIterators[source] = std::move(nextState);
-    nextStreams[streamOutput] =
-        std::make_shared<std::vector<CellRef>>(std::move(selected));
-    nextReferences.erase(streamOutput);
-    nextIteratorSlots.erase(streamOutput);
-    nextGroupIteratorSlots.erase(streamOutput);
-    nextOrdinaryIterators.erase(streamOutput);
-    nextStreamSlots.insert(streamOutput);
-    nextReferences.erase(presenceOutput);
-    nextStreams.erase(presenceOutput);
-    nextIteratorSlots.erase(presenceOutput);
-    nextGroupIteratorSlots.erase(presenceOutput);
-    nextOrdinaryIterators.erase(presenceOutput);
-    nextStreamSlots.erase(presenceOutput);
+    if (handover) {
+      streams_.swap(handover->streams);
+      iterators_.swap(handover->iterators);
+      groupIterators_.swap(handover->groupIterators);
+      groupIteratorSlots_.swap(handover->groupIteratorSlots);
+    }
+    MapUndo<StreamMap> streams(streams_, frameProbe_);
+    MapUndo<CellReferenceMap> references(cellReferences_, frameProbe_);
+    MapUndo<GroupIteratorMap> groupIterators(groupIterators_, frameProbe_);
+    SetUndo iteratorSlots(iteratorSlots_, frameProbe_);
+    SetUndo groupIteratorSlots(groupIteratorSlots_, frameProbe_);
+    SetUndo streamSlots(streamSlots_, frameProbe_);
+    MapUndo<IteratorMap> ordinaryIterators(iterators_, frameProbe_);
     zigzag::ArenaSavepoint savepoint(core_.arena());
-    core_.writeValue(presenceOutput, 0, std::nullopt, CellValue{present});
-    streams_.swap(nextStreams);
-    cellReferences_.swap(nextReferences);
-    groupIterators_.swap(nextIterators);
-    iteratorSlots_.swap(nextIteratorSlots);
-    groupIteratorSlots_.swap(nextGroupIteratorSlots);
-    streamSlots_.swap(nextStreamSlots);
-    iterators_.swap(nextOrdinaryIterators);
+    try {
+      groupIterators.set(source, std::move(nextState));
+      streams.set(streamOutput,
+                  std::make_shared<std::vector<CellRef>>(std::move(selected)));
+      references.erase(streamOutput);
+      iteratorSlots.erase(streamOutput);
+      groupIteratorSlots.erase(streamOutput);
+      ordinaryIterators.erase(streamOutput);
+      streamSlots.insert(streamOutput);
+      references.erase(presenceOutput);
+      streams.erase(presenceOutput);
+      iteratorSlots.erase(presenceOutput);
+      groupIteratorSlots.erase(presenceOutput);
+      ordinaryIterators.erase(presenceOutput);
+      streamSlots.erase(presenceOutput);
+      core_.writeValue(presenceOutput, 0, std::nullopt, CellValue{present});
+    } catch (...) {
+      streams.rollback();
+      references.rollback();
+      groupIterators.rollback();
+      iteratorSlots.rollback();
+      groupIteratorSlots.rollback();
+      streamSlots.rollback();
+      ordinaryIterators.rollback();
+      if (handover) {
+        streams_.clear();
+        iterators_.clear();
+        groupIterators_.clear();
+        groupIteratorSlots_.clear();
+      }
+      throw;
+    }
     savepoint.commit();
     break;
   }
