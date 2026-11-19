@@ -92,8 +92,9 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
   };
   binds.validate.linkedCeiling =
       mintInt(static_cast<std::int64_t>(OpcodeKind::VqlMaskProbe));
-  binds.validate.arityTable  = arena.makeCell();
-  binds.validate.impureKinds = arena.makeCell();
+  binds.validate.arityTable    = arena.makeCell();
+  binds.validate.variadicKinds = arena.makeCell();
+  binds.validate.impureKinds   = arena.makeCell();
 
   // Canonical wing arities, one (op, in, out) triple per kind on the
   // table cell's `+d.step` rank — the shapes the scalar compiler emits
@@ -150,7 +151,11 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       {static_cast<std::int64_t>(OpcodeKind::Nop), 0, 0},
       // The ceiling scalar above is VqlMaskProbe, the enum's last ordinal.
       // Host-state operations and closure operations remain absent from this
-      // table; a kind absent here makes validation refuse it by name.
+      // table; a kind absent here makes validation refuse it by ordinal.
+      // The two kinds below are variadic: `in` is the fixed head and
+      // kVariadic lists their stride.
+      {static_cast<std::int64_t>(OpcodeKind::ProjectTopology), 3, 1},
+      {static_cast<std::int64_t>(OpcodeKind::VqlMaskProbe), 2, 1},
       {static_cast<std::int64_t>(OpcodeKind::Find), 2, 1},
       {static_cast<std::int64_t>(OpcodeKind::FieldSet), 3, 1},
       {static_cast<std::int64_t>(OpcodeKind::RunCall), 4, 0},
@@ -163,6 +168,22 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       const auto cell = mintInt(field);
       zigzag::expectWritten(arena.link(tableTail, stepDim, Posward, cell));
       tableTail = cell;
+    }
+
+  // Both variadic tails are (dimension, value) pairs: ProjectTopology's
+  // edge pairs after (subject, wildcard, added-count), VqlMaskProbe's
+  // dimension/mask pairs after (owner, default).
+  static constexpr std::int64_t kPairStride    = 2;
+  static constexpr std::int64_t kVariadic[][2] = {
+      {static_cast<std::int64_t>(OpcodeKind::ProjectTopology), kPairStride},
+      {static_cast<std::int64_t>(OpcodeKind::VqlMaskProbe), kPairStride},
+  };
+  CellRef variadicTail = binds.validate.variadicKinds;
+  for (const auto &pair : kVariadic)
+    for (const auto field : pair) {
+      const auto cell = mintInt(field);
+      zigzag::expectWritten(arena.link(variadicTail, stepDim, Posward, cell));
+      variadicTail = cell;
     }
 
   // The impure set: the structural write ops. `Linked` stays pure (it
@@ -520,6 +541,21 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
                     static_cast<std::size_t>(*out)};
     }
   }
+  std::map<std::int64_t, std::size_t> variadicStride;
+  {
+    const auto fields = collect(
+        zigzag::rankAfter(arena, binds_.validate.variadicKinds, dims.step));
+    if (fields.size() % 2 != 0)
+      return {false, "validate: variadic table is not a pair chain"};
+    for (std::size_t i = 0; i + 1 < fields.size(); i += 2) {
+      const auto op     = arena.asInt64(fields[i]);
+      const auto stride = arena.asInt64(fields[i + 1]);
+      if (!op || !stride || *stride <= 0)
+        return {false, "validate: variadic table field is not a positive "
+                       "int64 pair"};
+      variadicStride[*op] = static_cast<std::size_t>(*stride);
+    }
+  }
   std::set<std::int64_t> impure;
   for (const auto cell :
        zigzag::rankAfter(arena, binds_.validate.impureKinds, dims.step))
@@ -557,12 +593,22 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
       return {false, "validate: op int64 outside [0, VqlMaskProbe]"};
     const auto shape = arity.find(*ordinal);
     if (shape == arity.end())
-      return {false, "validate: op kind absent from the arity table"};
-    const auto inCells  = core_.inputsOf(op);
-    const auto outCells = core_.outputsOf(op);
-    if (inCells.size() != shape->second.first ||
-        outCells.size() != shape->second.second)
-      return {false, "validate: wing arity differs from the table"};
+      return {false, std::format("validate: op kind {} absent from the arity "
+                                 "table",
+                                 *ordinal)};
+    const auto inCells          = core_.inputsOf(op);
+    const auto outCells         = core_.outputsOf(op);
+    const auto [minIn, wantOut] = shape->second;
+    const auto stride           = variadicStride.find(*ordinal);
+    const bool inputsFit =
+        stride == variadicStride.end()
+            ? inCells.size() == minIn
+            : inCells.size() >= minIn &&
+                  (inCells.size() - minIn) % stride->second == 0;
+    if (!inputsFit || outCells.size() != wantOut)
+      return {false, std::format("validate: op kind {} wing arity differs "
+                                 "from the table",
+                                 *ordinal)};
     if (options.runReachable &&
         static_cast<OpcodeKind>(*ordinal) == OpcodeKind::New &&
         !outCells.empty())
