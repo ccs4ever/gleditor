@@ -587,6 +587,23 @@ baseline. Rulings with these cards:
   handle refuses as reused (host and graph agree); copies made other than by `settle()` are
   untested.
 
+Gate Q (2026-11-19, shared branch after the FRAME2 merge, adding SMALL1, RESIDUAL and FRAME2):
+`xuzz_test` 11 failures of 4976, nothing newly failing; all 11 are the Evidence and Subscription
+baseline. `gleditor_test` and `zigzag_test` show one failure each, as in every gate since K. Rulings
+with these cards:
+
+- **FRAME2:** `GroupBegin` and `GroupNext` journal per key (worst case 7 and 13 records);
+  `RestoreBindings` moves the old tables aside and swaps them back on failure. Behaviour is identical
+  on every success path and every failure before the first change; after a failure injected after a
+  change, hash iteration order may differ (documented in `table_undo.hpp`), and `rollback()` is
+  `noexcept` but allocates. The golden transcript `tests/samples/vortex/group_opcode_transcript.txt`
+  was captured from the unchanged code.
+- **RESIDUAL:** the pre-cutoff host interpreter in `vql/` is deleted (about 2,350 lines); it held a
+  known divergence from §4.8.1. Anything that cited it as an oracle reads
+  `git show 4bbaa050:<path>`.
+- **SMALL1:** `mesh::evaluate` of VQL source runs `project` in the evaluator's own arena; a sealed
+  artifact naming `ProjectTopology`, `CellOfInt`, `IntOfCell` or `EpochOfCell` is refused by name.
+
 Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
 lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
 approval); `mesh::evaluate` of VQL source runs `project` by the owner's ruling, and a sealed
