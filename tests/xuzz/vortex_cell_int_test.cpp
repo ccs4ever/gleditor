@@ -225,16 +225,51 @@ TEST(VortexCellIntTest, IntOfCellRefusesAnAbsentOrTypedOperandByName) {
 }
 
 TEST(VortexCellIntTest, SpendsOneUnitOfWorkAndRecoversAfterABudgetReset) {
-  Harness h;
-  const auto cell   = h.arena.makeCell("c");
-  const auto out    = h.arena.makeCell();
-  const auto opcode = h.convert(OpcodeKind::IntOfCell, cell, out);
-  const auto cursor = h.vm.spawnCursor(opcode);
-  h.arena.setExecutionLimits(100'000, 0, 100'000);
-  EXPECT_FALSE(h.vm.step(cursor).success);
-  h.arena.setExecutionLimits(100'000, 100'000, 100'000);
-  h.vm.setCursorOpcode(cursor, opcode);
-  ASSERT_TRUE(h.vm.step(cursor).success);
+  for (const auto kind : {OpcodeKind::CellOfInt, OpcodeKind::IntOfCell}) {
+    Harness h;
+    const auto cell = h.arena.makeCell("c");
+    const auto in =
+        kind == OpcodeKind::CellOfInt
+            ? h.arena.makeScalarCell(static_cast<std::int64_t>(cell))
+            : cell;
+    const auto out    = h.arena.makeCell();
+    const auto opcode = h.convert(kind, in, out);
+    const auto cursor = h.vm.spawnCursor(opcode);
+    h.arena.setExecutionLimits(100'000, 0, 100'000);
+    EXPECT_FALSE(h.vm.step(cursor).success);
+    h.arena.setExecutionLimits(100'000, 100'000, 100'000);
+    h.vm.setCursorOpcode(cursor, opcode);
+    ASSERT_TRUE(h.vm.step(cursor).success);
+  }
+}
+
+TEST(VortexCellIntTest, StreamAndIteratorSlotsAreRefusedAsInputOrOutput) {
+  for (const auto kind : {OpcodeKind::CellOfInt, OpcodeKind::IntOfCell}) {
+    for (const bool asInput : {true, false}) {
+      for (const bool stream : {true, false}) {
+        Harness h;
+        const auto typedSlot = h.arena.makeCell("typed");
+        RuntimeBindingSnapshot bindings;
+        if (stream)
+          bindings.streams.emplace(typedSlot, std::vector<CellRef>{});
+        else
+          bindings.iterators.emplace(typedSlot, ClosedIteratorState::Exhausted);
+        h.vm.restoreBindings(bindings);
+        const auto plain  = h.arena.makeScalarCell(std::int64_t{1});
+        const auto result = asInput ? h.run(kind, typedSlot, h.arena.makeCell())
+                                    : h.run(kind, plain, typedSlot);
+        EXPECT_FALSE(result.success);
+        EXPECT_NE(result.errorMessage.find("requires scalar reference slots"),
+                  std::string::npos)
+            << result.errorMessage;
+        EXPECT_NE(result.errorMessage.find(kind == OpcodeKind::CellOfInt
+                                               ? "CellOfInt"
+                                               : "IntOfCell"),
+                  std::string::npos)
+            << result.errorMessage;
+      }
+    }
+  }
 }
 
 TEST(VortexCellIntTest, UnsupportedCompositionIsRefused) {
@@ -244,7 +279,13 @@ TEST(VortexCellIntTest, UnsupportedCompositionIsRefused) {
       const auto in     = h.arena.makeScalarCell(std::int64_t{1});
       const auto opcode = h.convert(kind, in, h.arena.makeCell());
       h.core.attachPipeline(in, h.vm.mintOpcode(OpcodeKind::Nop));
-      EXPECT_FALSE(h.vm.step(h.vm.spawnCursor(opcode)).success);
+      const auto result = h.vm.step(h.vm.spawnCursor(opcode));
+      EXPECT_FALSE(result.success);
+      EXPECT_NE(result.errorMessage.find(kind == OpcodeKind::CellOfInt
+                                             ? "CellOfInt does not support"
+                                             : "IntOfCell does not support"),
+                std::string::npos)
+          << result.errorMessage;
     }
     {
       Harness h;
@@ -287,12 +328,17 @@ TEST(VortexCellIntTest, UnsupportedCompositionIsRefused) {
       Harness h;
       const auto condition = h.convert(
           kind, h.arena.makeScalarCell(std::int64_t{1}), h.arena.makeCell());
-      const auto guarded = h.vm.mintOpcode(OpcodeKind::Nop);
-      h.core.attachPrecondition(guarded, condition);
-      const auto result = h.vm.step(h.vm.spawnCursor(guarded));
-      EXPECT_FALSE(result.success);
-      EXPECT_NE(result.errorMessage.find("cannot run as"), std::string::npos)
-          << result.errorMessage;
+      for (const bool pre : {true, false}) {
+        const auto guarded = h.vm.mintOpcode(OpcodeKind::Nop);
+        if (pre)
+          h.core.attachPrecondition(guarded, condition);
+        else
+          h.core.attachPostcondition(guarded, condition);
+        const auto result = h.vm.step(h.vm.spawnCursor(guarded));
+        EXPECT_FALSE(result.success);
+        EXPECT_NE(result.errorMessage.find("cannot run as"), std::string::npos)
+            << result.errorMessage;
+      }
     }
   }
 }
@@ -361,24 +407,78 @@ TEST(VortexCellIntTest, TheNameTablesKnowBoth) {
             "INTOFCELL");
 }
 
-TEST(VortexCellIntTest, MeshSealsAndEvaluatesBothAsPureOpcodes) {
+// A literal Int64 in an artifact is a constant, and the evaluating arena is a
+// copy-on-write view over the job's base snapshot, so CellOfInt would turn
+// the same sealed bytes into a different cell (or a host-store cell) per
+// snapshot. IntOfCell's number shifts with the same numbering. Neither can be
+// pure for a shipped artifact.
+TEST(VortexCellIntTest, MeshRefusesBothAsImpureNamingTheOpcode) {
   namespace mesh = zigzag::vortex::mesh;
-  const mesh::VortexProgram program{
-      .cells = {{}, {}, {}, {CellValue{std::string("target")}, {}}, {}, {}},
-      .instructions = {{0, OpcodeKind::IntOfCell, {3}, {4}, 1},
-                       {1, OpcodeKind::CellOfInt, {4}, {5}, 2},
-                       {2, OpcodeKind::Halt, {}, {}, {}}},
-      .entry        = 0,
-      .outputs      = {{5, true}}};
-  const auto bytes = mesh::sealVortexProgram(program);
-  ASSERT_TRUE(bytes) << bytes.error();
-  const auto result = mesh::evaluate(mesh::Frontend::Vortex, *bytes,
-                                     {100'000, 100'000, 16, 1'000'000});
-  ASSERT_TRUE(result) << result.error();
-  const auto values = mesh::readResultCells(*result);
-  ASSERT_TRUE(values) << values.error();
-  ASSERT_EQ(values->size(), 1U);
-  EXPECT_EQ(result->context->arena.textOf(values->front()), "target");
+  for (const auto kind : {OpcodeKind::CellOfInt, OpcodeKind::IntOfCell}) {
+    const mesh::VortexProgram program{
+        .cells        = {{}, {}, {CellValue{std::int64_t{5}}, {}}, {}},
+        .instructions = {{0, kind, {2}, {3}, 1},
+                         {1, OpcodeKind::Halt, {}, {}, {}}},
+        .entry        = 0,
+        .outputs      = {{3, true}}};
+    const auto sealed = mesh::sealVortexProgram(program);
+    ASSERT_FALSE(sealed) << "an artifact holding " << static_cast<int>(kind)
+                         << " was sealed";
+    EXPECT_NE(sealed.error().find(kind == OpcodeKind::CellOfInt ? "CellOfInt"
+                                                                : "IntOfCell"),
+              std::string::npos)
+        << sealed.error();
+  }
+}
+
+// A number that is an operation index inside a cell's history (a SetLink on
+// it) is not the cell's identity: two numbers must not name one cell, or
+// handle equality by number breaks. Only the birth operation names a cell.
+TEST(VortexCellIntTest, AHistoryChainIndexNamesNoCell) {
+  xanadu::UserPermascroll::Config config;
+  const auto directory =
+      std::filesystem::temp_directory_path() /
+      ("vortex_cell_int_chain_" +
+       std::to_string(
+           std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(directory);
+  config.storageDir = directory;
+  {
+    xanadu::Store store{std::make_shared<xanadu::UserPermascroll>(config)};
+    auto version     = store.sliceGenesis(xanadu::MicroversionId{});
+    version          = store.makeCell(version, "a");
+    const auto a     = store.cellRefOf(version).value();
+    version          = store.makeCell(version, "b");
+    const auto b     = store.cellRefOf(version).value();
+    const auto d     = store.makeDimension(version, "d.alias");
+    version          = store.setLink(d.version, a, d.dim, DimVector::POS, b);
+    const auto chain = store.cellRefOf(version).value();
+    ASSERT_NE(chain, a);
+    const auto base = store.rebuildManifold(version);
+    ASSERT_TRUE(base.contains(chain)) << "the chain index must be accepted by "
+                                         "contains() for this test to bite";
+    Harness h{&base};
+    const auto viaChain =
+        h.arena.makeScalarCell(static_cast<std::int64_t>(chain));
+    const auto viaBirth = h.arena.makeScalarCell(static_cast<std::int64_t>(a));
+    const auto outChain = h.arena.makeCell();
+    const auto outBirth = h.arena.makeCell();
+    ASSERT_TRUE(h.run(OpcodeKind::CellOfInt, viaChain, outChain).success);
+    ASSERT_TRUE(h.run(OpcodeKind::CellOfInt, viaBirth, outBirth).success);
+    EXPECT_FALSE(h.vm.cellReferenceOf(outChain));
+    EXPECT_EQ(h.arena.asInt64(outChain),
+              std::optional{static_cast<std::int64_t>(noCell)});
+    EXPECT_EQ(h.vm.cellReferenceOf(outBirth), a);
+    const auto same   = h.arena.makeCell();
+    const auto sameOp = h.vm.mintOpcode(OpcodeKind::SameCell);
+    h.core.bindInput(sameOp, outBirth);
+    h.core.bindInput(sameOp, outBirth);
+    h.core.bindOutput(sameOp, same);
+    EXPECT_TRUE(h.vm.step(h.vm.spawnCursor(sameOp)).success);
+    EXPECT_EQ(h.roundTrip(a), a);
+  }
+  std::error_code ignored;
+  std::filesystem::remove_all(directory, ignored);
 }
 
 struct TempDir {
@@ -449,30 +549,89 @@ TEST(VortexCellIntTest, ExportedProgramRunsAgainstTheLoadedCells) {
   EXPECT_EQ(vm.cellReferenceOf(core.outputsOf(*second).front()), target);
 }
 
-TEST(VortexCellIntTest, VagentValidatesBothAtArityOneInOneOutAndStops) {
+// Builds a two-instruction program over @p operand and exports it; the
+// exception's message, or empty when the export went through.
+std::string
+exportMessage(const std::function<void(Harness &, CellRef)> &shape) {
+  TempDir temporary;
+  auto scroll = std::make_shared<xanadu::UserPermascroll>(
+      xanadu::UserPermascroll::Config{.storageDir = temporary.path / "scroll"});
+  Harness h;
+  const auto target = h.arena.makeCell("target");
+  shape(h, target);
+  const auto first =
+      h.arena.linked(h.core.home(), h.core.dims().spin, DimVector::POS);
+  if (!first) return "no program";
+  std::vector<CellRef> chain{*first};
+  while (const auto next =
+             h.arena.linked(chain.back(), h.core.dims().spin, DimVector::POS))
+    chain.push_back(*next);
+  xanadu::Store store(scroll);
+  try {
+    static_cast<void>(exportProgram(h.core, h.vm, chain, store));
+  } catch (const std::exception &error) {
+    return error.what();
+  }
+  return {};
+}
+
+void chainOps(Harness &h, const std::vector<CellRef> &ops) {
+  const auto halt  = h.vm.mintOpcode(OpcodeKind::Halt);
+  CellRef previous = h.core.home();
+  for (const auto op : ops) {
+    ASSERT_TRUE(h.arena.link(previous, h.core.dims().spin, DimVector::POS, op));
+    previous = op;
+  }
+  ASSERT_TRUE(h.arena.link(previous, h.core.dims().spin, DimVector::POS, halt));
+}
+
+TEST(VortexCellIntTest, ExportRefusesAConstantCellNumberByName) {
+  const auto message = exportMessage([](Harness &h, const CellRef target) {
+    const auto literal =
+        h.arena.makeScalarCell(static_cast<std::int64_t>(target));
+    chainOps(h,
+             {h.convert(OpcodeKind::CellOfInt, literal, h.arena.makeCell())});
+  });
+  EXPECT_NE(message.find("CellOfInt operand is a constant"), std::string::npos)
+      << message;
+}
+
+TEST(VortexCellIntTest, ExportRefusesAMalformedConversionShape) {
+  const auto message = exportMessage([](Harness &h, const CellRef target) {
+    const auto op = h.vm.mintOpcode(OpcodeKind::IntOfCell);
+    h.core.bindInput(op, target);
+    h.core.bindInput(op, target);
+    h.core.bindOutput(op, h.arena.makeCell());
+    chainOps(h, {op});
+  });
+  EXPECT_NE(message.find("one input and one output"), std::string::npos)
+      << message;
+}
+
+// The ceilings are raised (the ordinal decodes as an op cell) but the arity
+// table has no row: a kind absent from it is refused by ordinal, because a
+// constant number would let a vagent graph read any cell by number.
+TEST(VortexCellIntTest, VagentRefusesBothByOrdinalAndStops) {
   Harness h;
   const auto root  = h.arena.makeCell();
   const auto agent = h.arena.makeCell();
   auto binds = xanadu::vagent::mintMetaBindSet(h.arena, h.core, root, agent);
   ASSERT_TRUE(binds.has_value());
   xanadu::vagent::MetaRuntime meta(h.core, h.vm, *binds);
+  EXPECT_EQ(h.arena.asInt64(binds->validate.linkedCeiling),
+            static_cast<std::int64_t>(OpcodeKind::IntOfCell));
   for (const auto kind : {OpcodeKind::CellOfInt, OpcodeKind::IntOfCell}) {
-    const auto shaped = [&](std::size_t inputs, std::size_t outputs) {
-      const auto op = h.vm.mintOpcode(kind);
-      for (std::size_t i = 0; i < inputs; ++i)
-        h.core.bindInput(op, h.arena.makeScalarCell(std::int64_t{1}));
-      for (std::size_t i = 0; i < outputs; ++i)
-        h.core.bindOutput(op, h.arena.makeCell());
-      return meta.validate(op, {.runReachable = false, .expectPure = true});
-    };
-    const auto good = shaped(1, 1);
-    EXPECT_TRUE(good.ok) << good.detail;
-    for (const auto [in, out] :
-         {std::pair{0U, 1U}, {2U, 1U}, {1U, 0U}, {1U, 2U}}) {
-      const auto bad = shaped(in, out);
-      EXPECT_FALSE(bad.ok);
-      EXPECT_NE(bad.detail.find("wing arity"), std::string::npos) << bad.detail;
-    }
+    const auto op = h.vm.mintOpcode(kind);
+    h.core.bindInput(op, h.arena.makeScalarCell(std::int64_t{1}));
+    h.core.bindOutput(op, h.arena.makeCell());
+    const auto report = meta.validate(op, {.runReachable = false});
+    EXPECT_FALSE(report.ok);
+    EXPECT_NE(report.detail.find("absent from the arity table"),
+              std::string::npos)
+        << report.detail;
+    EXPECT_NE(report.detail.find(std::to_string(static_cast<int>(kind))),
+              std::string::npos)
+        << report.detail;
   }
   const auto beyond = h.arena.makeScalarCell(
       static_cast<std::int64_t>(OpcodeKind::IntOfCell) + 1);
@@ -480,6 +639,26 @@ TEST(VortexCellIntTest, VagentValidatesBothAtArityOneInOneOutAndStops) {
   EXPECT_FALSE(unknown.ok);
   EXPECT_NE(unknown.detail.find("not an op cell"), std::string::npos)
       << unknown.detail;
+}
+
+// Both `value_or` fallbacks (isOpCell and validate) apply when the ceiling
+// cell holds no Int64; they must also stop at the enum's last ordinal.
+TEST(VortexCellIntTest, VagentCeilingFallbacksAlsoReachIntOfCell) {
+  Harness h;
+  const auto root  = h.arena.makeCell();
+  const auto agent = h.arena.makeCell();
+  auto binds = xanadu::vagent::mintMetaBindSet(h.arena, h.core, root, agent);
+  ASSERT_TRUE(binds.has_value());
+  binds->validate.linkedCeiling = h.arena.makeCell("not a number");
+  xanadu::vagent::MetaRuntime meta(h.core, h.vm, *binds);
+  const auto op = h.vm.mintOpcode(OpcodeKind::IntOfCell);
+  h.core.bindInput(op, h.arena.makeScalarCell(std::int64_t{1}));
+  h.core.bindOutput(op, h.arena.makeCell());
+  const auto report = meta.validate(op, {.runReachable = false});
+  EXPECT_FALSE(report.ok);
+  EXPECT_NE(report.detail.find("absent from the arity table"),
+            std::string::npos)
+      << report.detail;
 }
 
 } // namespace

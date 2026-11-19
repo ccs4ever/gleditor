@@ -202,10 +202,6 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::VqlAdd:
   case OpcodeKind::VqlBoxScalar:
   case OpcodeKind::ProbeLink:
-  // Pure reads of the evaluating arena's own cells: the number is computed
-  // and consumed inside the one private arena the artifact builds.
-  case OpcodeKind::CellOfInt:
-  case OpcodeKind::IntOfCell:
   case OpcodeKind::And:
   case OpcodeKind::Or:
   case OpcodeKind::Not:
@@ -267,6 +263,12 @@ bool pureOpcode(OpcodeKind opcode) {
   // Reads the evaluating arena's links, which no artifact carries, so its
   // answer is not a function of the operands.
   case OpcodeKind::VqlMaskProbe:
+  // The evaluating arena is copy-on-write over the job's base snapshot, so a
+  // literal Int64 names whatever cell the snapshot holds at that number, and
+  // the numbers IntOfCell returns shift with the snapshot and with genesis.
+  // The same sealed bytes would answer differently per arena.
+  case OpcodeKind::CellOfInt:
+  case OpcodeKind::IntOfCell:
     return false;
   case OpcodeKind::ResumeInit:
   case OpcodeKind::ResumeSet:
@@ -360,6 +362,13 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
       throw std::runtime_error(
           "Vortex mesh does not support VqlMaskProbe: it reads the links of "
           "the evaluating arena");
+    if (instruction.opcode == OpcodeKind::CellOfInt ||
+        instruction.opcode == OpcodeKind::IntOfCell)
+      throw std::runtime_error(
+          std::string{"Vortex mesh does not support "} +
+          (instruction.opcode == OpcodeKind::CellOfInt ? "CellOfInt"
+                                                       : "IntOfCell") +
+          ": a cell number depends on the evaluating arena's snapshot");
     if (instruction.opcode == OpcodeKind::ProjectTopology)
       throw std::runtime_error(
           "Vortex mesh does not support ProjectTopology: it mints cells on "

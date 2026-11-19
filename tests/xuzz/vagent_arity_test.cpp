@@ -71,6 +71,10 @@ const std::set<OpcodeKind> &deliberatelyRefused() {
       OpcodeKind::CheckClosureCall,
       OpcodeKind::GroupBegin,
       OpcodeKind::GroupNext,
+      // Ceiling raised, no arity row: a constant number would let a graph
+      // forge a reference to any cell.
+      OpcodeKind::CellOfInt,
+      OpcodeKind::IntOfCell,
   };
   return kinds;
 }

@@ -229,20 +229,28 @@ enum class OpcodeKind : std::uint8_t {
   // cell reference when that cell exists in the arena and the VM's absent
   // reference (noCell) otherwise. A pure read of the arena, one unit of work.
   //
+  // Only a cell's birth operation names it: a number that is an operation
+  // index inside a cell's history (a SetLink on it) yields the absent
+  // reference, so one cell never has two numbers.
+  //
   // HAZARD, stated plainly: a cell number held as an Int64 is not protected
-  // against reuse. A number kept across a release()/discard() or an arena
-  // compaction can later name a different cell that was minted into the same
-  // slot, and this opcode will hand that cell back without complaint. The
-  // release epoch that closes this gap is a separate, later card; until then
-  // a program must not keep such a number past the lifetime of the cell it
-  // names. Appended to preserve persisted opcode-kind integers.
+  // against reuse. A number kept across a release() or discard() can later
+  // name a different cell minted into the same slot, and this opcode will hand
+  // that cell back without complaint. The release epoch that closes this gap
+  // is a separate, later card; until then a program must not keep such a
+  // number past the lifetime of the cell it names. Not mesh-pure: the number
+  // depends on the evaluating arena's snapshot. Appended to preserve persisted
+  // opcode-kind integers.
   CellOfInt,
 
   // Cell -> Int64: the inverse of CellOfInt. One cell or reference slot in;
   // one raw Int64 out, equal to that cell's number (never itself published as
   // a reference). It refuses an absent or non-cell operand by name. It carries
-  // the same unprotected-number hazard as CellOfInt. Appended to preserve
-  // persisted opcode-kind integers.
+  // the same unprotected-number hazard as CellOfInt, and one more: an
+  // ephemeral cell's number has the ephemeral bit set, and promote() retargets
+  // ephemeral references but not a bare Int64, so a number held across
+  // promote() is stale (and can be persisted as data with that bit in it).
+  // Appended to preserve persisted opcode-kind integers.
   IntOfCell,
 };
 

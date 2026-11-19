@@ -165,20 +165,14 @@ bool publishesLogicReference(const OpcodeKind kind) {
          kind == OpcodeKind::Deref;
 }
 
-// CellOfInt and IntOfCell are pure arena reads with a fixed one-in one-out
-// shape. Like ProbeLink they are refused as conditions, in parameter pipelines
-// and under memoization: a cell number is an address, not a value to cache.
-bool isCellNumberConversion(const OpcodeKind kind) noexcept {
-  return kind == OpcodeKind::CellOfInt || kind == OpcodeKind::IntOfCell;
-}
-
 // Readers of host state (a registered provider, the arena's position, its
 // dimension table). Like CurrentTimestamp they cannot run where a graph is
 // re-evaluated for its truth value or as a parameter pipeline, and are never
 // memoized: the same inputs do not give the same output.
 bool readsHostState(const OpcodeKind kind) noexcept {
   return kind == OpcodeKind::RelationNext || kind == OpcodeKind::DimByName ||
-         kind == OpcodeKind::Hypertime;
+         kind == OpcodeKind::Hypertime || kind == OpcodeKind::CellOfInt ||
+         kind == OpcodeKind::IntOfCell;
 }
 
 double toDouble(const CellValue &val) {
@@ -925,9 +919,17 @@ ExecutionResult VortexVM::executeCellOfInt(const CellRef opcode,
       return fail("CellOfInt operand is outside the cell number range");
 
     core_.arena().consumeWork();
-    // writeCellReferences publishes this as a reference when the cell exists
-    // and as noCell otherwise; an absent number is an answer, not a fault.
-    outputs.emplace_back(*number);
+    // contains() also accepts an operation index inside a cell's history (a
+    // SetLink on it), which is not the cell: two numbers would name one cell
+    // and handle equality by number would break. Only the birth operation is
+    // the cell's identity, so any other index is an absent cell. The result is
+    // published through writeCellReferences: a reference when the cell exists,
+    // noCell otherwise; an absent number is an answer, not a fault.
+    const auto candidate = static_cast<CellRef>(*number);
+    const auto slot      = core_.arena().slot(candidate);
+    const bool canonical = slot && slot->birthOp == candidate;
+    outputs.emplace_back(canonical ? *number
+                                   : static_cast<std::int64_t>(noCell));
     return {};
   } catch (const std::exception &error) {
     return fail(error.what());
@@ -961,6 +963,10 @@ ExecutionResult VortexVM::executeIntOfCell(const CellRef opcode,
       return fail(*refusal);
     if (!core_.arena().contains(slots.front()))
       return fail("IntOfCell output slot is missing");
+    // CellOfInt gets this from inputValue and writeCellReferences; IntOfCell
+    // resolves its operand itself, so it asks here.
+    if (isGroupsPort(inputs.front()) || isGroupsPort(slots.front()))
+      return fail("IntOfCell cannot use a private Groups port");
 
     // A slot that carries a reference names its target; a bare slot is the
     // cell itself. An absent reference or a cell the arena does not hold is
@@ -1948,9 +1954,6 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
                                   "VqlMaskProbe cannot run in a parameter "
                                   "pipeline");
     }
-    if (isCellNumberConversion(kind))
-      throw std::invalid_argument(
-          "CellOfInt/IntOfCell cannot run in a parameter pipeline");
     if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
         kind == OpcodeKind::VqlBoxScalar ||
         kind == OpcodeKind::CurrentTimestamp)
@@ -1958,8 +1961,8 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
           "VQL scalar opcodes cannot run in a parameter pipeline");
     if (readsHostState(kind))
       throw std::invalid_argument(
-          "RelationNext/DimByName/Hypertime cannot run in a parameter "
-          "pipeline");
+          "RelationNext/DimByName/Hypertime/CellOfInt/IntOfCell cannot run in "
+          "a parameter pipeline");
     if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
         kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
         kind == OpcodeKind::CheckClosureCall ||
@@ -2111,14 +2114,13 @@ bool VortexVM::evaluateCondition(CellRef clause,
       kind == OpcodeKind::VqlMaskLinks || kind == OpcodeKind::VqlMaskProbe)
     throw std::invalid_argument("ProbeLink/VqlFieldProbe/VqlMaskLinks/"
                                 "VqlMaskProbe cannot run as conditions");
-  if (isCellNumberConversion(kind))
-    throw std::invalid_argument("CellOfInt/IntOfCell cannot run as conditions");
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
       kind == OpcodeKind::VqlBoxScalar || kind == OpcodeKind::CurrentTimestamp)
     throw std::invalid_argument("scalar opcodes cannot run as conditions");
   if (readsHostState(kind))
     throw std::invalid_argument(
-        "RelationNext/DimByName/Hypertime cannot run as conditions");
+        "RelationNext/DimByName/Hypertime/CellOfInt/IntOfCell cannot run as "
+        "conditions");
   if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
     throw std::invalid_argument(
         "activation-frame opcodes cannot run as conditions");
@@ -4543,15 +4545,6 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
              clauseKind == OpcodeKind::VqlMaskProbe;
     });
   };
-  const auto hasCellNumberCondition = [this](const auto &clauses) {
-    return std::ranges::any_of(clauses, [this](const CellRef clause) {
-      const CellRef actual = core_.arena()
-                                 .cloneMaster(clause, core_.dims().clone)
-                                 .value_or(clause);
-      const auto clauseKind = getOpcodeKind(actual);
-      return clauseKind && isCellNumberConversion(*clauseKind);
-    });
-  };
   const auto hasVqlScalarCondition = [this](const auto &clauses) {
     return std::ranges::any_of(clauses, [this](const CellRef clause) {
       const CellRef actual = core_.arena()
@@ -4633,11 +4626,6 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
             "ProbeLink/VqlFieldProbe/VqlMaskLinks/VqlMaskProbe cannot run as "
             "conditions"};
   }
-  if (hasCellNumberCondition(core_.preconditionsOf(*op)) ||
-      hasCellNumberCondition(core_.postconditionsOf(*op))) {
-    return {.success      = false,
-            .errorMessage = "CellOfInt/IntOfCell cannot run as conditions"};
-  }
   if (hasVqlScalarCondition(core_.preconditionsOf(*op)) ||
       hasVqlScalarCondition(core_.postconditionsOf(*op))) {
     return {.success      = false,
@@ -4645,9 +4633,10 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
   }
   if (hasHostStateCondition(core_.preconditionsOf(*op)) ||
       hasHostStateCondition(core_.postconditionsOf(*op))) {
-    return {.success = false,
-            .errorMessage =
-                "RelationNext/DimByName/Hypertime cannot run as conditions"};
+    return {.success      = false,
+            .errorMessage = "RelationNext/DimByName/Hypertime/CellOfInt/"
+                            "IntOfCell cannot run as "
+                            "conditions"};
   }
   if (kind == OpcodeKind::RelationNext) {
     if (!core_.preconditionsOf(*op).empty() ||
@@ -4867,8 +4856,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
           kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
           kind == OpcodeKind::CurrentTimestamp ||
           kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlMaskLinks ||
-          kind == OpcodeKind::VqlMaskProbe || isCellNumberConversion(kind) ||
-          kind == OpcodeKind::ScopedChoice ||
+          kind == OpcodeKind::VqlMaskProbe || kind == OpcodeKind::CellOfInt ||
+          kind == OpcodeKind::IntOfCell || kind == OpcodeKind::ScopedChoice ||
           kind == OpcodeKind::VqlFieldProbe ||
           kind == OpcodeKind::RelationNext) {
         oldInputs.emplace_back(false);
@@ -4912,8 +4901,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
       kind != OpcodeKind::ProbeLink && kind != OpcodeKind::VqlMaskLinks &&
       kind != OpcodeKind::VqlMaskProbe && kind != OpcodeKind::VqlFieldProbe &&
-      !isCellNumberConversion(kind) && !readsHostState(kind) &&
-      !publishesLogicReference(kind) && !stateful;
+      !readsHostState(kind) && !publishesLogicReference(kind) && !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);

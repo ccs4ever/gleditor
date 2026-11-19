@@ -150,14 +150,14 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       {static_cast<std::int64_t>(OpcodeKind::Halt), 0, 0},
       {static_cast<std::int64_t>(OpcodeKind::Nop), 0, 0},
       // The ceiling scalar above is IntOfCell, the enum's last ordinal.
+      // CellOfInt/IntOfCell are decodable (the ceiling reaches them) but stay
+      // absent: a constant number would forge a reference to any cell.
       // Host-state operations and closure operations remain absent from this
       // table; a kind absent here makes validation refuse it by ordinal.
       // The two kinds below are variadic: `in` is the fixed head and
       // kVariadic lists their stride.
       {static_cast<std::int64_t>(OpcodeKind::ProjectTopology), 3, 1},
       {static_cast<std::int64_t>(OpcodeKind::VqlMaskProbe), 2, 1},
-      {static_cast<std::int64_t>(OpcodeKind::CellOfInt), 1, 1},
-      {static_cast<std::int64_t>(OpcodeKind::IntOfCell), 1, 1},
       {static_cast<std::int64_t>(OpcodeKind::Find), 2, 1},
       {static_cast<std::int64_t>(OpcodeKind::FieldSet), 3, 1},
       {static_cast<std::int64_t>(OpcodeKind::RunCall), 4, 0},
