@@ -716,10 +716,12 @@ form that fixes this and follows the shape of the other primitives: it is an `IO
 it. Performing it *peeks*: it reports whether the input holds another character without consuming
 one, so a following `getLine` returns the next line and no line is lost, and asking twice gives the
 same answer. A final line with no trailing newline is still a line (`isEOF` is false until it is
-read) and input that is a lone newline is one empty line, not the end. It is a result in `IO` rather
-than a pure `Bool` because the answer changes as input is read; using it as a `Bool` is a type error
-that names it. No `until`/`whileM` combinator is added: the loop is ordinary recursion in `IO`,
-which the runner already trampolines in constant depth.
+read) and input that is a lone newline is one empty line, not the end. Like `getLine` it blocks on
+an interactive stream until a character or end of input arrives, and it tests the host input stream,
+not any store or cell state. It is a result in `IO` rather than a pure `Bool` because the answer
+changes as input is read; using it as a `Bool` is a type error that names it. No `until`/`whileM`
+combinator is added: the loop is ordinary recursion in `IO`, which the runner already trampolines in
+constant depth.
 
 ```ocaml
 loop = isEOF >>= (fn done => if done then pure 0 else getLine >>= (fn l => putStrLn l >> loop))

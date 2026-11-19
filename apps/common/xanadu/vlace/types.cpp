@@ -809,13 +809,13 @@ std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
             const auto cond = prune(*c);
             if (var != nullptr && cond->kind == Ty::Kind::Con &&
                 cond->con == "IO") {
-              return terr(CompileError::TypeMismatch,
-                          "'" + var->name + "' is an IO action (" +
-                              renderType(cond) +
-                              "), not its result: the condition of `if` "
-                              "needs a Bool, so bind it first, as in `" +
-                              var->name + " >>= (fn x => if x then ...)`",
-                          node.cond->loc);
+              return terr(
+                  CompileError::TypeMismatch,
+                  "'" + var->name + "' is an IO action (" + renderType(cond) +
+                      "), not its result: the condition of `if` "
+                      "needs a Bool, so bind it first with >>= and test "
+                      "the result",
+                  node.cond->loc);
             }
             return std::unexpected(u1.error());
           }

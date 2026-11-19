@@ -211,11 +211,13 @@ std::expected<ValuePtr, EvalError> runIoOnVm(Compiler &compiler,
                             std::to_string(curAction->args.size()),
                         {});
           }
-          // peek() looks at the next character without extracting it, so the
-          // line a following getLine returns is unchanged. It is the only
-          // test that is right for a final line with no newline (the stream
-          // still holds characters) and for input that is a lone newline (one
-          // empty line, not the end).
+          // C++ and not Vortex because it interfaces the host stream: the VM
+          // has no handle on `in`, which only this runner owns (as for
+          // getLine). peek() looks at the next character without extracting it,
+          // so the line a following getLine returns is unchanged. It is the
+          // only test that is right for a final line with no newline (the
+          // stream still holds characters) and for input that is a lone newline
+          // (one empty line, not the end).
           auto flag  = std::make_shared<Value>();
           flag->kind = Value::Kind::Bool;
           flag->b    = in.peek() == std::istream::traits_type::eof();

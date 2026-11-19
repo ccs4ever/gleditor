@@ -52,12 +52,13 @@ TEST(VlaceIsEofTest, HasTypeIOBool) { EXPECT_EQ(typeOf("isEOF"), "IO Bool"); }
 
 TEST(VlaceIsEofTest, MisuseAsABoolIsATypeErrorNamingIsEOF) {
   const std::string misuse = "if isEOF then 1 else 2";
-  const auto t             = typeOf(misuse);
-  EXPECT_EQ(t.rfind("ERR:", 0), 0u) << t;
-  EXPECT_NE(t.find("isEOF"), std::string::npos) << t;
+  const std::string hint = "'isEOF' is an IO action (IO Bool), not its result";
+  const auto t           = typeOf(misuse);
+  EXPECT_NE(t.find(hint), std::string::npos) << t;
+  EXPECT_EQ(t.find("unbound"), std::string::npos) << t;
   const auto r = perform(misuse);
   ASSERT_TRUE(r.error.has_value());
-  EXPECT_NE(Driver::formatError(*r.error).find("isEOF"), std::string::npos)
+  EXPECT_NE(Driver::formatError(*r.error).find(hint), std::string::npos)
       << Driver::formatError(*r.error);
 }
 
@@ -129,15 +130,19 @@ TEST(VlaceIsEofTest, GetLineAtEndIsStillTheNamedError) {
       << after.error->detail;
 }
 
-// A built description peeks nothing; the peek happens when it is performed,
-// after the earlier effect and before the later one.
+// A built description peeks nothing; the peek happens when it is performed.
+// `p` is built before the line is read, so a peek taken while building would
+// answer False where the performed one, after the only line is gone, is True.
 TEST(VlaceIsEofTest, ABuiltPeekRunsNothingUntilPerformed) {
-  const auto r = perform("let p = isEOF in pure 1", "");
+  const auto r = perform("let p = isEOF in getLine >> p", "a\n");
   ASSERT_FALSE(r.error.has_value()) << r.error->detail;
-  EXPECT_EQ(r.value, "1");
+  EXPECT_EQ(r.value, "True");
   const auto ordered = perform("getLine >> isEOF", "a\n");
   ASSERT_FALSE(ordered.error.has_value()) << ordered.error->detail;
   EXPECT_EQ(ordered.value, "True");
+  const auto unused = perform("let p = isEOF in pure 1", "");
+  ASSERT_FALSE(unused.error.has_value()) << unused.error->detail;
+  EXPECT_EQ(unused.value, "1");
 }
 
 TEST(VlaceIsEofTest, ALoopReadsUntilEndOfInput) {
@@ -149,25 +154,36 @@ TEST(VlaceIsEofTest, ALoopReadsUntilEndOfInput) {
   EXPECT_EQ(r.value, "0");
 }
 
-// VM-FRAME makes each step cost what the one before did, so a long input is
-// linear. The counter is compared each step so it is forced then; a counter
-// only used at the end would be a 10,000-deep thunk chain, which is the
-// program's laziness and not the input loop's.
-TEST(VlaceIsEofTest, TenThousandLinesRunInLinearTime) {
+// VM-FRAME makes each step cost what the one before did, so the loop is linear
+// in the input. The counter is compared each step so it is forced then; a
+// counter used only at the end would be a deep thunk chain, which is the
+// program's laziness and not the input loop's. Linearity is checked by the
+// ratio of two sizes, 4x apart: linear gives about 4, quadratic about 16, so a
+// bound of 8 (the geometric middle) separates them with room for timing noise.
+double secondsToCount(int lines) {
   std::string input;
-  constexpr int lines = 10000;
   for (int i = 0; i < lines; ++i) input += "x\n";
   const auto start = std::chrono::steady_clock::now();
   const auto r     = perform("count n = isEOF >>= (fn e => if e then pure n "
                                  "else if n < 0 then pure n else getLine >> "
                                  "count (n + 1)) ; count 0",
                              input);
-  ASSERT_FALSE(r.error.has_value()) << r.error->detail;
-  EXPECT_EQ(r.value, "10000");
-  const auto seconds =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
-          .count();
-  EXPECT_LT(seconds, 120.0);
+  EXPECT_FALSE(r.error.has_value())
+      << (r.error ? Driver::formatError(*r.error) : "");
+  EXPECT_EQ(r.value, std::to_string(lines));
+  return std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+      .count();
+}
+
+TEST(VlaceIsEofTest, LongInputRunsInLinearTime) {
+  constexpr int small       = 500;
+  constexpr int large       = 2000;
+  constexpr double maxRatio = 8.0;
+  const double tSmall       = secondsToCount(small);
+  const double tLarge       = secondsToCount(large);
+  EXPECT_LT(tLarge / tSmall, maxRatio)
+      << small << " lines: " << tSmall << " s, " << large
+      << " lines: " << tLarge << " s";
 }
 
 } // namespace
