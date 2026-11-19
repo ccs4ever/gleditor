@@ -882,14 +882,19 @@ public:
 
   /// A release epoch: how many times release() has truncated cells away. A
   /// cell number is reused after such a release, so a number alone does not
-  /// name a cell for long; a (number, epoch) pair does. Only a truncating
-  /// release() (and hydratePrefix(), which replaces the cells) advances it,
-  /// so it only grows. It is arena-local: it says nothing about a copy that
-  /// has since diverged.
+  /// name a cell for long; a (number, epoch) pair does. A truncating
+  /// release(), hydratePrefix(), and assigning one arena over another (all of
+  /// which replace cells) advance it, so across every one of those it only
+  /// grows, and an assignment lands strictly above both arenas' epochs: a
+  /// witness taken from either arena before the assignment cannot validate a
+  /// cell after it. It is arena-local: it says nothing about a copy that has
+  /// since diverged.
   using ReleaseEpoch = std::uint64_t;
 
   /// The epoch cells minted now would be born in.
-  [[nodiscard]] ReleaseEpoch releaseEpoch() const noexcept { return epoch_; }
+  [[nodiscard]] ReleaseEpoch releaseEpoch() const noexcept {
+    return epochs_.epoch;
+  }
 
   /**
    * @brief The epoch @p ref was minted in, or nullopt when no such cell exists.
@@ -1058,15 +1063,42 @@ private:
   std::uint64_t lastMarkSerial_{0};
 
   /// Cells [firstDense, next run's firstDense) were minted in `epoch`; cells
-  /// before the first run are epoch 0. Runs ascend by firstDense. One is added
-  /// only when a release truncates, so the cost is one entry per truncating
-  /// release above a live cell, not a word per cell.
+  /// before the first run (and base cells) were minted in `floor`. Runs ascend
+  /// by firstDense. One is added only when a release truncates, so the cost is
+  /// one entry per truncating release above a live cell, not a word per cell.
   struct EpochRun {
     std::uint32_t firstDense{0};
     ReleaseEpoch epoch{0};
   };
-  std::vector<EpochRun> epochRuns_;
-  ReleaseEpoch epoch_{0};
+  /// Its own type so that the defaulted copy/move assignment of the arena
+  /// replaces cells *and* moves the epoch strictly forward, instead of
+  /// restarting it at 0 and letting an old witness validate a new cell.
+  struct EpochState {
+    ReleaseEpoch epoch{0};
+    ReleaseEpoch floor{0};
+    std::vector<EpochRun> runs;
+
+    EpochState()                       = default;
+    EpochState(const EpochState &)     = default;
+    EpochState(EpochState &&) noexcept = default;
+    EpochState &operator=(const EpochState &other) noexcept {
+      return replacedBy(other);
+    }
+    EpochState &operator=(EpochState &&other) noexcept {
+      return replacedBy(other);
+    }
+    ~EpochState() = default;
+
+  private:
+    EpochState &replacedBy(const EpochState &other) noexcept {
+      if (this == &other) return *this;
+      epoch = std::max(epoch, other.epoch) + 1;
+      floor = epoch;
+      runs.clear();
+      return *this;
+    }
+  };
+  EpochState epochs_;
 
   /// The refusal for releasing or discarding @p m now, if any.
   [[nodiscard]] std::optional<MarkRefusal>

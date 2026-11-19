@@ -127,6 +127,9 @@ void VQLEngine::clearVariables() noexcept {
   functors_.clear();
   putGetLenses_.clear();
   compiledShapes_.clear();
+  // Records describe the entries just cleared; a leftover one would condemn
+  // a fresh handle that happens to reuse the number.
+  shapeEpochs_.clear();
 }
 
 std::unordered_map<std::string, std::vector<PathStep>>
@@ -198,9 +201,16 @@ std::vector<zigzag::CellRef> VQLEngine::pruneStaleShapes() {
 void VQLEngine::publishShapes(ShapeTable shapes,
                               const std::span<const zigzag::CellRef> results) {
   std::erase_if(shapes, [&](const auto &entry) {
+    const auto born = arena().epochOfCell(entry.first);
+    if (!born) {
+      // Nothing to record an epoch from, and a later cell minted at this number
+      // would otherwise inherit the entry unchecked.
+      GLEDITOR_LOG_DEBUG("vql.execution", "dropped handle {}: {}", entry.first,
+                         notACellReason);
+      return true;
+    }
     const auto recorded = shapeEpochs_.find(entry.first);
-    if (recorded == shapeEpochs_.end() ||
-        arena().epochOfCell(entry.first) == recorded->second)
+    if (recorded == shapeEpochs_.end() || *born == recorded->second)
       return false;
     GLEDITOR_LOG_DEBUG("vql.execution", "dropped handle {}: {}", entry.first,
                        staleHandleReason);

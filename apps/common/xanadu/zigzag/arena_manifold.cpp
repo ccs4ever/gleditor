@@ -2475,11 +2475,11 @@ ArenaManifold::epochOfCell(const CellRef ref) const {
   if (!contains(ref)) return std::nullopt;
   // denseOf() also answers for a shadowed base cell, which is not born here.
   const auto dense = isEphemeral(ref) ? denseOf(ref) : std::nullopt;
-  if (!dense) return ReleaseEpoch{0};
+  if (!dense) return epochs_.floor;
   const auto after =
-      std::ranges::upper_bound(epochRuns_, *dense, {}, &EpochRun::firstDense);
-  return after == epochRuns_.begin() ? ReleaseEpoch{0}
-                                     : std::prev(after)->epoch;
+      std::ranges::upper_bound(epochs_.runs, *dense, {}, &EpochRun::firstDense);
+  return after == epochs_.runs.begin() ? epochs_.floor
+                                       : std::prev(after)->epoch;
 }
 
 Mark ArenaManifold::mark() {
@@ -2678,11 +2678,12 @@ MarkResult ArenaManifold::release(const Mark &m) noexcept {
     // These numbers are handed out again; the runs at or above the cut
     // describe cells that no longer exist, and the next cells are a later
     // epoch.
-    while (!epochRuns_.empty() && epochRuns_.back().firstDense >= m.cellCount) {
-      epochRuns_.pop_back();
+    while (!epochs_.runs.empty() &&
+           epochs_.runs.back().firstDense >= m.cellCount) {
+      epochs_.runs.pop_back();
     }
-    epochRuns_.push_back(
-        EpochRun{.firstDense = m.cellCount, .epoch = ++epoch_});
+    epochs_.runs.push_back(
+        EpochRun{.firstDense = m.cellCount, .epoch = ++epochs_.epoch});
   }
   slots_.resize(m.cellCount);
   links_.resize(m.linkSize);
@@ -3563,7 +3564,8 @@ ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
                           .content = m.contentSize});
 
   // Every number now names a different cell than before the swap.
-  epochRuns_.assign(1, EpochRun{.firstDense = 0, .epoch = ++epoch_});
+  epochs_.floor = ++epochs_.epoch;
+  epochs_.runs.clear();
   slots_.swap(slots);
   links_.swap(links);
   content_.swap(content);

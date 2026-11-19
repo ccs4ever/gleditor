@@ -8,6 +8,9 @@
 
 #include <cstdint>
 
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace {
@@ -123,6 +126,85 @@ TEST(ArenaReleaseEpochTest, ACopyCarriesTheWitnessesOfTheMomentItWasTaken) {
   const ArenaManifold copy = arena;
   EXPECT_EQ(copy.epochOfCell(a), arena.epochOfCell(a));
   EXPECT_EQ(copy.releaseEpoch(), arena.releaseEpoch());
+}
+
+TEST(ArenaReleaseEpochTest, NestedReleasesPopTheRunsAboveTheirCut) {
+  ArenaManifold arena;
+  const auto m1 = arena.mark();
+  const auto a  = arena.makeCell("a");
+  const auto m2 = arena.mark();
+  const auto b  = arena.makeCell("b");
+  ASSERT_TRUE(arena.release(m2));
+  const auto c = arena.makeCell("c");
+  ASSERT_EQ(c, b);
+  ASSERT_EQ(arena.epochOfCell(c), std::optional<std::uint64_t>{1});
+  ASSERT_TRUE(arena.release(m1));
+  EXPECT_EQ(arena.epochOfCell(a), std::nullopt);
+  EXPECT_EQ(arena.epochOfCell(c), std::nullopt);
+  const auto d = arena.makeCell("d");
+  const auto e = arena.makeCell("e");
+  ASSERT_EQ(d, a);
+  ASSERT_EQ(e, b);
+  // The epoch-1 run that described c died with it: e is not epoch 1.
+  EXPECT_EQ(arena.epochOfCell(d), std::optional<std::uint64_t>{2});
+  EXPECT_EQ(arena.epochOfCell(e), std::optional<std::uint64_t>{2});
+}
+
+TEST(ArenaReleaseEpochTest, AssignmentMovesTheEpochStrictlyForward) {
+  ArenaManifold arena;
+  const auto m = arena.mark();
+  arena.makeCell("scratch");
+  ASSERT_TRUE(arena.release(m));
+  const auto witnessed = arena.makeCell("witnessed");
+  const auto witness   = arena.epochOfCell(witnessed);
+  const auto before    = arena.releaseEpoch();
+
+  arena = ArenaManifold{};
+  EXPECT_GT(arena.releaseEpoch(), before);
+  const auto fresh = arena.makeCell("fresh");
+  ASSERT_EQ(fresh, witnessed);
+  EXPECT_NE(arena.epochOfCell(fresh), witness);
+
+  const auto afterMove = arena.releaseEpoch();
+  const ArenaManifold other;
+  arena = other;
+  EXPECT_GT(arena.releaseEpoch(), afterMove);
+  EXPECT_GT(arena.releaseEpoch(), other.releaseEpoch());
+}
+
+TEST(ArenaReleaseEpochTest,
+     ASurvivingWitnessFromTheSourceArenaDoesNotValidate) {
+  ArenaManifold source;
+  const auto m = source.mark();
+  source.makeCell("scratch");
+  ASSERT_TRUE(source.release(m));
+  source.makeCell("x");
+  const auto witness = source.epochOfCell(ArenaManifold::refOf(0));
+  ArenaManifold target;
+  target.makeCell("y");
+  target = source;
+  EXPECT_NE(target.epochOfCell(ArenaManifold::refOf(0)), witness);
+}
+
+TEST(ArenaReleaseEpochTest, ABaseCellAndItsShadowShareTheFloorEpoch) {
+  auto scroll = std::make_shared<xanadu::UserPermascroll>();
+  xanadu::Store store{scroll};
+  const auto head = store.sliceGenesis(xanadu::MicroversionId{});
+  const auto dim  = store.makeDimension(head, "d.c").dim;
+  const auto home = store.homeCell().value();
+  const auto base = store.rebuildManifold(store.latest());
+
+  ArenaManifold arena{&base};
+  const auto floor = arena.releaseEpoch();
+  ASSERT_EQ(arena.epochOfCell(home), std::optional<std::uint64_t>{floor});
+  const auto m     = arena.mark();
+  const auto other = arena.makeCell("scratch");
+  // Writing the base cell shadows it; the shadow is the same cell.
+  ASSERT_TRUE(arena.link(home, dim, zigzag::DimVector::POS, other));
+  EXPECT_EQ(arena.epochOfCell(home), std::optional<std::uint64_t>{floor});
+  ASSERT_TRUE(arena.release(m));
+  EXPECT_GT(arena.releaseEpoch(), floor);
+  EXPECT_EQ(arena.epochOfCell(home), std::optional<std::uint64_t>{floor});
 }
 
 } // namespace

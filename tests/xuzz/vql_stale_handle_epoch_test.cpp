@@ -86,4 +86,52 @@ TEST(VqlStaleHandleEpochTest, LiveHandleKeepsItsEntryAcrossReleases) {
   EXPECT_TRUE(engine.compilerShapes().contains(handle));
 }
 
+TEST(VqlStaleHandleEpochTest, NestedMarksKeepTheOuterHandleAndDropTheInnerOne) {
+  zigzag::ArenaManifold arena;
+  xanadu::vql::VQLEngine engine(arena);
+  const auto source = arena.makeCell("source");
+  const auto outer  = arena.mark();
+  const auto h1     = arena.makeCell("h1");
+  const auto inner  = arena.mark();
+  const auto h2     = arena.makeCell("h2");
+  auto table        = tableOf(h1, source);
+  table.merge(tableOf(h2, source));
+  engine.publishShapes(std::move(table), {});
+  ASSERT_EQ(engine.shapeCount(), 2u);
+  ASSERT_TRUE(arena.release(inner));
+  ASSERT_EQ(arena.makeCell("someone else"), h2);
+
+  engine.publishShapes(engine.compilerShapes(), {});
+  EXPECT_TRUE(engine.compilerShapes().contains(h1));
+  EXPECT_FALSE(engine.compilerShapes().contains(h2));
+  ASSERT_TRUE(arena.release(outer));
+}
+
+TEST(VqlStaleHandleEpochTest, ClearVariablesForgetsTheRecordedEpochs) {
+  zigzag::ArenaManifold arena;
+  xanadu::vql::VQLEngine engine(arena);
+  const auto source = arena.makeCell("source");
+  const auto m      = arena.mark();
+  const auto h1     = arena.makeCell("h1");
+  engine.publishShapes(tableOf(h1, source), {});
+  ASSERT_TRUE(arena.release(m));
+  engine.clearVariables();
+  const auto h2 = arena.makeCell("h2");
+  ASSERT_EQ(h2, h1);
+
+  engine.publishShapes(tableOf(h2, source), {});
+  EXPECT_TRUE(engine.compilerShapes().contains(h2));
+}
+
+TEST(VqlStaleHandleEpochTest, AnEntryWhoseKeyIsNotACellIsRefusedNotKept) {
+  zigzag::ArenaManifold arena;
+  xanadu::vql::VQLEngine engine(arena);
+  const auto source = arena.makeCell("source");
+  const auto absent = zigzag::ArenaManifold::refOf(1u << 20);
+  ASSERT_FALSE(arena.contains(absent));
+  engine.publishShapes(tableOf(absent, source), {});
+  EXPECT_EQ(engine.shapeCount(), 0u);
+  EXPECT_FALSE(xanadu::vql::VQLEngine::notACellReason.empty());
+}
+
 } // namespace

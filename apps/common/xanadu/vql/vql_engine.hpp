@@ -127,6 +127,9 @@ public:
   static constexpr std::string_view staleHandleReason =
       "the handle's cell was released and its number now names a different "
       "cell";
+  /// Why an entry is refused when its key is not a cell of the arena.
+  static constexpr std::string_view notACellReason =
+      "the handle's key is not a cell of the arena";
   /// Drops every entry whose cell was minted in a different release epoch than
   /// the one recorded when it was published, so a released handle's number,
   /// reused by a new cell, cannot hand that cell the old entry. A live handle
