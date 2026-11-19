@@ -481,6 +481,12 @@ ExecutionResult VortexVM::invokeFramePrepared(
   auto previousFrames             = activationFrames_;
   auto previousCursorPC           = cursorPC_;
   const auto previousStreamCursor = streamCursor_;
+  frameTableEntriesCopied_ +=
+      previousReferences.size() + previousStreams.size() +
+      previousIterators.size() + previousGroupIterators.size() +
+      previousGroupOwners.size() + previousStreamSlots.size() +
+      previousIteratorSlots.size() + previousGroupIteratorSlots.size() +
+      previousFrames.size() + previousCursorPC.size();
   if (std::ranges::any_of(descriptor.argumentPorts,
                           [](const FramePort &port) {
                             return port.kind != FramePortKind::Cell;
@@ -764,6 +770,12 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
   auto previousFrames             = activationFrames_;
   auto previousCursorPC           = cursorPC_;
   const auto previousStreamCursor = streamCursor_;
+  frameTableEntriesCopied_ +=
+      previousReferences.size() + previousStreams.size() +
+      previousIterators.size() + previousGroupIterators.size() +
+      previousGroupOwners.size() + previousStreamSlots.size() +
+      previousIteratorSlots.size() + previousGroupIteratorSlots.size() +
+      previousFrames.size() + previousCursorPC.size();
   zigzag::Mark mark;
   try {
     mark = arena.mark();

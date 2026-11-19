@@ -798,6 +798,13 @@ public:
   [[nodiscard]] FrameLimits frameLimits() const noexcept {
     return frameLimits_;
   }
+  /// Cumulative number of table entries InvokeFrame and ReturnFrame have
+  /// copied or journalled so far. A frame's rollback cost must depend on what
+  /// the frame changes, never on how many runs the VM has already finished;
+  /// the frame tests read this to hold it to that.
+  [[nodiscard]] std::size_t frameTableEntriesCopied() const noexcept {
+    return frameTableEntriesCopied_;
+  }
   [[nodiscard]] std::expected<CellRef, ClosureDescriptorError>
   makeClosureDescriptor(const ClosureDescriptorSpec &spec);
   [[nodiscard]] std::expected<ParsedClosureDescriptor, ClosureDescriptorError>
@@ -1011,6 +1018,7 @@ private:
   std::size_t bindingReferencesRestored_{};
   ScopedChoiceLimits scopedChoiceLimits_;
   std::size_t frameBackingCellsAllocated_{};
+  std::size_t frameTableEntriesCopied_{};
   std::vector<ChoicePoint> choiceStack_;
   std::vector<std::uint16_t> currentDeweyPath_;
   std::vector<std::uint16_t> oraclePath_;
