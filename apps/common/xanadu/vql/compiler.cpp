@@ -3,8 +3,10 @@
  * @brief Implementation of VQL Compiler translating AST to Vortex bytecode.
  */
 #include "common/xanadu/vql/compiler.hpp"
+
 #include "common/xanadu/vortex/assembly_transaction.hpp"
 #include "common/xanadu/vql/invocation.hpp"
+#include <gleditor/logging.hpp>
 
 #include <algorithm>
 #include <array>
@@ -434,6 +436,22 @@ CellRef VQLCompiler::emitInputConstant(CellRef op, const CellValue &val) {
 
 CompilationResult VQLCompiler::compile(const QueryExpression &query,
                                        const CompilationOptions &options) {
+  try {
+    return compileOnce(query, options, false);
+  } catch (const ViewDimensionsNeededEarlier &) {
+    // A step was compiled without its guard before the first view was made, so
+    // it would have walked that view's handles as plain cells. Compile again
+    // with the view dimensions named first; the failed attempt's cells are the
+    // program's and go with it.
+    GLEDITOR_LOG_DEBUG("vql.compile",
+                       "recompiling with the view dimensions named first");
+    return compileOnce(query, options, true);
+  }
+}
+
+CompilationResult VQLCompiler::compileOnce(const QueryExpression &query,
+                                           const CompilationOptions &options,
+                                           const bool nameViewDimensions) {
   zigzag::vortex::AssemblyTransaction transaction(vm_);
   remainingContractEmissions_ = options.maxContractEmissions;
   maxNamedFrameVariants_      = options.limits.maxNamedFrameVariants;
@@ -457,7 +475,12 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   versionVars_.clear();
   constantCells_.clear();
   sessionCells_.clear();
-  viewStreams_.clear();
+  guardSteps_        = false;
+  viewGuardsSkipped_ = false;
+  viewDimensions_.reset();
+  viewRoutines_.reset();
+  ownHandles_.clear();
+  if (nameViewDimensions) viewDimensions_ = ensureViewDimensions(core_);
   for (const auto &[name, cells] : options.initialBindings) {
     constantCells_.insert(cells.begin(), cells.end());
     sessionCells_.insert(cells.begin(), cells.end());
@@ -726,6 +749,18 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
                          "invalid initial invocation marker on path");
   }
   if (path.anchor.versionPin) return compileVersionPinnedPath(path, ctxCell);
+  // Steps of this path may meet a view handle when they start from something
+  // the compiler did not make from a plain anchor: a variable (a handle bound
+  // by an earlier query), a context, or a cell a projection answers.
+  struct GuardScope {
+    bool &flag;
+    bool saved;
+    ~GuardScope() { flag = saved; }
+  } const guardScope{guardSteps_, guardSteps_};
+  guardSteps_ = path.anchor.kind == AnchorKind::Variable ||
+                path.anchor.kind == AnchorKind::Context ||
+                path.anchor.kind == AnchorKind::LiteralCellId ||
+                static_cast<bool>(path.anchorProjection);
   std::vector<CellRef> stream;
   if (path.anchor.kind == AnchorKind::Variable &&
       streamBindings_.contains(path.anchor.name)) {
@@ -754,8 +789,11 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
   }
   // A predicate filters into fresh program cells, so a handle in front of it
   // would reach the steps as a plain cell with the view dropped.
-  if (!path.anchorPredicates.empty())
+  if (!path.anchorPredicates.empty()) {
     refuseViewHandles(stream, "a predicate on the path's anchor");
+    rejectViewHandlesAtRunTime(
+        stream, viewHandleRefusal("a predicate on the path's anchor"));
+  }
   for (const auto &predicate : path.anchorPredicates) {
     stream = emitMap(stream, [&](const CellRef candidate) {
       const CellRef result = core_.arena().makeCell();
@@ -774,8 +812,11 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
       return std::vector<CellRef>{result};
     });
   }
-  if (path.anchor.derefMaster)
+  if (path.anchor.derefMaster) {
     refuseViewHandles(stream, "a master dereference of the path's anchor");
+    rejectViewHandlesAtRunTime(
+        stream, viewHandleRefusal("a master dereference of the path's anchor"));
+  }
   if (path.anchor.derefMaster) {
     stream = emitMap(stream, [&](CellRef candidate) {
       return std::vector<CellRef>{emitDereference(candidate)};
@@ -894,7 +935,6 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
     });
   }
 
-  refuseViewEscape(stream, "leaves the path as view cells");
   lastResultCells_ = stream;
   if (stream.empty()) return std::nullopt;
   return stream.front();
@@ -910,7 +950,7 @@ VQLCompiler::applyShapeProjection(std::span<const CellRef> owners,
   if (allowViews && isDynamicViewShape(shape))
     return lowerDynamicView(shape, owners);
   refuseViewHandles(owners, "a shape projection");
-  refuseViewEscape(owners, "is followed by a shape projection");
+  rejectViewHandlesAtRunTime(owners, viewHandleRefusal("a shape projection"));
   validateShapeProjection(shape);
   return emitMap(owners, [&](const CellRef owner) {
     compileShapeProjection(shape, owner);
@@ -1454,22 +1494,24 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           const CellRef rightStream = normalizeFrameStream(rightValues);
           for (const auto *operand : {&leftValues, &rightValues})
             for (const CellRef cell : *operand) {
-              const auto handle = shapeHandles_.find(cell);
-              if (handle == shapeHandles_.end()) continue;
-              const bool isShape =
-                  std::holds_alternative<ShapeLiteral>(handle->second);
-              const bool isView =
-                  std::holds_alternative<ViewHandle>(handle->second);
+              const auto kind = handleKindOf(cell);
+              if (kind == HandleKind::None) continue;
               throw QueryRefusal(
                   QueryErrorCategory::Unsupported,
                   std::string{"a "} +
-                      (isView    ? "dynamic view"
-                       : isShape ? "shape"
-                                 : "lens") +
+                      (kind == HandleKind::ViewHandle ? "dynamic view"
+                       : kind == HandleKind::Shape    ? "shape"
+                                                      : "lens") +
                       " value cannot be an operand of '+': it is syntax "
                       "resolved while the query is compiled, not a value "
                       "the graph computes with");
             }
+          for (const auto *operand : {&leftValues, &rightValues})
+            rejectViewHandlesAtRunTime(
+                *operand,
+                "VQL a dynamic view handle cannot be an operand of '+': its "
+                "text is a copy taken when the view was made, not a value the "
+                "graph computes with");
           const CellRef add = emitOp(OpcodeKind::VqlAdd, "#VQL_ADD");
           emitInput(add, leftStream);
           emitInput(add, rightStream);

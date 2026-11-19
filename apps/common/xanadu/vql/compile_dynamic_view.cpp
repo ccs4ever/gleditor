@@ -158,13 +158,109 @@ void VQLCompiler::compileDynamicShapeProjection(const ShapeLiteral &shape) {
   refuseForm("this shape projection");
 }
 
+std::optional<ViewDimensions> VQLCompiler::viewDimensions() const {
+  if (!viewDimensions_) viewDimensions_ = findViewDimensions(core_);
+  return viewDimensions_;
+}
+
+VQLCompiler::HandleKind VQLCompiler::handleKindOf(const CellRef cell) const {
+  if (const auto found = shapeHandles_.find(cell);
+      found != shapeHandles_.end()) {
+    if (std::holds_alternative<ShapeLiteral>(found->second))
+      return HandleKind::Shape;
+    if (std::holds_alternative<LensPair>(found->second))
+      return HandleKind::Lens;
+  }
+  // The marker is how a handle is told from a plain cell, wherever it came
+  // from: this compile, an earlier one, or another engine over the same core.
+  if (carriesViewMarker(core_.arena(), cell)) return HandleKind::ViewHandle;
+  return HandleKind::None;
+}
+
+namespace {
+
+/// One rule as cells: the rule's own cell holds the dimension it names (never
+/// empty, DimByName refuses an empty name), and its kind, target, negation,
+/// direction and bidirectionality hang off it, so what a rule does is data and
+/// not a bit of a packed word.
+CellRef mintRuleCell(zigzag::ArenaManifold &arena, const ViewDimensions &dims,
+                     const std::string &dimension, std::string_view kind,
+                     const std::string &target, const bool negated,
+                     const bool bidirectional,
+                     const zigzag::DimVector direction) {
+  const CellRef rule = arena.makeCell(dimension);
+  zigzag::expectWritten(
+      arena.link(rule, dims.kind, false, arena.makeCell(std::string{kind})));
+  zigzag::expectWritten(
+      arena.link(rule, dims.to, false, arena.makeCell(target)));
+  zigzag::expectWritten(
+      arena.link(rule, dims.neg, false, arena.makeScalarCell(negated)));
+  zigzag::expectWritten(
+      arena.link(rule, dims.bidir, false, arena.makeScalarCell(bidirectional)));
+  zigzag::expectWritten(
+      arena.link(rule, dims.dir, false,
+                 arena.makeScalarCell(
+                     static_cast<std::int64_t>(zigzag::toSign(direction)))));
+  return rule;
+}
+
+/// The view cell of @p shape: its base flag, then its rules in source order,
+/// which is the order the fold reads them.
+CellRef mintViewCell(zigzag::ArenaManifold &arena, const ViewDimensions &dims,
+                     const ShapeLiteral &shape) {
+  const CellRef view = arena.makeCell();
+  // With no wildcard and no mask rule everything is shown until a rule says
+  // otherwise, so the fold starts from "allowed".
+  const bool shownByDefault =
+      std::ranges::none_of(shape.rules, [](const ShapeRule &rule) {
+        return std::holds_alternative<ShapeWildcard>(rule.rule) ||
+               std::holds_alternative<DimensionShapeRule>(rule.rule);
+      });
+  zigzag::expectWritten(
+      arena.link(view, dims.base, false, arena.makeScalarCell(shownByDefault)));
+  const std::string none{viewNoDimensionName};
+  CellRef previous = view;
+  for (const ShapeRule &entry : shape.rules) {
+    CellRef rule{};
+    if (const auto *wildcard = std::get_if<ShapeWildcard>(&entry.rule)) {
+      rule = mintRuleCell(arena, dims, none,
+                          *wildcard == ShapeWildcard::Everything ? viewKindAll
+                                                                 : viewKindNone,
+                          none, false, false, zigzag::DimVector::POS);
+    } else if (const auto *mask =
+                   std::get_if<DimensionShapeRule>(&entry.rule)) {
+      rule = mintRuleCell(arena, dims, mask->dimName, viewKindMask, none,
+                          mask->negated, mask->isBidir, mask->direction);
+    } else if (const auto *pivot =
+                   std::get_if<DimensionPivotRule>(&entry.rule)) {
+      rule = mintRuleCell(arena, dims, pivot->fromDim, viewKindPivot,
+                          pivot->toDim, false, false, zigzag::DimVector::POS);
+    } else if (const auto *computed =
+                   std::get_if<VirtualDimensionDefRule>(&entry.rule)) {
+      rule = mintRuleCell(arena, dims, computed->dimName, viewKindComputed,
+                          none, false, false, computed->direction);
+    } else {
+      throw std::invalid_argument(
+          "a view's rules are expanded before they are minted");
+    }
+    zigzag::expectWritten(arena.link(previous, dims.rule, false, rule));
+    previous = rule;
+  }
+  return view;
+}
+
+} // namespace
+
 std::vector<CellRef>
 VQLCompiler::lowerDynamicView(const ShapeLiteral &shape,
                               const std::span<const CellRef> owners) {
+  bool hasComputed = false;
   for (const ShapeRule &entry : shape.rules) {
     if (const auto *computed =
-            std::get_if<VirtualDimensionDefRule>(&entry.rule))
+            std::get_if<VirtualDimensionDefRule>(&entry.rule)) {
       requireStaticComputedRule(*computed);
+      hasComputed = true;
+    }
     if (const auto *rule = std::get_if<DimensionShapeRule>(&entry.rule);
         rule && rule->targetValue)
       throw QueryRefusal(
@@ -173,172 +269,120 @@ VQLCompiler::lowerDynamicView(const ShapeLiteral &shape,
               ": ...') cannot be mixed with a pivot or computed rule in one "
               "projection: a view writes nothing, an assignment does");
   }
-  const auto view             = std::make_shared<const ViewDescriptor>(shape);
-  const zigzag::DimRef marker = resolveDimension(viewMarkerDimension);
-  std::vector<std::pair<CellRef, CellRef>> made;
-  std::vector<CellRef> handles;
+  std::vector<CellRef> runTimeOwners;
   for (const CellRef owner : owners) {
-    if (const auto known = shapeHandles_.find(owner);
-        known != shapeHandles_.end() &&
-        std::holds_alternative<ViewHandle>(known->second))
+    if (handleKindOf(owner) == HandleKind::ViewHandle)
       throw QueryRefusal(QueryErrorCategory::Unsupported,
                          "VQL a projection over a dynamic view handle is not "
                          "compiled to Vortex: project the source cell instead");
-    if (viewStreams_.contains(owner))
-      throw QueryRefusal(QueryErrorCategory::Unsupported,
-                         "VQL a projection over the cells reached through a "
-                         "dynamic view is not compiled to Vortex");
-    if (!sessionCells_.contains(owner))
+    if (sessionCells_.contains(owner)) continue;
+    // A computed rule is compiled where the view is stepped, from the rule's
+    // own expression, which only a view the compiler holds can supply; a view
+    // over a source known only while running is read by the graph alone.
+    if (hasComputed)
       throw QueryRefusal(
           QueryErrorCategory::Unsupported,
           "VQL a dynamic view over a source computed at run time is not "
-          "compiled to Vortex: its handle needs a source cell the session "
-          "already holds, such as a variable bound by an earlier query");
+          "compiled to Vortex when a rule is computed: its handle needs a "
+          "source cell the session already holds, such as a variable bound by "
+          "an earlier query");
+    runTimeOwners.push_back(owner);
+  }
+
+  // Naming the dimensions after a step was compiled without its guard would
+  // leave that step blind to the handles made here, so compile again with
+  // them named from the start.
+  if (!viewDimensions() && viewGuardsSkipped_)
+    throw ViewDimensionsNeededEarlier{};
+  const ViewDimensions dims = ensureViewDimensions(core_);
+  viewDimensions_           = dims;
+
+  auto &arena        = core_.arena();
+  const CellRef view = mintViewCell(arena, dims, shape);
+  if (hasComputed) {
+    ComputedViewRules computed;
+    for (const ShapeRule &entry : shape.rules)
+      if (const auto *rule = std::get_if<VirtualDimensionDefRule>(&entry.rule))
+        computed.rules.push_back(*rule);
+    shapeHandles_.emplace(view, std::move(computed));
+  }
+
+  std::vector<std::pair<CellRef, CellRef>> made;
+  std::vector<CellRef> handles;
+  for (const CellRef owner : owners) {
+    if (!sessionCells_.contains(owner)) continue;
     const auto again =
         std::ranges::find(made, owner, &decltype(made)::value_type::first);
     if (again != made.end()) {
       handles.push_back(again->second);
       continue;
     }
-    const CellRef handle = core_.arena().makeCell(core_.arena().textOf(owner));
-    // The marker's far end is a program cell too, so this writes nothing the
-    // program's release would not undo.
+    // A source the session already holds needs no run-time work: the handle
+    // and its two boxes are program cells like the view, copied out with it.
+    const CellRef handle = arena.makeCell(arena.textOf(owner));
     zigzag::expectWritten(
-        core_.arena().link(handle, marker, false, core_.arena().makeCell()));
-    shapeHandles_.emplace(handle, ViewHandle{.source = owner, .view = view});
+        arena.link(handle, dims.marker, false,
+                   arena.makeScalarCell(static_cast<std::int64_t>(owner))));
+    zigzag::expectWritten(
+        arena.link(handle, dims.of, false,
+                   arena.makeScalarCell(static_cast<std::int64_t>(view))));
+    ownHandles_.insert(handle);
     made.emplace_back(owner, handle);
     handles.push_back(handle);
     GLEDITOR_LOG_DEBUG("vql.compile", "dynamic view handle {} over cell {}",
                        static_cast<std::uint64_t>(handle),
                        static_cast<std::uint64_t>(owner));
   }
+  if (!runTimeOwners.empty()) {
+    rejectViewHandlesAtRunTime(
+        runTimeOwners,
+        "VQL a projection over a dynamic view handle is not compiled to "
+        "Vortex: project the source cell instead");
+    const CellRef viewNumber =
+        emitConstant(CellValue(static_cast<std::int64_t>(view)));
+    const auto wrapped = emitMap(runTimeOwners, [&](const CellRef owner) {
+      return std::vector<CellRef>{emitViewHandle(owner, viewNumber, dims)};
+    });
+    handles.insert(handles.end(), wrapped.begin(), wrapped.end());
+  }
   return handles;
 }
 
-std::optional<VQLCompiler::ViewMark>
-VQLCompiler::viewOfStream(std::vector<CellRef> &stream) {
-  std::optional<ViewMark> found;
-  bool plain = false;
-  for (const CellRef cell : stream) {
-    std::optional<ViewMark> mark;
-    if (const auto handle = shapeHandles_.find(cell);
-        handle != shapeHandles_.end()) {
-      if (const auto *view = std::get_if<ViewHandle>(&handle->second))
-        mark = ViewMark{.view = view->view, .created = false};
-    } else if (const auto reached = viewStreams_.find(cell);
-               reached != viewStreams_.end()) {
-      mark = reached->second;
-    }
-    if (!mark) {
-      if (carriesViewMarker(cell))
-        throw QueryRefusal(QueryErrorCategory::Unsupported,
-                           "VQL a dynamic view handle this session cannot "
-                           "resolve, or a cell created through a view, is "
-                           "not a cell a step can walk: step the view's "
-                           "handle instead (a handle from another engine "
-                           "or from before its variables were cleared is "
-                           "not statically known)");
-      plain = true;
-      continue;
-    }
-    if (found && found->view != mark->view)
-      throw QueryRefusal(QueryErrorCategory::Unsupported,
-                         "VQL a step reaches cells of two different dynamic "
-                         "views at once, which is not compiled to Vortex");
-    if (found)
-      found->created = found->created && mark->created;
-    else
-      found = mark;
-  }
-  if (!found) return std::nullopt;
-  if (plain)
-    throw QueryRefusal(QueryErrorCategory::Unsupported,
-                       "VQL a step reaches both dynamic view cells and plain "
-                       "cells at once, which is not compiled to Vortex");
-  for (CellRef &cell : stream)
-    if (const auto handle = shapeHandles_.find(cell);
-        handle != shapeHandles_.end())
-      if (const auto *view = std::get_if<ViewHandle>(&handle->second))
-        cell = view->source;
-  return found;
-}
-
-VQLCompiler::ViewStepPlan
-VQLCompiler::planViewStep(const ViewMark &view, const PathStep &step) const {
+std::optional<std::string>
+VQLCompiler::viewStepRefusal(const PathStep &step) const {
   const auto refuse = [](const std::string &what) {
-    throw QueryRefusal(QueryErrorCategory::Unsupported,
-                       "VQL " + what +
-                           " on a step through a dynamic view is not compiled "
-                           "to Vortex; only dimension steps, then value() or "
-                           "count(), follow a view");
+    return std::optional<std::string>{
+        "VQL " + what +
+        " on a step through a dynamic view is not compiled to Vortex; only "
+        "dimension steps, then value() or count(), follow a view"};
   };
-  if (step.versionPin) refuse("a version pin");
-  if (step.capturedFunctor) refuse("a captured functor");
-  if (step.derefMaster) refuse("a master dereference");
-  if (!step.predicates.empty()) refuse("a predicate");
-  if (!step.shapePredicates.empty()) refuse("a shape predicate");
-  if (step.projectionAfter) refuse("a shape projection");
+  if (step.versionPin) return refuse("a version pin");
+  if (step.capturedFunctor) return refuse("a captured functor");
+  if (step.derefMaster) return refuse("a master dereference");
+  if (!step.predicates.empty()) return refuse("a predicate");
+  if (!step.shapePredicates.empty()) return refuse("a shape predicate");
+  if (step.projectionAfter) return refuse("a shape projection");
   if (step.yieldMode != YieldMode::Default && step.yieldMode != YieldMode::New)
-    refuse("a yield mode (!keep, !last, !both)");
+    return refuse("a yield mode (!keep, !last, !both)");
   if (const auto *function = std::get_if<FunctionInvocation>(&step.selector)) {
     if ((function->name == "value" || function->name == "count") &&
         function->args.empty() && !definitions_.contains(function->name))
-      return {.step = step, .endsView = true};
-    refuse("function " + function->name + "()");
+      return std::nullopt;
+    return refuse("function " + function->name + "()");
   }
   const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
   if (!dimension || dimension->dimName.starts_with('$'))
-    refuse("this kind of step");
-  // The rules read in source order, as the oracle's traverseView did: a
-  // wildcard or a mask rule sets visibility, a pivot on the step's dimension
-  // remaps it and shows it.
-  const auto &rules = view.view->shape.rules;
-  bool allowed      = std::ranges::none_of(rules, [](const ShapeRule &rule) {
-    return std::holds_alternative<ShapeWildcard>(rule.rule) ||
-           std::holds_alternative<DimensionShapeRule>(rule.rule);
-  });
-  SignedDimensionStep physical            = *dimension;
-  const VirtualDimensionDefRule *computed = nullptr;
-  for (const ShapeRule &entry : rules) {
-    if (const auto *wildcard = std::get_if<ShapeWildcard>(&entry.rule)) {
-      allowed = *wildcard == ShapeWildcard::Everything;
-    } else if (const auto *mask =
-                   std::get_if<DimensionShapeRule>(&entry.rule)) {
-      if (mask->dimName == dimension->dimName &&
-          (mask->isBidir || mask->direction == dimension->direction))
-        allowed = !mask->negated;
-    } else if (const auto *pivot =
-                   std::get_if<DimensionPivotRule>(&entry.rule)) {
-      if (pivot->fromDim == dimension->dimName) {
-        physical.dimName = pivot->toDim;
-        allowed          = true;
-      }
-    } else if (const auto *virt =
-                   std::get_if<VirtualDimensionDefRule>(&entry.rule)) {
-      if (virt->dimName == dimension->dimName &&
-          virt->direction == dimension->direction) {
-        computed = virt;
-        allowed  = true;
-      }
-    }
-  }
-  if (!allowed) return {};
-  if (computed) {
-    if (!dimension->creates.empty())
-      throw QueryRefusal(QueryErrorCategory::Unsupported,
-                         "VQL computed dimension '" + computed->dimName +
-                             "' of a dynamic view cannot be written (%): it "
-                             "has no put transform");
-    if (dimension->isBidir || dimension->placement != Placement::Default)
-      throw QueryRefusal(QueryErrorCategory::Unsupported,
-                         "VQL computed dimension '" + computed->dimName +
-                             "' of a dynamic view does not take a "
-                             "bidirectional or placement modifier");
-    return {.step = step, .endsView = false, .computed = computed};
-  }
-  PathStep rewritten = step;
-  rewritten.selector = std::move(physical);
-  return {.step = std::move(rewritten), .endsView = false};
+    return refuse("this kind of step");
+  return std::nullopt;
+}
+
+bool VQLCompiler::isViewFollowableStep(const PathStep &step) const {
+  if (step.capturedFunctor) return false;
+  if (const auto *function = std::get_if<FunctionInvocation>(&step.selector))
+    return (function->name == "value" || function->name == "count") &&
+           function->args.empty() && !definitions_.contains(function->name);
+  const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
+  return dimension && !dimension->dimName.starts_with('$');
 }
 
 void VQLCompiler::requireStaticComputedRule(
@@ -385,19 +429,19 @@ void VQLCompiler::requireStaticComputedRule(
   }
 }
 
-void VQLCompiler::requireComputedResultEnds(
-    const VirtualDimensionDefRule &rule, const std::span<const PathStep> rest) {
+std::optional<std::string>
+VQLCompiler::computedResultEndsRefusal(const VirtualDimensionDefRule &rule,
+                                       const std::span<const PathStep> rest) {
   for (const PathStep &step : rest) {
     const auto *function = std::get_if<FunctionInvocation>(&step.selector);
     if (function && (function->name == "value" || function->name == "count") &&
         function->args.empty())
       continue;
-    throw QueryRefusal(QueryErrorCategory::Unsupported,
-                       "VQL a step after computed dimension '" + rule.dimName +
-                           "' of a dynamic view is not compiled to Vortex: "
-                           "its result is a fresh cell, so only value() or "
-                           "count() may follow");
+    return "VQL a step after computed dimension '" + rule.dimName +
+           "' of a dynamic view is not compiled to Vortex: its result is a "
+           "fresh cell, so only value() or count() may follow";
   }
+  return std::nullopt;
 }
 
 std::vector<CellRef>
@@ -460,39 +504,19 @@ VQLCompiler::compileComputedDimension(const VirtualDimensionDefRule &rule,
   });
 }
 
-bool VQLCompiler::carriesViewMarker(const CellRef cell) const {
-  // The core's dimension directory is shared by every engine over it, so a
-  // handle another engine made is found; an engine with a core of its own
-  // names its own dimensions and shares nothing to be confused with.
-  const auto marker = core_.findDimension(viewMarkerDimension);
-  return marker && core_.arena()
-                       .linked(cell, *marker, zigzag::DimVector::POS)
-                       .has_value();
-}
-
-void VQLCompiler::markViewStream(const std::span<const CellRef> stream,
-                                 const ViewMark &view) {
-  // A session cell is a source the program did not make: marking it would
-  // make every later use of that variable look like view traffic.
-  for (const CellRef cell : stream)
-    if (!sessionCells_.contains(cell))
-      viewStreams_.insert_or_assign(cell, view);
+std::string VQLCompiler::viewHandleRefusal(const std::string &where) {
+  return "VQL a dynamic view handle cannot be used by " + where +
+         ": the compiler follows a view only along a path from its variable, "
+         "and a handle carried elsewhere would walk as a plain cell with none "
+         "of the view's rules";
 }
 
 void VQLCompiler::refuseViewHandles(const std::span<const CellRef> cells,
                                     const std::string &where) const {
-  for (const CellRef cell : cells) {
-    const auto handle = shapeHandles_.find(cell);
-    const bool known  = handle != shapeHandles_.end() &&
-                       std::holds_alternative<ViewHandle>(handle->second);
-    if (!known && !carriesViewMarker(cell)) continue;
-    throw QueryRefusal(
-        QueryErrorCategory::Unsupported,
-        "VQL a dynamic view handle cannot be used by " + where +
-            ": the compiler follows a view only along a path from its "
-            "variable, and a handle carried elsewhere would walk as a plain "
-            "cell with none of the view's rules");
-  }
+  for (const CellRef cell : cells)
+    if (handleKindOf(cell) == HandleKind::ViewHandle)
+      throw QueryRefusal(QueryErrorCategory::Unsupported,
+                         viewHandleRefusal(where));
 }
 
 void VQLCompiler::refuseViewHandleArgument(const ValueExpr &argument) const {
@@ -516,17 +540,33 @@ void VQLCompiler::refuseViewHandleArgument(const ValueExpr &argument) const {
   refuseViewHandles(cells, "a function call argument");
 }
 
-void VQLCompiler::refuseViewEscape(const std::span<const CellRef> stream,
-                                   const std::string &what) const {
-  for (const CellRef cell : stream) {
-    const auto reached = viewStreams_.find(cell);
-    if (reached == viewStreams_.end() || reached->second.created) continue;
-    throw QueryRefusal(
-        QueryErrorCategory::Unsupported,
-        "VQL a step through a dynamic view " + what +
-            ": the cells it reaches are plain cells, not handles of the "
-            "view, so end the path with value() or count()");
+void VQLCompiler::rejectViewHandlesAtRunTime(
+    const std::span<const CellRef> cells, const std::string &message) {
+  const auto dims = viewDimensions();
+  if (!dims) {
+    // No handle exists yet; one made later in this compile would need the
+    // guard this place is leaving out.
+    viewGuardsSkipped_ = true;
+    return;
   }
+  // A cell the compiler holds is judged now; the rest is judged when it runs.
+  std::vector<CellRef> unknown;
+  for (const CellRef cell : cells)
+    if (!constantCells_.contains(cell) && !sessionCells_.contains(cell))
+      unknown.push_back(cell);
+  if (unknown.empty()) return;
+  const auto begin = emitOp(OpcodeKind::StreamBegin, "#VIEW_REJECT_BEGIN");
+  for (const CellRef cell : unknown) emitInput(begin, cell);
+  const CellRef iterator = core_.arena().makeCell();
+  emitOutput(begin, iterator);
+  emitIteratorLoop(iterator, [&](const CellRef item) {
+    const CellRef marker = emitLinkRead(item, dims->marker);
+    const CellRef absent = emitBinary(
+        OpcodeKind::Eq, marker,
+        emitConstant(CellValue(static_cast<std::int64_t>(zigzag::noCell))),
+        "#VIEW_REJECT_PLAIN");
+    emitRequire(absent, message);
+  });
 }
 
 CellRef VQLCompiler::registerLens(LensPair pair) {

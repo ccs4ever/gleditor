@@ -559,29 +559,23 @@ struct LensPair {
   std::shared_ptr<const PathLambda> put;
 };
 
-/// What a handle cell stands for in the compile-time table (decision D4 of
-/// the VM restoration): an expanded shape or a lens pair. Both are syntax the
-/// compiler resolves while lowering, so one table, one lifetime rule and one
-/// session persistence serve them. This is a deliberate exception to
-/// "cells and dimensions, not side tables"; moving the data half into cells
-/// is a later card.
-/// A dynamic view (Q-VIEW-A): the rules one projection gave. Handles of one
-/// projection share a descriptor, so two projections of one source are two
-/// views even when their rules read the same.
-struct ViewDescriptor {
-  ShapeLiteral shape;
+/// What a cell stands for in the compile-time table (decision D4 of the VM
+/// restoration): an expanded shape, a lens pair, or the computed rules of a
+/// dynamic view. All are syntax the compiler resolves while lowering, so one
+/// table, one lifetime rule and one session persistence serve them. This is a
+/// deliberate exception to "cells and dimensions, not side tables"; moving
+/// shapes and lenses into cells is a later card.
+///
+/// A dynamic view is not in the table: it is cells (view_cells.hpp), and a
+/// handle names its view and its source in its own boxes. The one thing a view
+/// holds that cannot be a cell is the expression of a computed rule, which is
+/// compiled where the view is stepped, so that entry is keyed by the view cell
+/// and holds only those rules.
+struct ComputedViewRules {
+  std::vector<VirtualDimensionDefRule> rules;
 };
 
-/// A dynamic view's handle cell: what it shows (a session-bound source cell
-/// that outlives the program) and by which rules. The handle carries a copy of
-/// the source's value for display only; a step through it is compiled against
-/// the source with the rules applied.
-struct ViewHandle {
-  zigzag::CellRef source{};
-  std::shared_ptr<const ViewDescriptor> view;
-};
-
-using CompiledHandle      = std::variant<ShapeLiteral, LensPair, ViewHandle>;
+using CompiledHandle = std::variant<ShapeLiteral, LensPair, ComputedViewRules>;
 using CompiledHandleTable = std::unordered_map<zigzag::CellRef, CompiledHandle>;
 
 struct DefDeclaration {
