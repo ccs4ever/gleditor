@@ -317,6 +317,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "CELLOFINT";
   case OpcodeKind::IntOfCell:
     return "INTOFCELL";
+  case OpcodeKind::EpochOfCell:
+    return "EPOCHOFCELL";
   default:
     return "UNKNOWN";
   }
@@ -479,7 +481,6 @@ CompilationResult VQLCompiler::compileOnce(const QueryExpression &query,
   viewGuardsSkipped_ = false;
   viewDimensions_.reset();
   viewRoutines_.reset();
-  ownHandles_.clear();
   if (nameViewDimensions) viewDimensions_ = ensureViewDimensions(core_);
   for (const auto &[name, cells] : options.initialBindings) {
     constantCells_.insert(cells.begin(), cells.end());

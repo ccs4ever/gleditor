@@ -367,6 +367,8 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "CELL_OF_INT";
   case OpcodeKind::IntOfCell:
     return "INT_OF_CELL";
+  case OpcodeKind::EpochOfCell:
+    return "EPOCH_OF_CELL";
   default:
     return "UNKNOWN";
   }

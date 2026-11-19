@@ -94,7 +94,7 @@ TEST(VortexMaskProbeWiringTest, VagentCeilingReachesTheProbeAndStopsThere) {
 
   // One ordinal further is not an op at all.
   const auto beyond = h.arena.makeScalarCell(
-      static_cast<std::int64_t>(OpcodeKind::IntOfCell) + 1);
+      static_cast<std::int64_t>(OpcodeKind::EpochOfCell) + 1);
   const auto unknown = meta.validate(beyond, {.runReachable = false});
   EXPECT_FALSE(unknown.ok);
   EXPECT_NE(unknown.detail.find("not an op cell"), std::string::npos)

@@ -172,7 +172,7 @@ bool publishesLogicReference(const OpcodeKind kind) {
 bool readsHostState(const OpcodeKind kind) noexcept {
   return kind == OpcodeKind::RelationNext || kind == OpcodeKind::DimByName ||
          kind == OpcodeKind::Hypertime || kind == OpcodeKind::CellOfInt ||
-         kind == OpcodeKind::IntOfCell;
+         kind == OpcodeKind::IntOfCell || kind == OpcodeKind::EpochOfCell;
 }
 
 double toDouble(const CellValue &val) {
@@ -327,7 +327,7 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // ceiling with the generated-vocabulary bound in meta.cpp.
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::IntOfCell)) {
+            static_cast<std::uint64_t>(OpcodeKind::EpochOfCell)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -604,7 +604,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::IntOfCell)) {
+          static_cast<std::uint64_t>(OpcodeKind::EpochOfCell)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -978,6 +978,72 @@ ExecutionResult VortexVM::executeIntOfCell(const CellRef opcode,
     // Raw on purpose: the step writes it as a plain Int64 (not through
     // writeCellReferences), so the result is a number, not a reference.
     outputs.emplace_back(static_cast<std::int64_t>(*cell));
+    return {};
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+}
+
+ExecutionResult VortexVM::executeEpochOfCell(const CellRef opcode,
+                                             std::vector<CellValue> &outputs) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+  try {
+    const auto inputs = inputsOf(opcode);
+    const auto slots  = outputsOf(opcode);
+    const auto typed  = [this](const CellRef slot) {
+      return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+    };
+    const auto hasPipeline = [this](const CellRef slot) {
+      return core_.hasPipeline(slot);
+    };
+    if (const auto refusal = conversionShapeRefusal(
+            "EpochOfCell", inputs, slots, isMemoized(opcode),
+            !core_.preconditionsOf(opcode).empty() ||
+                !core_.postconditionsOf(opcode).empty(),
+            std::ranges::any_of(inputs, typed) ||
+                std::ranges::any_of(slots, typed),
+            std::ranges::any_of(inputs, hasPipeline) ||
+                std::ranges::any_of(slots, hasPipeline)))
+      return fail(*refusal);
+    if (!core_.arena().contains(inputs.front()))
+      return fail("EpochOfCell input slot is missing");
+    if (!core_.arena().contains(slots.front()))
+      return fail("EpochOfCell output slot is missing");
+    if (isGroupsPort(inputs.front()) || isGroupsPort(slots.front()))
+      return fail("EpochOfCell cannot use a private Groups port");
+
+    // A slot that carries a reference names its target, absent or not; any
+    // other slot is read as a cell number, so a cell holding neither is not
+    // something this opcode takes.
+    const auto input = inputs.front();
+    std::optional<CellRef> cell;
+    if (const auto reference = cellReferences_.find(input);
+        reference != cellReferences_.end()) {
+      if (reference->second && core_.arena().contains(*reference->second))
+        cell = *reference->second;
+    } else {
+      const auto operand       = inputValue(input);
+      const auto *const number = std::get_if<std::int64_t>(&operand);
+      if (number == nullptr)
+        return fail("EpochOfCell operand must be a cell reference or an Int64");
+      if (*number >= 0 && static_cast<std::uint64_t>(*number) <=
+                              std::numeric_limits<CellRef>::max()) {
+        // Only the birth operation names a cell (see CellOfInt): another
+        // index inside the cell's history is not it.
+        const auto candidate = static_cast<CellRef>(*number);
+        const auto slot      = core_.arena().slot(candidate);
+        if (slot && slot->birthOp == candidate) cell = candidate;
+      }
+    }
+    const auto epoch = cell ? core_.arena().epochOfCell(*cell) : std::nullopt;
+    if (!epoch) return fail("EpochOfCell operand is not a cell in the arena");
+    core_.arena().consumeWork();
+    // Raw on purpose, as IntOfCell's answer is: a number, not a reference.
+    outputs.emplace_back(static_cast<std::int64_t>(*epoch));
     return {};
   } catch (const std::exception &error) {
     return fail(error.what());
@@ -1960,9 +2026,9 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
       throw std::invalid_argument(
           "VQL scalar opcodes cannot run in a parameter pipeline");
     if (readsHostState(kind))
-      throw std::invalid_argument(
-          "RelationNext/DimByName/Hypertime/CellOfInt/IntOfCell cannot run in "
-          "a parameter pipeline");
+      throw std::invalid_argument("RelationNext/DimByName/Hypertime/CellOfInt/"
+                                  "IntOfCell/EpochOfCell cannot run in "
+                                  "a parameter pipeline");
     if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame ||
         kind == OpcodeKind::CreateClosure || kind == OpcodeKind::ApplyClosure ||
         kind == OpcodeKind::CheckClosureCall ||
@@ -2118,9 +2184,9 @@ bool VortexVM::evaluateCondition(CellRef clause,
       kind == OpcodeKind::VqlBoxScalar || kind == OpcodeKind::CurrentTimestamp)
     throw std::invalid_argument("scalar opcodes cannot run as conditions");
   if (readsHostState(kind))
-    throw std::invalid_argument(
-        "RelationNext/DimByName/Hypertime/CellOfInt/IntOfCell cannot run as "
-        "conditions");
+    throw std::invalid_argument("RelationNext/DimByName/Hypertime/CellOfInt/"
+                                "IntOfCell/EpochOfCell cannot run as "
+                                "conditions");
   if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
     throw std::invalid_argument(
         "activation-frame opcodes cannot run as conditions");
@@ -2849,6 +2915,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeCellOfInt(opcode, outputs);
   case OpcodeKind::IntOfCell:
     return executeIntOfCell(opcode, outputs);
+  case OpcodeKind::EpochOfCell:
+    return executeEpochOfCell(opcode, outputs);
   case OpcodeKind::CreateClosure:
   case OpcodeKind::ApplyClosure:
   case OpcodeKind::CheckClosureCall:
@@ -4635,7 +4703,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       hasHostStateCondition(core_.postconditionsOf(*op))) {
     return {.success      = false,
             .errorMessage = "RelationNext/DimByName/Hypertime/CellOfInt/"
-                            "IntOfCell cannot run as "
+                            "IntOfCell/EpochOfCell cannot run as "
                             "conditions"};
   }
   if (kind == OpcodeKind::RelationNext) {
@@ -4857,7 +4925,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
           kind == OpcodeKind::CurrentTimestamp ||
           kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlMaskLinks ||
           kind == OpcodeKind::VqlMaskProbe || kind == OpcodeKind::CellOfInt ||
-          kind == OpcodeKind::IntOfCell || kind == OpcodeKind::ScopedChoice ||
+          kind == OpcodeKind::IntOfCell || kind == OpcodeKind::EpochOfCell ||
+          kind == OpcodeKind::ScopedChoice ||
           kind == OpcodeKind::VqlFieldProbe ||
           kind == OpcodeKind::RelationNext) {
         oldInputs.emplace_back(false);

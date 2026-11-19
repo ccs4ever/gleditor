@@ -236,25 +236,41 @@ enum class OpcodeKind : std::uint8_t {
   // HAZARD, stated plainly: a cell number held as an Int64 is not protected
   // against reuse. A number kept across a release() or discard() can later
   // name a different cell minted into the same slot, and this opcode will hand
-  // that cell back without complaint. ArenaManifold::epochOfCell() closes the
-  // gap for a holder that records it beside the number and compares it again
-  // before trusting the number; this opcode does not consult it, so a program
-  // must still not keep such a number past the lifetime of the cell it names
-  // unless its host validates it. Not mesh-pure: the number
-  // depends on the evaluating arena's snapshot. Appended to preserve persisted
+  // that cell back without complaint. This opcode does not consult the
+  // release epoch itself. A holder closes the gap by recording EpochOfCell of
+  // the cell (ArenaManifold::epochOfCell) beside the number and comparing it
+  // again, in the graph, before trusting the number: dynamic view handles do
+  // exactly that when they are resolved. A program must not keep such a number
+  // past the lifetime of the cell it names without that witness. Not
+  // mesh-pure: the number depends on the evaluating arena's snapshot. Appended
+  // to preserve persisted
   // opcode-kind integers.
   CellOfInt,
 
   // Cell -> Int64: the inverse of CellOfInt. One cell or reference slot in;
   // one raw Int64 out, equal to that cell's number (never itself published as
   // a reference). It refuses an absent or non-cell operand by name. It carries
-  // the same unprotected-number hazard as CellOfInt (record
-  // ArenaManifold::epochOfCell beside a number you keep), and one more: an
+  // the same unprotected-number hazard as CellOfInt (record EpochOfCell, the
+  // in-graph read of ArenaManifold::epochOfCell, beside a number you keep and
+  // compare it before trusting the number), and one more: an
   // ephemeral cell's number has the ephemeral bit set, and promote() retargets
   // ephemeral references but not a bare Int64, so a number held across
   // promote() is stale (and can be persisted as data with that bit in it).
   // Appended to preserve persisted opcode-kind integers.
   IntOfCell,
+
+  // Cell or Int64 -> Int64: the release epoch the named cell was minted in,
+  // ArenaManifold::epochOfCell as a graph operation. One operand, either a
+  // reference slot (the cell it names) or an Int64 (a cell number, read as
+  // CellOfInt reads it, only the birth operation naming a cell); one raw Int64
+  // out, never published as a reference. An operand that names no cell is
+  // refused by name rather than answered, so no value of the result means
+  // "absent". It is the witness the unprotected-number hazard of CellOfInt and
+  // IntOfCell asks for: a program that keeps a number records this beside it
+  // and compares it again before trusting the number. Pure read, one unit of
+  // work. Not mesh-pure: epochs depend on how the evaluating arena was built
+  // and released. Appended to preserve persisted opcode-kind integers.
+  EpochOfCell,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.
@@ -989,6 +1005,8 @@ private:
                                       std::vector<CellValue> &outputs);
   ExecutionResult executeCellOfInt(CellRef opcode,
                                    std::vector<CellValue> &outputs);
+  ExecutionResult executeEpochOfCell(CellRef opcode,
+                                     std::vector<CellValue> &outputs);
   ExecutionResult executeIntOfCell(CellRef opcode,
                                    std::vector<CellValue> &outputs);
   /// One directed link a mask would remove from the owner.
