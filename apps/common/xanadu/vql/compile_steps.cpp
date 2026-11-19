@@ -76,33 +76,22 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                                                bool allowInitialEmptyCall) {
   for (std::size_t stepIndex = 0; stepIndex < steps.size(); ++stepIndex) {
     const auto &written = steps[stepIndex];
-    // A stream seen through a dynamic view: the step is compiled against the
-    // source with the view's rules (compile_dynamic_view.cpp).
-    auto view = viewOfStream(stream);
-    std::optional<PathStep> viewStep;
-    bool viewEnds = false;
-    if (view) {
-      auto plan = planViewStep(*view, written);
-      if (!plan.step) {
-        // Hidden by a mask: nothing is read and nothing is created.
-        if (written.yieldMode != YieldMode::Keep) stream = {emitStreamClear()};
-        hasContext = true;
-        continue;
-      }
-      if (plan.computed) {
-        requireComputedResultEnds(*plan.computed, steps.subspan(stepIndex + 1));
-        auto computed = compileComputedDimension(*plan.computed, stream);
-        if (written.rangeClamp)
-          computed = emitClamp(computed, *written.rangeClamp);
-        if (written.yieldMode != YieldMode::Keep) stream = std::move(computed);
-        hasContext = true;
-        continue;
-      }
-      viewStep = std::move(plan.step);
-      viewEnds = plan.endsView;
+    // A stream that may hold view handles (a variable, a context, or the
+    // result of a projection) is stepped through the view guard once the
+    // session has made a view; before that no handle exists to guard against.
+    std::optional<ViewDimensions> viewDims;
+    if (guardSteps_ && hasContext) {
+      viewDims = viewDimensions();
+      if (!viewDims) viewGuardsSkipped_ = true;
     }
-    const PathStep &step = viewStep ? *viewStep : written;
+    const std::string stepRefusal =
+        viewDims ? viewStepRefusal(written).value_or(std::string{}) : "";
+    const auto refuseHandles = [&](const std::string &message) {
+      if (viewDims) rejectViewHandlesAtRunTime(stream, message);
+    };
+    const PathStep &step = written;
     if (step.versionPin) {
+      refuseHandles(stepRefusal);
       stream =
           compileVersionPinnedStep(step, std::move(stream), hasContext,
                                    allowInitialEmptyCall && stepIndex == 0);
@@ -138,6 +127,7 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       const auto lens =
           functorBindings_.contains(name) ? std::nullopt : lensBoundTo(name);
       if (lens) {
+        refuseHandles(stepRefusal);
         if (step.yieldMode != YieldMode::Default &&
             step.yieldMode != YieldMode::New)
           throw QueryRefusal(QueryErrorCategory::Unsupported,
@@ -167,6 +157,14 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                    bound != varBindings_.end() && bound->second) {
           aliases.push_back(*bound->second);
         }
+        for (const CellRef alias : aliases)
+          if (handleKindOf(alias) == HandleKind::ViewHandle)
+            throw QueryRefusal(
+                QueryErrorCategory::Unsupported,
+                "VQL $" + name +
+                    " holds a dynamic view handle, which is neither a lens "
+                    "nor a closure: step it with a dimension, not with /$" +
+                    name);
         // A session variable that holds an empty cell and no closure is what
         // a lens handle looks like once the table that explained it is gone
         // (another engine or session): say so instead of failing in the VM.
@@ -185,6 +183,7 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
           stream     = nextStream;
           continue;
         }
+        refuseHandles(stepRefusal);
         nextStream = emitMap(stream, [&](const CellRef candidate) {
           RuntimeClosureInvocation invocation{
               .callee = ValueExpr{.kind = name}, .args = {}, .argNames = {}};
@@ -200,15 +199,25 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                isWholeWalkStep(*function)) {
       // Whole-walk builtins consume the incoming stream once, including when
       // it is empty. User definitions and argument-taking calls stay per-cell.
+      // count() only counts the elements, handle or not; the others read what
+      // each element is, which for a handle is not its own cell.
+      if (function->name != "count") refuseHandles(stepRefusal);
       nextStream = compileWholeWalkStep(*function, stream, hasContext);
     } else if (std::holds_alternative<PerspectiveStep>(step.selector)) {
+      refuseHandles(stepRefusal);
       std::vector<CellRef> res;
       for (const auto cell : stream) {
         auto stepRes = compileSelector(step, cell, hasContext);
         res.insert(res.end(), stepRes.begin(), stepRes.end());
       }
       nextStream = res;
+    } else if (viewDims && isViewFollowableStep(step)) {
+      nextStream = emitViewStep(step, stream, hasContext,
+                                steps.subspan(stepIndex + 1), *viewDims);
+      if (dimension && dimension->creates.empty())
+        nextStream = emitMountFallback(*dimension, std::move(nextStream));
     } else {
+      refuseHandles(stepRefusal);
       nextStream = emitMap(stream, [&](CellRef current) {
         return compileSelector(step, current, hasContext);
       });
@@ -285,22 +294,6 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
 
     if (step.rangeClamp) nextStream = emitClamp(nextStream, *step.rangeClamp);
 
-    if (view && creationStep) {
-      // The created cell is a plain cell, not a handle (a handle needs a
-      // compile-time source). Marking it makes a later step from it refuse by
-      // name rather than walk it without the view's rules.
-      const auto marker =
-          static_cast<std::int64_t>(resolveDimension(viewMarkerDimension));
-      nextStream = emitMap(nextStream, [&](const CellRef created) {
-        const CellRef group = beginMutationGroup("#VIEW_MARK_GROUP");
-        const auto mint     = emitOp(OpcodeKind::New, "#VIEW_MARK");
-        emitInput(mint, created);
-        emitInputConstant(mint, marker);
-        emitInputConstant(mint, std::int64_t{1});
-        endMutationGroup(group, "#VIEW_MARK_GROUP_END");
-        return std::vector<CellRef>{created};
-      });
-    }
     if (creationStep) {
       if (step.yieldMode == YieldMode::Keep) {
         // Keep the incoming context while retaining the selector's writes.
@@ -322,11 +315,6 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
     }
     if (step.projectionAfter)
       stream = applyShapeProjection(stream, *step.projectionAfter);
-    if (view && !viewEnds) {
-      ViewMark reached = *view;
-      reached.created  = creationStep;
-      markViewStream(stream, reached);
-    }
     hasContext = true;
   }
 

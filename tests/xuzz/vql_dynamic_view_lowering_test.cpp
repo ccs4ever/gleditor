@@ -96,7 +96,8 @@ TEST_F(VQLDynamicViewLoweringTest, ProjectionAnswersAHandleCarryingTheValue) {
   ASSERT_EQ(view.size(), 1u);
   EXPECT_NE(view.front(), source);
   EXPECT_EQ(arena.textOf(view.front()), "task");
-  EXPECT_EQ(engine.shapeCount(), 1u);
+  // A view is cells now: the compile-time table holds shapes and lenses.
+  EXPECT_EQ(engine.shapeCount(), 0u);
   EXPECT_FALSE(arena.linkedMinting(source, engine.resolveDimension("d.1"),
                                    zigzag::DimVector::POS));
 }
@@ -164,9 +165,20 @@ TEST_F(VQLDynamicViewLoweringTest, EagerAssignmentCannotMixWithAPivot) {
                 "cannot be mixed with a pivot");
 }
 
-TEST_F(VQLDynamicViewLoweringTest, ASourceComputedAtRunTimeRefuses) {
-  expectRefusal("##{ d.1 <=> d.priority }", "source computed at run time");
-  expectRefusal("let $t := $task/+d.priority return $t{ d.1 <=> d.x }",
+TEST_F(VQLDynamicViewLoweringTest, ASourceComputedAtRunTimeNowWorks) {
+  // V12 replaces this refusal: the handle names its source at run time.
+  const auto home = engine.core().home();
+  zigzag::expectWritten(arena.link(home, engine.resolveDimension("d.priority"),
+                                   false, arena.makeCell("homed")));
+  EXPECT_EQ(textsOf("##{ d.1 <=> d.priority }/+d.1/value()"), "homed");
+  EXPECT_EQ(textsOf("let $t := $task/+d.priority return "
+                    "$t{ d.1 <=> d.priority }/+d.1/value()"),
+            "urgent");
+  // A computed rule still needs the source at compile time: its expression is
+  // compiled where the view is stepped.
+  expectRefusal("##{ +d.label := ./value() }", "source computed at run time");
+  expectRefusal("let $t := $task/+d.priority return "
+                "$t{ +d.label := ./value() }",
                 "source computed at run time");
 }
 
@@ -179,16 +191,22 @@ TEST_F(VQLDynamicViewLoweringTest, ProjectingAHandleRefuses) {
 TEST_F(VQLDynamicViewLoweringTest, UnfollowableStepsRefuseByName) {
   bindView("v", "{ d.1 <=> d.priority }");
   expectRefusal("$v/+d.1[./value() = \"high\"]", "predicate");
-  expectRefusal("$v/+d.1/first()", "function first()");
+  // first() is not compiled to Vortex at all, so its own refusal would come
+  // before the view's; a user function is compiled for plain cells and is
+  // what refuses here.
+  expectRefusal("def f($x) := 1; $v/+d.1/f()", "function f()");
   expectRefusal("$v/+d.1/+d.1{*}", "projection");
   expectRefusal("$v/+d.1!keep", "yield mode");
 }
 
-TEST_F(VQLDynamicViewLoweringTest, ViewCellsMayNotEscapeThePath) {
+TEST_F(VQLDynamicViewLoweringTest, CellsReachedThroughAViewAreItsHandles) {
+  // They used to be plain cells, so a path ending in a step refused: a later
+  // step from one would have walked it without the view's rules. Each is a
+  // handle of the same view now, so they may be returned, bound and looped.
   bindView("v", "{ d.1 <=> d.priority }");
-  expectRefusal("$v/+d.1", "leaves the path");
-  expectRefusal("let $x := $v/+d.1 return $x", "leaves the path");
-  expectRefusal("for $c in $v/+d.1 return $c/+d.1", "leaves the path");
+  EXPECT_EQ(textsOf("$v/+d.1"), "high,urgent");
+  EXPECT_EQ(textsOf("let $x := $v/+d.1 return $x"), "high,urgent");
+  EXPECT_EQ(textsOf("for $c in $v/+d.1 return $c/+d.1/value()"), "urgent");
 }
 
 TEST_F(VQLDynamicViewLoweringTest, HandlesMayNotBeLoopedOrPassedOrAdded) {
@@ -198,13 +216,16 @@ TEST_F(VQLDynamicViewLoweringTest, HandlesMayNotBeLoopedOrPassedOrAdded) {
   expectRefusal("let $s := $v + 1 return $s", "dynamic view");
 }
 
-TEST_F(VQLDynamicViewLoweringTest, HandleTableFollowsTheHandleCell) {
+TEST_F(VQLDynamicViewLoweringTest, AHandleIsResolvableWithoutATableEntry) {
   bindView("v", "{ d.1 <=> d.priority }");
-  EXPECT_EQ(engine.shapeCount(), 1u);
+  const auto handle = engine.getVariable("v");
+  EXPECT_EQ(engine.shapeCount(), 0u);
   // A handle is a cell the caller keeps, so it stays resolvable after a later
-  // query rebinds the variable; the entry goes with the cell, not the name.
+  // query rebinds the variable: its source and view are in its own cells.
   (void)engine.execute("let $v := 1 return $v");
-  EXPECT_EQ(engine.shapeCount(), 1u);
+  EXPECT_EQ(engine.shapeCount(), 0u);
+  engine.setVariable("v", handle);
+  EXPECT_EQ(textsOf("$v/+d.1/value()"), "high,urgent");
 }
 
 TEST_F(VQLDynamicViewLoweringTest, ProgramIsReleasedAfterReadsAndProjections) {
@@ -219,8 +240,9 @@ TEST_F(VQLDynamicViewLoweringTest, ProgramIsReleasedAfterReadsAndProjections) {
   const auto view  = executor.execute("$task{ d.1 <=> d.priority }");
   ASSERT_TRUE(view) << view.error().message;
   EXPECT_FALSE(executor.programRetainedBecause());
-  // The handle and the far end of its marker.
-  EXPECT_EQ(arena.cellCount(), cells + 2);
+  // The handle, the two boxes naming its source and its view, the view, its
+  // base flag, and six cells for its one rule.
+  EXPECT_EQ(arena.cellCount(), cells + 11);
   engine.setVariable("v", *view);
   const auto read = executor.execute("$v/+d.1/value()");
   ASSERT_TRUE(read) << read.error().message;
@@ -240,34 +262,37 @@ TEST_F(VQLDynamicViewLoweringTest, APredicateOnTheHandleAnchorRefuses) {
   expectRefusal("$v[./value() = \"nope\"]/+d.1/value()", "dynamic view handle");
 }
 
-TEST_F(VQLDynamicViewLoweringTest, ACellCreatedThroughAViewIsNotAHandle) {
+TEST_F(VQLDynamicViewLoweringTest, ACellCreatedThroughAViewIsItsHandle) {
   bindView("v", "{ d.1 <=> d.fresh }");
   const auto made = engine.execute("$v/+d.1%\"made\"");
   ASSERT_EQ(made.size(), 1u);
   engine.setVariable("n", made);
   EXPECT_EQ(arena.textOf(made.front()), "made");
-  // Stepping from it through the view would walk it as a plain cell; the
-  // marker it was given at creation makes that a named refusal instead.
-  expectRefusal("$n/+d.1/value()", "dynamic view");
+  // It was a plain cell that a later step refused; it is a handle of the same
+  // view now, so the step goes on through the view (nothing is behind it).
+  EXPECT_TRUE(engine.execute("$n/+d.1/value()").empty());
+  EXPECT_EQ(textOf("$task/+d.fresh/value()"), "made");
 }
 
-TEST_F(VQLDynamicViewLoweringTest, AHandleOfAnotherEngineRefusesByName) {
+TEST_F(VQLDynamicViewLoweringTest, AHandleOfAnotherEngineStepsAndRefusesLoops) {
+  // The handle holds its own view, so another engine over the same core reads
+  // it without a table; where it cannot be followed it still refuses by name.
   VQLEngine other{engine.core()};
   other.setVariable("task", source);
   const auto view = other.execute("$task{ d.1 <=> d.priority }");
   ASSERT_EQ(view.size(), 1u);
   engine.setVariable("v", view);
-  expectRefusal("$v/+d.1/value()", "dynamic view handle");
+  EXPECT_EQ(textsOf("$v/+d.1/value()"), "high,urgent");
   expectRefusal("for $c in $v return $c", "dynamic view handle");
 }
 
-TEST_F(VQLDynamicViewLoweringTest, AHandleHeldAfterClearVariablesRefuses) {
+TEST_F(VQLDynamicViewLoweringTest, AHandleHeldAfterClearVariablesStillSteps) {
   const auto view = engine.execute("$task{ d.1 <=> d.priority }");
   ASSERT_EQ(view.size(), 1u);
   engine.clearVariables();
   engine.setVariable("task", source);
   engine.setVariable("v", view);
-  expectRefusal("$v/+d.1/value()", "dynamic view handle");
+  EXPECT_EQ(textsOf("$v/+d.1/value()"), "high,urgent");
 }
 
 TEST_F(VQLDynamicViewLoweringTest, ValueThroughAHandleReadsTheLiveSource) {

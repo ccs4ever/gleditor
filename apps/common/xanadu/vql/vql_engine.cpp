@@ -178,12 +178,12 @@ void VQLEngine::publishShapes(ShapeTable shapes,
   std::unordered_set<zigzag::CellRef> named(results.begin(), results.end());
   for (const auto &[name, cells] : env_)
     named.insert(cells.begin(), cells.end());
-  // A view handle is the one entry a caller may bind after a later query has
-  // run (the handle is a result it keeps in its own variable), so it lives as
-  // long as its cell does; shapes and lenses live as long as a variable or a
-  // result names them.
+  // The computed rules of a view are keyed by the view cell, which a handle a
+  // caller keeps names after a later query has run, so they live as long as
+  // that cell does; shapes and lenses live as long as a variable or a result
+  // names them.
   std::erase_if(shapes, [&](const auto &entry) {
-    if (std::holds_alternative<ViewHandle>(entry.second))
+    if (std::holds_alternative<ComputedViewRules>(entry.second))
       return !arena().contains(entry.first);
     return !named.contains(entry.first);
   });

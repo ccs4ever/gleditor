@@ -27,6 +27,57 @@ CellRef VQLCompiler::emitExistingTargetClone(const CellRef target) {
   return cloneCell;
 }
 
+std::vector<CellRef>
+VQLCompiler::compileDimensionCreation(CellRef current,
+                                      const SignedDimensionStep &sd,
+                                      const DimOperand &dimension) {
+  const CellRef group = beginMutationGroup("#CREATE_CELL_GROUP");
+  std::vector<CellRef> createdCells;
+  CellRef attachPoint = emitExtreme(current, dimension, zigzag::DimVector::POS);
+  emitRefuseCycle(attachPoint, dimension, zigzag::DimVector::POS,
+                  "VQL append refused: the rank is a cycle, so it has no "
+                  "end to append at");
+  for (const auto &createVal : sd.creates) {
+    std::optional<CellRef> initialValue;
+    if (createVal.kind == CreateValue::Kind::Expression && createVal.expr)
+      initialValue = compileValueExpr(*createVal.expr, current);
+    CellRef newOp = emitOp(OpcodeKind::New, "#MINT_CELL");
+    emitInput(newOp, attachPoint);
+    bindDimension(newOp, dimension);
+    emitInputConstant(newOp, std::int64_t{1});
+
+    // An output-less New mints on each execution. Read the resulting
+    // neighbor into a reference register instead of reusing a graph cell.
+    const auto read = emitOp(OpcodeKind::Link, "#MINT_RESULT");
+    emitInput(read, attachPoint);
+    bindDimension(read, dimension);
+    emitInputConstant(read, std::int64_t{1});
+    CellRef freshCell = core_.arena().makeCell();
+    emitOutput(read, freshCell);
+
+    if (createVal.kind == CreateValue::Kind::Literal) {
+      CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
+      emitInput(valOp, freshCell);
+      emitInputConstant(valOp, static_cast<std::int64_t>(0));
+      emitInputConstant(valOp, static_cast<std::int64_t>(-1));
+      emitInputConstant(valOp, createVal.literal);
+    } else if (createVal.kind == CreateValue::Kind::Expression &&
+               createVal.expr) {
+      if (initialValue) {
+        CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
+        emitInput(valOp, freshCell);
+        emitInputConstant(valOp, static_cast<std::int64_t>(0));
+        emitInputConstant(valOp, static_cast<std::int64_t>(-1));
+        emitInput(valOp, *initialValue);
+      }
+    }
+    createdCells.push_back(freshCell);
+    attachPoint = freshCell;
+  }
+  endMutationGroup(group, "#CREATE_CELL_GROUP_END");
+  return createdCells;
+}
+
 std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
                                                   CellRef current,
                                                   bool hasContext) {
@@ -83,55 +134,8 @@ std::vector<CellRef> VQLCompiler::compileSelector(const PathStep &step,
         nextStream.push_back(emitRank(current, dim, sd.direction));
       }
     } else {
-      for (CellRef current : stream) {
-        const CellRef group = beginMutationGroup("#CREATE_CELL_GROUP");
-        std::vector<CellRef> createdCells;
-        CellRef attachPoint = emitExtreme(current, dim, zigzag::DimVector::POS);
-        emitRefuseCycle(attachPoint, dim, zigzag::DimVector::POS,
-                        "VQL append refused: the rank is a cycle, so it has no "
-                        "end to append at");
-        for (const auto &createVal : sd.creates) {
-          std::optional<CellRef> initialValue;
-          if (createVal.kind == CreateValue::Kind::Expression && createVal.expr)
-            initialValue = compileValueExpr(*createVal.expr, current);
-          CellRef newOp = emitOp(OpcodeKind::New, "#MINT_CELL");
-          emitInput(newOp, attachPoint);
-          emitInputConstant(newOp, static_cast<std::int64_t>(dim));
-          emitInputConstant(newOp, std::int64_t{1});
-
-          // An output-less New mints on each execution. Read the resulting
-          // neighbor into a reference register instead of reusing a graph cell.
-          const auto read = emitOp(OpcodeKind::Link, "#MINT_RESULT");
-          emitInput(read, attachPoint);
-          emitInputConstant(read, static_cast<std::int64_t>(dim));
-          emitInputConstant(read, std::int64_t{1});
-          CellRef freshCell = core_.arena().makeCell();
-          emitOutput(read, freshCell);
-
-          if (createVal.kind == CreateValue::Kind::Literal) {
-            CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
-            emitInput(valOp, freshCell);
-            emitInputConstant(valOp, static_cast<std::int64_t>(0));
-            emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-            emitInputConstant(valOp, createVal.literal);
-          } else if (createVal.kind == CreateValue::Kind::Expression &&
-                     createVal.expr) {
-            if (initialValue) {
-              CellRef valOp = emitOp(OpcodeKind::Value, "#INIT_VALUE");
-              emitInput(valOp, freshCell);
-              emitInputConstant(valOp, static_cast<std::int64_t>(0));
-              emitInputConstant(valOp, static_cast<std::int64_t>(-1));
-              emitInput(valOp, *initialValue);
-            }
-          }
-          createdCells.push_back(freshCell);
-          attachPoint = freshCell;
-        }
-        endMutationGroup(group, "#CREATE_CELL_GROUP_END");
-
-        nextStream.insert(nextStream.end(), createdCells.begin(),
-                          createdCells.end());
-      }
+      nextStream =
+          compileDimensionCreation(current, sd, DimOperand::constant(dim));
     }
   } else if (std::holds_alternative<FunctionInvocation>(step.selector)) {
     const auto &fn = std::get<FunctionInvocation>(step.selector);

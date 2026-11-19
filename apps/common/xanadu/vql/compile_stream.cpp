@@ -82,7 +82,19 @@ CellRef VQLCompiler::emitDereference(CellRef candidate) {
   return master;
 }
 
+void VQLCompiler::bindDimension(const CellRef op, const DimOperand &dimension) {
+  if (dimension.fixed)
+    emitInputConstant(op, static_cast<std::int64_t>(*dimension.fixed));
+  else
+    emitInput(op, dimension.slot);
+}
+
 CellRef VQLCompiler::emitExtreme(CellRef anchor, DimRef dimension,
+                                 DimVector direction) {
+  return emitExtreme(anchor, DimOperand::constant(dimension), direction);
+}
+
+CellRef VQLCompiler::emitExtreme(CellRef anchor, const DimOperand &dimension,
                                  DimVector direction) {
   const auto extreme = core_.arena().makeCell();
   const auto initial = emitOp(OpcodeKind::CopyCellRefs, "#EXTREME_START");
@@ -90,7 +102,7 @@ CellRef VQLCompiler::emitExtreme(CellRef anchor, DimRef dimension,
   emitOutput(initial, extreme);
   const auto begin = emitOp(OpcodeKind::RankBegin, "#EXTREME_BEGIN");
   emitInput(begin, anchor);
-  emitInputConstant(begin, static_cast<std::int64_t>(dimension));
+  bindDimension(begin, dimension);
   emitInputConstant(begin, static_cast<std::int64_t>(toSign(direction)));
   const auto iterator = core_.arena().makeCell();
   emitOutput(begin, iterator);
@@ -105,9 +117,16 @@ CellRef VQLCompiler::emitExtreme(CellRef anchor, DimRef dimension,
 void VQLCompiler::emitRefuseCycle(const CellRef extreme, const DimRef dimension,
                                   const DimVector direction,
                                   const std::string_view what) {
+  emitRefuseCycle(extreme, DimOperand::constant(dimension), direction, what);
+}
+
+void VQLCompiler::emitRefuseCycle(const CellRef extreme,
+                                  const DimOperand &dimension,
+                                  const DimVector direction,
+                                  const std::string_view what) {
   const auto onward = emitOp(OpcodeKind::Link, "#CYCLE_PROBE");
   emitInput(onward, extreme);
-  emitInputConstant(onward, static_cast<std::int64_t>(dimension));
+  bindDimension(onward, dimension);
   emitInputConstant(onward, static_cast<std::int64_t>(toSign(direction)));
   const auto neighbor = core_.arena().makeCell();
   emitOutput(onward, neighbor);

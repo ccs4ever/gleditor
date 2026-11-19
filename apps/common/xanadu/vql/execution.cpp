@@ -12,6 +12,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -21,6 +22,7 @@
 #include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/vql/view_cells.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_copy_out.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -98,16 +100,46 @@ public:
     std::vector<zigzag::CellRef> live{cells};
     for (const auto *extra : alsoLive)
       live.insert(live.end(), extra->begin(), extra->end());
+    const auto olderThanProgram = [this](const zigzag::CellRef cell) {
+      const auto dense = vm_.core().arena().denseOf(cell);
+      return dense && *dense < mark_.cellCount;
+    };
+    // A handle names its source and its view by number. A number is not
+    // carried by re-minting, so what it names must either outlive the program
+    // or be carried with the handle: a view the program minted is added to the
+    // live set (and the handle's box rewritten once it has a new cell), and a
+    // source the program minted keeps the whole program, for it is not a cell
+    // anyone asked to keep.
+    struct ViewToCarry {
+      zigzag::CellRef handle;
+      zigzag::CellRef view;
+    };
+    std::vector<ViewToCarry> carried;
+    const auto viewDims = findViewDimensions(vm_.core());
+    if (viewDims) {
+      for (const auto cell : live) {
+        const auto parts = handleParts(vm_.core().arena(), *viewDims, cell);
+        if (!parts) continue;
+        if (!olderThanProgram(parts->source)) {
+          retain();
+          return RetainedProgram{std::format(
+              "a dynamic view handle (cell {}) names a source cell the "
+              "program minted (cell {}), which the release would take",
+              cell, parts->source)};
+        }
+        if (!olderThanProgram(parts->view)) {
+          carried.push_back({cell, parts->view});
+          if (std::ranges::find(live, parts->view) == live.end())
+            live.push_back(parts->view);
+        }
+      }
+    }
     // A closure value holds its descriptor and captured cells as integers,
     // which re-minting a cell would leave dangling. CopyOut refuses any
     // closure the program minted; one that merely names an older closure is
     // shared as long as the VM reports every cell it names as older too.
     // closureReferences() charges no work, so this check cannot push a run
     // that fits its budget over it.
-    const auto olderThanProgram = [this](const zigzag::CellRef cell) {
-      const auto dense = vm_.core().arena().denseOf(cell);
-      return dense && *dense < mark_.cellCount;
-    };
     const auto mayShareClosure = [&](const zigzag::CellRef object) {
       const auto references = vm_.closureReferences(object);
       return references && std::ranges::all_of(*references, olderThanProgram);
@@ -138,6 +170,23 @@ public:
     release();
     const auto replacements = captured->materialize(vm_.core().arena());
     replaced                = replacements;
+    // The copied handle's box still holds the old view's number; the view was
+    // carried out with it, so the box is pointed at the copy.
+    for (const auto &[handle, view] : carried) {
+      const auto movedHandle = replacements.find(handle);
+      const auto movedView   = replacements.find(view);
+      if (movedHandle == replacements.end() || movedView == replacements.end())
+        throw std::logic_error(
+            "a dynamic view handle's view was not carried out with it");
+      const auto box = vm_.core().arena().linked(
+          movedHandle->second, viewDims->of, zigzag::DimVector::POS);
+      if (!box || !vm_.core().writeValue(
+                      *box, 0, std::nullopt,
+                      zigzag::vortex::CellValue{
+                          static_cast<std::int64_t>(movedView->second)}))
+        throw std::logic_error(
+            "a dynamic view handle's view box could not be rewritten");
+    }
     zigzag::applyCopyOut(replacements, cells);
     for (auto *extra : alsoLive) zigzag::applyCopyOut(replacements, *extra);
     return std::nullopt;

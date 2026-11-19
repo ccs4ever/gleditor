@@ -78,15 +78,14 @@ ShapeLiteral VQLCompiler::shapeOfVariable(const std::string &name) {
   ShapeLiteral result;
   bool known = false;
   for (const CellRef cell : cells) {
-    const auto handle = shapeHandles_.find(cell);
-    if (handle == shapeHandles_.end()) continue;
-    const auto *shape = std::get_if<ShapeLiteral>(&handle->second);
-    if (!shape)
+    const auto kind = handleKindOf(cell);
+    if (kind == HandleKind::None) continue;
+    if (kind != HandleKind::Shape)
       throw TypeContractError(
           "variable $" + name + " does not contain a Shape value (it is a " +
-          (std::holds_alternative<ViewHandle>(handle->second) ? "dynamic view"
-                                                              : "lens") +
-          ")");
+          (kind == HandleKind::ViewHandle ? "dynamic view" : "lens") + ")");
+    const auto *shape =
+        std::get_if<ShapeLiteral>(&shapeHandles_.find(cell)->second);
     known = true;
     appendShapeRules(result, *shape);
   }

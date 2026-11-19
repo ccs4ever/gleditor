@@ -36,6 +36,7 @@
 #include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/query_error.hpp"
 #include "common/xanadu/vql/static_functor_program.hpp"
+#include "common/xanadu/vql/view_cells.hpp"
 
 namespace xanadu {
 class MultiStoreCoordinator;
@@ -437,32 +438,24 @@ private:
   void compileMountDeclarations(const QueryExpression &query);
   /// Q5, compile_dynamic_view.cpp.
   void compileDynamicShapeProjection(const ShapeLiteral &shape);
-  /// Q-VIEW-A, compile_dynamic_view.cpp. A view is a handle cell per source in
-  /// the shape table; a step on a handle is compiled against the source with
-  /// the view's rules applied (pivot remaps, mask hides, a create goes to the
-  /// physical dimension). Nothing about a view is written to the store.
-  struct ViewMark {
-    std::shared_ptr<const ViewDescriptor> view;
-    bool created{false};
-  };
+  /// V12, compile_dynamic_view.cpp and compile_view_steps.cpp. A dynamic view
+  /// is data (view_cells.hpp): a view cell holding its rules, and a handle per
+  /// source naming the source and the view in two Int64 boxes. A step on a
+  /// stream that may hold handles is a guarded fold over those cells in the
+  /// graph, so the view need not be known while compiling: nothing about it is
+  /// written to the store, and the source is never given a link.
   static bool isDynamicViewShape(const ShapeLiteral &shape);
   std::vector<zigzag::CellRef>
   lowerDynamicView(const ShapeLiteral &shape,
                    std::span<const zigzag::CellRef> owners);
-  /// The view the cells of @p stream are seen through, if any; handles in the
-  /// stream are replaced by their sources. Refuses a stream that mixes views
-  /// or plain and view cells.
-  std::optional<ViewMark> viewOfStream(std::vector<zigzag::CellRef> &stream);
-  /// What a step becomes through @p view: the rewritten step, or nothing when
-  /// a mask hides it. Refuses steps whose meaning through a view is not
-  /// lowered.
-  struct ViewStepPlan {
-    std::optional<PathStep> step; ///< empty: the mask hides the step
-    bool endsView{false};         ///< value() and count() leave the view
-    /// Q-VIEW-B: the step reads a computed dimension; the rule, not the
-    /// source's links, answers it.
-    const VirtualDimensionDefRule *computed{nullptr};
-  };
+  /// What a table-lookup site is looking at. Every site that asks the table
+  /// "what is this cell?" asks this instead, so a view handle (which the
+  /// table does not hold) is never taken for a plain cell.
+  enum class HandleKind : std::uint8_t { None, Shape, Lens, ViewHandle };
+  [[nodiscard]] HandleKind handleKindOf(zigzag::CellRef cell) const;
+  /// The view dimensions when the core names them; absent while no view was
+  /// ever made, which means no handle exists and no step needs a guard.
+  [[nodiscard]] std::optional<ViewDimensions> viewDimensions() const;
   /// Refuses a computed rule whose expression is not a literal or a plain
   /// path from the source: anything else would be compiled at the use site's
   /// bindings, not the binding scope's.
@@ -472,28 +465,82 @@ private:
   std::vector<zigzag::CellRef>
   compileComputedDimension(const VirtualDimensionDefRule &rule,
                            std::span<const zigzag::CellRef> sources);
-  /// A computed result is a fresh cell; only value() and count() may follow.
-  static void requireComputedResultEnds(const VirtualDimensionDefRule &rule,
-                                        std::span<const PathStep> rest);
-  ViewStepPlan planViewStep(const ViewMark &view, const PathStep &step) const;
-  void markViewStream(std::span<const zigzag::CellRef> stream,
-                      const ViewMark &view);
-  /// Refuses a view handle used where its provenance would be lost (a loop
-  /// source, a call argument, an operand).
+  /// Why @p rest may not follow a computed result, or nothing when it may: its
+  /// result is a fresh cell, so only value() or count() may follow.
+  static std::optional<std::string>
+  computedResultEndsRefusal(const VirtualDimensionDefRule &rule,
+                            std::span<const PathStep> rest);
+  /// Why a step cannot be taken through a handle, or nothing when it can:
+  /// only dimension steps, value() and count() follow a view.
+  [[nodiscard]] std::optional<std::string>
+  viewStepRefusal(const PathStep &step) const;
+  /// Whether a step is one the guarded fold takes (a dimension step, or
+  /// value()/count() without arguments); any other step refuses handles.
+  [[nodiscard]] bool isViewFollowableStep(const PathStep &step) const;
+  /// Refuses, for a handle known while compiling, and otherwise at run time,
+  /// a view handle used where its provenance would be lost.
   void refuseViewHandles(std::span<const zigzag::CellRef> cells,
                          const std::string &where) const;
   void refuseViewHandleArgument(const ValueExpr &argument) const;
-  void refuseViewEscape(std::span<const zigzag::CellRef> stream,
-                        const std::string &what) const;
-  /// Every view handle, and every cell created through a view, carries a
-  /// link along this dimension. The compile-time table knows which handles
-  /// this session made; the marker is how a handle it does not know (another
-  /// engine's, one held across clearVariables()) is still recognised and
-  /// refused by name instead of walking as a plain cell.
-  static constexpr const char *viewMarkerDimension = "d.vql.view";
-  [[nodiscard]] bool carriesViewMarker(zigzag::CellRef cell) const;
+  [[nodiscard]] static std::string viewHandleRefusal(const std::string &where);
+  /// Run-time half of refuseViewHandles for cells the compiler cannot see.
+  void rejectViewHandlesAtRunTime(std::span<const zigzag::CellRef> cells,
+                                  const std::string &message);
+  /// One step of @p stream through the view guard: a plain cell is stepped as
+  /// ever, a handle by the fold of its view's rules over its source. Every
+  /// cell a handle reaches is wrapped in a handle of the same view.
+  std::vector<zigzag::CellRef>
+  emitViewStep(const PathStep &step, std::span<const zigzag::CellRef> stream,
+               bool hasContext, std::span<const PathStep> rest,
+               const ViewDimensions &dims);
+  /// A fresh handle over the cell @p source holds, of the view whose number is
+  /// the raw Int64 @p viewNumber; returns the slot that holds the handle.
+  zigzag::CellRef emitViewHandle(zigzag::CellRef source,
+                                 zigzag::CellRef viewNumber,
+                                 const ViewDimensions &dims);
+  zigzag::CellRef emitLinkRead(zigzag::CellRef from, zigzag::DimRef dimension);
+  zigzag::CellRef emitBinary(zigzag::vortex::OpcodeKind kind,
+                             zigzag::CellRef left, zigzag::CellRef right,
+                             std::string_view label);
+  void emitRequire(zigzag::CellRef condition, const std::string &message);
+  void emitJump(zigzag::CellRef target);
+  /// What emitted steps do to a dimension: a number the program knows or a
+  /// slot the graph computes (a view's pivot target, read from its rule).
+  struct DimOperand {
+    std::optional<zigzag::DimRef> fixed;
+    zigzag::CellRef slot{};
+    static DimOperand constant(zigzag::DimRef dimension) {
+      return DimOperand{.fixed = dimension, .slot = {}};
+    }
+    static DimOperand fromSlot(zigzag::CellRef cell) {
+      return DimOperand{.fixed = std::nullopt, .slot = cell};
+    }
+  };
+  void bindDimension(zigzag::CellRef op, const DimOperand &dimension);
+  zigzag::CellRef emitExtreme(zigzag::CellRef anchor,
+                              const DimOperand &dimension,
+                              zigzag::DimVector direction);
+  void emitRefuseCycle(zigzag::CellRef extreme, const DimOperand &dimension,
+                       zigzag::DimVector direction, std::string_view what);
+  /// The creation chain of a `+d.x%...` step: one fresh cell per value at the
+  /// end of the rank, each in a mutation group of its own.
+  std::vector<zigzag::CellRef>
+  compileDimensionCreation(zigzag::CellRef current,
+                           const SignedDimensionStep &step,
+                           const DimOperand &dimension);
+  /// Thrown while compiling when a view is made after a step was compiled
+  /// without its guard (the view dimensions did not exist yet); the compile
+  /// then restarts with them named.
+  struct ViewDimensionsNeededEarlier {};
+  CompilationResult compileOnce(const QueryExpression &query,
+                                const CompilationOptions &options,
+                                bool nameViewDimensions);
   std::unordered_set<zigzag::CellRef> sessionCells_;
-  std::unordered_map<zigzag::CellRef, ViewMark> viewStreams_;
+  /// Whether steps of the path being compiled may meet a handle: its anchor is
+  /// a variable or a context, or a projection made it.
+  bool guardSteps_{false};
+  bool viewGuardsSkipped_{false};
+  mutable std::optional<ViewDimensions> viewDimensions_;
   std::vector<zigzag::CellRef> compileLensStep(const PathStep &step,
                                                zigzag::CellRef current,
                                                bool hasContext);
