@@ -1564,8 +1564,19 @@ return $u/+d.name
 
 - **Syntax & Scope**: Defined using `+d.dim := expr` within a shape projection.
 - **Path Transparency**: Virtual dimensions are traversed with standard path syntax (`$u/+d.age`).
-- **Lazy Evaluation**: The expression evaluates only when accessed, with results cached in the
-  active thread cursor's register bank.
+- **Lazy Evaluation**: The expression is compiled into the step taken on the view's handle and is
+  evaluated against the source cell each time the view is traversed, so it observes later edits to
+  the source. Nothing is cached and nothing is written: the source gains no link on the virtual
+  dimension, and a `%` write to it is refused by name (it has no put transform).
+- **Lowered subset**: a literal, or a path from the source (`./` steps along plain dimensions, then
+  `value()` or `count()`). Variables, predicates, arithmetic, other functions and nested views
+  refuse by name, because they would be compiled against the use site's bindings, not the binding
+  scope's. The example above is therefore not yet compilable (`now()` and arithmetic).
+- **One value**: the result is a fresh cell holding one value, as the oracle's `evaluateValueExpr`
+  answered (it took the first cell of a path result). The oracle dropped the rest silently; the
+  lowering instead fails at run time, naming the dimension, when the path answers more than one cell
+  for a source, so the first cell is never mistaken for the whole answer. A path that answers
+  nothing answers nothing. Only `value()` and `count()` may follow the step.
 
 #### 4.10.3 Bidirectional Morphisms: Put/Get Lenses
 

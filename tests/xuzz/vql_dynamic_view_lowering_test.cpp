@@ -149,11 +149,14 @@ TEST_F(VQLDynamicViewLoweringTest, TwoProjectionsOfOneSourceAreTwoViews) {
   EXPECT_EQ(textsOf("$b/+d.1/value()"), "Alice");
 }
 
-TEST_F(VQLDynamicViewLoweringTest, ComputedDimensionRefusesNamingTheLaterCard) {
-  expectRefusal("$task{ +d.label := ./value() }",
-                "computed dimension 'd.label'");
-  expectRefusal("$task{ d.1 <=> d.priority, +d.label := ./value() }",
-                "computed dimension 'd.label'");
+TEST_F(VQLDynamicViewLoweringTest, ComputedDimensionLowersToAHandle) {
+  // Q-VIEW-B retired the refusal: a computed rule is a view like a pivot.
+  for (const auto *shape : {"{ +d.label := ./value() }",
+                            "{ d.1 <=> d.priority, +d.label := ./value() }"}) {
+    const auto view = engine.execute(std::string("$task") + shape);
+    ASSERT_EQ(view.size(), 1u) << shape;
+    EXPECT_NE(view.front(), source) << shape;
+  }
 }
 
 TEST_F(VQLDynamicViewLoweringTest, EagerAssignmentCannotMixWithAPivot) {

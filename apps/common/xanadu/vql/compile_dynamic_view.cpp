@@ -12,6 +12,8 @@
 
 namespace xanadu::vql {
 using zigzag::CellRef;
+using zigzag::vortex::CellValue;
+using zigzag::vortex::OpcodeKind;
 
 namespace {
 
@@ -162,9 +164,7 @@ VQLCompiler::lowerDynamicView(const ShapeLiteral &shape,
   for (const ShapeRule &entry : shape.rules) {
     if (const auto *computed =
             std::get_if<VirtualDimensionDefRule>(&entry.rule))
-      refuseForm("computed dimension '" + computed->dimName +
-                 "' in a dynamic view (evaluated against the source each "
-                 "time it is traversed, lowered by a later card)");
+      requireStaticComputedRule(*computed);
     if (const auto *rule = std::get_if<DimensionShapeRule>(&entry.rule);
         rule && rule->targetValue)
       throw QueryRefusal(
@@ -297,7 +297,8 @@ VQLCompiler::planViewStep(const ViewMark &view, const PathStep &step) const {
     return std::holds_alternative<ShapeWildcard>(rule.rule) ||
            std::holds_alternative<DimensionShapeRule>(rule.rule);
   });
-  SignedDimensionStep physical = *dimension;
+  SignedDimensionStep physical            = *dimension;
+  const VirtualDimensionDefRule *computed = nullptr;
   for (const ShapeRule &entry : rules) {
     if (const auto *wildcard = std::get_if<ShapeWildcard>(&entry.rule)) {
       allowed = *wildcard == ShapeWildcard::Everything;
@@ -312,12 +313,151 @@ VQLCompiler::planViewStep(const ViewMark &view, const PathStep &step) const {
         physical.dimName = pivot->toDim;
         allowed          = true;
       }
+    } else if (const auto *virt =
+                   std::get_if<VirtualDimensionDefRule>(&entry.rule)) {
+      if (virt->dimName == dimension->dimName &&
+          virt->direction == dimension->direction) {
+        computed = virt;
+        allowed  = true;
+      }
     }
   }
   if (!allowed) return {};
+  if (computed) {
+    if (!dimension->creates.empty())
+      throw QueryRefusal(QueryErrorCategory::Unsupported,
+                         "VQL computed dimension '" + computed->dimName +
+                             "' of a dynamic view cannot be written (%): it "
+                             "has no put transform");
+    if (dimension->isBidir || dimension->placement != Placement::Default)
+      throw QueryRefusal(QueryErrorCategory::Unsupported,
+                         "VQL computed dimension '" + computed->dimName +
+                             "' of a dynamic view does not take a "
+                             "bidirectional or placement modifier");
+    return {.step = step, .endsView = false, .computed = computed};
+  }
   PathStep rewritten = step;
   rewritten.selector = std::move(physical);
   return {.step = std::move(rewritten), .endsView = false};
+}
+
+void VQLCompiler::requireStaticComputedRule(
+    const VirtualDimensionDefRule &rule) {
+  const auto refuse = [&rule](const std::string &why) {
+    throw QueryRefusal(
+        QueryErrorCategory::Unsupported,
+        "VQL computed dimension '" + rule.dimName +
+            "' in a dynamic view cannot be compiled to Vortex: " + why +
+            "; only a literal or a path from the source (./ steps along "
+            "plain dimensions, then value() or count()) is lowered");
+  };
+  if (!rule.expr) refuse("it has no expression");
+  if (std::holds_alternative<ScalarLiteral>(rule.expr->kind)) return;
+  const auto *path =
+      std::get_if<std::shared_ptr<PathExpression>>(&rule.expr->kind);
+  if (!path || !*path) refuse("its expression is not a literal or a path");
+  const PathExpression &expr = **path;
+  if (expr.anchor.kind != AnchorKind::Context || expr.isFunctor ||
+      expr.isInvocationRoot)
+    refuse("its path does not start at the source cell (./)");
+  if (!expr.anchorPredicates.empty() || expr.anchorProjection ||
+      expr.shapeProjection || expr.cloneTail)
+    refuse("its path carries a predicate, projection or clone");
+  for (const PathStep &step : expr.steps) {
+    if (step.versionPin || step.capturedFunctor || step.derefMaster ||
+        !step.predicates.empty() || !step.shapePredicates.empty() ||
+        step.projectionAfter || step.rangeClamp ||
+        step.yieldMode != YieldMode::Default)
+      refuse("a step of its path carries a predicate, projection, range, "
+             "pin or yield mode");
+    if (const auto *function =
+            std::get_if<FunctionInvocation>(&step.selector)) {
+      if ((function->name != "value" && function->name != "count") ||
+          !function->args.empty())
+        refuse("function " + function->name + "() is not value() or count()");
+      continue;
+    }
+    const auto *dimension = std::get_if<SignedDimensionStep>(&step.selector);
+    if (!dimension || dimension->dimName.starts_with('$') ||
+        !dimension->creates.empty() ||
+        dimension->placement != Placement::Default)
+      refuse("a step of its path is not a read along a plain dimension");
+  }
+}
+
+void VQLCompiler::requireComputedResultEnds(
+    const VirtualDimensionDefRule &rule, const std::span<const PathStep> rest) {
+  for (const PathStep &step : rest) {
+    const auto *function = std::get_if<FunctionInvocation>(&step.selector);
+    if (function && (function->name == "value" || function->name == "count") &&
+        function->args.empty())
+      continue;
+    throw QueryRefusal(QueryErrorCategory::Unsupported,
+                       "VQL a step after computed dimension '" + rule.dimName +
+                           "' of a dynamic view is not compiled to Vortex: "
+                           "its result is a fresh cell, so only value() or "
+                           "count() may follow");
+  }
+}
+
+std::vector<CellRef>
+VQLCompiler::compileComputedDimension(const VirtualDimensionDefRule &rule,
+                                      const std::span<const CellRef> sources) {
+  // Evaluated against the source, as the oracle did, so a computed dimension
+  // cannot resolve itself through its own view.
+  return emitMap(sources, [&](const CellRef sourceCell) {
+    std::vector<CellRef> reached;
+    if (const auto *literal = std::get_if<ScalarLiteral>(&rule.expr->kind)) {
+      reached = {std::visit(
+          [this](const auto &value) { return emitConstant(CellValue(value)); },
+          literal->value)};
+    } else {
+      const auto &path =
+          *std::get<std::shared_ptr<PathExpression>>(rule.expr->kind);
+      reached = compileSteps(path.steps, {sourceCell}, true);
+      // A computed dimension is one value per source. The oracle kept the
+      // first cell of a longer answer and said nothing; here a second cell
+      // is a named run-time error, so the first is never mistaken for all.
+      const auto begin = emitOp(OpcodeKind::StreamBegin, "#COMPUTED_DIM_BEGIN");
+      for (const CellRef cell : reached) emitInput(begin, cell);
+      const CellRef iterator = core_.arena().makeCell();
+      emitOutput(begin, iterator);
+      CellRef extraPresent = iterator;
+      for (const char *label : {"#COMPUTED_DIM_FIRST", "#COMPUTED_DIM_EXTRA"}) {
+        const auto next = emitOp(OpcodeKind::IteratorNext, label);
+        emitInput(next, iterator);
+        emitOutput(next, core_.arena().makeCell());
+        emitOutput(next, extraPresent = core_.arena().makeCell());
+      }
+      const auto none = emitOp(OpcodeKind::Not, "#COMPUTED_DIM_NO_EXTRA");
+      emitInput(none, extraPresent);
+      const CellRef single = core_.arena().makeCell();
+      emitOutput(none, single);
+      const auto require = emitOp(OpcodeKind::Assert, "#COMPUTED_DIM_SINGLE");
+      emitInput(require, single);
+      emitInputConstant(
+          require, "computed dimension '" + rule.dimName +
+                       "' of a dynamic view: its expression answered more "
+                       "than one cell for a source, and a computed dimension "
+                       "holds one value");
+      reached = emitClamp(reached, RangeClamp{.start = 1, .end = 1});
+    }
+    // value() and count() already answer a fresh cell; a plain dimension step
+    // or a literal answers a cell the source or the program owns.
+    const auto *path =
+        std::get_if<std::shared_ptr<PathExpression>>(&rule.expr->kind);
+    if (path && !(*path)->steps.empty() &&
+        std::holds_alternative<FunctionInvocation>(
+            (*path)->steps.back().selector))
+      return reached;
+    return emitMap(reached, [&](const CellRef value) {
+      const CellRef copy = core_.arena().makeCell();
+      const auto read    = emitOp(OpcodeKind::Value, "#COMPUTED_DIM_VALUE");
+      emitInput(read, value);
+      emitOutput(read, copy);
+      return std::vector<CellRef>{copy};
+    });
+  });
 }
 
 bool VQLCompiler::carriesViewMarker(const CellRef cell) const {

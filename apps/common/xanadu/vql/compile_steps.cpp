@@ -89,6 +89,15 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
         hasContext = true;
         continue;
       }
+      if (plan.computed) {
+        requireComputedResultEnds(*plan.computed, steps.subspan(stepIndex + 1));
+        auto computed = compileComputedDimension(*plan.computed, stream);
+        if (written.rangeClamp)
+          computed = emitClamp(computed, *written.rangeClamp);
+        if (written.yieldMode != YieldMode::Keep) stream = std::move(computed);
+        hasContext = true;
+        continue;
+      }
       viewStep = std::move(plan.step);
       viewEnds = plan.endsView;
     }

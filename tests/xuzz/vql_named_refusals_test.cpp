@@ -56,8 +56,11 @@ TEST_F(VQLNamedRefusalTest, PivotAndComputedDimensionNameTheirForms) {
   // it still refuses inside project() and apply_shape().
   EXPECT_THAT(refusalOf("project($task, { d.1 <=> d.priority })"),
               testing::HasSubstr("pivot, computed-dimension"));
-  EXPECT_THAT(refusalOf("$task{ +d.label := ./value() }"),
-              testing::HasSubstr("computed dimension"));
+  // Q-VIEW-B lowers a computed rule in a path projection to a dynamic view,
+  // so the computed-rule refusal now lives in apply_shape().
+  EXPECT_THAT(
+      refusalOf("weave { apply_shape($task, { +d.label := ./value() }) }"),
+      testing::HasSubstr("pivot, computed-dimension"));
 }
 
 TEST_F(VQLNamedRefusalTest, FieldBindingInAShapeNamesTheForm) {
