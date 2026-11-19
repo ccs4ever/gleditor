@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -119,6 +120,13 @@ TEST_F(VQLDynamicViewRuntimeTest, AViewProjectedInsideADefSteps) {
       "low");
   EXPECT_EQ(textsOf("def v($s) := $s{ d.1 <=> d.priority }; "
                     "let $w := v(##) return $w/+d.1/value()"),
+            "high,urgent");
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, ADefStepsAHandleItIsHandedAtRunTime) {
+  // The shared fold is called from a function body as from the query's own.
+  EXPECT_EQ(textsOf("def f($c) := $c/+d.1/value(); "
+                    "f(##{ d.1 <=> d.priority })"),
             "high,urgent");
 }
 
@@ -361,6 +369,108 @@ TEST_F(VQLDynamicViewRuntimeTest, AStepBeforeTheFirstViewOfAQueryIsGuarded) {
   EXPECT_EQ(arena.textOf(both->front()), "high");
 }
 
+TEST_F(VQLDynamicViewRuntimeTest, ManyHandlesOverAProgramMintedViewSettle) {
+  // Settle collects the views of the handles it carries while it walks them;
+  // enough handles to make that vector grow more than once, each over the one
+  // program-minted view.
+  constexpr int reached = 40;
+  const auto home       = engine.core().home();
+  const auto priority   = engine.resolveDimension("d.many");
+  auto tail             = home;
+  for (int i = 0; i < reached; ++i) {
+    const auto next = arena.makeCell("n" + std::to_string(i));
+    zigzag::expectWritten(arena.link(tail, priority, false, next));
+    tail = next;
+  }
+  warm();
+  const auto handles = executor.execute("##{ d.1 <=> d.many }/+d.1");
+  ASSERT_TRUE(handles) << handles.error().message;
+  ASSERT_EQ(handles->size(), static_cast<std::size_t>(reached));
+  EXPECT_FALSE(executor.programRetainedBecause());
+  engine.setVariable("h", *handles);
+  // Each handle kept its view: the second step reads one cell further on.
+  EXPECT_EQ(engine.execute("$h/+d.1/value()").size(),
+            static_cast<std::size_t>(reached - 1) * reached / 2);
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, TwoReachesOfOneSourceAreTwoHandles) {
+  // A handle is minted per reach and no VQL operation exposes cell identity,
+  // so two reaches of the same source being two cells is not observable as a
+  // wrong answer; equality of reaches is not claimed. This records the shape
+  // so a change to sharing handles is a decision and not an accident.
+  const auto view = engine.execute("##{ d.1 <=> d.priority }");
+  ASSERT_EQ(view.size(), 1u);
+  engine.setVariable("two", {view.front(), view.front()});
+  const auto reached = engine.execute("$two/+d.1");
+  ASSERT_EQ(reached.size(), 4u);
+  std::set<zigzag::CellRef> distinct(reached.begin(), reached.end());
+  EXPECT_EQ(distinct.size(), 4u);
+  EXPECT_EQ(textsOf("$two/+d.1/value()"), "high,urgent,high,urgent");
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, AHandleOfASeparateCoreRefusesByName) {
+  const auto view = engine.execute("$task{ d.1 <=> d.priority }");
+  ASSERT_EQ(view.size(), 1u);
+  // Its own dimension directory knows nothing of the marker; the handle is
+  // recognised by the marker's name on the handle's own links, so it is never
+  // walked as a plain cell.
+  VQLEngine other{arena};
+  other.setVariable("v", view);
+  other.setVariable("task", source);
+  const auto before = footprint();
+  std::string message;
+  try {
+    (void)other.execute("$v/+d.1/value()");
+  } catch (const std::exception &error) {
+    message = error.what();
+  }
+  EXPECT_THAT(message, testing::HasSubstr("dynamic view handle"));
+  EXPECT_THAT(message, testing::HasSubstr("another core"));
+  EXPECT_EQ(footprint(), before);
+  EXPECT_THAT(std::string{[&] {
+                try {
+                  (void)other.execute("for $c in $v return $c");
+                } catch (const std::exception &error) {
+                  return std::string{error.what()};
+                }
+                return std::string{};
+              }()},
+              testing::HasSubstr("dynamic view handle"));
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, TheStepProgramGrowsByABoundedAmountPerStep) {
+  warm();
+  engine.setVariable("v", engine.execute("$task{ d.1 <=> d.priority }"));
+  const auto opsFor = [&](const int steps) {
+    std::string query = "$v";
+    for (int i = 0; i < steps; ++i) query += "/+d.1";
+    query += "/value()";
+    xanadu::vql::VQLCompiler compiler(engine.coordinator(), vm);
+    xanadu::vql::CompilationOptions options;
+    options.initialBindings = engine.variables();
+    const auto result       = compiler.compile(query, options);
+    EXPECT_TRUE(result.success) << result.errorMessage;
+    return result.generatedOpcodes.size();
+  };
+  // The fold, the handle wrap and the handle's resolution are subroutines
+  // built once per program. What a site still emits is the map harness, its
+  // dispatch, the plain branch (the step as it always compiled, about the
+  // size of a step without views), its arguments and calls, and the walk that
+  // wraps what is reached. Measured 57 per site; the bound leaves a little
+  // room for the plain branch to grow. Before the routines were shared a
+  // site cost 102.
+  constexpr std::size_t maxOpsPerStep = 60;
+  const auto one                      = opsFor(1);
+  std::size_t previous                = one;
+  for (const int steps : {2, 3, 8}) {
+    const auto now = opsFor(steps);
+    const auto perStep =
+        (now - previous) / static_cast<std::size_t>(steps == 8 ? 5 : 1);
+    EXPECT_LE(perStep, maxOpsPerStep) << steps << " steps: " << now;
+    previous = now;
+  }
+}
+
 // -- the known hole ----------------------------------------------------------
 
 TEST_F(VQLDynamicViewRuntimeTest, AReusedSourceNumberReadsTheReusingCell) {
@@ -406,7 +516,7 @@ std::size_t countOps(const xanadu::vql::CompilationResult &result,
       }));
 }
 
-TEST_F(VQLDynamicViewRuntimeTest, FoldDimensionsAreResolvedOncePerCompile) {
+TEST_F(VQLDynamicViewRuntimeTest, TheFoldIsBuiltOncePerProgram) {
   warm();
   const auto view = engine.execute("##{ d.1 <=> d.priority }");
   engine.setVariable("v", view);
@@ -422,12 +532,10 @@ TEST_F(VQLDynamicViewRuntimeTest, FoldDimensionsAreResolvedOncePerCompile) {
   const auto three = compile("$v/+d.1/+d.1/+d.1/value()");
   const auto dims1 = countOps(one, vm, OpcodeKind::DimByName);
   const auto dims3 = countOps(three, vm, OpcodeKind::DimByName);
-  // Every dimension the fold needs but the rules (data) is a compile-time
-  // constant: only the step's own dimension, a rule's own name and a pivot's
-  // target are resolved while running, one triple per step site, whatever the
-  // number of rules, and none of the view's own dimensions.
-  constexpr std::size_t perSite = 3;
-  EXPECT_EQ(dims3 - dims1, 2 * perSite) << dims1 << " " << dims3;
+  // The fold is one subroutine per program, so a step site resolves no
+  // dimension of its own: the step's dimension, a rule's name and a pivot's
+  // target are looked up inside the shared fold, whatever the number of sites.
+  EXPECT_EQ(dims3, dims1) << dims1 << " " << dims3;
 }
 
 TEST_F(VQLDynamicViewRuntimeTest, RuleCountDoesNotChangeTheStepProgram) {

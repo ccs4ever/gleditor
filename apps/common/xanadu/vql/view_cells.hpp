@@ -84,11 +84,20 @@ struct HandleParts {
 handleParts(const zigzag::ArenaManifold &arena, const ViewDimensions &dims,
             zigzag::CellRef cell);
 
-/// True when @p cell carries the marker, whether or not its boxes still name
-/// live cells.
+/// True when @p cell carries a link on a dimension named like the marker.
+/// Looked up by the name on the cell's own links, not through a core's
+/// dimension directory, so a handle made through another core over the same
+/// arena is still recognised as a handle.
 [[nodiscard]] bool carriesViewMarker(const zigzag::ArenaManifold &arena,
-                                     const ViewDimensions &dims,
                                      zigzag::CellRef cell);
+
+/// True when @p cell carries the marker, but not the one @p dims names: a
+/// handle another core made. Its rules and boxes sit on dimensions this core
+/// has no number for, so it cannot be stepped here.
+[[nodiscard]] bool
+carriesForeignViewMarker(const zigzag::ArenaManifold &arena,
+                         const std::optional<ViewDimensions> &dims,
+                         zigzag::CellRef cell);
 
 } // namespace xanadu::vql
 

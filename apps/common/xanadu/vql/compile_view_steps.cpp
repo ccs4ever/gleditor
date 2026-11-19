@@ -57,42 +57,266 @@ void VQLCompiler::emitJump(const CellRef target) {
   emitInput(jump, target);
 }
 
+void VQLCompiler::emitCallRoutine(const CellRef entry) {
+  const auto call = emitOp(OpcodeKind::Call, "#VIEW_CALL");
+  emitInputConstant(call, static_cast<std::int64_t>(entry));
+}
+
+void VQLCompiler::emitWrite(const CellRef slot, const CellValue &value) {
+  const auto write = emitOp(OpcodeKind::Value, "#VIEW_ARGUMENT");
+  emitInput(write, slot);
+  emitInputConstant(write, std::int64_t{0});
+  emitInputConstant(write, std::int64_t{-1});
+  emitInputConstant(write, value);
+}
+
+CellRef VQLCompiler::emitRawCopy(const CellRef value) {
+  const CellRef copy = core_.arena().makeCell();
+  const auto add     = emitOp(OpcodeKind::Add, "#VIEW_COPY_FLAG");
+  emitInput(add, value);
+  emitOutput(add, copy);
+  return copy;
+}
+
+CellRef VQLCompiler::emitReferenceCopy(const CellRef reference) {
+  const CellRef copy = core_.arena().makeCell();
+  const auto cp      = emitOp(OpcodeKind::CopyCellRefs, "#VIEW_COPY_REF");
+  emitInput(cp, reference);
+  emitOutput(cp, copy);
+  return copy;
+}
+
+const VQLCompiler::ViewRoutines &
+VQLCompiler::viewRoutines(const ViewDimensions &dims) {
+  if (viewRoutines_) return *viewRoutines_;
+  // The fold, the handle wrap and the handle's resolution do not depend on the
+  // step that calls them, so each is emitted once, as a subroutine on a chain
+  // of its own, and a step site writes its arguments into fixed slots and
+  // calls it. A site's cost is then its dispatch and its calls, not a copy of
+  // the fold. The slots are the program's own cells and a routine never
+  // calls another step, so nothing calls one while it runs.
+  auto &arena             = core_.arena();
+  const auto savedEntry   = entryOp_;
+  const auto savedCurrent = currentOp_;
+  const bool savedFrame   = compilingFrameDefinition_;
+  entryOp_.reset();
+  currentOp_.reset();
+  compilingFrameDefinition_ = false;
+  ViewRoutines routines;
+  const auto slot   = [&] { return arena.makeCell(); };
+  const auto finish = [&] {
+    emitOp(OpcodeKind::Return, "#VIEW_RETURN");
+    // Inside a function body the VM requires every op but a jump or a frame
+    // return to have a successor; the Return never falls through to it.
+    emitOp(OpcodeKind::Nop, "#VIEW_RETURN_END");
+    const CellRef entry = *entryOp_;
+    entryOp_.reset();
+    currentOp_.reset();
+    return entry;
+  };
+  const auto numberOf = [&](const CellRef cell, const CellRef target) {
+    const auto convert = emitOp(OpcodeKind::IntOfCell, "#VIEW_NUMBER");
+    emitInput(convert, cell);
+    emitOutput(convert, target);
+    return target;
+  };
+  const auto box = [&](const CellRef scalar, const CellRef target) {
+    const auto make = emitOp(OpcodeKind::VqlBoxScalar, "#VIEW_BOX");
+    emitInput(make, scalar);
+    emitOutput(make, target);
+    return target;
+  };
+  const auto cellOf = [&](const CellRef reference, const CellRef target,
+                          const std::string &gone) {
+    const auto convert = emitOp(OpcodeKind::CellOfInt, "#VIEW_CELL");
+    emitInput(convert, reference);
+    emitOutput(convert, target);
+    emitRequire(emitCellPresence(target), gone);
+  };
+  const CellRef falseConst = emitConstant(CellValue(false));
+
+  // -- resolve: a handle to its source, its view and the view's number.
+  routines.resolveHandle = slot();
+  routines.resolveSource = slot();
+  routines.resolveView   = slot();
+  routines.resolveNumber = slot();
+  {
+    // Link answers the Int64 box's neighbour, and a CellOfInt of it is a
+    // reference to the cell the box names, or the VM's own absent-cell
+    // reference when there is none: presence, not a number, is what is asked.
+    const CellRef marker = emitLinkRead(routines.resolveHandle, dims.marker);
+    cellOf(marker, routines.resolveSource,
+           "VQL a dynamic view handle names a source that is no longer a "
+           "cell: the cell it was made over was released");
+    const CellRef ofBox = emitLinkRead(routines.resolveHandle, dims.of);
+    cellOf(ofBox, routines.resolveView,
+           "VQL a dynamic view handle names a view that is no longer a cell: "
+           "the cell it was made with was released");
+    numberOf(routines.resolveView, routines.resolveNumber);
+    routines.resolveEntry = finish();
+  }
+
+  // -- wrap: a reached cell to a handle of the view whose number is given.
+  routines.wrapSource = slot();
+  routines.wrapNumber = slot();
+  routines.wrapHandle = slot();
+  {
+    const CellRef sourceBox =
+        box(numberOf(routines.wrapSource, slot()), slot());
+    const CellRef viewBox = box(routines.wrapNumber, slot());
+    // The handle's own text is a display copy taken now; a step reads the
+    // live source through the box, never this copy.
+    const CellRef copy = slot();
+    const auto read    = emitOp(OpcodeKind::VqlString, "#VIEW_COPY");
+    emitInput(read, routines.wrapSource);
+    emitOutput(read, copy);
+    box(copy, routines.wrapHandle);
+    for (const auto &[dimension, target] :
+         {std::pair{dims.marker, sourceBox}, std::pair{dims.of, viewBox}}) {
+      const auto link = emitOp(OpcodeKind::Link, "#VIEW_NAME");
+      emitInput(link, routines.wrapHandle);
+      emitInputConstant(link, static_cast<std::int64_t>(dimension));
+      emitInputConstant(link, forward);
+      emitInput(link, target);
+    }
+    routines.wrapEntry = finish();
+  }
+
+  // -- fold: the view's rules, in source order, over one step.
+  routines.foldView      = slot();
+  routines.foldName      = slot();
+  routines.foldDirection = slot();
+  routines.foldMint      = slot();
+  routines.foldAllowed   = slot();
+  routines.foldPhysical  = slot();
+  routines.foldComputed  = slot();
+  {
+    const auto text = [&](const std::string_view value) {
+      return emitConstant(CellValue(std::string{value}));
+    };
+    const auto notOf = [&](const CellRef value) {
+      const CellRef result = slot();
+      const auto negate    = emitOp(OpcodeKind::Not, "#VIEW_FOLD_NOT");
+      emitInput(negate, value);
+      emitOutput(negate, result);
+      return result;
+    };
+    const auto binary = [&](const OpcodeKind kind, const CellRef left,
+                            const CellRef right) {
+      return emitBinary(kind, left, right, "#VIEW_FOLD");
+    };
+    const auto copyInto = [&](const CellRef value, const CellRef target) {
+      const auto add = emitOp(OpcodeKind::Add, "#VIEW_COPY_FLAG");
+      emitInput(add, value);
+      emitOutput(add, target);
+    };
+    // Resolved the way a rule's own name is, so the two compare as the same
+    // kind of value whatever the VM does with a dimension number.
+    const CellRef stepNumber = slot();
+    const auto stepResolve   = emitOp(OpcodeKind::DimByName, "#VIEW_STEP_DIM");
+    emitInput(stepResolve, routines.foldName);
+    emitInputConstant(stepResolve, std::int64_t{0});
+    emitOutput(stepResolve, stepNumber);
+    // `allowed` starts from the view's base flag and each rule, in source
+    // order, shows or hides the step; a pivot on the step's own dimension also
+    // redirects it.
+    copyInto(emitLinkRead(routines.foldView, dims.base), routines.foldAllowed);
+    copyInto(stepNumber, routines.foldPhysical);
+    copyInto(falseConst, routines.foldComputed);
+    const auto rules = emitOp(OpcodeKind::RankBegin, "#VIEW_RULES");
+    emitInput(rules, routines.foldView);
+    emitInputConstant(rules, static_cast<std::int64_t>(dims.rule));
+    emitInputConstant(rules, forward);
+    const CellRef iterator = slot();
+    emitOutput(rules, iterator);
+    const CellRef allText      = text(viewKindAll);
+    const CellRef noneText     = text(viewKindNone);
+    const CellRef maskText     = text(viewKindMask);
+    const CellRef pivotText    = text(viewKindPivot);
+    const CellRef computedText = text(viewKindComputed);
+    emitIteratorLoop(iterator, [&](const CellRef rule) {
+      const CellRef fromDim = slot();
+      const auto resolve    = emitOp(OpcodeKind::DimByName, "#VIEW_RULE_DIM");
+      emitInput(resolve, rule);
+      emitInputConstant(resolve, std::int64_t{0});
+      emitOutput(resolve, fromDim);
+      const CellRef kind       = emitLinkRead(rule, dims.kind);
+      const CellRef target     = emitLinkRead(rule, dims.to);
+      const CellRef negated    = emitLinkRead(rule, dims.neg);
+      const CellRef bidir      = emitLinkRead(rule, dims.bidir);
+      const CellRef direction  = emitLinkRead(rule, dims.dir);
+      const CellRef isAll      = binary(OpcodeKind::Eq, kind, allText);
+      const CellRef isNone     = binary(OpcodeKind::Eq, kind, noneText);
+      const CellRef isMask     = binary(OpcodeKind::Eq, kind, maskText);
+      const CellRef isPivot    = binary(OpcodeKind::Eq, kind, pivotText);
+      const CellRef isComputed = binary(OpcodeKind::Eq, kind, computedText);
+      const CellRef sameDim    = binary(OpcodeKind::Eq, fromDim, stepNumber);
+      const CellRef sameWay =
+          binary(OpcodeKind::Eq, direction, routines.foldDirection);
+      const CellRef maskHit =
+          binary(OpcodeKind::And, isMask,
+                 binary(OpcodeKind::And, sameDim,
+                        binary(OpcodeKind::Or, bidir, sameWay)));
+      const CellRef pivotHit = binary(OpcodeKind::And, isPivot, sameDim);
+      const CellRef computedHit1 =
+          binary(OpcodeKind::And, isComputed,
+                 binary(OpcodeKind::And, sameDim, sameWay));
+      const CellRef shows = binary(
+          OpcodeKind::Or, isAll,
+          binary(OpcodeKind::Or, pivotHit,
+                 binary(OpcodeKind::Or, computedHit1,
+                        binary(OpcodeKind::And, maskHit, notOf(negated)))));
+      const CellRef hides = binary(OpcodeKind::Or, isNone,
+                                   binary(OpcodeKind::And, maskHit, negated));
+      const CellRef kept =
+          binary(OpcodeKind::And, routines.foldAllowed, notOf(hides));
+      const auto setAllowed = emitOp(OpcodeKind::Or, "#VIEW_ALLOWED");
+      emitInput(setAllowed, shows);
+      emitInput(setAllowed, kept);
+      emitOutput(setAllowed, routines.foldAllowed);
+      const auto setComputed = emitOp(OpcodeKind::Or, "#VIEW_COMPUTED");
+      emitInput(setComputed, routines.foldComputed);
+      emitInput(setComputed, computedHit1);
+      emitOutput(setComputed, routines.foldComputed);
+      const CellRef skip = mintOpcode(OpcodeKind::Nop, "#VIEW_NO_PIVOT");
+      const auto notPivot =
+          emitOp(OpcodeKind::BranchFalseCell, "#VIEW_PIVOT_TEST");
+      emitInput(notPivot, pivotHit);
+      emitInput(notPivot, skip);
+      const auto redirect = emitOp(OpcodeKind::DimByName, "#VIEW_PIVOT_DIM");
+      emitInput(redirect, target);
+      emitInput(redirect, routines.foldMint);
+      emitOutput(redirect, routines.foldPhysical);
+      appendOpcode(skip);
+    });
+    routines.foldEntry = finish();
+  }
+
+  entryOp_                  = savedEntry;
+  currentOp_                = savedCurrent;
+  compilingFrameDefinition_ = savedFrame;
+  viewRoutines_             = routines;
+  return *viewRoutines_;
+}
+
 CellRef VQLCompiler::emitViewHandle(const CellRef source,
                                     const CellRef viewNumber,
                                     const ViewDimensions &dims) {
-  auto &arena         = core_.arena();
-  const auto numberOf = [&](const CellRef cell) {
-    const CellRef number = arena.makeCell();
-    const auto convert   = emitOp(OpcodeKind::IntOfCell, "#VIEW_NUMBER");
-    emitInput(convert, cell);
-    emitOutput(convert, number);
-    return number;
-  };
-  const auto box = [&](const CellRef scalar) {
-    const CellRef boxed = arena.makeCell();
-    const auto make     = emitOp(OpcodeKind::VqlBoxScalar, "#VIEW_BOX");
-    emitInput(make, scalar);
-    emitOutput(make, boxed);
-    return boxed;
-  };
-  const CellRef sourceBox = box(numberOf(source));
-  const CellRef viewBox   = box(viewNumber);
-  // The handle's own text is a display copy taken now; a step reads the live
-  // source through the box, never this copy.
-  const CellRef copy = arena.makeCell();
-  const auto read    = emitOp(OpcodeKind::VqlString, "#VIEW_COPY");
-  emitInput(read, source);
-  emitOutput(read, copy);
-  const CellRef handle = box(copy);
-  for (const auto &[dimension, target] :
-       {std::pair{dims.marker, sourceBox}, std::pair{dims.of, viewBox}}) {
-    const auto link = emitOp(OpcodeKind::Link, "#VIEW_NAME");
-    emitInput(link, handle);
-    emitInputConstant(link, static_cast<std::int64_t>(dimension));
-    emitInputConstant(link, forward);
-    emitInput(link, target);
-  }
-  return handle;
+  const ViewRoutines &routines = viewRoutines(dims);
+  // One handle per reach, never looked up and reused: handles are minted
+  // inside the program and released with it, no VQL operation exposes cell
+  // identity, and a lookup would be a search over the view's handles for a
+  // difference nothing can observe. Two reaches of one source are two cells.
+  const auto arguments = emitOp(OpcodeKind::CopyCellRefs, "#VIEW_WRAP_SOURCE");
+  emitInput(arguments, source);
+  emitOutput(arguments, routines.wrapSource);
+  const auto number = emitOp(OpcodeKind::Add, "#VIEW_WRAP_NUMBER");
+  emitInput(number, viewNumber);
+  emitOutput(number, routines.wrapNumber);
+  emitCallRoutine(routines.wrapEntry);
+  // The slot is the routine's and is overwritten by the next wrap, so the
+  // caller appends what it holds before wrapping again.
+  return routines.wrapHandle;
 }
 
 std::vector<CellRef> VQLCompiler::emitViewStep(
@@ -144,12 +368,14 @@ std::vector<CellRef> VQLCompiler::emitViewStep(
     }
   }
 
+  const ViewRoutines &routines = viewRoutines(dims);
+  // The VM answers a Link that finds no neighbour with its absent-cell
+  // reference, the one representation it has for "nothing there"; the
+  // comparison is that probe and nothing else, and no number of ours is ever
+  // given that meaning.
   const CellRef absentCell =
       emitConstant(CellValue(static_cast<std::int64_t>(zigzag::noCell)));
   const CellRef falseConst = emitConstant(CellValue(false));
-  const auto text          = [&](const std::string_view value) {
-    return emitConstant(CellValue(std::string{value}));
-  };
 
   return emitMap(stream, [&](const CellRef current) {
     const CellRef out    = emitStreamClear();
@@ -167,133 +393,33 @@ std::vector<CellRef> VQLCompiler::emitViewStep(
     emitJump(end);
 
     appendOpcode(handleLabel);
-    const auto cellOf = [&](const CellRef box, const std::string &gone) {
-      const CellRef cell = core_.arena().makeCell();
-      const auto convert = emitOp(OpcodeKind::CellOfInt, "#VIEW_CELL");
-      emitInput(convert, box);
-      emitOutput(convert, cell);
-      emitRequire(emitCellPresence(cell), gone);
-      return cell;
-    };
-    const CellRef source = cellOf(
-        marker, "VQL a dynamic view handle names a source that is no longer a "
-                "cell: the cell it was made over was released");
+    const auto copyIn = emitOp(OpcodeKind::CopyCellRefs, "#VIEW_RESOLVE_ARG");
+    emitInput(copyIn, current);
+    emitOutput(copyIn, routines.resolveHandle);
+    emitCallRoutine(routines.resolveEntry);
+    const CellRef source = emitReferenceCopy(routines.resolveSource);
     if (refusal) {
       emitRequire(falseConst, *refusal);
     } else if (!dimension) {
       // value() and count() leave the view: they answer about the source.
       emitAppendStream(out, compileSelector(step, source, hasContext));
     } else {
-      const CellRef ofBox = emitLinkRead(current, dims.of);
-      const CellRef view  = cellOf(
-          ofBox, "VQL a dynamic view handle names a view that is no longer a "
-                  "cell: the cell it was made with was released");
-      const CellRef viewNumber = core_.arena().makeCell();
-      const auto numberOp      = emitOp(OpcodeKind::IntOfCell, "#VIEW_NUMBER");
-      emitInput(numberOp, view);
-      emitOutput(numberOp, viewNumber);
-
-      // The fold. `allowed` starts from the view's base flag and each rule, in
-      // source order, shows or hides the step; a pivot on the step's own
-      // dimension also redirects it. Every name here but the rule's own is a
-      // constant of the compile.
-      const auto copyOf = [&](const CellRef value) {
-        const CellRef copy = core_.arena().makeCell();
-        const auto add     = emitOp(OpcodeKind::Add, "#VIEW_COPY_FLAG");
-        emitInput(add, value);
-        emitOutput(add, copy);
-        return copy;
-      };
-      const auto notOf = [&](const CellRef value) {
-        const CellRef result = core_.arena().makeCell();
-        const auto negate    = emitOp(OpcodeKind::Not, "#VIEW_FOLD_NOT");
-        emitInput(negate, value);
-        emitOutput(negate, result);
-        return result;
-      };
-      const auto binary = [&](const OpcodeKind kind, const CellRef left,
-                              const CellRef right) {
-        return emitBinary(kind, left, right, "#VIEW_FOLD");
-      };
-      // Resolved the way a rule's own name is, so the two compare as the
-      // same kind of value whatever the VM does with a dimension number.
-      const CellRef stepNumber = core_.arena().makeCell();
-      const auto stepResolve = emitOp(OpcodeKind::DimByName, "#VIEW_STEP_DIM");
-      emitInput(stepResolve, text(dimension->dimName));
-      emitInputConstant(stepResolve, std::int64_t{0});
-      emitOutput(stepResolve, stepNumber);
-      const CellRef stepDirection   = emitConstant(CellValue(
-          static_cast<std::int64_t>(zigzag::toSign(dimension->direction))));
-      const CellRef allowed         = copyOf(emitLinkRead(view, dims.base));
-      const CellRef physical        = copyOf(stepNumber);
-      const CellRef computedHit     = copyOf(falseConst);
-      const std::int64_t mintTarget = dimension->creates.empty() ? 0 : 1;
-
-      const auto rules = emitOp(OpcodeKind::RankBegin, "#VIEW_RULES");
-      emitInput(rules, view);
-      emitInputConstant(rules, static_cast<std::int64_t>(dims.rule));
-      emitInputConstant(rules, forward);
-      const CellRef iterator = core_.arena().makeCell();
-      emitOutput(rules, iterator);
-      const CellRef allText      = text(viewKindAll);
-      const CellRef noneText     = text(viewKindNone);
-      const CellRef maskText     = text(viewKindMask);
-      const CellRef pivotText    = text(viewKindPivot);
-      const CellRef computedText = text(viewKindComputed);
-      emitIteratorLoop(iterator, [&](const CellRef rule) {
-        const CellRef fromDim = core_.arena().makeCell();
-        const auto resolve    = emitOp(OpcodeKind::DimByName, "#VIEW_RULE_DIM");
-        emitInput(resolve, rule);
-        emitInputConstant(resolve, std::int64_t{0});
-        emitOutput(resolve, fromDim);
-        const CellRef kind       = emitLinkRead(rule, dims.kind);
-        const CellRef target     = emitLinkRead(rule, dims.to);
-        const CellRef negated    = emitLinkRead(rule, dims.neg);
-        const CellRef bidir      = emitLinkRead(rule, dims.bidir);
-        const CellRef direction  = emitLinkRead(rule, dims.dir);
-        const CellRef isAll      = binary(OpcodeKind::Eq, kind, allText);
-        const CellRef isNone     = binary(OpcodeKind::Eq, kind, noneText);
-        const CellRef isMask     = binary(OpcodeKind::Eq, kind, maskText);
-        const CellRef isPivot    = binary(OpcodeKind::Eq, kind, pivotText);
-        const CellRef isComputed = binary(OpcodeKind::Eq, kind, computedText);
-        const CellRef sameDim    = binary(OpcodeKind::Eq, fromDim, stepNumber);
-        const CellRef sameWay =
-            binary(OpcodeKind::Eq, direction, stepDirection);
-        const CellRef maskHit =
-            binary(OpcodeKind::And, isMask,
-                   binary(OpcodeKind::And, sameDim,
-                          binary(OpcodeKind::Or, bidir, sameWay)));
-        const CellRef pivotHit = binary(OpcodeKind::And, isPivot, sameDim);
-        const CellRef computedHit1 =
-            binary(OpcodeKind::And, isComputed,
-                   binary(OpcodeKind::And, sameDim, sameWay));
-        const CellRef shows = binary(
-            OpcodeKind::Or, isAll,
-            binary(OpcodeKind::Or, pivotHit,
-                   binary(OpcodeKind::Or, computedHit1,
-                          binary(OpcodeKind::And, maskHit, notOf(negated)))));
-        const CellRef hides   = binary(OpcodeKind::Or, isNone,
-                                       binary(OpcodeKind::And, maskHit, negated));
-        const CellRef kept    = binary(OpcodeKind::And, allowed, notOf(hides));
-        const auto setAllowed = emitOp(OpcodeKind::Or, "#VIEW_ALLOWED");
-        emitInput(setAllowed, shows);
-        emitInput(setAllowed, kept);
-        emitOutput(setAllowed, allowed);
-        const auto setComputed = emitOp(OpcodeKind::Or, "#VIEW_COMPUTED");
-        emitInput(setComputed, computedHit);
-        emitInput(setComputed, computedHit1);
-        emitOutput(setComputed, computedHit);
-        const CellRef skip = mintOpcode(OpcodeKind::Nop, "#VIEW_NO_PIVOT");
-        const auto notPivot =
-            emitOp(OpcodeKind::BranchFalseCell, "#VIEW_PIVOT_TEST");
-        emitInput(notPivot, pivotHit);
-        emitInput(notPivot, skip);
-        const auto redirect = emitOp(OpcodeKind::DimByName, "#VIEW_PIVOT_DIM");
-        emitInput(redirect, target);
-        emitInputConstant(redirect, mintTarget);
-        emitOutput(redirect, physical);
-        appendOpcode(skip);
-      });
+      const CellRef viewNumber = emitRawCopy(routines.resolveNumber);
+      emitWrite(routines.foldName, CellValue(dimension->dimName));
+      emitWrite(routines.foldDirection,
+                CellValue(static_cast<std::int64_t>(
+                    zigzag::toSign(dimension->direction))));
+      emitWrite(routines.foldMint,
+                CellValue(std::int64_t{dimension->creates.empty() ? 0 : 1}));
+      const auto viewIn = emitOp(OpcodeKind::CopyCellRefs, "#VIEW_FOLD_VIEW");
+      emitInput(viewIn, routines.resolveView);
+      emitOutput(viewIn, routines.foldView);
+      emitCallRoutine(routines.foldEntry);
+      // Copied out of the routine's slots: a creation value or a computed rule
+      // below may step a view of its own and call the fold again.
+      const CellRef allowed     = emitRawCopy(routines.foldAllowed);
+      const CellRef physical    = emitRawCopy(routines.foldPhysical);
+      const CellRef computedHit = emitRawCopy(routines.foldComputed);
 
       // A hidden step reaches nothing and creates nothing.
       const auto hidden = emitOp(OpcodeKind::BranchFalseCell, "#VIEW_HIDDEN");
@@ -308,8 +434,8 @@ std::vector<CellRef> VQLCompiler::emitViewStep(
       emitInput(toPlainRule, notComputed);
       for (const Candidate &candidate : candidates) {
         const CellRef thisView =
-            binary(OpcodeKind::Eq, viewNumber,
-                   emitConstant(CellValue(candidate.view)));
+            emitBinary(OpcodeKind::Eq, viewNumber,
+                       emitConstant(CellValue(candidate.view)), "#VIEW_FOLD");
         const CellRef next = mintOpcode(OpcodeKind::Nop, "#VIEW_NEXT_VIEW");
         const auto other =
             emitOp(OpcodeKind::BranchFalseCell, "#VIEW_WHICH_VIEW");

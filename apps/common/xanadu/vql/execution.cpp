@@ -129,10 +129,13 @@ public:
         }
         if (!olderThanProgram(parts->view)) {
           carried.push_back({cell, parts->view});
-          if (std::ranges::find(live, parts->view) == live.end())
-            live.push_back(parts->view);
         }
       }
+      // Appended once the walk is over: growing the vector being walked would
+      // invalidate the walk.
+      for (const auto &entry : carried)
+        if (std::ranges::find(live, entry.view) == live.end())
+          live.push_back(entry.view);
     }
     // A closure value holds its descriptor and captured cells as integers,
     // which re-minting a cell would leave dangling. CopyOut refuses any

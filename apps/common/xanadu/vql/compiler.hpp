@@ -541,6 +541,21 @@ private:
   bool guardSteps_{false};
   bool viewGuardsSkipped_{false};
   mutable std::optional<ViewDimensions> viewDimensions_;
+  /// The three subroutines a view step calls, and the slots it passes its
+  /// arguments and reads its answers in. Built once per compile.
+  struct ViewRoutines {
+    zigzag::CellRef resolveEntry{}, resolveHandle{}, resolveSource{},
+        resolveView{}, resolveNumber{};
+    zigzag::CellRef wrapEntry{}, wrapSource{}, wrapNumber{}, wrapHandle{};
+    zigzag::CellRef foldEntry{}, foldView{}, foldName{}, foldDirection{},
+        foldMint{}, foldAllowed{}, foldPhysical{}, foldComputed{};
+  };
+  std::optional<ViewRoutines> viewRoutines_;
+  const ViewRoutines &viewRoutines(const ViewDimensions &dims);
+  void emitCallRoutine(zigzag::CellRef entry);
+  void emitWrite(zigzag::CellRef slot, const zigzag::vortex::CellValue &value);
+  zigzag::CellRef emitRawCopy(zigzag::CellRef value);
+  zigzag::CellRef emitReferenceCopy(zigzag::CellRef reference);
   std::vector<zigzag::CellRef> compileLensStep(const PathStep &step,
                                                zigzag::CellRef current,
                                                bool hasContext);

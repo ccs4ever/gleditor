@@ -478,6 +478,7 @@ CompilationResult VQLCompiler::compileOnce(const QueryExpression &query,
   guardSteps_        = false;
   viewGuardsSkipped_ = false;
   viewDimensions_.reset();
+  viewRoutines_.reset();
   if (nameViewDimensions) viewDimensions_ = ensureViewDimensions(core_);
   for (const auto &[name, cells] : options.initialBindings) {
     constantCells_.insert(cells.begin(), cells.end());

@@ -173,9 +173,7 @@ VQLCompiler::HandleKind VQLCompiler::handleKindOf(const CellRef cell) const {
   }
   // The marker is how a handle is told from a plain cell, wherever it came
   // from: this compile, an earlier one, or another engine over the same core.
-  const auto dims = viewDimensions();
-  if (dims && carriesViewMarker(core_.arena(), *dims, cell))
-    return HandleKind::ViewHandle;
+  if (carriesViewMarker(core_.arena(), cell)) return HandleKind::ViewHandle;
   return HandleKind::None;
 }
 

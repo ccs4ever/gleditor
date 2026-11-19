@@ -1,5 +1,6 @@
 #include "common/xanadu/vql/view_cells.hpp"
 
+#include <algorithm>
 #include <limits>
 
 namespace xanadu::vql {
@@ -42,10 +43,20 @@ ViewDimensions ensureViewDimensions(zigzag::vortex::VortexCore &core) {
   };
 }
 
-bool carriesViewMarker(const zigzag::ArenaManifold &arena,
-                       const ViewDimensions &dims, const CellRef cell) {
-  return arena.contains(cell) &&
-         arena.linked(cell, dims.marker, DimVector::POS).has_value();
+bool carriesViewMarker(const zigzag::ArenaManifold &arena, const CellRef cell) {
+  if (!arena.contains(cell)) return false;
+  return std::ranges::any_of(
+      arena.dimensionsOf(cell), [&](const zigzag::DimLink &link) {
+        return (link.pos != zigzag::noCell || link.neg != zigzag::noCell) &&
+               arena.textOf(link.dim) == viewMarkerDimension;
+      });
+}
+
+bool carriesForeignViewMarker(const zigzag::ArenaManifold &arena,
+                              const std::optional<ViewDimensions> &dims,
+                              const CellRef cell) {
+  if (!carriesViewMarker(arena, cell)) return false;
+  return !dims || !arena.linked(cell, dims->marker, DimVector::POS);
 }
 
 std::optional<HandleParts> handleParts(const zigzag::ArenaManifold &arena,

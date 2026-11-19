@@ -83,6 +83,16 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
     if (guardSteps_ && hasContext) {
       viewDims = viewDimensions();
       if (!viewDims) viewGuardsSkipped_ = true;
+      // A handle another core made names its boxes and rules on dimensions
+      // this core has no number for; walking it as a plain cell would answer
+      // nothing and say nothing. Only a cell the compiler holds can be seen.
+      for (const CellRef cell : stream)
+        if (carriesForeignViewMarker(core_.arena(), viewDims, cell))
+          throw QueryRefusal(
+              QueryErrorCategory::Unsupported,
+              "VQL a dynamic view handle made through another core cannot be "
+              "stepped here: its view and source are named on dimensions this "
+              "core does not hold");
     }
     const std::string stepRefusal =
         viewDims ? viewStepRefusal(written).value_or(std::string{}) : "";
