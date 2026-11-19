@@ -255,6 +255,19 @@ enum class OpcodeKind : std::uint8_t {
   // promote() is stale (and can be persisted as data with that bit in it).
   // Appended to preserve persisted opcode-kind integers.
   IntOfCell,
+
+  // Cell or Int64 -> Int64: the release epoch the named cell was minted in,
+  // ArenaManifold::epochOfCell as a graph operation. One operand, either a
+  // reference slot (the cell it names) or an Int64 (a cell number, read as
+  // CellOfInt reads it, only the birth operation naming a cell); one raw Int64
+  // out, never published as a reference. An operand that names no cell is
+  // refused by name rather than answered, so no value of the result means
+  // "absent". It is the witness the unprotected-number hazard of CellOfInt and
+  // IntOfCell asks for: a program that keeps a number records this beside it
+  // and compares it again before trusting the number. Pure read, one unit of
+  // work. Not mesh-pure: epochs depend on how the evaluating arena was built
+  // and released. Appended to preserve persisted opcode-kind integers.
+  EpochOfCell,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.
@@ -989,6 +1002,8 @@ private:
                                       std::vector<CellValue> &outputs);
   ExecutionResult executeCellOfInt(CellRef opcode,
                                    std::vector<CellValue> &outputs);
+  ExecutionResult executeEpochOfCell(CellRef opcode,
+                                     std::vector<CellValue> &outputs);
   ExecutionResult executeIntOfCell(CellRef opcode,
                                    std::vector<CellValue> &outputs);
   /// One directed link a mask would remove from the owner.

@@ -458,7 +458,10 @@ TEST_F(VQLDynamicViewRuntimeTest, TheStepProgramGrowsByABoundedAmountPerStep) {
   // size of a step without views), its arguments and calls, and the walk that
   // wraps what is reached. Measured 57 per site; the bound leaves a little
   // room for the plain branch to grow. Before the routines were shared a
-  // site cost 102.
+  // site cost 102. The in-graph epoch check of a handle (EpochOfCell of the
+  // source and the view against the recorded witness) is part of the shared
+  // resolve routine: about a dozen ops once per program, none per site, so
+  // 57 stands (re-measured with the check in place: 57 at 2, 3 and 8 steps).
   constexpr std::size_t maxOpsPerStep = 60;
   const auto one                      = opsFor(1);
   std::size_t previous                = one;

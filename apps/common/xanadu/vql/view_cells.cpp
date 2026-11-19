@@ -126,6 +126,12 @@ void recordViewWitnesses(zigzag::ArenaManifold &arena,
   }
 }
 
+std::string viewNumberReusedReason(const std::string_view what) {
+  return "VQL a dynamic view handle's " + std::string{what} +
+         " cell was released and its number reused: the handle no longer "
+         "names the cell it was made with";
+}
+
 std::optional<std::string> staleHandleReason(const zigzag::ArenaManifold &arena,
                                              const ViewDimensions &dims,
                                              const CellRef cell,
@@ -154,9 +160,7 @@ std::optional<std::string> staleHandleReason(const zigzag::ArenaManifold &arena,
       return std::string{"VQL a dynamic view handle's "} + what +
              " cell is no longer a cell: it was released";
     if (recorded && static_cast<std::int64_t>(*now) != *recorded)
-      return std::string{"VQL a dynamic view handle's "} + what +
-             " cell was released and its number reused: the handle no longer "
-             "names the cell it was made with";
+      return viewNumberReusedReason(what);
     return std::nullopt;
   };
   if (const auto why = check(*sourceBox, number(first), "source")) return why;

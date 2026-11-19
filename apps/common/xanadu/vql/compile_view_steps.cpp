@@ -133,6 +133,16 @@ VQLCompiler::viewRoutines(const ViewDimensions &dims) {
     emitOutput(convert, target);
     emitRequire(emitCellPresence(target), gone);
   };
+  // The graph's own comparison of a cell's epoch now with the one recorded.
+  const auto epochUnchanged = [&](const CellRef cell, const CellRef recorded,
+                                  const std::string &reused) {
+    const CellRef now  = arena.makeCell();
+    const auto observe = emitOp(OpcodeKind::EpochOfCell, "#VIEW_EPOCH");
+    emitInput(observe, cell);
+    emitOutput(observe, now);
+    emitRequire(emitBinary(OpcodeKind::Eq, now, recorded, "#VIEW_EPOCH_SAME"),
+                reused);
+  };
   const CellRef falseConst = emitConstant(CellValue(false));
 
   // -- resolve: a handle to its source, its view and the view's number.
@@ -153,6 +163,31 @@ VQLCompiler::viewRoutines(const ViewDimensions &dims) {
            "VQL a dynamic view handle names a view that is no longer a cell: "
            "the cell it was made with was released");
     numberOf(routines.resolveView, routines.resolveNumber);
+
+    // The numbers just read are only as good as the epochs recorded beside
+    // them: a cell released and its number minted again answers a later
+    // epoch. The witness is the rank the host writes when a run settles
+    // (source's epoch, then the view's). A handle without one was made by the
+    // running program itself, and nothing releases beneath a running program,
+    // so its numbers cannot have been reused yet; the wrap step writes no
+    // witness, since nothing may be written onto the view or the source and
+    // the host records it once the handle is a result or a binding.
+    const CellRef sourceEpoch =
+        emitLinkRead(routines.resolveHandle, dims.epoch);
+    const CellRef unwitnessed =
+        mintOpcode(OpcodeKind::Nop, "#VIEW_UNWITNESSED");
+    // The presence ops are emitted before the branch that reads them.
+    const CellRef witnessed = emitCellPresence(sourceEpoch);
+    const auto skipCheck =
+        emitOp(OpcodeKind::BranchFalseCell, "#VIEW_WITNESS_TEST");
+    emitInput(skipCheck, witnessed);
+    emitInput(skipCheck, unwitnessed);
+    const CellRef viewEpoch = emitLinkRead(sourceEpoch, dims.epoch);
+    epochUnchanged(routines.resolveSource, sourceEpoch,
+                   viewNumberReusedReason("source"));
+    epochUnchanged(routines.resolveView, viewEpoch,
+                   viewNumberReusedReason("view"));
+    appendOpcode(unwitnessed);
     routines.resolveEntry = finish();
   }
 

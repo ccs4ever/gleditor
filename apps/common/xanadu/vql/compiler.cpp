@@ -317,6 +317,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "CELLOFINT";
   case OpcodeKind::IntOfCell:
     return "INTOFCELL";
+  case OpcodeKind::EpochOfCell:
+    return "EPOCHOFCELL";
   default:
     return "UNKNOWN";
   }

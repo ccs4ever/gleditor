@@ -109,6 +109,12 @@ staleHandleReason(const zigzag::ArenaManifold &arena,
                   const ViewDimensions &dims, zigzag::CellRef cell,
                   bool witnessed = true);
 
+/// What a handle refuses with when the number its @p what box ("source" or
+/// "view") holds now names a cell of a later release epoch than the one
+/// recorded beside it. Shared by the host check and the check the handle's
+/// resolution makes in the graph, so the two say the same thing.
+[[nodiscard]] std::string viewNumberReusedReason(std::string_view what);
+
 /// True when @p cell carries a link on a dimension named like the marker.
 /// Looked up by the name on the cell's own links, not through a core's
 /// dimension directory, so a handle made through another core over the same
