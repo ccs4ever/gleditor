@@ -115,6 +115,7 @@ TypeChecker::TypeChecker() {
   //   putStr   :: String -> IO Unit
   //   putStrLn :: String -> IO Unit
   //   getLine  :: IO String
+  //   isEOF    :: IO Bool
   {
     const int a       = nextVar_++;
     auto av           = std::make_shared<Ty>();
@@ -144,6 +145,7 @@ TypeChecker::TypeChecker() {
   builtins_["putStrLn"] =
       Scheme{.vars = {}, .body = tyFun(tyStr(), tyIO(tyUnit()))};
   builtins_["getLine"] = Scheme{.vars = {}, .body = tyIO(tyStr())};
+  builtins_["isEOF"]   = Scheme{.vars = {}, .body = tyIO(tyBool())};
 
   // std:xanadu authoring verbs (§13). Cell and Dim are opaque reference types;
   // Unit is the result of a side-effecting-looking arena write (still pure --
@@ -799,7 +801,24 @@ std::expected<TyPtr, TypeError> TypeChecker::infer(const ExprNode &e,
           auto c = infer(*node.cond, env);
           if (!c) return c;
           auto u1 = unify(*c, tyBool(), e.loc);
-          if (!u1) return std::unexpected(u1.error());
+          if (!u1) {
+            // An IO action used where its result is wanted (`if isEOF then`)
+            // is the one mistake the unifier's "IO Bool with Bool" does not
+            // locate, so name the variable and the way to get at the value.
+            const auto *var = std::get_if<EVar>(&node.cond->node);
+            const auto cond = prune(*c);
+            if (var != nullptr && cond->kind == Ty::Kind::Con &&
+                cond->con == "IO") {
+              return terr(CompileError::TypeMismatch,
+                          "'" + var->name + "' is an IO action (" +
+                              renderType(cond) +
+                              "), not its result: the condition of `if` "
+                              "needs a Bool, so bind it first, as in `" +
+                              var->name + " >>= (fn x => if x then ...)`",
+                          node.cond->loc);
+            }
+            return std::unexpected(u1.error());
+          }
           auto th = infer(*node.then, env);
           if (!th) return th;
           auto el = infer(*node.elze, env);

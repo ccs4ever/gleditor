@@ -251,7 +251,7 @@ lowerFieldAccessor(LowerContext &ctx, std::string_view name,
 /// `>>=` and `>>` (the operator string selects IO.Bind / IO.Then).
 [[nodiscard]] Lowered<Operand> lowerIoBind(LowerContext &ctx, const EBinOp &e,
                                            SourceLocation loc);
-/// pure bind then putStr putStrLn getLine; nullopt for any other name.
+/// pure bind then putStr putStrLn getLine isEOF; nullopt for any other name.
 [[nodiscard]] std::optional<Lowered<Operand>>
 lowerIoBuiltin(LowerContext &ctx, std::string_view name, SourceLocation loc);
 

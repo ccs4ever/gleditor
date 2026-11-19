@@ -704,7 +704,25 @@ currentVersion :: Key -> IO MicroversionId   -- "what is the head of this doc no
 read           :: MicroversionId -> Doc       -- PURE: a frozen snapshot has one value (§2.1)
 save           :: Key -> a -> IO ()           -- promote the value under the current head
 getLine        :: IO String                   -- console input (§6.6, §7.4)
+isEOF          :: IO Bool                     -- is the console input exhausted?
 putStr         :: String -> IO ()             -- console output
+```
+
+**`isEOF` (end of input).** `getLine` has no value for "no more input" and an empty line is a
+legitimate answer, so a reader that cannot ask would find the end only by hitting `getLine`'s named
+error (`getLine: end of input`), which the program cannot catch. `isEOF :: IO Bool` is the smallest
+form that fixes this and follows the shape of the other primitives: it is an `IO` description like
+`getLine`, so building it runs nothing, and the runner performs it in order with the effects around
+it. Performing it *peeks*: it reports whether the input holds another character without consuming
+one, so a following `getLine` returns the next line and no line is lost, and asking twice gives the
+same answer. A final line with no trailing newline is still a line (`isEOF` is false until it is
+read) and input that is a lone newline is one empty line, not the end. It is a result in `IO` rather
+than a pure `Bool` because the answer changes as input is read; using it as a `Bool` is a type error
+that names it. No `until`/`whileM` combinator is added: the loop is ordinary recursion in `IO`,
+which the runner already trampolines in constant depth.
+
+```ocaml
+loop = isEOF >>= (fn done => if done then pure 0 else getLine >>= (fn l => putStrLn l >> loop))
 ```
 
 The split that fixes 1.0's unsoundness is `currentVersion`/`read`: asking *which* version is current
@@ -844,7 +862,7 @@ package is deliberately thin, because §7.3's reuse carries most of the weight. 
   releases on no-match, §5.4), `tag` (read a cell's constructor tag), `field` (a field by name or
   Inputs-Wing position), `record` (construct and functionally update by field name, §5.7).
 - **Effects**: `io` (the `IO` monad — `pure`, `(>>=)`, `(>>)`, and the primitives `read`/`save`/
-  `currentVersion`/`getLine`/`putStr`, §6.5), `show` (render any value to `String`, §6.7).
+  `currentVersion`/`getLine`/`isEOF`/`putStr`, §6.5), `show` (render any value to `String`, §6.7).
 - **Lazy lists / streams**: `cons`, `head`, `tail`, `take`, `drop`, `repeat`, `iterate`, `unfold` —
   built on `std:collections`' ranks but with lazy tails (a tail is a thunk), which is what makes
   §9.2's infinite stream finite to take from.
@@ -896,6 +914,7 @@ exports it (§7.1–§7.3) or the prelude ADT it belongs to. Signatures use the 
 | `show`                                                               | `a -> String` (render any value, §6.7)                 | `std:fun/show`                |
 | `format`                                                             | `String -> List String -> String` (`{}`-interpolation) | `std:string`                  |
 | `currentVersion`, `read`, `save`, `getLine`, `putStr`, `putStrLn`    | I/O (§6.5)                                             | `std:fun/io`                  |
+| `isEOF`                                                              | `IO Bool`: is the input exhausted? (§6.5)              | `std:fun/io`                  |
 
 The §9 examples draw only on this table. Where 1.0 used undefined names (`addWord`, `sortByValue`),
 §9 now spells them from these primitives (`insertWith`, a `foldr` with a comparator) so the examples
