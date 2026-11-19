@@ -3,6 +3,7 @@
  * @brief Frontend-neutral VQL execution and error normalization.
  */
 #include "common/xanadu/vql/execution.hpp"
+#include "common/xanadu/vql/prose_hits.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -324,9 +325,13 @@ QueryExecutor::executeVortex(const QueryExpression &query,
         vm_.setContractCoordinator(priorContractCoordinator);
       }};
   try {
-    // PROSE-HITS REGISTRATION SITE: the card that lowers `find` with
-    // RelationNext registers a provider here that calls proseHits()
-    // (vql/prose_hits.hpp) with coordinator_ and its arena.
+    // `find` is lowered to RelationNext over this provider. It lives for one
+    // run, so its hit list cannot outlive the query that searched, and a run
+    // that never calls find pays nothing.
+    vm_.setRelationProvider(std::string{findRelationName},
+                            makeFindProvider(coordinator_));
+    const RestoreScope dropFindProvider{
+        [this] { vm_.setRelationProvider(std::string{findRelationName}, {}); }};
     VQLCompiler compiler(coordinator_, vm_);
     CompilationOptions compilation;
     compilation.contextCells = contextCells;

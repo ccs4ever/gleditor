@@ -387,6 +387,11 @@ private:
   std::vector<zigzag::CellRef>
   compilePathFunctionCall(const FunctionInvocation &fn,
                           std::optional<zigzag::CellRef> context);
+  /// find(needle): a RelationNext scan over the host's find provider, one
+  /// stream of hits; an absent needle answers an empty stream.
+  std::vector<zigzag::CellRef>
+  compileFind(const FunctionInvocation &fn,
+              std::optional<zigzag::CellRef> context);
   std::optional<zigzag::CellRef>
   compilePathFunctionValue(const FunctionInvocation &fn,
                            zigzag::CellRef ctxCell);
