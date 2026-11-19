@@ -415,7 +415,31 @@ VQLCompiler::compileComputedDimension(const VirtualDimensionDefRule &rule,
       const auto &path =
           *std::get<std::shared_ptr<PathExpression>>(rule.expr->kind);
       reached = compileSteps(path.steps, {sourceCell}, true);
-      // One value, as evaluateValueExpr answered.
+      // A computed dimension is one value per source. The oracle kept the
+      // first cell of a longer answer and said nothing; here a second cell
+      // is a named run-time error, so the first is never mistaken for all.
+      const auto begin = emitOp(OpcodeKind::StreamBegin, "#COMPUTED_DIM_BEGIN");
+      for (const CellRef cell : reached) emitInput(begin, cell);
+      const CellRef iterator = core_.arena().makeCell();
+      emitOutput(begin, iterator);
+      CellRef extraPresent = iterator;
+      for (const char *label : {"#COMPUTED_DIM_FIRST", "#COMPUTED_DIM_EXTRA"}) {
+        const auto next = emitOp(OpcodeKind::IteratorNext, label);
+        emitInput(next, iterator);
+        emitOutput(next, core_.arena().makeCell());
+        emitOutput(next, extraPresent = core_.arena().makeCell());
+      }
+      const auto none = emitOp(OpcodeKind::Not, "#COMPUTED_DIM_NO_EXTRA");
+      emitInput(none, extraPresent);
+      const CellRef single = core_.arena().makeCell();
+      emitOutput(none, single);
+      const auto require = emitOp(OpcodeKind::Assert, "#COMPUTED_DIM_SINGLE");
+      emitInput(require, single);
+      emitInputConstant(
+          require, "computed dimension '" + rule.dimName +
+                       "' of a dynamic view: its expression answered more "
+                       "than one cell for a source, and a computed dimension "
+                       "holds one value");
       reached = emitClamp(reached, RangeClamp{.start = 1, .end = 1});
     }
     // value() and count() already answer a fresh cell; a plain dimension step

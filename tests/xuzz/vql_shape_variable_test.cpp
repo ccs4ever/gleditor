@@ -199,6 +199,9 @@ TEST_F(VQLShapeVariableTest,
   EXPECT_THAT(refusalOf("let $s := { +d.label := ./value() } return ##{ $s }"),
               testing::HasSubstr("dynamic view over a source computed at run "
                                  "time"));
+  // A computed rule whose expression is not static still refuses by name.
+  EXPECT_THAT(refusalOf("let $s := { +d.label := $x/value() } return ##{ $s }"),
+              testing::HasSubstr("computed dimension 'd.label'"));
   EXPECT_THAT(refusalOf("def p() := { d.1 <=> d.priority }; ##{ p() }"),
               testing::HasSubstr("dynamic view over a source computed at run "
                                  "time"));

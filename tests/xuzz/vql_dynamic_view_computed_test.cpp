@@ -27,6 +27,8 @@ struct VQLDynamicViewComputedTest : testing::Test {
     zigzag::expectWritten(arena.link(source, priority, false, high));
     zigzag::expectWritten(
         arena.link(high, priority, false, arena.makeCell("urgent")));
+    zigzag::expectWritten(arena.link(source, engine.resolveDimension("d.owner"),
+                                     false, arena.makeCell("Alice")));
     engine.setVariable("task", source);
   }
 
@@ -74,10 +76,10 @@ struct VQLDynamicViewComputedTest : testing::Test {
 };
 
 TEST_F(VQLDynamicViewComputedTest, ComputedValueFollowsTheSourceBetweenWalks) {
-  bindView("v", "{ +d.top := ./+d.priority/value() }");
-  EXPECT_EQ(textsOf("$v/+d.top/value()"), "high");
-  engine.execute("$task/+d.priority/value(\"changed\")");
-  EXPECT_EQ(textsOf("$v/+d.top/value()"), "changed");
+  bindView("v", "{ +d.top := ./+d.owner/value() }");
+  EXPECT_EQ(textsOf("$v/+d.top/value()"), "Alice");
+  engine.execute("$task/+d.owner/value(\"Bob\")");
+  EXPECT_EQ(textsOf("$v/+d.top/value()"), "Bob");
   // The source never gains the virtual link.
   EXPECT_FALSE(arena.linkedMinting(source, engine.resolveDimension("d.top"),
                                    zigzag::DimVector::POS));
@@ -92,10 +94,10 @@ TEST_F(VQLDynamicViewComputedTest, LiteralAndCountExpressionsLower) {
 }
 
 TEST_F(VQLDynamicViewComputedTest, ComputedCellIsAFreshCopyNotASourceCell) {
-  bindView("v", "{ +d.first := ./+d.priority }");
+  bindView("v", "{ +d.first := ./+d.owner }");
   const auto reached = engine.execute("$v/+d.first");
   ASSERT_EQ(reached.size(), 1u);
-  EXPECT_EQ(arena.textOf(reached.front()), "high");
+  EXPECT_EQ(arena.textOf(reached.front()), "Alice");
   // The oracle answers a fresh cell holding the value, never the linked cell,
   // so a walk from it would find none of the source's links; the lowering
   // refuses that walk instead of answering it.
@@ -139,7 +141,9 @@ TEST_F(VQLDynamicViewComputedTest, ReadsLeakNothingAndReleaseTheProgram) {
 
 TEST_F(VQLDynamicViewComputedTest, WritingAComputedDimensionRefusesByName) {
   bindView("v", "{ +d.label := ./value() }");
-  expectRefusal("$v/+d.label%\"bad\"", "computed dimension 'd.label'");
+  expectRefusal("$v/+d.label%\"bad\"",
+                "computed dimension 'd.label' of a dynamic view cannot be "
+                "written");
   EXPECT_THROW(engine.execute("$v/+d.label%\"bad\""), std::runtime_error);
 }
 
@@ -150,22 +154,25 @@ TEST_F(VQLDynamicViewComputedTest, EagerAssignmentCannotMixWithAComputedRule) {
 
 TEST_F(VQLDynamicViewComputedTest, ExpressionsOutsideTheStaticSubsetRefuse) {
   engine.setVariable("other", engine.execute("$task"));
-  expectRefusal("$task{ +d.l := $other/value() }", "computed dimension 'd.l'");
+  expectRefusal("$task{ +d.l := $other/value() }",
+                "cannot be compiled to Vortex: its path does not start at the "
+                "source cell");
   expectRefusal("$task{ +d.l := ./+d.priority[./value() = \"high\"]/value() }",
-                "computed dimension 'd.l'");
+                "a step of its path carries a predicate");
   expectRefusal("$task{ +d.l := ./+d.priority%\"x\" }",
-                "computed dimension 'd.l'");
+                "a step of its path is not a read along a plain dimension");
   expectRefusal("$task{ +d.l := ./+d.priority/first() }",
-                "computed dimension 'd.l'");
+                "function first() is not value() or count()");
   expectRefusal("$task{ +d.l := ./+d.priority/$other }",
-                "computed dimension 'd.l'");
-  expectRefusal("$task{ +d.l := 1 + 2 }", "computed dimension 'd.l'");
+                "a step of its path is not a read along a plain dimension");
+  expectRefusal("$task{ +d.l := 1 + 2 }",
+                "its expression is not a literal or a path");
 }
 
 TEST_F(VQLDynamicViewComputedTest, RulesThatNestOrReferenceViewsRefuse) {
   bindView("inner", "{ +d.a := ./value() }");
   expectRefusal("$task{ +d.b := $inner/+d.a/value() }",
-                "computed dimension 'd.b'");
+                "its path does not start at the source cell");
 }
 
 TEST_F(VQLDynamicViewComputedTest,
@@ -178,15 +185,19 @@ TEST_F(VQLDynamicViewComputedTest,
 }
 
 TEST_F(VQLDynamicViewComputedTest, ComputedRulesRefuseInStaticProjections) {
+  // A guard that the projection forms do not route into the view lowering;
+  // the base refused them too, with this message.
   expectRefusal("weave { apply_shape($task, { +d.l := ./value() }) }",
-                "computed");
+                "pivot, computed-dimension, variable and nested rules are not "
+                "lowered");
 }
 
 TEST_F(VQLDynamicViewComputedTest, StepsOnAComputedResultRefuseNotWalkWrong) {
   bindView("v", "{ +d.label := ./value() }");
   // The oracle gives a fresh plain cell; a following write must not land on a
   // program-owned or source cell.
-  expectRefusal("$v/+d.label/+d.x%\"y\"", "computed dimension");
+  expectRefusal("$v/+d.label/+d.x%\"y\"",
+                "a step after computed dimension 'd.label'");
 }
 
 TEST_F(VQLDynamicViewComputedTest, AComputedViewHandleOfAnotherEngineRefuses) {
@@ -199,9 +210,22 @@ TEST_F(VQLDynamicViewComputedTest, AComputedViewHandleOfAnotherEngineRefuses) {
 }
 
 TEST_F(VQLDynamicViewComputedTest, FailedProjectionLeavesNoHandleOrMark) {
+  // The first rule is lowerable and the second is not: nothing of the first
+  // may be minted before the refusal.
+  expectRefusal("$task{ +d.l := ./value(), +d.m := $nope/value() }",
+                "its path does not start at the source cell");
+}
+
+TEST_F(VQLDynamicViewComputedTest, APathAnsweringTwoCellsFailsAtRunTimeByName) {
+  // The rank holds two cells; keeping the first and dropping the second
+  // would answer `high` as if it were the whole answer.
+  bindView("v", "{ +d.top := ./+d.priority/value(), +d.e := ./+d.priority }");
   const auto before = footprint();
-  EXPECT_THROW(engine.execute("$task{ +d.l := $nope/value() }"),
-               std::runtime_error);
+  EXPECT_THAT(refusalOf("$v/+d.top/value()"),
+              testing::HasSubstr("computed dimension 'd.top'"));
+  EXPECT_THAT(refusalOf("$v/+d.top/value()"),
+              testing::HasSubstr("more than one cell"));
+  EXPECT_THAT(refusalOf("$v/+d.e"), testing::HasSubstr("more than one cell"));
   EXPECT_EQ(footprint(), before);
 }
 
