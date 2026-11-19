@@ -9,7 +9,7 @@
 **In Response to:**
 
 - [`design/zigzag-lenses-plan9-philosophy.md`](zigzag-lenses-plan9-philosophy.md)
-- [`design/zigzag-lenses-tripartite-critique.md`](zigzag-lenses-tripartite-critique.md)
+- [`design/projects/zigzag-lenses-tripartite-critique.md`](projects/zigzag-lenses-tripartite-critique.md)
   **Foundational References:**
 - [`design/enfilade/enfilade-rank-indexing.md`](enfilade/enfilade-rank-indexing.md) (U1 Solution)
 - [`design/enfilade/layoutfilade-virtualized-scrolling.md`](enfilade/layoutfilade-virtualized-scrolling.md)

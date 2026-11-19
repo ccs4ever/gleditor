@@ -46,11 +46,11 @@ per-curve sample cap. All three retained the visual family with the following bl
 | Major    | Current border-based anchors do not establish which short phrase on a wide line is attached.                                                 | Exact run boundary cue, optional safe leader and matching readable identity token.                        |
 | Major    | The existing enlarged native frame has a registry-cell card over the target passage.                                                         | Content/control exclusions and companion framing before claiming the refined beams are usable.            |
 
-Source evidence: [placement and half-links](../apps/common/xanadu/link_layout.cpp),
-[lane limit](../apps/common/xanadu/anchor_lanes.hpp),
-[lane assignment](../apps/common/xanadu/anchor_lanes.cpp),
-[picking and margin spines](../apps/common/ui/xanadoc/beams.cpp), and
-[presentation resolution](../apps/common/ui/xanadoc/link_context.cpp). The lane test currently
+Source evidence: [placement and half-links](../../apps/common/xanadu/link_layout.cpp),
+[lane limit](../../apps/common/xanadu/anchor_lanes.hpp),
+[lane assignment](../../apps/common/xanadu/anchor_lanes.cpp),
+[picking and margin spines](../../apps/common/ui/xanadoc/beams.cpp), and
+[presentation resolution](../../apps/common/ui/xanadoc/link_context.cpp). The lane test currently
 accepts the fifth anchor sharing lane 3; its passing result is not evidence of graceful overflow.
 The native composition finding is visible in
 `build/beam-candidate-review/current-scaled/entered.png`.

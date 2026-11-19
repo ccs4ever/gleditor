@@ -1567,7 +1567,10 @@ GIT_LS := git ls-files --cached --others --exclude-standard
 CXX_FORMAT_FILES = $(shell $(GIT_LS) '*.cpp' '*.hpp' '*.h' '*.glsl' | grep -v '^thirdparty/')
 SH_FORMAT_FILES  = $(shell $(GIT_LS) '*.sh' | grep -v '^thirdparty/')
 YAML_FORMAT_FILES = .github/workflows/c-cpp.yml .github/workflows/packaging.yml .github/dependabot.yml
-MD_FORMAT_FILES  = $(shell $(GIT_LS) '*.md' | grep -v '^thirdparty/')
+# design/projects/ holds working files (reviews, plans, section drafts) that
+# are machine-written and not meant to be read as prose, so neither mdformat
+# nor mdl is run over them.
+MD_FORMAT_FILES  = $(shell $(GIT_LS) '*.md' | grep -v '^thirdparty/' | grep -v '^design/projects/')
 
 CLANG_FORMAT_MAJOR := 19
 CLANG_FORMAT := $(shell command -v clang-format-$(CLANG_FORMAT_MAJOR) 2>/dev/null || command -v clang-format 2>/dev/null)

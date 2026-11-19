@@ -8,7 +8,7 @@
 
 - [`design/zigzag-lenses-plan9-philosophy.md`](zigzag-lenses-plan9-philosophy.md) (Core
   Architecture)
-- [`design/zigzag-lenses-tripartite-critique.md`](zigzag-lenses-tripartite-critique.md)
+- [`design/projects/zigzag-lenses-tripartite-critique.md`](projects/zigzag-lenses-tripartite-critique.md)
   (Multi-Expert Critique & Rectification)
 - [`design/zigzag-lenses-enfilade-synthesis.md`](zigzag-lenses-enfilade-synthesis.md) (Enfilade
   Acceleration Specification)

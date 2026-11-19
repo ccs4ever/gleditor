@@ -3,10 +3,10 @@
 The recommended first prototype combines **slim exact-range connectors (C3), controlled gathering
 shoulders (C2), quiet satin material (C1), and independent cursor emphasis (C5)**. Explicit
 unresolved states (C6) and bounded rendering quality (C7) are requirements of that prototype. The
-subsequent [adversarial review](ui_nurbs_beam_adversarial_review_2026-10-08.md) makes named overlap
-choice, honest overflow and page-local rendering requirements of the first prototype. Particular
-corridor and detail-ladder treatments remain experiments; a carousel is rejected as the default
-presentation. That review supersedes the dense-case deferrals below.
+subsequent [adversarial review](projects/ui_nurbs_beam_adversarial_review_2026-10-08.md) makes named
+overlap choice, honest overflow and page-local rendering requirements of the first prototype.
+Particular corridor and detail-ladder treatments remain experiments; a carousel is rejected as the
+default presentation. That review supersedes the dense-case deferrals below.
 
 This is a design report with mockups, not a new beam implementation. The UI designer, independent
 aesthetics reviewer and independent UX reviewer used the repository's `xuzz-ui-design` and
