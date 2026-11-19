@@ -1,3 +1,4 @@
+#include "common/xanadu/vortex/table_undo.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
 #include <algorithm>
@@ -1036,8 +1037,22 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
         capture.push_back(cell);
       });
     }
-    auto priorReferences                    = cellReferences_;
-    auto priorCursorPC                      = cursorPC_;
+    // The opcode writes its output slots' references and the cursor's program
+    // counter, so those entries are journalled; copying both tables made every
+    // closure creation cost everything earlier runs had left in them (card
+    // VM-FRAME). Closing the cursor (no continuation) also erases the entries
+    // of its guards and frames, which only a whole-table copy can undo.
+    MapUndo<CellReferenceMap> references(cellReferences_,
+                                         frameTableEntriesCopied_);
+    MapUndo<std::unordered_map<CellRef, std::optional<CellRef>>>
+        programCounters(cursorPC_, frameTableEntriesCopied_);
+    std::optional<CellReferenceMap> closingReferences;
+    if (!continuation) {
+      closingReferences = cellReferences_;
+      frameTableEntriesCopied_ += cellReferences_.size();
+    }
+    for (const CellRef slot : outputs) references.touch(slot);
+    programCounters.touch(cursor);
     const auto priorValuesCreated           = closureValuesCreated_;
     const auto priorEnvironmentCellsCreated = closureEnvironmentCellsCreated_;
     try {
@@ -1050,8 +1065,9 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
       savepoint.commit();
       return {};
     } catch (const std::exception &error) {
-      cellReferences_.swap(priorReferences);
-      cursorPC_.swap(priorCursorPC);
+      references.rollback();
+      programCounters.rollback();
+      if (closingReferences) cellReferences_.swap(*closingReferences);
       closureValuesCreated_           = priorValuesCreated;
       closureEnvironmentCellsCreated_ = priorEnvironmentCellsCreated;
       return fail(error.what());

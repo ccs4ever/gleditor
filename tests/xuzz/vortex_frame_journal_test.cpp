@@ -23,7 +23,7 @@ using zigzag::DimVector;
 /// run count is far above the per-run constant.
 constexpr std::size_t finishedRuns = 200;
 /// Runs the frame depth tests make, each through a nested call.
-constexpr std::size_t nestedRuns = 60;
+constexpr std::size_t nestedRuns     = 60;
 constexpr std::int64_t firstArgument = 40;
 
 struct Harness {
@@ -107,8 +107,8 @@ std::vector<std::size_t> copiedPerRun(Harness &h, const CellRef frame,
                                       const std::int64_t expectedOffset) {
   std::vector<std::size_t> perRun;
   for (std::size_t run = 0; run < runs; ++run) {
-    const auto value  = firstArgument + static_cast<std::int64_t>(run);
-    const auto before = h.vm.frameTableEntriesCopied();
+    const auto value         = firstArgument + static_cast<std::int64_t>(run);
+    const auto before        = h.vm.frameTableEntriesCopied();
     const auto [cursor, out] = h.freshRun(frame, value);
     const auto execution     = h.vm.run(cursor, 100);
     EXPECT_TRUE(execution.success) << execution.errorMessage;
@@ -124,7 +124,7 @@ std::vector<std::size_t> copiedPerRun(Harness &h, const CellRef frame,
 
 TEST(VortexFrameJournalTest, TheCostOfACallDoesNotGrowWithFinishedRuns) {
   Harness h;
-  const auto frame   = h.addOneFrame();
+  const auto frame  = h.addOneFrame();
   const auto perRun = copiedPerRun(h, frame, finishedRuns, 1);
   ASSERT_EQ(perRun.size(), finishedRuns);
   const auto [lowest, highest] = std::ranges::minmax(perRun);
@@ -161,6 +161,35 @@ TEST(VortexFrameJournalTest, ARerunCursorCostsTheSameAsAFreshOne) {
     const auto before = h.vm.frameTableEntriesCopied();
     h.vm.setCursorOpcode(cursor, call);
     const auto execution = h.vm.run(cursor, 100);
+    ASSERT_TRUE(execution.success) << execution.errorMessage;
+    perRun.push_back(h.vm.frameTableEntriesCopied() - before);
+  }
+  const auto [lowest, highest] = std::ranges::minmax(perRun);
+  EXPECT_EQ(lowest, highest);
+}
+
+TEST(VortexFrameJournalTest, TheCostOfCreatingAClosureDoesNotGrowWithRuns) {
+  Harness h;
+  const auto ret = h.op(OpcodeKind::ReturnFrame);
+  const auto frame =
+      h.vm.makeFrameDescriptor(FrameDescriptorSpec{.entry = ret});
+  ASSERT_TRUE(frame);
+  h.core.bindInput(ret, *frame);
+  const auto closure = h.vm.makeClosureDescriptor(ClosureDescriptorSpec{
+      .frameDescriptor = *frame,
+  });
+  ASSERT_TRUE(closure);
+  std::vector<std::size_t> perRun;
+  for (std::size_t run = 0; run < finishedRuns; ++run) {
+    const auto before = h.vm.frameTableEntriesCopied();
+    const auto create = h.op(OpcodeKind::CreateClosure);
+    const auto handle = h.arena.makeCell("closure handle");
+    h.core.bindInput(create, *closure);
+    h.core.bindOutput(create, handle);
+    const auto halt = h.op(OpcodeKind::Halt);
+    h.next(create, halt);
+    const auto cursor    = h.vm.spawnCursor(create, "closure_journal");
+    const auto execution = h.vm.run(cursor, 20);
     ASSERT_TRUE(execution.success) << execution.errorMessage;
     perRun.push_back(h.vm.frameTableEntriesCopied() - before);
   }
