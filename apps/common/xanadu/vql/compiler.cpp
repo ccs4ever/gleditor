@@ -309,6 +309,8 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "PINHISTORICAL";
   case OpcodeKind::ProjectTopology:
     return "PROJECTTOPOLOGY";
+  case OpcodeKind::VqlMaskProbe:
+    return "VQLMASKPROBE";
   default:
     return "UNKNOWN";
   }

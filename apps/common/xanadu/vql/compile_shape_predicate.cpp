@@ -1,5 +1,8 @@
 #include "common/xanadu/vql/compiler.hpp"
 
+#include <array>
+#include <map>
+#include <optional>
 #include <stdexcept>
 #include <unordered_set>
 #include <vector>
@@ -24,12 +27,6 @@ std::size_t validateShape(const ShapeLiteral &shape, std::size_t depth,
   if (!active.insert(&shape).second) {
     throw std::invalid_argument("compiled shape predicates contain a cycle");
   }
-  if (shape.rules.empty()) {
-    active.erase(&shape);
-    throw std::invalid_argument(
-        "compiled shape predicates do not support empty shapes or wildcards");
-  }
-
   std::size_t expanded = 0;
   const auto add       = [&](std::size_t amount) {
     if (amount > maxCompiledShapePredicateRules - expanded) {
@@ -39,6 +36,8 @@ std::size_t validateShape(const ShapeLiteral &shape, std::size_t depth,
     expanded += amount;
   };
   try {
+    // An empty shape is the exact test "no link at all", one probe.
+    if (shape.rules.empty()) add(1);
     for (const auto &entry : shape.rules) {
       if (remainingValidationNodes == 0) {
         throw std::invalid_argument(
@@ -46,8 +45,10 @@ std::size_t validateShape(const ShapeLiteral &shape, std::size_t depth,
       }
       --remainingValidationNodes;
       if (std::holds_alternative<ShapeWildcard>(entry.rule)) {
-        throw std::invalid_argument(
-            "compiled shape predicates do not support wildcards");
+        // A wildcard costs at most the link-presence probe or the exactness
+        // probe, each emitted once per shape.
+        add(1);
+        continue;
       }
       const auto *dimension = std::get_if<DimensionShapeRule>(&entry.rule);
       if (!dimension) {
@@ -122,6 +123,7 @@ CellRef VQLCompiler::compileShapePredicateImpl(const ShapeLiteral &shape,
   rules.reserve(shape.rules.size());
   for (const auto &entry : shape.rules) {
     const auto *dimension = std::get_if<DimensionShapeRule>(&entry.rule);
+    if (!dimension) continue; // a wildcard, handled by the link probes below
     std::optional<CellRef> scalarTarget;
     if (dimension->targetValue && !dimension->negated) {
       if (const auto *literal =
@@ -143,6 +145,39 @@ CellRef VQLCompiler::compileShapePredicateImpl(const ShapeLiteral &shape,
     }
     rules.push_back(
         {dimension, resolveDimension(dimension->dimName), scalarTarget});
+  }
+
+  // Mask state in source order, as shape_eval.cpp builds it: a wildcard
+  // resets every earlier dimension rule, `{}` and `{!*}` make the test exact
+  // (every link of the cell must be allowed), `{*}` makes it a has-any-link
+  // test. Both are answered by VqlMaskProbe, which enumerates links that a
+  // fixed list of ProbeLink dimensions cannot.
+  constexpr std::size_t positiveSide = 0;
+  constexpr std::size_t negativeSide = 1;
+  std::map<DimRef, std::array<std::optional<bool>, 2>> masks;
+  bool includeEverything = false;
+  bool exact             = shape.rules.empty();
+  bool sawWildcard       = false;
+  {
+    std::size_t resolvedIndex = 0;
+    for (const auto &entry : shape.rules) {
+      if (const auto *wildcard = std::get_if<ShapeWildcard>(&entry.rule)) {
+        sawWildcard       = true;
+        includeEverything = *wildcard == ShapeWildcard::Everything;
+        exact             = *wildcard == ShapeWildcard::Nothing;
+        masks.clear();
+        continue;
+      }
+      const auto &resolved = rules[resolvedIndex++];
+      auto &mask           = masks[resolved.dimension];
+      if (resolved.rule->negated)
+        mask = {false, false};
+      else if (resolved.rule->isBidir)
+        mask = {true, true};
+      else
+        mask[resolved.rule->direction == DimVector::POS ? positiveSide
+                                                        : negativeSide] = true;
+    }
   }
 
   const auto falseCell = emitConstant(false);
@@ -219,6 +254,28 @@ CellRef VQLCompiler::compileShapePredicateImpl(const ShapeLiteral &shape,
     return answer;
   };
 
+  const auto probeMask = [&](const bool defaultKeep, const bool withPairs) {
+    const auto op = emitOp(OpcodeKind::VqlMaskProbe, "#SHAPE_LINK_PROBE");
+    emitInput(op, candidate);
+    emitInputConstant(op, defaultKeep);
+    if (withPairs)
+      for (const auto &[dimension, sides] : masks) {
+        emitInputConstant(op, static_cast<std::int64_t>(dimension));
+        emitInputConstant(
+            op, static_cast<std::int64_t>(
+                    (sides[positiveSide].value_or(defaultKeep) ? 1 : 0) |
+                    (sides[negativeSide].value_or(defaultKeep) ? 2 : 0)));
+      }
+    const CellRef removed = core_.arena().makeCell();
+    emitOutput(op, removed);
+    return removed;
+  };
+  if (sawWildcard && includeEverything) {
+    // `{*, ...}` needs at least one link: a mask keeping nothing would remove
+    // something exactly when the cell has one.
+    branchFalse(probeMask(false, false), failed);
+  }
+
   for (const auto &resolved : rules) {
     const auto *rule     = resolved.rule;
     const auto dimension = resolved.dimension;
@@ -272,6 +329,18 @@ CellRef VQLCompiler::compileShapePredicateImpl(const ShapeLiteral &shape,
       const auto neighbor = probe(dimension, rule->direction, candidate);
       branchFalse(candidateMatches(resolved, neighbor), failed);
     }
+  }
+
+  if (exact) {
+    // Polarity: VqlMaskProbe answers true when the mask is NOT satisfied (a
+    // link would be removed), and an exact shape holds when none would be.
+    // The probe is emitted first: emission order is execution order.
+    const auto removed = probeMask(false, true);
+    const auto negate  = emitOp(OpcodeKind::Not, "#SHAPE_EXACT");
+    emitInput(negate, removed);
+    const CellRef satisfied = core_.arena().makeCell();
+    emitOutput(negate, satisfied);
+    branchFalse(satisfied, failed);
   }
 
   const auto copyTrue = emitOp(OpcodeKind::CopyCellRefs, "#SHAPE_TRUE");
