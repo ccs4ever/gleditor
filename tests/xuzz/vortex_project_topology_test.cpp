@@ -12,9 +12,12 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/bencode.hpp"
+#include "common/xanadu/provenance.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/mesh_evaluator.hpp"
+#include "common/xanadu/vortex/mesh_result.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/arena_topology_copy.hpp"
@@ -355,6 +358,53 @@ TEST(ProjectTopologyOpcodeTest, ThePortableArtifactRefusesTheOpcodeByName) {
   ASSERT_FALSE(sealed);
   EXPECT_NE(sealed.error().find("ProjectTopology"), std::string::npos)
       << sealed.error();
+}
+
+// mesh::evaluate of VQL source is the owner-ruled exception: the private arena
+// is the evaluator's own, so `project` copies land there and nothing outside
+// can observe them. Only a sealed artifact is portable bytes that must answer
+// alike in any arena, and ProjectTopology mints fresh cells per run.
+TEST(ProjectTopologyOpcodeTest, MeshEvaluateOfVqlSourceRunsProject) {
+  namespace mesh = zigzag::vortex::mesh;
+  constexpr mesh::EvaluationBudget budget{1'000'000, 100'000, 100, 1'000'000};
+  auto result =
+      mesh::evaluate(mesh::Frontend::Vquery, "project(\"seed\", {})", budget);
+  ASSERT_TRUE(result) << result.error();
+  const auto values = mesh::readResultCells(*result);
+  ASSERT_TRUE(values) << values.error();
+  ASSERT_EQ(values->size(), 1U);
+  EXPECT_EQ(result->context->arena.textOf(values->front()), "seed");
+}
+
+TEST(ProjectTopologyOpcodeTest, ADecodedArtifactNamingItIsRefusedByName) {
+  namespace mesh = zigzag::vortex::mesh;
+  using Wire     = xanadu::bencode::Value;
+  const mesh::VortexProgram program{
+      .cells        = {{}, {}, {vortex::CellValue{std::int64_t{5}}, {}}, {}},
+      .instructions = {{0, vortex::OpcodeKind::Add, {2, 2}, {3}, 1},
+                       {1, vortex::OpcodeKind::Halt, {}, {}, {}}},
+      .entry        = 0,
+      .outputs      = {{3, false}}};
+  const auto sealed = mesh::sealVortexProgram(program);
+  ASSERT_TRUE(sealed) << sealed.error();
+  auto fields = xanadu::bencode::decode(*sealed).asDict();
+  auto parts  = xanadu::bencode::decode(fields.at("body").asString()).asDict();
+  auto list   = parts.at("instructions").asList();
+  auto first  = list.front().asDict();
+  first["opcode"] = Wire::integer(
+      static_cast<std::int64_t>(vortex::OpcodeKind::ProjectTopology));
+  list.front()          = Wire::dict(std::move(first));
+  parts["instructions"] = Wire::list(std::move(list));
+  const auto encoded    = Wire::dict(std::move(parts)).encode();
+  fields["body"]        = Wire::string(encoded);
+  fields["sha256"]      = Wire::string(xanadu::sha256Hex(encoded));
+  const auto result     = mesh::evaluate(
+      mesh::Frontend::Vortex, Wire::dict(std::move(fields)).encode(),
+      mesh::EvaluationBudget{1'000'000, 100'000, 100, 1'000'000});
+  ASSERT_FALSE(result);
+  EXPECT_NE(result.error().find("does not support ProjectTopology"),
+            std::string::npos)
+      << result.error();
 }
 
 TEST(ProjectTopologyOpcodeTest,
