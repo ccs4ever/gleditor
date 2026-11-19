@@ -18,7 +18,7 @@ namespace {
 using zigzag::CellRef;
 using zigzag::vortex::OpcodeKind;
 
-constexpr auto kLastKind             = OpcodeKind::VqlMaskProbe;
+constexpr auto kLastKind             = OpcodeKind::IntOfCell;
 constexpr auto kLastOrdinal          = static_cast<std::int64_t>(kLastKind);
 constexpr std::int64_t kOrdinalSpace = 256; // OpcodeKind is a uint8_t
 

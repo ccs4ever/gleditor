@@ -227,6 +227,17 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
             "structural dimension operand is not relocatable");
       dimensionOperands.emplace(inputs[1], static_cast<DimRef>(*value));
     }
+    // The conversions carry no dimension operand and nothing to relocate: the
+    // operand is an ordinary cell and the number is computed by the loading
+    // arena. A constant Int64 cell number is NOT rewritten across an export
+    // (it is data, not a reference operand), so it can name a different cell
+    // after loading; the release-epoch card is what makes that detectable.
+    if (*kind == OpcodeKind::CellOfInt || *kind == OpcodeKind::IntOfCell) {
+      if (core.inputsOf(opcode).size() != 1 ||
+          core.outputsOf(opcode).size() != 1)
+        throw std::runtime_error(
+            "cell-number conversion needs one input and one output");
+    }
     // The probe carries the mask's operands and differs only by its one
     // output, so both name dimensions that must follow the program across.
     if (*kind == OpcodeKind::VqlMaskLinks ||

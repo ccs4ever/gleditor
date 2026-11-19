@@ -224,6 +224,26 @@ enum class OpcodeKind : std::uint8_t {
   // fixed-dimension probe can enumerate. Appended to preserve persisted
   // opcode-kind integers.
   VqlMaskProbe,
+
+  // Int64 -> cell: one scalar operand holding an Int64; the result slot is a
+  // cell reference when that cell exists in the arena and the VM's absent
+  // reference (noCell) otherwise. A pure read of the arena, one unit of work.
+  //
+  // HAZARD, stated plainly: a cell number held as an Int64 is not protected
+  // against reuse. A number kept across a release()/discard() or an arena
+  // compaction can later name a different cell that was minted into the same
+  // slot, and this opcode will hand that cell back without complaint. The
+  // release epoch that closes this gap is a separate, later card; until then
+  // a program must not keep such a number past the lifetime of the cell it
+  // names. Appended to preserve persisted opcode-kind integers.
+  CellOfInt,
+
+  // Cell -> Int64: the inverse of CellOfInt. One cell or reference slot in;
+  // one raw Int64 out, equal to that cell's number (never itself published as
+  // a reference). It refuses an absent or non-cell operand by name. It carries
+  // the same unprotected-number hazard as CellOfInt. Appended to preserve
+  // persisted opcode-kind integers.
+  IntOfCell,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.
@@ -956,6 +976,10 @@ private:
                                       std::vector<CellValue> &outputs);
   ExecutionResult executeVqlMaskProbe(CellRef opcode,
                                       std::vector<CellValue> &outputs);
+  ExecutionResult executeCellOfInt(CellRef opcode,
+                                   std::vector<CellValue> &outputs);
+  ExecutionResult executeIntOfCell(CellRef opcode,
+                                   std::vector<CellValue> &outputs);
   /// One directed link a mask would remove from the owner.
   struct MaskRemoval {
     DimRef dimension;

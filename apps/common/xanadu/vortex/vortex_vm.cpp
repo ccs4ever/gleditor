@@ -165,6 +165,13 @@ bool publishesLogicReference(const OpcodeKind kind) {
          kind == OpcodeKind::Deref;
 }
 
+// CellOfInt and IntOfCell are pure arena reads with a fixed one-in one-out
+// shape. Like ProbeLink they are refused as conditions, in parameter pipelines
+// and under memoization: a cell number is an address, not a value to cache.
+bool isCellNumberConversion(const OpcodeKind kind) noexcept {
+  return kind == OpcodeKind::CellOfInt || kind == OpcodeKind::IntOfCell;
+}
+
 // Readers of host state (a registered provider, the arena's position, its
 // dimension table). Like CurrentTimestamp they cannot run where a graph is
 // re-evaluated for its truth value or as a parameter pipeline, and are never
@@ -326,7 +333,7 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // ceiling with the generated-vocabulary bound in meta.cpp.
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::VqlMaskProbe)) {
+            static_cast<std::uint64_t>(OpcodeKind::IntOfCell)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -603,7 +610,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::VqlMaskProbe)) {
+          static_cast<std::uint64_t>(OpcodeKind::IntOfCell)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -848,6 +855,123 @@ ExecutionResult VortexVM::executeProbeLink(const CellRef opcode,
                      *directionValue > 0 ? DimVector::POS : DimVector::NEG)
                : std::nullopt;
     outputs.emplace_back(static_cast<std::int64_t>(neighbor.value_or(noCell)));
+    return {};
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+}
+
+namespace {
+
+// The shared shape checks of the two conversions; the refusal text names the
+// opcode so a malformed graph is diagnosable from the message alone.
+std::optional<std::string>
+conversionShapeRefusal(const std::string_view name,
+                       const std::vector<CellRef> &inputs,
+                       const std::vector<CellRef> &slots, const bool memoized,
+                       const bool guarded, const bool typed, const bool piped) {
+  if (inputs.size() != 1 || slots.size() != 1)
+    return std::string{name} + " expects one input and one output";
+  if (inputs.front() == slots.front())
+    return std::string{name} + " output must not alias an input";
+  if (memoized) return std::string{name} + " cannot be memoized";
+  if (guarded)
+    return std::string{name} + " does not support pre/postconditions";
+  if (typed) return std::string{name} + " requires scalar reference slots";
+  if (piped) return std::string{name} + " does not support parameter pipelines";
+  return std::nullopt;
+}
+
+} // namespace
+
+ExecutionResult VortexVM::executeCellOfInt(const CellRef opcode,
+                                           std::vector<CellValue> &outputs) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+  try {
+    const auto inputs = inputsOf(opcode);
+    const auto slots  = outputsOf(opcode);
+    const auto typed  = [this](const CellRef slot) {
+      return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+    };
+    const auto hasPipeline = [this](const CellRef slot) {
+      return core_.hasPipeline(slot);
+    };
+    if (const auto refusal = conversionShapeRefusal(
+            "CellOfInt", inputs, slots, isMemoized(opcode),
+            !core_.preconditionsOf(opcode).empty() ||
+                !core_.postconditionsOf(opcode).empty(),
+            std::ranges::any_of(inputs, typed) ||
+                std::ranges::any_of(slots, typed),
+            std::ranges::any_of(inputs, hasPipeline) ||
+                std::ranges::any_of(slots, hasPipeline)))
+      return fail(*refusal);
+    if (!core_.arena().contains(inputs.front()))
+      return fail("CellOfInt input slot is missing");
+    if (!core_.arena().contains(slots.front()))
+      return fail("CellOfInt output slot is missing");
+
+    // A reference-carrying slot reads through to the cell it names, as
+    // Value's output does, so an unwrapped box feeds this directly.
+    const auto operand       = inputValue(inputs.front());
+    const auto *const number = std::get_if<std::int64_t>(&operand);
+    if (number == nullptr) return fail("CellOfInt operand must be an Int64");
+    if (*number < 0) return fail("CellOfInt operand is negative");
+    if (static_cast<std::uint64_t>(*number) >
+        std::numeric_limits<CellRef>::max())
+      return fail("CellOfInt operand is outside the cell number range");
+
+    core_.arena().consumeWork();
+    // writeCellReferences publishes this as a reference when the cell exists
+    // and as noCell otherwise; an absent number is an answer, not a fault.
+    outputs.emplace_back(*number);
+    return {};
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+}
+
+ExecutionResult VortexVM::executeIntOfCell(const CellRef opcode,
+                                           std::vector<CellValue> &outputs) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+  try {
+    const auto inputs = inputsOf(opcode);
+    const auto slots  = outputsOf(opcode);
+    const auto typed  = [this](const CellRef slot) {
+      return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+    };
+    const auto hasPipeline = [this](const CellRef slot) {
+      return core_.hasPipeline(slot);
+    };
+    if (const auto refusal = conversionShapeRefusal(
+            "IntOfCell", inputs, slots, isMemoized(opcode),
+            !core_.preconditionsOf(opcode).empty() ||
+                !core_.postconditionsOf(opcode).empty(),
+            std::ranges::any_of(inputs, typed) ||
+                std::ranges::any_of(slots, typed),
+            std::ranges::any_of(inputs, hasPipeline) ||
+                std::ranges::any_of(slots, hasPipeline)))
+      return fail(*refusal);
+    if (!core_.arena().contains(slots.front()))
+      return fail("IntOfCell output slot is missing");
+
+    // A slot that carries a reference names its target; a bare slot is the
+    // cell itself. An absent reference or a cell the arena does not hold is
+    // not a cell, and there is no number to give it.
+    const auto cell =
+        resolveCell(inputs, {}, cellReferences_, 0, core_.arena());
+    if (!cell) return fail("IntOfCell operand is not a cell in the arena");
+    core_.arena().consumeWork();
+    // Raw on purpose: the step writes it as a plain Int64 (not through
+    // writeCellReferences), so the result is a number, not a reference.
+    outputs.emplace_back(static_cast<std::int64_t>(*cell));
     return {};
   } catch (const std::exception &error) {
     return fail(error.what());
@@ -1824,6 +1948,9 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
                                   "VqlMaskProbe cannot run in a parameter "
                                   "pipeline");
     }
+    if (isCellNumberConversion(kind))
+      throw std::invalid_argument(
+          "CellOfInt/IntOfCell cannot run in a parameter pipeline");
     if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
         kind == OpcodeKind::VqlBoxScalar ||
         kind == OpcodeKind::CurrentTimestamp)
@@ -1984,6 +2111,8 @@ bool VortexVM::evaluateCondition(CellRef clause,
       kind == OpcodeKind::VqlMaskLinks || kind == OpcodeKind::VqlMaskProbe)
     throw std::invalid_argument("ProbeLink/VqlFieldProbe/VqlMaskLinks/"
                                 "VqlMaskProbe cannot run as conditions");
+  if (isCellNumberConversion(kind))
+    throw std::invalid_argument("CellOfInt/IntOfCell cannot run as conditions");
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
       kind == OpcodeKind::VqlBoxScalar || kind == OpcodeKind::CurrentTimestamp)
     throw std::invalid_argument("scalar opcodes cannot run as conditions");
@@ -2714,6 +2843,10 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeVqlMaskLinks(opcode, outputs);
   case OpcodeKind::VqlMaskProbe:
     return executeVqlMaskProbe(opcode, outputs);
+  case OpcodeKind::CellOfInt:
+    return executeCellOfInt(opcode, outputs);
+  case OpcodeKind::IntOfCell:
+    return executeIntOfCell(opcode, outputs);
   case OpcodeKind::CreateClosure:
   case OpcodeKind::ApplyClosure:
   case OpcodeKind::CheckClosureCall:
@@ -4410,6 +4543,15 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
              clauseKind == OpcodeKind::VqlMaskProbe;
     });
   };
+  const auto hasCellNumberCondition = [this](const auto &clauses) {
+    return std::ranges::any_of(clauses, [this](const CellRef clause) {
+      const CellRef actual = core_.arena()
+                                 .cloneMaster(clause, core_.dims().clone)
+                                 .value_or(clause);
+      const auto clauseKind = getOpcodeKind(actual);
+      return clauseKind && isCellNumberConversion(*clauseKind);
+    });
+  };
   const auto hasVqlScalarCondition = [this](const auto &clauses) {
     return std::ranges::any_of(clauses, [this](const CellRef clause) {
       const CellRef actual = core_.arena()
@@ -4490,6 +4632,11 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
         .errorMessage =
             "ProbeLink/VqlFieldProbe/VqlMaskLinks/VqlMaskProbe cannot run as "
             "conditions"};
+  }
+  if (hasCellNumberCondition(core_.preconditionsOf(*op)) ||
+      hasCellNumberCondition(core_.postconditionsOf(*op))) {
+    return {.success      = false,
+            .errorMessage = "CellOfInt/IntOfCell cannot run as conditions"};
   }
   if (hasVqlScalarCondition(core_.preconditionsOf(*op)) ||
       hasVqlScalarCondition(core_.postconditionsOf(*op))) {
@@ -4720,7 +4867,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
           kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
           kind == OpcodeKind::CurrentTimestamp ||
           kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlMaskLinks ||
-          kind == OpcodeKind::VqlMaskProbe ||
+          kind == OpcodeKind::VqlMaskProbe || isCellNumberConversion(kind) ||
           kind == OpcodeKind::ScopedChoice ||
           kind == OpcodeKind::VqlFieldProbe ||
           kind == OpcodeKind::RelationNext) {
@@ -4765,7 +4912,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
       kind != OpcodeKind::ProbeLink && kind != OpcodeKind::VqlMaskLinks &&
       kind != OpcodeKind::VqlMaskProbe && kind != OpcodeKind::VqlFieldProbe &&
-      !readsHostState(kind) && !publishesLogicReference(kind) && !stateful;
+      !isCellNumberConversion(kind) && !readsHostState(kind) &&
+      !publishesLogicReference(kind) && !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
@@ -4859,7 +5007,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
     } else if (kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
                kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
                kind == OpcodeKind::ClearCellRefs ||
-               kind == OpcodeKind::ProbeLink || publishesLogicReference(kind) ||
+               kind == OpcodeKind::ProbeLink || kind == OpcodeKind::CellOfInt ||
+               publishesLogicReference(kind) ||
                kind == OpcodeKind::VqlBoxScalar ||
                kind == OpcodeKind::CurrentTimestamp) {
       if (kind == OpcodeKind::VqlBoxScalar ||

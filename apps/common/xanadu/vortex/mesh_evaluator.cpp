@@ -202,6 +202,10 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::VqlAdd:
   case OpcodeKind::VqlBoxScalar:
   case OpcodeKind::ProbeLink:
+  // Pure reads of the evaluating arena's own cells: the number is computed
+  // and consumed inside the one private arena the artifact builds.
+  case OpcodeKind::CellOfInt:
+  case OpcodeKind::IntOfCell:
   case OpcodeKind::And:
   case OpcodeKind::Or:
   case OpcodeKind::Not:
@@ -563,8 +567,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 ||
-        opcode > static_cast<std::int64_t>(OpcodeKind::VqlMaskProbe))
+    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::IntOfCell))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)
