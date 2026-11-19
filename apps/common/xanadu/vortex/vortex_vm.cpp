@@ -471,12 +471,13 @@ void VortexVM::trimGuardScopes(const CellRef cursor,
   auto next = std::make_shared<std::vector<GuardScope>>(*found->second);
   while (!next->empty() && next->back().ownerActivation == ownerActivation)
     next->pop_back();
-  auto nextMap = guardScopes_;
+  // Only this cursor's entry changes, and nothing below can throw, so the entry
+  // is replaced in place; copying the whole map to swap it in cost every
+  // ReturnFrame the number of cursors that ever held a scope (card VM-FRAME).
   if (next->empty())
-    nextMap.erase(cursor);
+    guardScopes_.erase(found);
   else
-    nextMap[cursor] = std::move(next);
-  guardScopes_.swap(nextMap);
+    found->second = std::move(next);
 }
 
 void VortexVM::abortOwnedMutationGroups(

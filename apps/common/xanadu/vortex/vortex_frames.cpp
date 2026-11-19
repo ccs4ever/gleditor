@@ -480,13 +480,12 @@ ExecutionResult VortexVM::invokeFramePrepared(
   // The one exception is requireStreamCursor handing the stream-cursor role
   // over, which clears four whole tables; only then are they copied.
   bool committed = false;
-  MapUndo<CellReferenceMap> references(cellReferences_,
-                                       frameTableEntriesCopied_);
-  MapUndo<StreamMap> streams(streams_, frameTableEntriesCopied_);
-  MapUndo<GroupOwnerMap> groupOwners(groupOwners_, frameTableEntriesCopied_);
-  SetUndo streamSlots(streamSlots_, frameTableEntriesCopied_);
+  MapUndo<CellReferenceMap> references(cellReferences_, frameProbe_);
+  MapUndo<StreamMap> streams(streams_, frameProbe_);
+  MapUndo<GroupOwnerMap> groupOwners(groupOwners_, frameProbe_);
+  SetUndo streamSlots(streamSlots_, frameProbe_);
   MapUndo<std::unordered_map<CellRef, std::optional<CellRef>>> programCounters(
-      cursorPC_, frameTableEntriesCopied_);
+      cursorPC_, frameProbe_);
   const auto previousStreamCursor = streamCursor_;
   const std::size_t previousDepth = depth;
   bool pushedFrame                = false;
@@ -526,9 +525,9 @@ ExecutionResult VortexVM::invokeFramePrepared(
     if (streamCursor_ && *streamCursor_ != cursor) {
       ownership = StreamOwnershipSnapshot{streams_, iterators_, groupIterators_,
                                           groupIteratorSlots_};
-      frameTableEntriesCopied_ += streams_.size() + iterators_.size() +
-                                  groupIterators_.size() +
-                                  groupIteratorSlots_.size();
+      frameProbe_.entries += streams_.size() + iterators_.size() +
+                             groupIterators_.size() +
+                             groupIteratorSlots_.size();
     }
     try {
       requireStreamCursor(cursor);
@@ -538,6 +537,7 @@ ExecutionResult VortexVM::invokeFramePrepared(
   }
   zigzag::Mark mark;
   try {
+    frameProbe_.hit(); // after the stream-cursor handover, before any change
     mark = arena.mark();
   } catch (const std::exception &error) {
     rollBack();
@@ -548,6 +548,7 @@ ExecutionResult VortexVM::invokeFramePrepared(
     for (const auto logical : descriptor.locals) {
       arena.consumeWork();
       const CellRef backing = arena.makeCell();
+      frameProbe_.hit();
       frame.localBacking.emplace(logical, backing);
       references.set(backing, std::nullopt);
     }
@@ -607,9 +608,13 @@ ExecutionResult VortexVM::invokeFramePrepared(
       groupOwners.set(backing, frameOwner);
     }
     activationFrames_[cursor].push_back(std::move(frameOwner));
+    // Nothing that can throw may sit between the push_back above and this
+    // flag, or rollBack() would not know to pop the frame.
     pushedFrame = true;
+    frameProbe_.hit();
     programCounters.touch(cursor);
     setCursorOpcode(cursor, descriptor.entry.value());
+    frameProbe_.hit();
     zigzag::expectMarkOrder(arena.discard(mark));
     frameBackingCellsAllocated_ += descriptor.locals.size();
     ++nextActivationId_;
@@ -779,20 +784,18 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
   // destination slots in the caller's registers, the frame's own backing cells
   // (erased), the cursor's frame stack, program counter and guard state; each
   // change is journalled on its key and replayed backwards on failure.
-  MapUndo<GuardScopeMap> guardScopes(guardScopes_, frameTableEntriesCopied_);
-  MapUndo<GuardStackMap> guardStacks(guardStacks_, frameTableEntriesCopied_);
-  MapUndo<CellReferenceMap> references(cellReferences_,
-                                       frameTableEntriesCopied_);
-  MapUndo<StreamMap> streams(streams_, frameTableEntriesCopied_);
-  MapUndo<IteratorMap> iterators(iterators_, frameTableEntriesCopied_);
-  MapUndo<GroupIteratorMap> groupIterators(groupIterators_,
-                                           frameTableEntriesCopied_);
-  MapUndo<GroupOwnerMap> groupOwners(groupOwners_, frameTableEntriesCopied_);
-  SetUndo streamSlots(streamSlots_, frameTableEntriesCopied_);
-  SetUndo iteratorSlots(iteratorSlots_, frameTableEntriesCopied_);
-  SetUndo groupIteratorSlots(groupIteratorSlots_, frameTableEntriesCopied_);
+  MapUndo<GuardScopeMap> guardScopes(guardScopes_, frameProbe_);
+  MapUndo<GuardStackMap> guardStacks(guardStacks_, frameProbe_);
+  MapUndo<CellReferenceMap> references(cellReferences_, frameProbe_);
+  MapUndo<StreamMap> streams(streams_, frameProbe_);
+  MapUndo<IteratorMap> iterators(iterators_, frameProbe_);
+  MapUndo<GroupIteratorMap> groupIterators(groupIterators_, frameProbe_);
+  MapUndo<GroupOwnerMap> groupOwners(groupOwners_, frameProbe_);
+  SetUndo streamSlots(streamSlots_, frameProbe_);
+  SetUndo iteratorSlots(iteratorSlots_, frameProbe_);
+  SetUndo groupIteratorSlots(groupIteratorSlots_, frameProbe_);
   MapUndo<std::unordered_map<CellRef, std::optional<CellRef>>> programCounters(
-      cursorPC_, frameTableEntriesCopied_);
+      cursorPC_, frameProbe_);
   const auto previousStreamCursor = streamCursor_;
   bool poppedFrame                = false;
   const auto rollBack             = [&] {
@@ -848,17 +851,22 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
 
     if (guardScopes_.contains(cursor)) guardScopes.touch(cursor);
     trimGuardScopes(cursor, frame.activationId);
+    frameProbe_.hit();
     if (retainedGuards) {
       guardStacks.touch(cursor);
       if ((*retainedGuards)->empty())
         guardStacks_.erase(cursor);
       else
         guardStacks_[cursor] = *retainedGuards;
+      frameProbe_.hit();
     }
     auto &frames            = activationFrames_.at(cursor);
     const auto returnOpcode = frame.returnOpcode;
     frames.pop_back();
+    // Nothing that can throw may sit between the pop_back above and this
+    // flag, or rollBack() would not know to push the frame back.
     poppedFrame = true;
+    frameProbe_.hit();
     for (const auto &[logical, backing] : frame.localBacking) {
       (void)logical;
       references.erase(backing);
@@ -871,8 +879,10 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
       groupIteratorSlots.erase(backing);
     }
     if (frames.empty()) activationFrames_.erase(cursor);
+    frameProbe_.hit();
     programCounters.touch(cursor);
     cursorPC_[cursor] = returnOpcode;
+    frameProbe_.hit();
     if (arena.contains(cursor)) {
       if (returnOpcode) {
         zigzag::expectWritten(
@@ -883,6 +893,7 @@ ExecutionResult VortexVM::executeFrameOpcode(const OpcodeKind kind,
             arena.setValueBits(cursor, xanadu::ValueKind::None, 0));
       }
     }
+    frameProbe_.hit();
     zigzag::expectMarkOrder(arena.discard(mark));
   } catch (const std::exception &error) {
     zigzag::expectMarkOrder(arena.release(mark));

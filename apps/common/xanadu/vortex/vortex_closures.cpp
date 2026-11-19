@@ -1042,14 +1042,13 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
     // closure creation cost everything earlier runs had left in them (card
     // VM-FRAME). Closing the cursor (no continuation) also erases the entries
     // of its guards and frames, which only a whole-table copy can undo.
-    MapUndo<CellReferenceMap> references(cellReferences_,
-                                         frameTableEntriesCopied_);
+    MapUndo<CellReferenceMap> references(cellReferences_, frameProbe_);
     MapUndo<std::unordered_map<CellRef, std::optional<CellRef>>>
-        programCounters(cursorPC_, frameTableEntriesCopied_);
+        programCounters(cursorPC_, frameProbe_);
     std::optional<CellReferenceMap> closingReferences;
     if (!continuation) {
       closingReferences = cellReferences_;
-      frameTableEntriesCopied_ += cellReferences_.size();
+      frameProbe_.entries += cellReferences_.size();
     }
     for (const CellRef slot : outputs) references.touch(slot);
     programCounters.touch(cursor);
@@ -1169,8 +1168,18 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
       return fail("CheckClosureCall snapshot limit exceeded");
     for (std::size_t index = 0; index < snapshotRecords; ++index)
       arena.consumeWork();
-    auto priorReferences = cellReferences_;
-    auto priorCursorPC   = cursorPC_;
+    // Journalled as in CreateClosure. The metering above still charges the
+    // table sizes: that is the opcode's documented budget, not its cost.
+    MapUndo<CellReferenceMap> references(cellReferences_, frameProbe_);
+    MapUndo<std::unordered_map<CellRef, std::optional<CellRef>>>
+        programCounters(cursorPC_, frameProbe_);
+    std::optional<CellReferenceMap> closingReferences;
+    if (!continuation) {
+      closingReferences = cellReferences_;
+      frameProbe_.entries += cellReferences_.size();
+    }
+    for (const CellRef slot : outputs) references.touch(slot);
+    programCounters.touch(cursor);
     try {
       zigzag::ArenaSavepoint savepoint(arena);
       writeCellReferences(outputs,
@@ -1179,8 +1188,9 @@ ExecutionResult VortexVM::executeClosureOpcodeBody(const OpcodeKind kind,
       savepoint.commit();
       return {};
     } catch (const std::exception &error) {
-      cellReferences_.swap(priorReferences);
-      cursorPC_.swap(priorCursorPC);
+      references.rollback();
+      programCounters.rollback();
+      if (closingReferences) cellReferences_.swap(*closingReferences);
       return fail(error.what());
     }
   }
