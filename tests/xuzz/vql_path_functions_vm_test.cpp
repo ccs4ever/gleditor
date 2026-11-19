@@ -227,10 +227,17 @@ TEST_F(PathFunctionFixture, ContainsInALetBindingIsTheBooleanScalar) {
   EXPECT_EQ(core.render(bound.front()), zigzag::vortex::CellValue(true));
 }
 
-TEST_F(PathFunctionFixture, FindIsRefusedUntilProseSearchExists) {
-  expectRefusal(R"(find("needle"))", "find");
+// find lowers as an anchor: a store-less engine has nothing to search, so the
+// answer is the empty result, not a refusal.
+TEST_F(PathFunctionFixture, FindAsAnAnchorHasNothingToSearchWithoutStores) {
+  EXPECT_TRUE(engine.execute(R"(find("needle"))").empty());
+}
+
+TEST_F(PathFunctionFixture, FindRefusesBadArityAndStepPosition) {
   expectRefusal("find()", "find");
   expectRefusal(R"(find("a", "b"))", "find");
+  // As a step it would run once per cell and repeat every hit for each.
+  expectRefusal(R"(##/find("a"))", "find is only supported as an anchor");
 }
 
 // A rank of keyed cells: n cells along d.videos, each with a +d.tag key.
