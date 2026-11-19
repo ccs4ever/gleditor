@@ -452,8 +452,12 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   varBindings_.clear();
   versionVars_.clear();
   constantCells_.clear();
-  for (const auto &[name, cells] : options.initialBindings)
+  sessionCells_.clear();
+  viewStreams_.clear();
+  for (const auto &[name, cells] : options.initialBindings) {
     constantCells_.insert(cells.begin(), cells.end());
+    sessionCells_.insert(cells.begin(), cells.end());
+  }
   mounts_ = options.mounts;
   mountBindings_.clear();
   streamBindings_ = options.initialBindings;
@@ -768,7 +772,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
     });
   }
   if (path.anchorProjection)
-    stream = applyShapeProjection(stream, *path.anchorProjection);
+    stream = applyShapeProjection(stream, *path.anchorProjection, true);
   stream =
       compileSteps(path.steps, std::move(stream),
                    path.anchor.kind != AnchorKind::Context ||
@@ -776,7 +780,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
                    path.isInvocationRoot);
 
   if (path.shapeProjection) {
-    stream = applyShapeProjection(stream, *path.shapeProjection);
+    stream = applyShapeProjection(stream, *path.shapeProjection, true);
   }
 
   if (path.cloneTail && !stream.empty()) {
@@ -880,6 +884,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
     });
   }
 
+  refuseViewEscape(stream, "leaves the path as view cells");
   lastResultCells_ = stream;
   if (stream.empty()) return std::nullopt;
   return stream.front();
@@ -887,10 +892,15 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
 
 std::vector<CellRef>
 VQLCompiler::applyShapeProjection(std::span<const CellRef> owners,
-                                  const ShapeLiteral &written) {
+                                  const ShapeLiteral &written,
+                                  const bool allowViews) {
   // Variables, shape-returning calls and nested shapes are expanded first, so
   // validation and lowering see only the rules the static path knows.
   const ShapeLiteral shape = expandShape(written);
+  if (allowViews && isDynamicViewShape(shape))
+    return lowerDynamicView(shape, owners);
+  refuseViewHandles(owners, "a shape projection");
+  refuseViewEscape(owners, "is followed by a shape projection");
   validateShapeProjection(shape);
   return emitMap(owners, [&](const CellRef owner) {
     compileShapeProjection(shape, owner);
@@ -1438,9 +1448,14 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
               if (handle == shapeHandles_.end()) continue;
               const bool isShape =
                   std::holds_alternative<ShapeLiteral>(handle->second);
+              const bool isView =
+                  std::holds_alternative<ViewHandle>(handle->second);
               throw QueryRefusal(
                   QueryErrorCategory::Unsupported,
-                  std::string{"a "} + (isShape ? "shape" : "lens") +
+                  std::string{"a "} +
+                      (isView    ? "dynamic view"
+                       : isShape ? "shape"
+                                 : "lens") +
                       " value cannot be an operand of '+': it is syntax "
                       "resolved while the query is compiled, not a value "
                       "the graph computes with");

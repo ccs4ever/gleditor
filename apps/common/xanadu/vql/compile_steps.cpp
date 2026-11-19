@@ -75,7 +75,24 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                                                bool hasContext,
                                                bool allowInitialEmptyCall) {
   for (std::size_t stepIndex = 0; stepIndex < steps.size(); ++stepIndex) {
-    const auto &step = steps[stepIndex];
+    const auto &written = steps[stepIndex];
+    // A stream seen through a dynamic view: the step is compiled against the
+    // source with the view's rules (compile_dynamic_view.cpp).
+    auto view = viewOfStream(stream);
+    std::optional<PathStep> viewStep;
+    bool viewEnds = false;
+    if (view) {
+      auto plan = planViewStep(*view, written);
+      if (!plan.step) {
+        // Hidden by a mask: nothing is read and nothing is created.
+        if (written.yieldMode != YieldMode::Keep) stream = {emitStreamClear()};
+        hasContext = true;
+        continue;
+      }
+      viewStep = std::move(plan.step);
+      viewEnds = plan.endsView;
+    }
+    const PathStep &step = viewStep ? *viewStep : written;
     if (step.versionPin) {
       stream =
           compileVersionPinnedStep(step, std::move(stream), hasContext,
@@ -280,6 +297,11 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
     }
     if (step.projectionAfter)
       stream = applyShapeProjection(stream, *step.projectionAfter);
+    if (view && !viewEnds) {
+      ViewMark reached = *view;
+      reached.created  = creationStep;
+      markViewStream(stream, reached);
+    }
     hasContext = true;
   }
 

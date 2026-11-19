@@ -565,7 +565,23 @@ struct LensPair {
 /// session persistence serve them. This is a deliberate exception to
 /// "cells and dimensions, not side tables"; moving the data half into cells
 /// is a later card.
-using CompiledHandle      = std::variant<ShapeLiteral, LensPair>;
+/// A dynamic view (Q-VIEW-A): the rules one projection gave. Handles of one
+/// projection share a descriptor, so two projections of one source are two
+/// views even when their rules read the same.
+struct ViewDescriptor {
+  ShapeLiteral shape;
+};
+
+/// A dynamic view's handle cell: what it shows (a session-bound source cell
+/// that outlives the program) and by which rules. The handle carries a copy of
+/// the source's value for display only; a step through it is compiled against
+/// the source with the rules applied.
+struct ViewHandle {
+  zigzag::CellRef source{};
+  std::shared_ptr<const ViewDescriptor> view;
+};
+
+using CompiledHandle      = std::variant<ShapeLiteral, LensPair, ViewHandle>;
 using CompiledHandleTable = std::unordered_map<zigzag::CellRef, CompiledHandle>;
 
 struct DefDeclaration {

@@ -82,8 +82,11 @@ ShapeLiteral VQLCompiler::shapeOfVariable(const std::string &name) {
     if (handle == shapeHandles_.end()) continue;
     const auto *shape = std::get_if<ShapeLiteral>(&handle->second);
     if (!shape)
-      throw TypeContractError("variable $" + name +
-                              " does not contain a Shape value (it is a lens)");
+      throw TypeContractError(
+          "variable $" + name + " does not contain a Shape value (it is a " +
+          (std::holds_alternative<ViewHandle>(handle->second) ? "dynamic view"
+                                                              : "lens") +
+          ")");
     known = true;
     appendShapeRules(result, *shape);
   }

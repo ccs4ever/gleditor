@@ -190,12 +190,16 @@ TEST_F(VQLShapeVariableTest, VariableHoldingAScalarIsNotAShape) {
 
 TEST_F(VQLShapeVariableTest,
        PivotAndComputedRulesInAVariableKeepTheirRefusals) {
+  // A pivot is a dynamic view (Q-VIEW-A): a variable's shape expands into it,
+  // and ## is a source the session does not hold, so that refuses by name.
   EXPECT_THAT(refusalOf("let $s := { d.1 <=> d.priority } return ##{ $s }"),
-              testing::HasSubstr("dimension pivot"));
+              testing::HasSubstr("dynamic view over a source computed at run "
+                                 "time"));
   EXPECT_THAT(refusalOf("let $s := { +d.label := ./value() } return ##{ $s }"),
               testing::HasSubstr("computed dimension"));
   EXPECT_THAT(refusalOf("def p() := { d.1 <=> d.priority }; ##{ p() }"),
-              testing::HasSubstr("dimension pivot"));
+              testing::HasSubstr("dynamic view over a source computed at run "
+                                 "time"));
 }
 
 TEST_F(VQLShapeVariableTest, ShapeOfAnotherEngineIsNotStaticallyKnown) {

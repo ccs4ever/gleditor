@@ -1,6 +1,7 @@
 #include "common/xanadu/vql/compiler.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <limits>
 #include <stdexcept>
@@ -333,6 +334,12 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
                          const std::vector<ValueExpr> &arguments,
                          std::optional<CellRef> context, bool ufcs,
                          const bool entersActiveCallStack) {
+  for (const ValueExpr &argument : arguments)
+    refuseViewHandleArgument(argument);
+  if (context) {
+    const std::array<CellRef, 1> contextCell{*context};
+    refuseViewHandles(contextCell, "a function call");
+  }
   const bool hasVariadic =
       !definition.params.empty() && definition.params.back().isVariadic;
   if (!hasVariadic && arguments.size() > definition.params.size())

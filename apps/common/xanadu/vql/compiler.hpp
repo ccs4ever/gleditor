@@ -437,6 +437,41 @@ private:
   void compileMountDeclarations(const QueryExpression &query);
   /// Q5, compile_dynamic_view.cpp.
   void compileDynamicShapeProjection(const ShapeLiteral &shape);
+  /// Q-VIEW-A, compile_dynamic_view.cpp. A view is a handle cell per source in
+  /// the shape table; a step on a handle is compiled against the source with
+  /// the view's rules applied (pivot remaps, mask hides, a create goes to the
+  /// physical dimension). Nothing about a view is written to the store.
+  struct ViewMark {
+    std::shared_ptr<const ViewDescriptor> view;
+    bool created{false};
+  };
+  static bool isDynamicViewShape(const ShapeLiteral &shape);
+  std::vector<zigzag::CellRef>
+  lowerDynamicView(const ShapeLiteral &shape,
+                   std::span<const zigzag::CellRef> owners);
+  /// The view the cells of @p stream are seen through, if any; handles in the
+  /// stream are replaced by their sources. Refuses a stream that mixes views
+  /// or plain and view cells.
+  std::optional<ViewMark> viewOfStream(std::vector<zigzag::CellRef> &stream);
+  /// What a step becomes through @p view: the rewritten step, or nothing when
+  /// a mask hides it. Refuses steps whose meaning through a view is not
+  /// lowered.
+  struct ViewStepPlan {
+    std::optional<PathStep> step; ///< empty: the mask hides the step
+    bool endsView{false};         ///< value() and count() leave the view
+  };
+  ViewStepPlan planViewStep(const ViewMark &view, const PathStep &step) const;
+  void markViewStream(std::span<const zigzag::CellRef> stream,
+                      const ViewMark &view);
+  /// Refuses a view handle used where its provenance would be lost (a loop
+  /// source, a call argument, an operand).
+  void refuseViewHandles(std::span<const zigzag::CellRef> cells,
+                         const std::string &where) const;
+  void refuseViewHandleArgument(const ValueExpr &argument) const;
+  void refuseViewEscape(std::span<const zigzag::CellRef> stream,
+                        const std::string &what) const;
+  std::unordered_set<zigzag::CellRef> sessionCells_;
+  std::unordered_map<zigzag::CellRef, ViewMark> viewStreams_;
   std::vector<zigzag::CellRef> compileLensStep(const PathStep &step,
                                                zigzag::CellRef current,
                                                bool hasContext);
@@ -624,9 +659,12 @@ private:
   compilePathExpression(const PathExpression &path, zigzag::CellRef ctxCell);
   void validateShapeProjection(const ShapeLiteral &shape);
   void compileShapeProjection(const ShapeLiteral &shape, zigzag::CellRef owner);
+  /// @p allowViews is true only where a path projects its own result: a
+  /// projection with pivot or computed rules answers view handles there, and
+  /// is refused everywhere a projection is a mutation (project, apply_shape).
   std::vector<zigzag::CellRef>
   applyShapeProjection(std::span<const zigzag::CellRef> owners,
-                       const ShapeLiteral &shape);
+                       const ShapeLiteral &shape, bool allowViews = false);
   std::optional<zigzag::CellRef> compileAnchor(const AnchorNode &anchor);
   std::optional<zigzag::CellRef> compilePathStep(const PathStep &step,
                                                  zigzag::CellRef inStreamCell);

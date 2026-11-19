@@ -212,8 +212,9 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
     const auto &loop = std::get<ForClause>(binding);
     compilePathExpression(loop.inPath, core_.home());
     std::vector<CellRef> source = lastResultCells_;
-    const CellRef iterator      = core_.arena().makeCell();
-    const CellRef begin         = emitOp(OpcodeKind::StreamBegin, "#FOR_BEGIN");
+    refuseViewHandles(source, "a for loop source");
+    const CellRef iterator = core_.arena().makeCell();
+    const CellRef begin    = emitOp(OpcodeKind::StreamBegin, "#FOR_BEGIN");
     for (const auto cell : source) emitInput(begin, cell);
     emitOutput(begin, iterator);
     emitIteratorLoop(iterator, [&](const CellRef item) {
