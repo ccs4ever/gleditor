@@ -10,6 +10,7 @@
 
 #include "common/xanadu/zigzag/arena_savepoint.hpp"
 #include "common/xanadu/zigzag/query_scalar.hpp"
+#include <gleditor/cpp26.hpp>
 
 namespace zigzag::vortex {
 namespace {
@@ -938,6 +939,155 @@ VortexVM::closureValue(const CellRef root) const try {
                       .captures       = std::move(environment),
                       .referenceCells = std::move(references)};
   return result;
+} catch (const std::exception &error) {
+  return std::unexpected(closureError(error.what()));
+}
+
+namespace {
+
+/// One closure record read without charging work: its role text and integer.
+struct UnchargedRecord {
+  std::string role;
+  std::uint64_t value{};
+};
+
+/// The text of @p cell if it fits @p byteLimit, read without consumeWork().
+std::optional<std::string> unchargedText(const ArenaManifold &arena,
+                                         const CellRef cell,
+                                         const std::size_t byteLimit) {
+  if (!arena.contains(cell)) return std::nullopt;
+  std::size_t bytes = 0;
+  for (const auto &span : arena.contentOf(cell)) {
+    if (span.length > byteLimit - std::min(bytes, byteLimit))
+      return std::nullopt;
+    bytes += static_cast<std::size_t>(span.length);
+  }
+  return arena.textOf(cell);
+}
+
+/// The single cell @p cell links to along @p dimension in @p direction.
+std::expected<std::optional<CellRef>, ClosureDescriptorError>
+unchargedLink(const ArenaManifold &arena, const CellRef cell,
+              const DimRef dimension, const DimVector direction,
+              const std::size_t relationLimit) {
+  const auto links = arena.dimensionsOf(cell);
+  if (links.size() > relationLimit)
+    return std::unexpected(
+        closureError("closure metadata cell exceeds its relation limit"));
+  for (const auto &link : links)
+    if (link.dim == dimension) return link.neighbor(direction);
+  return std::optional<CellRef>{};
+}
+
+/// Visit the integer records chained from @p root (grab, then step).
+std::expected<void, ClosureDescriptorError> forEachClosureRecord(
+    const VortexCore &core, const CellRef root,
+    const LogicalClosureLimits &limits, const std::size_t recordLimit,
+    gleditor::cpp26::function_ref<
+        std::expected<void, ClosureDescriptorError>(const UnchargedRecord &)>
+        visit) {
+  const auto &arena = core.arena();
+  auto next = unchargedLink(arena, root, core.dims().grab, DimVector::POS,
+                            limits.maxMetadataRelations);
+  if (!next) return std::unexpected(next.error());
+  std::unordered_set<CellRef> visited;
+  for (auto record = *next; record;) {
+    if (visited.size() >= recordLimit || !visited.insert(*record).second)
+      return std::unexpected(
+          closureError("closure records exceed their limit or cycle"));
+    if (arena.valueKindOf(*record) != xanadu::ValueKind::Int64)
+      return std::unexpected(
+          closureError("closure record has an invalid value type"));
+    const auto value = arena.asInt64(*record);
+    const auto role  = unchargedText(arena, *record, limits.maxMetadataBytes);
+    if (!value || *value < 0 || !role)
+      return std::unexpected(closureError("closure record is malformed"));
+    if (const auto done =
+            visit({.role = *role, .value = static_cast<std::uint64_t>(*value)});
+        !done)
+      return done;
+    auto following = unchargedLink(arena, *record, core.dims().step,
+                                   DimVector::POS, limits.maxMetadataRelations);
+    if (!following) return std::unexpected(following.error());
+    record = *following;
+  }
+  return {};
+}
+
+} // namespace
+
+std::expected<std::vector<CellRef>, ClosureDescriptorError>
+VortexVM::closureReferences(const CellRef root) const try {
+  const auto &arena = core_.arena();
+  const auto fail   = [](std::string message)
+      -> std::expected<std::vector<CellRef>, ClosureDescriptorError> {
+    return std::unexpected(closureError(std::move(message)));
+  };
+  const auto claim = core_.dims().runtimeObjectClaim;
+  if (!claim || !arena.contains(root) ||
+      arena.valueKindOf(root) != xanadu::ValueKind::None)
+    return fail("cell is not a Vortex closure value");
+  const auto kindCell = arena.linked(root, *claim, DimVector::POS);
+  const auto probe =
+      unchargedText(arena, root, closureLimits_.maxMetadataBytes);
+  const auto tag = kindCell ? unchargedText(arena, *kindCell,
+                                            closureLimits_.maxMetadataBytes)
+                            : std::nullopt;
+  if (!probe || *probe != zigzag::runtimeObjectProbeText || !tag ||
+      *tag != closureValueTag)
+    return fail("cell is not a Vortex closure value");
+
+  std::vector<CellRef> references;
+  std::unordered_set<CellRef> seen;
+  const auto add = [&](const std::uint64_t value)
+      -> std::expected<CellRef, ClosureDescriptorError> {
+    if (value > std::numeric_limits<CellRef>::max() ||
+        !arena.contains(static_cast<CellRef>(value)))
+      return std::unexpected(closureError("closure refers to a missing cell"));
+    const auto cell = static_cast<CellRef>(value);
+    if (seen.insert(cell).second) references.push_back(cell);
+    return cell;
+  };
+  std::optional<CellRef> descriptor;
+  const auto walked = forEachClosureRecord(
+      core_, root, closureLimits_, closureLimits_.maxValueRecords,
+      [&](const UnchargedRecord &record)
+          -> std::expected<void, ClosureDescriptorError> {
+        if (record.role == valueDescriptorRole) {
+          if (descriptor)
+            return std::unexpected(
+                closureError("closure value has duplicate descriptors"));
+          const auto cell = add(record.value);
+          if (!cell) return std::unexpected(cell.error());
+          descriptor = *cell;
+        } else if (record.role == environmentMemberRole) {
+          if (const auto cell = add(record.value); !cell)
+            return std::unexpected(cell.error());
+        } else if (record.role != environmentStreamRole) {
+          return std::unexpected(
+              closureError("closure value contains an unknown record role"));
+        }
+        return {};
+      });
+  if (!walked) return std::unexpected(walked.error());
+  if (!descriptor) return fail("closure value has no descriptor reference");
+
+  // The descriptor's own cell references: its frame descriptor and the two
+  // Bool cells it hands back for argument presence.
+  const auto descriptorWalk = forEachClosureRecord(
+      core_, *descriptor, closureLimits_, closureLimits_.maxDescriptorRecords,
+      [&](const UnchargedRecord &record)
+          -> std::expected<void, ClosureDescriptorError> {
+        if (record.role == frameReferenceRole ||
+            record.role == presenceTrueRole ||
+            record.role == presenceFalseRole) {
+          if (const auto cell = add(record.value); !cell)
+            return std::unexpected(cell.error());
+        }
+        return {};
+      });
+  if (!descriptorWalk) return std::unexpected(descriptorWalk.error());
+  return references;
 } catch (const std::exception &error) {
   return std::unexpected(closureError(error.what()));
 }

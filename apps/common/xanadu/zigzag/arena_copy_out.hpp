@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -65,6 +67,11 @@ struct CopyOutRefused {
 carriesRuntimeObjectClaim(const ArenaManifold &arena, CellRef cell,
                           std::optional<DimRef> claimDimension);
 
+/// The runtime object @p cell is or names (an integer naming one), if any.
+[[nodiscard]] std::optional<CellRef>
+runtimeObjectOf(const ArenaManifold &arena, CellRef cell,
+                std::optional<DimRef> claimDimension);
+
 /**
  * @brief Cells a program minted under a mark, read out so they can outlive
  *        that mark's release().
@@ -83,10 +90,15 @@ public:
   /// Describe the cells of @p cells that @p arena minted since @p floor was
   /// taken. One description per distinct cell, so a cell appearing twice
   /// stays one cell.
+  ///
+  /// A cell that merely names an older runtime object (an integer holding its
+  /// ref) is copied as it is when @p mayShareRuntimeObject agrees that nothing
+  /// the object names is the program's; every other runtime object is refused.
   [[nodiscard]] static std::expected<CopyOut, CopyOutRefused>
   capture(const ArenaManifold &arena, const Mark &floor,
           std::span<const CellRef> cells,
-          std::optional<DimRef> runtimeObjectClaim);
+          std::optional<DimRef> runtimeObjectClaim,
+          gleditor::cpp26::function_ref<bool(CellRef)> mayShareRuntimeObject);
 
   /// Mint the described cells in @p arena, which has been released to the
   /// floor, and answer the replacement of each cell captured.

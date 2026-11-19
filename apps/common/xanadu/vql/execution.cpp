@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <format>
 #include <iterator>
 #include <optional>
 #include <ranges>
@@ -47,16 +48,6 @@ public:
               std::optional<std::string> &retained)
       : vm_(vm), retainedSink_(retained), mark_(vm.core().arena().mark()),
         dimensionsBefore_(vm.core().arena().dimensions().size()) {}
-
-  /// The program's opcode cells, once compiled: only to learn whether it can
-  /// make a closure value, which no result check can see from the arena.
-  void setProgram(std::span<const zigzag::CellRef> ops) {
-    createsClosures_ =
-        std::ranges::any_of(ops, [this](const zigzag::CellRef op) {
-          return vm_.getOpcodeKind(op) ==
-                 zigzag::vortex::OpcodeKind::CreateClosure;
-        });
-  }
 
   /// The program is compiled and attached to home; what the run writes from
   /// here is the run's. Attaching it wrote home (a +d.spin entry and a cursor
@@ -104,23 +95,42 @@ public:
     std::vector<zigzag::CellRef> live{cells};
     for (const auto *extra : alsoLive)
       live.insert(live.end(), extra->begin(), extra->end());
-    // A closure value names its descriptor and environment cells by integer
-    // reference, which re-minting a cell would leave dangling, and a closure
-    // can sit behind any result or binding. Inspecting them costs arena work
-    // a tight budget notices, so a program that can make one keeps itself.
-    // Known leak: such a query keeps its program (about 142 cells a run)
-    // until a read-only VM accessor for closure values is approved, which
-    // would let the check be exact and work-free.
-    if (createsClosures_) {
-      retain();
-      return RetainedProgram{
-          "the program creates closure values, which name program cells"};
-    }
+    // A closure value holds its descriptor and captured cells as integers,
+    // which re-minting a cell would leave dangling. CopyOut refuses any
+    // closure the program minted; one that merely names an older closure is
+    // shared as long as the VM reports every cell it names as older too.
+    // closureReferences() charges no work, so this check cannot push a run
+    // that fits its budget over it.
+    const auto olderThanProgram = [this](const zigzag::CellRef cell) {
+      const auto dense = vm_.core().arena().denseOf(cell);
+      return dense && *dense < mark_.cellCount;
+    };
+    const auto mayShareClosure = [&](const zigzag::CellRef object) {
+      const auto references = vm_.closureReferences(object);
+      return references && std::ranges::all_of(*references, olderThanProgram);
+    };
     auto captured = zigzag::CopyOut::capture(
-        vm_.core().arena(), mark_, live, vm_.core().dims().runtimeObjectClaim);
+        vm_.core().arena(), mark_, live, vm_.core().dims().runtimeObjectClaim,
+        mayShareClosure);
     if (!captured) {
       retain();
-      return RetainedProgram{zigzag::toString(captured.error())};
+      const auto &refused = captured.error();
+      if (refused.reason == zigzag::CopyOutRefusal::RuntimeObject &&
+          vm_.closureReferences(refused.cell)) {
+        const auto holds = [&](const auto &values) {
+          return std::ranges::find(values, refused.cell) != values.end();
+        };
+        // A closure both bound and returned is the result it is.
+        const bool bound = std::ranges::any_of(
+            alsoLive, [&](const auto *values) { return holds(*values); });
+        const char *holder = holds(cells) ? "a result"
+                             : bound      ? "a session binding"
+                                     : "a value a result or binding links to";
+        return RetainedProgram{std::format(
+            "{} holds a closure into the program (runtime object cell {})",
+            holder, refused.cell)};
+      }
+      return RetainedProgram{zigzag::toString(refused)};
     }
     release();
     const auto replacements = captured->materialize(vm_.core().arena());
@@ -168,7 +178,6 @@ private:
   std::optional<std::string> &retainedSink_;
   zigzag::Mark mark_;
   std::optional<zigzag::Mark> runMark_;
-  bool createsClosures_{false};
   std::size_t dimensionsBefore_;
   bool settled_{false};
 };
@@ -369,7 +378,6 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       });
     }
     const auto cursor = *result.cursor;
-    area.setProgram(result.generatedOpcodes);
     area.beginRun();
 
     std::vector<zigzag::CellRef> cells;

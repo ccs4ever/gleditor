@@ -9,8 +9,9 @@
 
 namespace zigzag {
 
-bool carriesRuntimeObjectClaim(const ArenaManifold &arena, const CellRef cell,
-                               const std::optional<DimRef> claimDimension) {
+std::optional<CellRef>
+runtimeObjectOf(const ArenaManifold &arena, const CellRef cell,
+                const std::optional<DimRef> claimDimension) {
   const auto claimed = [&](const CellRef candidate) {
     if (!arena.contains(candidate)) return false;
     if (claimDimension &&
@@ -19,13 +20,20 @@ bool carriesRuntimeObjectClaim(const ArenaManifold &arena, const CellRef cell,
       return true;
     return arena.textOf(candidate) == zigzag::runtimeObjectProbeText;
   };
-  if (claimed(cell)) return true;
-  if (arena.valueKindOf(cell) != xanadu::ValueKind::Int64) return false;
+  if (claimed(cell)) return cell;
+  if (arena.valueKindOf(cell) != xanadu::ValueKind::Int64) return std::nullopt;
   const auto named = arena.asInt64(cell);
-  return named && *named > 0 &&
-         static_cast<std::uint64_t>(*named) <=
-             std::numeric_limits<CellRef>::max() &&
-         claimed(static_cast<CellRef>(*named));
+  if (named && *named > 0 &&
+      static_cast<std::uint64_t>(*named) <=
+          std::numeric_limits<CellRef>::max() &&
+      claimed(static_cast<CellRef>(*named)))
+    return static_cast<CellRef>(*named);
+  return std::nullopt;
+}
+
+bool carriesRuntimeObjectClaim(const ArenaManifold &arena, const CellRef cell,
+                               const std::optional<DimRef> claimDimension) {
+  return runtimeObjectOf(arena, cell, claimDimension).has_value();
 }
 
 std::string toString(const CopyOutRefused &refused) {
@@ -33,10 +41,11 @@ std::string toString(const CopyOutRefused &refused) {
                      refused.cell, toString(refused.reason));
 }
 
-std::expected<CopyOut, CopyOutRefused>
-CopyOut::capture(const ArenaManifold &arena, const Mark &floor,
-                 std::span<const CellRef> cells,
-                 const std::optional<DimRef> runtimeObjectClaim) {
+std::expected<CopyOut, CopyOutRefused> CopyOut::capture(
+    const ArenaManifold &arena, const Mark &floor,
+    std::span<const CellRef> cells,
+    const std::optional<DimRef> runtimeObjectClaim,
+    const gleditor::cpp26::function_ref<bool(CellRef)> mayShareRuntimeObject) {
   CopyOut out;
   std::unordered_set<CellRef> seen;
   const auto dimensions = arena.dimensions();
@@ -62,8 +71,16 @@ CopyOut::capture(const ArenaManifold &arena, const Mark &floor,
       return refuse(CopyOutRefusal::DimensionCell);
     const auto slot = arena.slot(ref);
     if (!slot) return refuse(CopyOutRefusal::QuotedCell);
-    if (carriesRuntimeObjectClaim(arena, ref, runtimeObjectClaim))
-      return refuse(CopyOutRefusal::RuntimeObject);
+    if (const auto object = runtimeObjectOf(arena, ref, runtimeObjectClaim)) {
+      // A runtime object is shareable only when it is not this cell (which the
+      // release would re-mint under a new number) but an older one this
+      // integer names, which the release leaves where it is.
+      const auto objectDense = arena.denseOf(*object);
+      const bool olderObject =
+          *object != ref && objectDense && *objectDense < floor.cellCount;
+      if (!olderObject || !mayShareRuntimeObject(*object))
+        return refuse(CopyOutRefusal::RuntimeObject);
+    }
     const auto kind = static_cast<xanadu::ValueKind>(slot->valueKind);
     if (kind == xanadu::ValueKind::OpHandle ||
         kind == xanadu::ValueKind::ExternRef ||
