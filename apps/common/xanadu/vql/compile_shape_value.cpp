@@ -80,8 +80,12 @@ ShapeLiteral VQLCompiler::shapeOfVariable(const std::string &name) {
   for (const CellRef cell : cells) {
     const auto handle = shapeHandles_.find(cell);
     if (handle == shapeHandles_.end()) continue;
+    const auto *shape = std::get_if<ShapeLiteral>(&handle->second);
+    if (!shape)
+      throw TypeContractError("variable $" + name +
+                              " does not contain a Shape value (it is a lens)");
     known = true;
-    appendShapeRules(result, handle->second);
+    appendShapeRules(result, *shape);
   }
   if (!known)
     refuseShape("shape value '$" + name +

@@ -105,9 +105,9 @@ public:
       ContractBindings bindings,
       std::unordered_map<std::string, std::vector<PathStep>> functors);
 
-  /// The shape handles the compiler may resolve, handle cell to expanded
-  /// shape. See publishShapes for the lifetime.
-  using ShapeTable = std::unordered_map<zigzag::CellRef, ShapeLiteral>;
+  /// The handles the compiler may resolve, handle cell to an expanded shape
+  /// or a lens pair. See publishShapes for the lifetime.
+  using ShapeTable = CompiledHandleTable;
   [[nodiscard]] const ShapeTable &compilerShapes() const noexcept {
     return compiledShapes_;
   }
@@ -175,9 +175,10 @@ public:
   }
 
 private:
-  // Compile-time shape table (decision D4 of the VM restoration): shapes are
-  // syntax, not data, so the handle cell stands for a ShapeLiteral the
-  // compiler resolves into the static projection paths and the VM never sees.
+  // Compile-time shape and lens table (decision D4 of the VM restoration):
+  // shapes and lens callbacks are syntax, not data, so the handle cell stands
+  // for a ShapeLiteral or a LensPair the compiler resolves while lowering and
+  // the VM never sees.
   // It is an exception to the "cells and dimensions, not side tables" rule,
   // taken because those paths consume syntax trees; moving the data half into
   // cells is a later card. It follows env_: clearVariables() empties it.

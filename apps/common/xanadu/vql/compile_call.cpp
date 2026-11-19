@@ -534,12 +534,26 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   std::vector<std::string> requiredStaticProgramCaptures(
       staticProgramRequiredNames.begin(), staticProgramRequiredNames.end());
   std::ranges::sort(requiredStaticProgramCaptures);
+  // A lens is syntax the compiler resolves where it is applied; a reusable
+  // frame would receive only its handle cell at run time, so a call that is
+  // handed a lens is compiled inline.
+  if (std::ranges::any_of(arguments, [this](const ValueExpr &argument) {
+        if (const auto *name = std::get_if<std::string>(&argument.kind))
+          return lensBoundTo(*name).has_value();
+        if (const auto *call = std::get_if<std::shared_ptr<FunctionInvocation>>(
+                &argument.kind))
+          return *call && (*call)->name == "lens" &&
+                 !definitions_.contains("lens");
+        return false;
+      }))
+    unsupportedFunctorArgument = true;
   bool hasInlineCapture = false;
   if (const auto captures = frameFreeCaptureNames_.find(definition.name);
       captures != frameFreeCaptureNames_.end()) {
     hasInlineCapture =
         std::ranges::any_of(captures->second, [this](const std::string &name) {
           if (functorBindings_.contains(name)) return true;
+          if (lensBoundTo(name)) return true;
           if (const auto stream = streamBindings_.find(name);
               stream != streamBindings_.end()) {
             return std::ranges::any_of(stream->second, [this](CellRef cell) {
