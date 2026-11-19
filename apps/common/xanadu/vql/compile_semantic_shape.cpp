@@ -103,12 +103,13 @@ std::vector<CellRef>
 VQLCompiler::compileSemanticShapeCall(const FunctionInvocation &fn,
                                       const std::optional<CellRef> context) {
   if (fn.args.size() != 2) refuse(fn.name + " requires 2 argument(s)");
-  const auto *shapeArgument =
-      std::get_if<std::shared_ptr<ShapeLiteral>>(&fn.args[1].kind);
-  if (!shapeArgument || !*shapeArgument)
-    refuse(fn.name + " requires a literal shape; a shape held in a variable "
-                     "or returned by a function is not lowered");
-  const ShapeLiteral &shape = **shapeArgument;
+  // A literal, a shape variable or a shape-returning call, expanded while
+  // compiling: the graph never carries a shape (compile_shape_value.cpp).
+  const auto resolved = resolveShapeValue(fn.args[1]);
+  if (!resolved)
+    refuse(fn.name + " requires a shape literal, a shape variable or a call "
+                     "of a function whose body is a shape literal");
+  const ShapeLiteral &shape = *resolved;
 
   if (fn.name == "project") return compileProject(fn, shape, context);
 

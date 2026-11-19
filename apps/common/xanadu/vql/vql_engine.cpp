@@ -125,6 +125,7 @@ void VQLEngine::clearVariables() noexcept {
   env_.clear();
   functors_.clear();
   putGetLenses_.clear();
+  compiledShapes_.clear();
 }
 
 std::unordered_map<std::string, std::vector<PathStep>>
@@ -170,6 +171,16 @@ void VQLEngine::publishCompilerBindings(
   env_.swap(nextEnv);
   functors_.swap(nextFunctors);
   putGetLenses_.swap(nextLenses);
+}
+
+void VQLEngine::publishShapes(ShapeTable shapes,
+                              const std::span<const zigzag::CellRef> results) {
+  std::unordered_set<zigzag::CellRef> named(results.begin(), results.end());
+  for (const auto &[name, cells] : env_)
+    named.insert(cells.begin(), cells.end());
+  std::erase_if(
+      shapes, [&](const auto &entry) { return !named.contains(entry.first); });
+  compiledShapes_.swap(shapes);
 }
 
 void VQLEngine::publishUserDefs(const std::vector<DefDeclaration> &defs) {

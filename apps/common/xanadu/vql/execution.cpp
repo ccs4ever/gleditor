@@ -84,9 +84,12 @@ public:
   /// Release the program, then re-mint the results it minted. A shape that
   /// cannot be copied exactly keeps the whole program instead -- the arena is
   /// then as it was before this existed -- and the refusal is returned.
+  /// @p replaced receives old cell to re-minted cell for what was carried out,
+  /// for state that keys on a result cell (the session's shape table).
   std::optional<RetainedProgram>
   settle(std::vector<zigzag::CellRef> &cells,
-         std::span<std::vector<zigzag::CellRef> *const> alsoLive) {
+         std::span<std::vector<zigzag::CellRef> *const> alsoLive,
+         std::unordered_map<zigzag::CellRef, zigzag::CellRef> &replaced) {
     // A dimension the run named is a name the session keeps: release() would
     // un-name it while later queries still resolve it. The arena records
     // writes, not names, so this is the one question it cannot answer.
@@ -124,6 +127,7 @@ public:
     }
     release();
     const auto replacements = captured->materialize(vm_.core().arena());
+    replaced                = replacements;
     zigzag::applyCopyOut(replacements, cells);
     for (auto *extra : alsoLive) zigzag::applyCopyOut(replacements, *extra);
     return std::nullopt;
@@ -339,6 +343,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
         bindingSource_ ? bindingSource_->get() : bindings_;
     if (session_) {
       compilation.initialFunctors = session_->compilerFunctors();
+      compilation.initialShapes   = session_->compilerShapes();
       for (const auto &[name, mount] : session_->compilerMounts())
         compilation.mounts.emplace(
             name, CompilationOptions::Mount{.direction = mount.direction,
@@ -424,6 +429,11 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     // first. A mount's roots are program slots a later query reads, which a
     // value copy cannot stand in for, so a run that publishes one keeps its
     // program.
+    // A shape handle this query minted is a program cell like any other: it
+    // survives only if a result or a variable names it, and then as the copy
+    // settle() re-mints, so the table is re-keyed by what settle replaced.
+    std::unordered_map<zigzag::CellRef, zigzag::CellRef> replaced;
+    bool programKept = false;
     const bool mountRoots =
         std::ranges::any_of(result.sessionBindings, [](const auto &binding) {
           return binding.kind ==
@@ -432,11 +442,13 @@ QueryExecutor::executeVortex(const QueryExpression &query,
         });
     if (session_ && mountRoots) {
       area.retain();
+      programKept      = true;
       programRetained_ = "session mount roots are program slots";
     } else {
       std::vector<std::vector<zigzag::CellRef> *> alsoLive;
       for (auto &[name, values] : published) alsoLive.push_back(&values);
-      if (const auto refused = area.settle(cells, alsoLive)) {
+      if (const auto refused = area.settle(cells, alsoLive, replaced)) {
+        programKept      = true;
         programRetained_ = refused->because;
         GLEDITOR_LOG_DEBUG("vql.execution",
                            "program cells retained after the run: {}",
@@ -447,6 +459,21 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       publishMounts(session_, result.sessionBindings);
       session_->publishCompilerBindings(std::move(published),
                                         std::move(functors));
+      // Handles the session already held keep their cells; the ones this query
+      // minted follow the program: kept in place when the program was kept,
+      // else under the cell settle() re-minted, and dropped if nothing named
+      // them (their cell is gone, and a reused number must not read as one).
+      VQLEngine::ShapeTable shapes = compilation.initialShapes;
+      for (auto &[handle, shape] : result.shapes) {
+        if (compilation.initialShapes.contains(handle)) continue;
+        if (programKept) {
+          shapes.emplace(handle, std::move(shape));
+        } else if (const auto moved = replaced.find(handle);
+                   moved != replaced.end()) {
+          shapes.emplace(moved->second, std::move(shape));
+        }
+      }
+      session_->publishShapes(std::move(shapes), cells);
       session_->publishUserDefs(query.defs);
     }
     return cells;

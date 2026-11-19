@@ -104,6 +104,24 @@ public:
   void publishCompilerBindings(
       ContractBindings bindings,
       std::unordered_map<std::string, std::vector<PathStep>> functors);
+
+  /// The shape handles the compiler may resolve, handle cell to expanded
+  /// shape. See publishShapes for the lifetime.
+  using ShapeTable = std::unordered_map<zigzag::CellRef, ShapeLiteral>;
+  [[nodiscard]] const ShapeTable &compilerShapes() const noexcept {
+    return compiledShapes_;
+  }
+  /// Number of shape handles the session can still resolve.
+  [[nodiscard]] std::size_t shapeCount() const noexcept {
+    return compiledShapes_.size();
+  }
+  /// Adopts @p shapes after a query succeeded and its variables were
+  /// published, keeping only the handles a variable or one of @p results
+  /// still names. That is what bounds the table by the shapes held rather
+  /// than by the queries run. Called with nothing on failure, so a failed
+  /// query registers no shape.
+  void publishShapes(ShapeTable shapes,
+                     std::span<const zigzag::CellRef> results);
   [[nodiscard]] const std::unordered_map<std::string, DefDeclaration> &
   userDefs() const noexcept {
     return userDefs_;
@@ -157,6 +175,14 @@ public:
   }
 
 private:
+  // Compile-time shape table (decision D4 of the VM restoration): shapes are
+  // syntax, not data, so the handle cell stands for a ShapeLiteral the
+  // compiler resolves into the static projection paths and the VM never sees.
+  // It is an exception to the "cells and dimensions, not side tables" rule,
+  // taken because those paths consume syntax trees; moving the data half into
+  // cells is a later card. It follows env_: clearVariables() empties it.
+  ShapeTable compiledShapes_;
+
   // Shape values are immutable arena-local handles; their definitions live in
   // this side table so no store operation is minted for a query value.
   std::unordered_map<zigzag::CellRef, ShapeLiteral> shapeHandles_;
