@@ -527,6 +527,26 @@ failures. Rulings with these cards:
   no replacement and refuses, and a put with several replacements answers the source once per
   replacement.
 
+Gate N (2026-11-19, shared branch at the Q-VIEW-B merge, adding VAGENT-ARITY, Q-VIEW-A and
+Q-VIEW-B): `xuzz_test` 11 failures of 4836, nothing newly failing; every remaining failure is an
+Evidence or Subscription baseline test, and no VQL test is red. Rulings with these cards:
+
+- **VAGENT-ARITY:** `ProjectTopology` and `VqlMaskProbe` are variadic (fixed head plus (dimension,
+  value) pairs, stride 2) and pure; arity refusals name the ordinal; 43 opcodes remain deliberately
+  absent from the table behind a named allow-list a new opcode must join.
+- **Q-VIEW-A:** pivot views lower through a `ViewHandle` entry in the compile-time table. The owner
+  ruled that an entry lives as long as its handle cell exists, until D4(b) replaces the table.
+  Handles carry a marker link on `d.vql.view`, so a handle from another engine or held after
+  `clearVariables()` refuses by name. A cell created through a view refuses any later step.
+- **Q-VIEW-B:** computed dimensions lower for a literal or a `./` path with plain dimension steps
+  and optional `value()` or `count()`; a path answering more than one cell fails at run time by
+  name.
+- **D4(b):** run-time views need handles as arena cells with run-time dispatch (approved). V0 showed
+  the rule fold works over existing opcodes but no opcode turns an Int64 into a cell reference; the
+  owner approved two pure opcodes, `CellOfInt` and `IntOfCell`, over host providers. A release epoch
+  on `ArenaManifold` (core) is approved to follow, to close the stale-source hole. Shapes and lenses
+  stay on the table; each move needs its own approval.
+
 Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
 lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
 approval); `mesh::evaluate` of VQL source still runs `project` although a sealed portable artifact
