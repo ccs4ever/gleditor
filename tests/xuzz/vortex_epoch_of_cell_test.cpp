@@ -23,6 +23,8 @@
 #include <system_error>
 #include <vector>
 
+#include "common/xanadu/bencode.hpp"
+#include "common/xanadu/provenance.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vagent/meta.hpp"
@@ -399,6 +401,59 @@ TEST(VortexEpochOfCellTest, MeshRefusesItAsImpureNamingTheOpcode) {
   ASSERT_FALSE(sealed) << "an artifact holding EpochOfCell was sealed";
   EXPECT_NE(sealed.error().find("EpochOfCell"), std::string::npos)
       << sealed.error();
+}
+
+namespace mesh = zigzag::vortex::mesh;
+using Wire     = xanadu::bencode::Value;
+
+// An artifact is bytes, so one naming EpochOfCell can arrive that was never
+// sealed here. Decoding must reach the opcode (the decode ceiling) and refuse
+// it by name (the purity allowlist), not call it unknown or run it.
+std::string artifactNaming(const OpcodeKind kind) {
+  const mesh::VortexProgram program{
+      .cells        = {{}, {}, {CellValue{std::int64_t{5}}, {}}, {}},
+      .instructions = {{0, OpcodeKind::Add, {2, 2}, {3}, 1},
+                       {1, OpcodeKind::Halt, {}, {}, {}}},
+      .entry        = 0,
+      .outputs      = {{3, false}}};
+  const auto sealed = mesh::sealVortexProgram(program);
+  EXPECT_TRUE(sealed) << (sealed ? "" : sealed.error());
+  auto envelope         = xanadu::bencode::decode(*sealed);
+  auto fields           = envelope.asDict();
+  auto body             = xanadu::bencode::decode(fields.at("body").asString());
+  auto parts            = body.asDict();
+  auto list             = parts.at("instructions").asList();
+  auto first            = list.front().asDict();
+  first["opcode"]       = Wire::integer(static_cast<std::int64_t>(kind));
+  list.front()          = Wire::dict(std::move(first));
+  parts["instructions"] = Wire::list(std::move(list));
+  const auto encoded    = Wire::dict(std::move(parts)).encode();
+  fields["body"]        = Wire::string(encoded);
+  fields["sha256"]      = Wire::string(xanadu::sha256Hex(encoded));
+  return Wire::dict(std::move(fields)).encode();
+}
+
+constexpr mesh::EvaluationBudget meshBudget{1'000'000, 100'000, 100, 1'000'000};
+
+TEST(VortexEpochOfCellTest, ADecodedArtifactNamingItIsRefusedByName) {
+  const auto result =
+      mesh::evaluate(mesh::Frontend::Vortex,
+                     artifactNaming(OpcodeKind::EpochOfCell), meshBudget);
+  ASSERT_FALSE(result);
+  EXPECT_NE(result.error().find("does not support EpochOfCell"),
+            std::string::npos)
+      << result.error();
+}
+
+TEST(VortexEpochOfCellTest, TheMeshDecodeCeilingStopsAfterIt) {
+  const auto beyond = static_cast<OpcodeKind>(
+      static_cast<std::int64_t>(OpcodeKind::EpochOfCell) + 1);
+  const auto result = mesh::evaluate(mesh::Frontend::Vortex,
+                                     artifactNaming(beyond), meshBudget);
+  ASSERT_FALSE(result);
+  EXPECT_NE(result.error().find("Unknown Vortex artifact opcode"),
+            std::string::npos)
+      << result.error();
 }
 
 struct TempDir {

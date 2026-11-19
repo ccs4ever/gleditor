@@ -516,13 +516,16 @@ QueryExecutor::executeVortex(const QueryExpression &query,
                            *programRetained_);
       }
     }
-    // A handle that leaves the run names its source and view by number; the
-    // epochs of those cells are recorded now, for the number to be checked
-    // against whenever the handle is next stepped.
-    if (const auto viewDims = findViewDimensions(vm_.core())) {
-      recordViewWitnesses(vm_.core().arena(), *viewDims, cells);
-      for (const auto &[name, values] : published)
-        recordViewWitnesses(vm_.core().arena(), *viewDims, values);
+    // Every handle was witnessed where it was made, in the graph or by the
+    // compiler. A handle settle() re-minted may name a view that is now a new
+    // cell in a later epoch, so those copies, and only those, are witnessed
+    // again; a handle the session already held keeps the witness it has.
+    if (const auto viewDims = findViewDimensions(vm_.core());
+        viewDims && !replaced.empty()) {
+      std::vector<zigzag::CellRef> remade;
+      remade.reserve(replaced.size());
+      for (const auto &[from, to] : replaced) remade.push_back(to);
+      refreshViewWitnesses(vm_.core().arena(), *viewDims, remade);
     }
     if (session_) {
       publishMounts(session_, result.sessionBindings);

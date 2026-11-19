@@ -6,8 +6,10 @@
  *        export, vagent).
  *
  * A cell number held as an Int64 is not protected against reuse after
- * release(); ReleasedNumberNamesALaterCell records that hazard as behaviour
- * so the release-epoch card has a test to turn.
+ * release(); ReleasedNumberNamesALaterCell records that hazard as behaviour of
+ * these two opcodes. The witness against it is EpochOfCell (see
+ * vortex_epoch_of_cell_test.cpp), which a holder records beside the number and
+ * compares in the graph.
  */
 #include <gtest/gtest.h>
 

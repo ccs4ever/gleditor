@@ -456,20 +456,23 @@ TEST_F(VQLDynamicViewRuntimeTest, TheStepProgramGrowsByABoundedAmountPerStep) {
   // built once per program. What a site still emits is the map harness, its
   // dispatch, the plain branch (the step as it always compiled, about the
   // size of a step without views), its arguments and calls, and the walk that
-  // wraps what is reached. Measured 57 per site; the bound leaves a little
-  // room for the plain branch to grow. Before the routines were shared a
-  // site cost 102. The in-graph epoch check of a handle (EpochOfCell of the
-  // source and the view against the recorded witness) is part of the shared
-  // resolve routine: about a dozen ops once per program, none per site, so
-  // 57 stands (re-measured with the check in place: 57 at 2, 3 and 8 steps).
-  constexpr std::size_t maxOpsPerStep = 60;
+  // wraps what is reached: 57 per site, pinned exactly so a change to a site
+  // is a decision. (Before the routines were shared a site cost 102.) The
+  // epoch witness is written by the wrap routine and checked by the resolve
+  // routine (EpochOfCell of the source and the view against what was recorded,
+  // with the witness itself checked to be two Int64s), so it costs nothing per
+  // site: it is in the program once, and a one-step program is pinned at 183
+  // ops (163 when the check only compared a witness that was present).
+  constexpr std::size_t opsPerStep    = 57;
+  constexpr std::size_t opsOneStepRun = 183;
   const auto one                      = opsFor(1);
-  std::size_t previous                = one;
+  EXPECT_EQ(one, opsOneStepRun);
+  std::size_t previous = one;
   for (const int steps : {2, 3, 8}) {
     const auto now = opsFor(steps);
     const auto perStep =
         (now - previous) / static_cast<std::size_t>(steps == 8 ? 5 : 1);
-    EXPECT_LE(perStep, maxOpsPerStep) << steps << " steps: " << now;
+    EXPECT_EQ(perStep, opsPerStep) << steps << " steps: " << now;
     previous = now;
   }
 }

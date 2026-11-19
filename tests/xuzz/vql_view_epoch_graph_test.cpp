@@ -12,6 +12,7 @@
 
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/execution.hpp"
+#include "common/xanadu/vql/view_cells.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
@@ -149,10 +150,9 @@ TEST_F(VqlViewEpochGraphTest, ALiveHandleStillStepsAcrossReleasesAboveIt) {
     EXPECT_EQ(textsOf(query), "low") << route;
 }
 
-TEST_F(VqlViewEpochGraphTest, AHandleMintedByTheRunHasNoWitnessAndSteps) {
-  // A handle that exists only inside the running program has no witness yet
-  // (the host records them when the run settles), and nothing releases
-  // beneath a running program, so the graph does not ask for one.
+TEST_F(VqlViewEpochGraphTest, AHandleMintedByTheRunSteps) {
+  // The wrap step writes the handle's witness, so a handle made by the
+  // running program passes the same check as any other.
   EXPECT_EQ(textsOf("def f($c) := $c/+d.1/value(); "
                     "f(##{ d.1 <=> d.priority })"),
             "high,urgent");
@@ -161,12 +161,107 @@ TEST_F(VqlViewEpochGraphTest, AHandleMintedByTheRunHasNoWitnessAndSteps) {
             "urgent");
 }
 
-TEST_F(VqlViewEpochGraphTest, AHandleMintedByTheRunStaysUnwitnessedDuringIt) {
+TEST_F(VqlViewEpochGraphTest, AHandleMintedByTheRunLeavesTheViewAlone) {
   // The wrap step writes nothing onto the view or the source: the in-graph
   // check is a read, so a view stepped inside the run leaves them as found.
   const auto before = arena.cellCount();
   (void)textsOf("def f($c) := $c/+d.1/value(); f($task{ d.1 <=> d.priority })");
   EXPECT_LE(arena.cellCount(), before);
+}
+
+constexpr const char *noWitness = "no valid epoch witness";
+
+TEST_F(VqlViewEpochGraphTest, AHandleWithoutAWitnessRefusesByNameOnEveryRoute) {
+  // Nothing says such a handle was made by the running program: a handle a
+  // host linked into data, copied, or loaded carries no witness either, and
+  // its number may name a cell that was released and minted again.
+  const auto dims = *xanadu::vql::findViewDimensions(engine.core());
+  ASSERT_TRUE(
+      arena.unlink(handle, dims.epoch, zigzag::DimVector::POS).has_value());
+  for (const auto &[route, query] : blindRoutes)
+    EXPECT_THAT(refusalOf(query), testing::HasSubstr(noWitness)) << route;
+}
+
+TEST_F(VqlViewEpochGraphTest, AStaleHandleWithoutAWitnessIsRefusedNotAnswered) {
+  const auto dims = *xanadu::vql::findViewDimensions(engine.core());
+  ASSERT_TRUE(
+      arena.unlink(handle, dims.epoch, zigzag::DimVector::POS).has_value());
+  repoint("d.vql.view", reusedNumber());
+  for (const auto &[route, query] : blindRoutes)
+    EXPECT_THAT(refusalOf(query), testing::HasSubstr(noWitness)) << route;
+}
+
+TEST_F(VqlViewEpochGraphTest, ASecondWitnessMissingIsNotReadAsEpochZero) {
+  const auto dims  = *xanadu::vql::findViewDimensions(engine.core());
+  const auto first = arena.linked(handle, dims.epoch, zigzag::DimVector::POS);
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(
+      arena.unlink(*first, dims.epoch, zigzag::DimVector::POS).has_value());
+  for (const auto &[route, query] : blindRoutes)
+    EXPECT_THAT(refusalOf(query), testing::HasSubstr(noWitness)) << route;
+}
+
+TEST_F(VqlViewEpochGraphTest, AWitnessThatIsNotAnInt64IsInvalidNotReused) {
+  const auto dims  = *xanadu::vql::findViewDimensions(engine.core());
+  const auto first = arena.linked(handle, dims.epoch, zigzag::DimVector::POS);
+  ASSERT_TRUE(first.has_value());
+  for (const zigzag::vortex::CellValue &junk :
+       {zigzag::vortex::CellValue{std::string{"junk"}},
+        zigzag::vortex::CellValue{2.5}, zigzag::vortex::CellValue{true}}) {
+    ASSERT_TRUE(engine.core().writeValue(*first, 0, std::nullopt, junk));
+    for (const auto &[route, query] : blindRoutes) {
+      const auto message = refusalOf(query);
+      EXPECT_THAT(message, testing::HasSubstr(noWitness)) << route;
+      EXPECT_THAT(message, testing::Not(testing::HasSubstr("reused"))) << route;
+    }
+  }
+}
+
+TEST_F(VqlViewEpochGraphTest, TheWitnessOfAMintedHandleIsItsCellsEpochs) {
+  // A handle made in the graph carries the epochs its two boxes name, whether
+  // it was wrapped in the program or its view was carried out of one.
+  const auto dims  = *xanadu::vql::findViewDimensions(engine.core());
+  const auto check = [&](const zigzag::CellRef minted, const char *what) {
+    const auto parts = xanadu::vql::handleParts(arena, dims, minted);
+    ASSERT_TRUE(parts.has_value()) << what;
+    const auto first = arena.linked(minted, dims.epoch, zigzag::DimVector::POS);
+    ASSERT_TRUE(first.has_value()) << what;
+    const auto second =
+        arena.linked(*first, dims.epoch, zigzag::DimVector::POS);
+    ASSERT_TRUE(second.has_value()) << what;
+    EXPECT_EQ(arena.asInt64(*first),
+              std::optional{static_cast<std::int64_t>(
+                  arena.epochOfCell(parts->source).value())})
+        << what;
+    EXPECT_EQ(arena.asInt64(*second),
+              std::optional{static_cast<std::int64_t>(
+                  arena.epochOfCell(parts->view).value())})
+        << what;
+  };
+  const auto carried = engine.execute("##{ d.1 <=> d.priority }");
+  ASSERT_EQ(carried.size(), 1u);
+  check(carried.front(), "view carried out of its program");
+  const auto wrapped = engine.execute("$task/+d.held/+d.1");
+  ASSERT_EQ(wrapped.size(), 1u);
+  check(wrapped.front(), "handle wrapped in the graph");
+}
+
+TEST_F(VqlViewEpochGraphTest, WrappingAHandleWritesNoOlderCell) {
+  const auto dims  = *xanadu::vql::findViewDimensions(engine.core());
+  const auto parts = xanadu::vql::handleParts(arena, dims, handle);
+  ASSERT_TRUE(parts.has_value());
+  const auto edges = [&](const zigzag::CellRef cell) {
+    return arena.dimensionsOf(cell).size();
+  };
+  const auto viewEdges   = edges(parts->view);
+  const auto sourceEdges = edges(parts->source);
+  const auto before      = std::pair{arena.cellCount(), arena.deadLinks()};
+  const auto read        = executor.execute("$task/+d.held/+d.1/+d.1/value()");
+  ASSERT_TRUE(read.has_value()) << read.error().message;
+  EXPECT_FALSE(executor.programRetainedBecause());
+  EXPECT_EQ(edges(parts->view), viewEdges);
+  EXPECT_EQ(edges(parts->source), sourceEdges);
+  EXPECT_EQ(std::pair(arena.cellCount(), arena.deadLinks()), before);
 }
 
 } // namespace

@@ -365,14 +365,18 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
       throw std::runtime_error(
           "Vortex mesh does not support VqlMaskProbe: it reads the links of "
           "the evaluating arena");
-    if (instruction.opcode == OpcodeKind::CellOfInt ||
-        instruction.opcode == OpcodeKind::IntOfCell)
+    // The purity allowlist decides; these name why it refuses, so a mutation
+    // of the allowlist shows as the program being accepted.
+    if (!pureOpcode(instruction.opcode) &&
+        (instruction.opcode == OpcodeKind::CellOfInt ||
+         instruction.opcode == OpcodeKind::IntOfCell))
       throw std::runtime_error(
           std::string{"Vortex mesh does not support "} +
           (instruction.opcode == OpcodeKind::CellOfInt ? "CellOfInt"
                                                        : "IntOfCell") +
           ": a cell number depends on the evaluating arena's snapshot");
-    if (instruction.opcode == OpcodeKind::EpochOfCell)
+    if (!pureOpcode(instruction.opcode) &&
+        instruction.opcode == OpcodeKind::EpochOfCell)
       throw std::runtime_error(
           "Vortex mesh does not support EpochOfCell: a release epoch depends "
           "on how the evaluating arena was built and released");

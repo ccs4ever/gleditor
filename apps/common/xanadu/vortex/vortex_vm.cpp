@@ -1009,6 +1009,8 @@ ExecutionResult VortexVM::executeEpochOfCell(const CellRef opcode,
             std::ranges::any_of(inputs, hasPipeline) ||
                 std::ranges::any_of(slots, hasPipeline)))
       return fail(*refusal);
+    if (!core_.arena().contains(inputs.front()))
+      return fail("EpochOfCell input slot is missing");
     if (!core_.arena().contains(slots.front()))
       return fail("EpochOfCell output slot is missing");
     if (isGroupsPort(inputs.front()) || isGroupsPort(slots.front()))

@@ -92,22 +92,34 @@ handleParts(const zigzag::ArenaManifold &arena, const ViewDimensions &dims,
             zigzag::CellRef cell);
 
 /// Records, on each handle of @p cells that has none, the epochs of the cells
-/// its boxes name. No opcode reads an epoch, so the host records them once the
-/// handle is a result or a binding; a handle made inside a program is
-/// witnessed when the program settles, and nothing releases beneath it while
-/// it runs.
+/// its boxes name. The graph writes a handle's witness itself when it wraps one
+/// (EpochOfCell of the source and of the view, on cells linked from the new
+/// handle only), and the compiler writes the witness of a handle it mints as a
+/// constant with this; nothing else makes a handle, so every handle the graph
+/// meets carries one.
 void recordViewWitnesses(zigzag::ArenaManifold &arena,
                          const ViewDimensions &dims,
                          std::span<const zigzag::CellRef> cells);
 
+/// Records the witness of each handle of @p cells afresh, replacing the one it
+/// has. For handles a program's release re-minted: the copy's view may be a new
+/// cell, born in a later epoch than the one the graph recorded. Only for cells
+/// this run made; refreshing a handle the session already held would hide
+/// exactly what its witness is there to show.
+void refreshViewWitnesses(zigzag::ArenaManifold &arena,
+                          const ViewDimensions &dims,
+                          std::span<const zigzag::CellRef> cells);
+
+/// Why a handle with no usable witness is refused: the one text the host check
+/// and the check the handle's resolution makes in the graph both give.
+[[nodiscard]] std::string viewWitnessMissingReason();
+
 /// Why @p cell, if a handle, can no longer be trusted: a box names no cell, or
 /// a cell whose epoch is not the one recorded (the number was released and
-/// reused), or the witness itself is missing or not a number. A handle the
-/// host has not settled yet (@p witnessed false) is exempt from the last.
+/// reused), or the witness itself is missing or not a number.
 [[nodiscard]] std::optional<std::string>
 staleHandleReason(const zigzag::ArenaManifold &arena,
-                  const ViewDimensions &dims, zigzag::CellRef cell,
-                  bool witnessed = true);
+                  const ViewDimensions &dims, zigzag::CellRef cell);
 
 /// What a handle refuses with when the number its @p what box ("source" or
 /// "view") holds now names a cell of a later release epoch than the one
