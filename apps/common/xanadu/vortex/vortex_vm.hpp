@@ -824,6 +824,19 @@ public:
                    std::span<const std::vector<CellRef>> resolvedActuals);
   [[nodiscard]] std::expected<ClosureValue, ClosureDescriptorError>
   closureValue(CellRef root) const;
+  /// The cells a closure value names by integer reference: its descriptor, the
+  /// descriptor's frame and presence cells, and every captured cell, each once,
+  /// in record order. The value's own root and record cells are not listed.
+  ///
+  /// Read-only and charges no work: it never calls ArenaManifold::consumeWork()
+  /// (closureValue() does, per record), so asking it from inside or around a
+  /// run leaves the run's fuel, the arena's cells, links and trail untouched.
+  /// Its own walk is bounded by closureLimits() record and byte caps instead.
+  /// It refuses, naming the form, for a cell that is not a closure value or
+  /// whose records are malformed; a caller must then treat the value as
+  /// unknown.
+  [[nodiscard]] std::expected<std::vector<CellRef>, ClosureDescriptorError>
+  closureReferences(CellRef root) const;
   VortexVM *setClosureLimits(LogicalClosureLimits limits);
   [[nodiscard]] LogicalClosureLimits closureLimits() const noexcept {
     return closureLimits_;
