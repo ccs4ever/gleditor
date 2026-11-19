@@ -69,8 +69,8 @@ std::optional<MicroversionId> branchOf(const MicroversionId &version,
   return parseVersion(version.str() + letters + "1");
 }
 
-/// Mirrors VQLEngine::evaluateVersionExpr, reading the version variables the
-/// compiler bound instead of the engine's environment.
+/// Mirrors the deleted host interpreter's evaluateVersionExpr, reading the
+/// version variables the compiler bound instead of the engine's environment.
 std::optional<MicroversionId> evaluateVersion(const VersionExpr &expr,
                                               VariableText variable,
                                               zigzag::ArenaManifold &arena) {
@@ -166,7 +166,7 @@ std::optional<std::uint32_t> historicalSpace(zigzag::ArenaManifold &arena,
 }
 
 /// The versions a pin names, in pin order. Mirrors the pin handling of
-/// VQLEngine::applyVersionPin.
+/// the deleted host interpreter's applyVersionPin.
 std::vector<MicroversionId> pinnedVersions(const VersionPin &pin,
                                            VariableText variable,
                                            zigzag::ArenaManifold &arena) {

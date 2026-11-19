@@ -147,11 +147,11 @@ CellRef VQLCompiler::compileShapePredicateImpl(const ShapeLiteral &shape,
         {dimension, resolveDimension(dimension->dimName), scalarTarget});
   }
 
-  // Mask state in source order, as shape_eval.cpp builds it: a wildcard
-  // resets every earlier dimension rule, `{}` and `{!*}` make the test exact
-  // (every link of the cell must be allowed), `{*}` makes it a has-any-link
-  // test. Both are answered by VqlMaskProbe, which enumerates links that a
-  // fixed list of ProbeLink dimensions cannot.
+  // Mask state in source order, as the deleted host interpreter built it: a
+  // wildcard resets every earlier dimension rule, `{}` and `{!*}` make the test
+  // exact (every link of the cell must be allowed), `{*}` makes it a
+  // has-any-link test. Both are answered by VqlMaskProbe, which enumerates
+  // links that a fixed list of ProbeLink dimensions cannot.
   constexpr std::size_t positiveSide = 0;
   constexpr std::size_t negativeSide = 1;
   std::map<DimRef, std::array<std::optional<bool>, 2>> masks;
