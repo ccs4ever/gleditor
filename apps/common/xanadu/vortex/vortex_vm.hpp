@@ -940,14 +940,16 @@ private:
   };
   /// What a VqlMaskLinks-shaped operand list asks of its owner, resolved and
   /// validated but not applied; `name` prefixes every refusal so each opcode
-  /// reports under its own name.
+  /// reports under its own name. A probe skips the store-ref index dimension
+  /// even with no rules; the mask keeps refusing that case.
   struct MaskPlan {
     CellRef owner;
     std::optional<std::uint32_t> foreignSpace;
     std::vector<MaskRemoval> removals;
   };
   [[nodiscard]] std::expected<MaskPlan, std::string>
-  planMaskRemovals(std::string_view name, const std::vector<CellRef> &inputs);
+  planMaskRemovals(std::string_view name, const std::vector<CellRef> &inputs,
+                   bool alwaysSkipStoreRefIndex);
   ExecutionResult executeClosureOpcodeBody(OpcodeKind kind, CellRef opcode,
                                            CellRef cursor);
   ExecutionResult executeRestoreBindings(CellRef opcode, CellRef cursor);

@@ -1030,7 +1030,8 @@ ExecutionResult VortexVM::executeRelationNext(const CellRef opcode) {
 
 std::expected<VortexVM::MaskPlan, std::string>
 VortexVM::planMaskRemovals(const std::string_view name,
-                           const std::vector<CellRef> &inputs) {
+                           const std::vector<CellRef> &inputs,
+                           const bool alwaysSkipStoreRefIndex) {
   const auto fail = [name](const std::string_view message) {
     return std::unexpected(std::string{name} + " " + std::string{message});
   };
@@ -1093,9 +1094,11 @@ VortexVM::planMaskRemovals(const std::string_view name,
         arena.consumeWork();
         if (foreignOwner.has_value() && foreignIndexDimension &&
             dimension == *foreignIndexDimension && rule == rules.end() &&
-            !rules.empty()) {
+            (alwaysSkipStoreRefIndex || !rules.empty())) {
           // Wildcard mask on a store proxy preserves the internal store-ref
-          // index dimension.
+          // index dimension. A probe never counts it, rules or not: every
+          // proxy carries that bookkeeping link, so counting it would make
+          // `{}` false on a cell with no user links.
           return;
         }
         const bool keep =
@@ -1194,7 +1197,7 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
         }))
       return fail("VqlMaskLinks does not support parameter pipelines");
 
-    const auto plan = planMaskRemovals("VqlMaskLinks", inputs);
+    const auto plan = planMaskRemovals("VqlMaskLinks", inputs, false);
     if (!plan) return fail(plan.error());
     const auto &owner       = plan->owner;
     const auto &removals    = plan->removals;
@@ -1277,7 +1280,7 @@ ExecutionResult VortexVM::executeVqlMaskProbe(const CellRef opcode,
 
     // The same planner as VqlMaskLinks, so the probe and the mask cannot
     // disagree about which links a mask would remove.
-    const auto plan = planMaskRemovals("VqlMaskProbe", inputs);
+    const auto plan = planMaskRemovals("VqlMaskProbe", inputs, true);
     if (!plan) return fail(plan.error());
     outputs.emplace_back(!plan->removals.empty());
     return {};

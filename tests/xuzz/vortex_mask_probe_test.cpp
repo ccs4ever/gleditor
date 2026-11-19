@@ -309,7 +309,7 @@ struct ForeignSource {
   CellRef indexFollower{noCell};
 };
 
-ForeignSource makeForeignSource() {
+ForeignSource makeForeignSource(const int userLinks) {
   const auto directory =
       std::filesystem::temp_directory_path() /
       ("vortex_mask_probe_foreign_" +
@@ -332,8 +332,10 @@ ForeignSource makeForeignSource() {
   const CellRef neighbor       = store->cellRefOf(version).value();
   version                      = store->makeCell(version, "second neighbor");
   const CellRef secondNeighbor = store->cellRefOf(version).value();
-  version = store->setLink(version, owner, dimension.dim, false, neighbor);
-  version = store->setLink(version, owner, second.dim, false, secondNeighbor);
+  if (userLinks >= 1)
+    version = store->setLink(version, owner, dimension.dim, false, neighbor);
+  if (userLinks >= 2)
+    version = store->setLink(version, owner, second.dim, false, secondNeighbor);
   auto manifold = store->rebuildManifold(version);
   return ForeignSource{.store           = std::move(store),
                        .manifold        = std::move(manifold),
@@ -347,17 +349,21 @@ struct ForeignProbeHarness {
   ArenaManifold arena;
   VortexCore core{arena};
   VortexVM vm{core};
-  ForeignSource source{makeForeignSource()};
-  std::uint32_t space{arena.attach(Space{.manifold = &source.manifold,
-                                         .store    = source.store.get(),
-                                         .reader   = source.store.get(),
-                                         .label    = "source"})};
-  DimRef axis{arena.ensureDimension("d.foreign-axis")};
-  DimRef secondAxis{arena.ensureDimension("d.foreign-axis-second")};
+  ForeignSource source;
+  std::uint32_t space;
+  DimRef axis;
+  DimRef secondAxis;
   CellRef owner{noCell};
   CellRef output{arena.makeScalarCell(false)};
 
-  ForeignProbeHarness() {
+  explicit ForeignProbeHarness(const int userLinks = 2)
+      : source(makeForeignSource(userLinks)),
+        space(arena.attach(Space{.manifold = &source.manifold,
+                                 .store    = source.store.get(),
+                                 .reader   = source.store.get(),
+                                 .label    = "source"})),
+        axis(arena.ensureDimension("d.foreign-axis")),
+        secondAxis(arena.ensureDimension("d.foreign-axis-second")) {
     arena.bindDimension(axis, space, source.dimension,
                         DimensionBindingMode::Explicit);
     arena.bindDimension(secondAxis, space, source.secondDimension,
@@ -390,11 +396,27 @@ TEST(VortexMaskProbeTest, ForeignOwnerAnswersFromTheEffectiveLinkSnapshot) {
   EXPECT_TRUE(h.answer(false, {{h.axis, keepBoth}}));
   EXPECT_FALSE(h.answer(true, {}));
   EXPECT_TRUE(h.answer(true, {{h.axis, keepNone}}));
-  // A wildcard mask with rules protects the internal store-ref index
-  // dimension, so keeping every ordinary axis removes nothing.
+  // The internal store-ref index link is never a link a probe can remove.
   EXPECT_FALSE(h.answer(false, both));
-  // With no rules at all the index link is an ordinary link of the proxy.
+  // Two user links remain, so keeping nothing would remove them.
   EXPECT_TRUE(h.answer(false, {}));
+}
+
+TEST(VortexMaskProbeTest, ProxyWithoutUserLinksHasNothingToRemove) {
+  // Every proxy carries the store-ref index link; it is bookkeeping, not a
+  // link of the foreign cell, so a mask without rules has nothing to remove.
+  ForeignProbeHarness h(0);
+  ASSERT_TRUE(h.arena.storeRefsDimension(h.space));
+  EXPECT_FALSE(h.answer(false, {}));
+  EXPECT_FALSE(h.answer(true, {}));
+  EXPECT_FALSE(h.answer(false, {{h.axis, keepNone}}));
+}
+
+TEST(VortexMaskProbeTest, ProxyWithOneUserLinkReportsOnlyThatLink) {
+  ForeignProbeHarness h(1);
+  EXPECT_TRUE(h.answer(false, {}));
+  EXPECT_FALSE(h.answer(false, {{h.axis, keepBoth}}));
+  EXPECT_TRUE(h.answer(false, {{h.axis, keepNone}}));
 }
 
 TEST(VortexMaskProbeTest, ForeignProbeMintsNothingAndLeavesTheSourceAlone) {
