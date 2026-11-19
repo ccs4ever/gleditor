@@ -1463,8 +1463,8 @@ ______________________________________________________________________
   exception; `d.state` scope covers sightings.
 
 - **rev 7.** As implemented on `design/sql-to-zigzag`. All six phases landed (the `SqlBackend` port
-  \+ read-only SQLite backend; `refresh()`/`checkpoint()`/`rewind()`/`pin()` + `WindowedLens`; browse
-  mode; query mode + `sql:` URI + typed params + ordinal replay; the promote envelope +
+  plus read-only SQLite backend; `refresh()`/`checkpoint()`/`rewind()`/`pin()` + `WindowedLens`;
+  browse mode; query mode + `sql:` URI + typed params + ordinal replay; the promote envelope +
   `SqlPromotion` driver + `d.promoted` reconcile; the xuzz surface + the vprolog gate). The write
   phase followed: `SqlBackend::execWrite` + the dialect surface (`paramPlaceholder`/`nullSafeEq` —
   `?`/`IS ?` on SQLite, `$n`/`IS NOT DISTINCT FROM $n` on Postgres), `SqliteOpenOptions::writable`,

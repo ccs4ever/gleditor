@@ -260,7 +260,7 @@ struct ArrayWid {
   double maxScalar{-std::numeric_limits<double>::infinity()};
   std::uint64_t bloomFilter{0};
   std::uint32_t scalarTypeMask{0};
-  
+
   [[nodiscard]] bool couldMatch(const QueryPredicate &pred) const noexcept;
 };
 ```
@@ -268,6 +268,7 @@ struct ArrayWid {
 ### 3.3 Zero-Copy Slicing and Predicate Pushdown Mechanics
 
 1. **$O(1)$ Subtree Rejection**:
+
    - **Range Predicate** ($\text{cpu\_usage} > 80.0$): If $w.\text{maxScalar} < 80.0$, the entire
      crum subtree ($B^k$ cells) is pruned in a single instruction.
 
@@ -276,13 +277,17 @@ struct ArrayWid {
 
    - **Equality / Token Predicate** (`name == "xuzz"`): Evaluates 64-bit Bloom filter:
 
-     $$
+     ```math
      \text{if } ((w.\text{bloomFilter} \ \& \ \text{Bloom}("xuzz")) \neq \text{Bloom}("xuzz")) \implies \text{Prune Subtree}
-     $$
+     ```
+
 1. **Sublinear Zero-Copy Slicing**:
+
    - `Arrayfilade::slice([minCoord, maxCoord])` returns an ephemeral enfilade sharing child crums
      without allocating or copying underlying manifold cells.
+
 1. **Derived Rank Materialization in `prepare()`**:
+
    - `FilterLens::prepare()` walks only the non-pruned subtrees to emit contiguous CSR links into
      the `derived_` arena. Rendering traverses $+d.\text{filtered}$ in pure $4.96\text{ ns}$ memory
      hops.
@@ -373,7 +378,7 @@ struct alignas(64) StatWid {
   std::uint32_t alertFlags{0};
 
   [[nodiscard]] bool isEmpty() const noexcept { return 0 == count; }
-  
+
   [[nodiscard]] StatWid combine(const StatWid &other) const noexcept {
     if (isEmpty()) return other;
     if (other.isEmpty()) return *this;

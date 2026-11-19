@@ -304,22 +304,25 @@ clause graphs as `Code<Cell>` (a `run` on them yields a `Cell` handle to the pro
 honest type at an unchecked boundary), and the wrapper heads carry
 `+d.entry → the wrapped graph's root op` like every head — they are session-side and unpromotable by
 construction, so the uniform head convention costs nothing. The memoization is *clause-side*: a
-`clause +d.code → +d.step` chain of memo **records**, each
-`{+d.values → the wrapper head, +d.name → the memo-kind label ("test"/"body") — a fresh text cell per record (the makeCell(name) precedent, vortex_stdlib.cpp:4051), since an interned label cell could hold only one `-d.name` edge and the second memo's would evict the first's, +d.grab → a fresh scalar key cell holding the attach cell's identifying label}`
-— the identifying label is the attach cell's `+d.name` text where it carries one; a label-less
-attach cell (a bare op under the op-or-head resolution rule §6.1 states) has no key to write, so its
-wrapper never memo-hits and is re-minted per call — and no memo record is appended for it either,
-since a keyless record could never hit — the key is *content* compared by value, never a link to the
-attach cell, because the attach cell's single `-d.name` slot could hold only one memo's key edge and
-the other memo would evict it; and the record's `+d.values` occupies the wrapper's single
-`-d.values` slot, safe because a builtin-minted wrapper carries no emission-record anchor on that
-dim. `+d.step` chains the records only, so a wrapper's own `+d.step` never enters `validate`'s
-op-graph walk, and a key-mismatching memo is unlinked at re-wrap — so repeated reflection does not
-mint a fresh ~6-cell head per call, and `test_of`/`body_of` memos coexist on the chain rather than
-evicting each other. The memo chain is never on the agent's `d.code` rank (§6.7): clause cells are
-program-side, so the transit clause keeps wrappers off the durable set — they die with the
-incarnation at `resume`, matching the session-handle rule they already are. *Price:* one adapter
-binding, memoized wrapper cells, and rank walks at O(length) per hop.
+`clause +d.code → +d.step` chain of memo **records**, each of three fields,
+`+d.values → the wrapper head`; `+d.name → the memo-kind label ("test"/"body")` — a fresh text cell
+per record (the makeCell(name) precedent, vortex_stdlib.cpp:4051), since an interned label cell
+could hold only one `-d.name` edge and the second memo's would evict the first's; and
+`+d.grab → a fresh scalar key cell holding the attach cell's identifying label` — the identifying
+label is the attach cell's `+d.name` text where it carries one; a label-less attach cell (a bare op
+under the op-or-head resolution rule §6.1 states) has no key to write, so its wrapper never
+memo-hits and is re-minted per call — and no memo record is appended for it either, since a keyless
+record could never hit — the key is *content* compared by value, never a link to the attach cell,
+because the attach cell's single `-d.name` slot could hold only one memo's key edge and the other
+memo would evict it; and the record's `+d.values` occupies the wrapper's single `-d.values` slot,
+safe because a builtin-minted wrapper carries no emission-record anchor on that dim. `+d.step`
+chains the records only, so a wrapper's own `+d.step` never enters `validate`'s op-graph walk, and a
+key-mismatching memo is unlinked at re-wrap — so repeated reflection does not mint a fresh ~6-cell
+head per call, and `test_of`/`body_of` memos coexist on the chain rather than evicting each other.
+The memo chain is never on the agent's `d.code` rank (§6.7): clause cells are program-side, so the
+transit clause keeps wrappers off the durable set — they die with the incarnation at `resume`,
+matching the session-handle rule they already are. *Price:* one adapter binding, memoized wrapper
+cells, and rank walks at O(length) per hop.
 
 **M9. Mutation under execution is legal, deterministic and bounded — the VM reads links at step
 time, cells are never freed mid-turn, and containment uses the drain idiom, never a bare
@@ -1757,63 +1760,64 @@ and mint the installed clause's `+d.name` label itself as `patch:<n>`, `<n>` the
 rank position (§6.1's naming rule: the user `name` is an alias on the record, never the label).
 Patch and installed clause carry equal-text `patch:<n>` labels on their own `+d.name` label cells
 intentionally — the patch's label names the clause it installed, and the text sharing cannot collide
-because `plan_named`'s space is clause-rank cells, never patch records. The patch carries
-`{ordinal, target descriptor record, the user `name` alias, +d.patch-head→record chain, +d.name→label, priority for learn_handler}`
-— the alias present only where the verb takes a *user-alias* name (`learn_plan`, `learn_handler`;
-`learn_where`/`learn_body` take none and `learn_method`'s `name` is never an alias) — `d.patch-head`
-is a dedicated first-edge dimension rather than reusing `+d.step` or `+d.values` at the patch,
-matching the record-chain convention this document uses throughout — a chain's first edge and its
-step edges are different dims (`+d.refs`/`+d.step`, `+d.recipe`/`+d.step`, the memo chain's
-`+d.code`/`+d.step`); the top-level ranks themselves — `d.code`, `d.patch`, `d.synapse` on the agent
-cell, and each goal's/event type's `d.clause` — are *same-dim* chains per
-`insertIntoRank`/`rankTail` (`arena_manifold.cpp:1423-1439`, `cell_views.hpp:258`; the `addClause`
-precedent `vortex_stdlib.cpp:4238-4241`) — and avoiding an occupancy collision — the patch's
-`+d.values` already points at the descriptor record, so a `+d.values` first edge would evict it.
-`learn_handler`'s patch record carries `priority`, since handler selection orders clauses by it and
-a replayed graft must restore the same ordering. The label and serial split **per verb**: every
-`learn_*` consumes its `<n>` off the agent cell's `d.vars` counter and writes it into the record's
-`ordinal`, and every patch record carries its own `+d.name → patch:<n>` label cell — the uniform
-`label_of`/genesis-transport bookkeeping handle (`unlearn` never matches it, (d) below). The
-*installed* label differs: a clause-installing verb (`learn_plan`, `learn_handler`) mints a second,
-equal-text `patch:<n>` label cell on the installed clause — two cells, never one shared, each label
-cell's `-d.name` backlink holding a single edge (genesis (d)'s re-mint rule) — while
-`learn_where`/`learn_body` install nothing, so the re-pointed clause keeps its own declared or
-minted name and the patch's `patch:<n>` lives on the record alone, and `learn_method`'s installed
-symbol keeps its functional `owner.name` content — the content *is* the name the `d.vars` walk
-matches on `textOf` (`vortex_stdlib.cpp:1953`), a `+d.name` label shadows nothing and no resolver on
-the symbol arm reads one — its `patch:<n>` likewise on the record alone. Replay and `unlearn` follow
-the same split: `learn_where`/`learn_body` re-point the target descriptor's resolved clause,
-`learn_method` re-runs its unlink-first symbol arm, and `unlearn` matches every verb by the recorded
-*target* name, never by the record's own label. The chain is `+d.step`-linked record cells, each
-`+d.values`-pointing at a fresh cell holding one **registered** head's `+d.name` label — the
-pristine `d.code`-resident original the patch names, never the installed copy (`learn_plan` records
-registered test head then registered body head, followed by any recorded prior head's name). Heads
-are recorded **by name, never by link**: a head is referenced by up to two patches (installed on
-one, prior on a later replace), and a second `+d.*` link to the head cell would sever the first
-record by eviction; `unlearn` and genesis replay resolve each name through `code_named`/
-`plan_named` (§6.7). An `unlearn` re-point never installs the named head in place — it installs a
-`reify` of the named prior head, per the same never-graft-a-registered-head rule (§6.3). The target
-descriptor records the target's resolved name, and the convention has two arms: the **qualified**
-`[<module>:][<Agent>.]<member>` spelling for program-original clause and member targets (intentions'
-qualified names — two-part `module:Name` for goals and events, three-part where an `Agent.` member
-segment applies), and the clause's **verbatim `+d.name`** — the `patch:<n>` the learning verb minted
-— for learned-clause targets: a learned clause's name lives on its `+d.name` verbatim, so the record
-stores it exactly, never a canonicalized `<module>:<Agent>.patch:<n>` the `plan_named` match would
-then miss (§6.7). For graft verbs the descriptor also carries the parent the clause attaches under —
-the `goal`/`event` name replay needs to re-run the attach. *Where the name is read off* splits by
-verb, because the name lives on different dims for a clause than for a method/symbol. A **clause**
-target (`learn_plan`, `learn_where`, `learn_body`, `learn_handler`) resolves through `plan_named`:
-`plan_named` matches the clause's verbatim `+d.name` label (§6.7). A **method or symbol** target
-(`learn_method`) resolves through `symbol_named`: the qualified spelling is walked `module_named` on
-the qualifier, `symbol_named` on the module and the dotted remainder against the module's `d.vars`
-(§6.7's owner rule) — the argument's symbol cell stores bare `Agent.member` content while the record
-carries the composed qualified `module:Agent.member`, the same composition `unlearn`'s symbol arm
-must re-do — a method has no `+d.name` label to match, so `plan_named` cannot name it. A `learn_*`
-whose target has no resolvable name (an anonymous grafted clause) is refused, because a patch that
-cannot be re-found at genesis is a patch that lies — and the gap reaches declared handlers too: a
-kernel-emitted handler clause is anonymous under spec V15 (`on Event [guard] { }` mints no `+d.name`
-— only plan clauses are named), so `learn_where`/`learn_body` on a *declared* handler hits the same
-refusal — durable guard/body patching works on named plans and on learned handlers
+because `plan_named`'s space is clause-rank cells, never patch records. The patch carries `ordinal`,
+`target descriptor record`, the user `name` alias, `+d.patch-head→record chain`, `+d.name→label`,
+and `priority for learn_handler` — the alias present only where the verb takes a *user-alias* name
+(`learn_plan`, `learn_handler`; `learn_where`/`learn_body` take none and `learn_method`'s `name` is
+never an alias) — `d.patch-head` is a dedicated first-edge dimension rather than reusing `+d.step`
+or `+d.values` at the patch, matching the record-chain convention this document uses throughout — a
+chain's first edge and its step edges are different dims (`+d.refs`/`+d.step`,
+`+d.recipe`/`+d.step`, the memo chain's `+d.code`/`+d.step`); the top-level ranks themselves —
+`d.code`, `d.patch`, `d.synapse` on the agent cell, and each goal's/event type's `d.clause` — are
+*same-dim* chains per `insertIntoRank`/`rankTail` (`arena_manifold.cpp:1423-1439`,
+`cell_views.hpp:258`; the `addClause` precedent `vortex_stdlib.cpp:4238-4241`) — and avoiding an
+occupancy collision — the patch's `+d.values` already points at the descriptor record, so a
+`+d.values` first edge would evict it. `learn_handler`'s patch record carries `priority`, since
+handler selection orders clauses by it and a replayed graft must restore the same ordering. The
+label and serial split **per verb**: every `learn_*` consumes its `<n>` off the agent cell's
+`d.vars` counter and writes it into the record's `ordinal`, and every patch record carries its own
+`+d.name → patch:<n>` label cell — the uniform `label_of`/genesis-transport bookkeeping handle
+(`unlearn` never matches it, (d) below). The *installed* label differs: a clause-installing verb
+(`learn_plan`, `learn_handler`) mints a second, equal-text `patch:<n>` label cell on the installed
+clause — two cells, never one shared, each label cell's `-d.name` backlink holding a single edge
+(genesis (d)'s re-mint rule) — while `learn_where`/`learn_body` install nothing, so the re-pointed
+clause keeps its own declared or minted name and the patch's `patch:<n>` lives on the record alone,
+and `learn_method`'s installed symbol keeps its functional `owner.name` content — the content *is*
+the name the `d.vars` walk matches on `textOf` (`vortex_stdlib.cpp:1953`), a `+d.name` label shadows
+nothing and no resolver on the symbol arm reads one — its `patch:<n>` likewise on the record alone.
+Replay and `unlearn` follow the same split: `learn_where`/`learn_body` re-point the target
+descriptor's resolved clause, `learn_method` re-runs its unlink-first symbol arm, and `unlearn`
+matches every verb by the recorded *target* name, never by the record's own label. The chain is
+`+d.step`-linked record cells, each `+d.values`-pointing at a fresh cell holding one **registered**
+head's `+d.name` label — the pristine `d.code`-resident original the patch names, never the
+installed copy (`learn_plan` records registered test head then registered body head, followed by any
+recorded prior head's name). Heads are recorded **by name, never by link**: a head is referenced by
+up to two patches (installed on one, prior on a later replace), and a second `+d.*` link to the head
+cell would sever the first record by eviction; `unlearn` and genesis replay resolve each name
+through `code_named`/ `plan_named` (§6.7). An `unlearn` re-point never installs the named head in
+place — it installs a `reify` of the named prior head, per the same never-graft-a-registered-head
+rule (§6.3). The target descriptor records the target's resolved name, and the convention has two
+arms: the **qualified** `[<module>:][<Agent>.]<member>` spelling for program-original clause and
+member targets (intentions' qualified names — two-part `module:Name` for goals and events,
+three-part where an `Agent.` member segment applies), and the clause's **verbatim `+d.name`** — the
+`patch:<n>` the learning verb minted — for learned-clause targets: a learned clause's name lives on
+its `+d.name` verbatim, so the record stores it exactly, never a canonicalized
+`<module>:<Agent>.patch:<n>` the `plan_named` match would then miss (§6.7). For graft verbs the
+descriptor also carries the parent the clause attaches under — the `goal`/`event` name replay needs
+to re-run the attach. *Where the name is read off* splits by verb, because the name lives on
+different dims for a clause than for a method/symbol. A **clause** target (`learn_plan`,
+`learn_where`, `learn_body`, `learn_handler`) resolves through `plan_named`: `plan_named` matches
+the clause's verbatim `+d.name` label (§6.7). A **method or symbol** target (`learn_method`)
+resolves through `symbol_named`: the qualified spelling is walked `module_named` on the qualifier,
+`symbol_named` on the module and the dotted remainder against the module's `d.vars` (§6.7's owner
+rule) — the argument's symbol cell stores bare `Agent.member` content while the record carries the
+composed qualified `module:Agent.member`, the same composition `unlearn`'s symbol arm must re-do — a
+method has no `+d.name` label to match, so `plan_named` cannot name it. A `learn_*` whose target has
+no resolvable name (an anonymous grafted clause) is refused, because a patch that cannot be re-found
+at genesis is a patch that lies — and the gap reaches declared handlers too: a kernel-emitted
+handler clause is anonymous under spec V15 (`on Event [guard] { }` mints no `+d.name` — only plan
+clauses are named), so `learn_where`/`learn_body` on a *declared* handler hits the same refusal —
+durable guard/body patching works on named plans and on learned handlers
 (`graft_handler`/`learn_handler` mint named clauses), never on declared ones, which are likewise
 un-*replaceable* and un-*removable* durably: dedupe-by-name cannot match a nameless clause, so
 `learn_handler` on the same event is always additive — it coexists with the declared clause under
