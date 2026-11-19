@@ -97,7 +97,7 @@ TEST_F(VQLLensTest, PutAcceptsAReplacementComputedFromAVariable) {
   EXPECT_EQ(textOf("$item/value()"), "computed");
 }
 
-TEST_F(VQLLensTest, FailingPutLeavesNothingHalfWritten) {
+TEST_F(VQLLensTest, UnknownFunctionInPutRefusesBeforeAnyWrite) {
   engine.setVariable("item", arena.makeCell("kept"));
   (void)engine.execute(R"(
     let $bad := lens(
@@ -113,7 +113,7 @@ TEST_F(VQLLensTest, FailingPutLeavesNothingHalfWritten) {
   EXPECT_TRUE(engine.execute("$item/+d.note").empty());
 }
 
-TEST_F(VQLLensTest, RunTimeFailureInPutWritesNothing) {
+TEST_F(VQLLensTest, FailingPutLeavesNothingHalfWritten) {
   engine.setVariable("item", arena.makeCell("kept"));
   // The contract on must_int fails when put runs, after the first two writes
   // of the callback have been issued.
@@ -215,7 +215,95 @@ TEST_F(VQLLensTest, ALensFromAnotherEngineIsNotStaticallyKnown) {
   other.setVariable("editable", handle);
   other.setVariable("item", arena.makeCell("x"));
   EXPECT_EQ(other.shapeCount(), 0u);
-  EXPECT_ANY_THROW(other.execute("$item/$editable"));
+  try {
+    (void)other.execute("$item/$editable");
+    FAIL() << "expected a refusal";
+  } catch (const std::exception &error) {
+    EXPECT_THAT(error.what(), testing::HasSubstr("lens value $editable"));
+    EXPECT_THAT(error.what(), testing::HasSubstr("not statically known"));
+  }
+}
+
+TEST_F(VQLLensTest, CallbackFreeVariablesAreRefusedAtBindTime) {
+  EXPECT_THAT(refusalOf(R"(
+    let $k := "bound"
+    let $l := lens(get: \(.) $k)
+    return $l)"),
+              testing::HasSubstr("lens callback captures $k"));
+  EXPECT_THAT(refusalOf(R"(let $l := lens(get: \(.) ./value(),
+                                         put: \(c, v) $c/value($rate))
+                           return $l)"),
+              testing::HasSubstr("captures $rate"));
+  EXPECT_THAT(refusalOf(R"(let $l := lens(get: \(.) $nosuch) return $l)"),
+              testing::HasSubstr("captures $nosuch"));
+  EXPECT_EQ(engine.shapeCount(), 0u);
+}
+
+TEST_F(VQLLensTest, UseSiteRebindingCannotChangeACallbackBecauseItHasNone) {
+  engine.setVariable("item", arena.makeCell("x"));
+  (void)engine.execute(valueLens);
+  // A parameter that shares a name with nothing the callbacks use cannot
+  // reach them, and a def parameter named like a callback parameter does not
+  // either.
+  EXPECT_EQ(textOf(R"(def f($cell, $val, $x) := $x/$editable;
+                      f("a", "b", $item))"),
+            "x");
+}
+
+TEST_F(VQLLensTest, LensEscapingThroughAClosureIsRefusedByName) {
+  engine.setVariable("item", arena.makeCell("x"));
+  (void)engine.execute(valueLens);
+  EXPECT_THAT(refusalOf(R"(let $f := \(y) $y/$editable return $f($item))"),
+              testing::HasSubstr("lens value $editable is not statically"));
+}
+
+TEST_F(VQLLensTest, LensReturnedFromADefIsRefusedByName) {
+  engine.setVariable("item", arena.makeCell("x"));
+  EXPECT_THAT(refusalOf(R"(def mk() := lens(get: \(.) ./value());
+                           let $l := mk()
+                           return $item/$l)"),
+              testing::HasSubstr("lens value is not statically known"));
+  EXPECT_THAT(refusalOf(R"(def mk() := lens(get: \(.) ./value());
+                           $item/mk())"),
+              testing::HasSubstr("lens value is not statically known"));
+}
+
+TEST_F(VQLLensTest, UnsupportedModifiersOnALensStepRefuseByName) {
+  engine.setVariable("item", arena.makeCell("x"));
+  (void)engine.execute(valueLens);
+  EXPECT_THAT(refusalOf("$item/$editable!last"),
+              testing::HasSubstr("yield mode"));
+  EXPECT_THAT(refusalOf("weave { $item/$editable% }"),
+              testing::HasSubstr("needs a replacement value"));
+  EXPECT_EQ(textOf("$item/value()"), "x");
+}
+
+// Spec 4.5 says a batch step's result is every cell it produced; a put
+// answers its source once per replacement, as the oracle did.
+TEST_F(VQLLensTest, SeveralReplacementsAnswerTheSourceOncePerReplacement) {
+  const auto item = arena.makeCell("0");
+  engine.setVariable("item", item);
+  (void)engine.execute(valueLens);
+  const auto result = engine.execute(R"(weave { $item/$editable%"1"%"2" })");
+  EXPECT_EQ(result, (std::vector<zigzag::CellRef>{item, item}));
+}
+
+TEST_F(VQLLensTest, LaterReplacementFailingRollsBackTheEarlierOnes) {
+  engine.setVariable("item", arena.makeCell("kept"));
+  (void)engine.execute(R"(
+    def must_int($x): Int := $x;
+    let $ints := lens(
+      get: \(.) ./value(),
+      put: \(cell, val) $cell/value(must_int($val))
+    )
+    return $ints
+  )");
+  engine.execute("weave { $item/$ints%\"1\" }");
+  EXPECT_EQ(textOf("$item/value()"), "1");
+  const auto before = footprint();
+  EXPECT_ANY_THROW(engine.execute("weave { $item/$ints%\"2\"%\"text\" }"));
+  EXPECT_EQ(footprint(), before);
+  EXPECT_EQ(textOf("$item/value()"), "1");
 }
 
 TEST_F(VQLLensTest, TableIsBoundedByTheLensesHeldAndSurvivesNoFailure) {

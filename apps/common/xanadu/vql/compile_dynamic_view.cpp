@@ -8,6 +8,8 @@
 
 #include <gleditor/logging.hpp>
 
+#include "common/xanadu/vql/frame_eligibility.hpp"
+
 namespace xanadu::vql {
 using zigzag::CellRef;
 
@@ -77,6 +79,36 @@ LensPair lensCallbacks(const FunctionInvocation &fn) {
   if (pair.put && pair.put->params.size() != 2)
     refuseLensForm("put: takes exactly two parameters (the source cell and "
                    "the replacement)");
+  for (const auto *callback : {pair.get.get(), pair.put.get()}) {
+    if (!callback) continue;
+    // The frame scope walker records a form's captures before it declines
+    // the form as a frame body, so its capture set is used even when it
+    // declines (a put that creates cells is the common case).
+    const auto scope = analyzeFrameClosureScope(*callback);
+    if (!scope)
+      throw QueryRefusal(QueryErrorCategory::Unsupported,
+                         "VQL lens(...): " + scope.error().message);
+    // A callback is compiled where the lens is applied, so a free variable
+    // would be read from the use site's bindings, not the binding scope's:
+    // silently the wrong value. Callbacks therefore take everything they use
+    // through their parameters.
+    std::vector<std::string> captured(scope->freeCaptureNames.begin(),
+                                      scope->freeCaptureNames.end());
+    captured.insert(captured.end(),
+                    scope->requiredDefaultCaptureBindings.begin(),
+                    scope->requiredDefaultCaptureBindings.end());
+    captured.insert(captured.end(),
+                    scope->conditionalRequiredDefaultCaptureBindings.begin(),
+                    scope->conditionalRequiredDefaultCaptureBindings.end());
+    captured.insert(captured.end(),
+                    scope->omittedRestRequiredDefaultCaptureBindings.begin(),
+                    scope->omittedRestRequiredDefaultCaptureBindings.end());
+    std::ranges::sort(captured);
+    if (!captured.empty())
+      refuseLensForm("lens callback captures $" + captured.front() +
+                     " from its binding scope; lens callbacks may not "
+                     "capture variables");
+  }
   return pair;
 }
 
@@ -179,10 +211,16 @@ VQLCompiler::compileLensApplication(const SignedDimensionStep &step,
   // same bracket `%` creation uses.
   std::vector<CellRef> sources;
   for (const CreateValue &create : step.creates) {
-    ValueExpr replacement{.kind = ScalarLiteral{std::string{}}};
-    if (create.kind == CreateValue::Kind::Literal)
-      replacement.kind = ScalarLiteral{create.literal};
-    else if (create.kind == CreateValue::Kind::Expression && create.expr)
+    // Spec 4.5: a bare % allocates and initialises nothing, so it carries no
+    // replacement for put to write.
+    if (create.kind == CreateValue::Kind::Empty ||
+        (create.kind == CreateValue::Kind::Expression && !create.expr))
+      throw QueryRefusal(QueryErrorCategory::Unsupported,
+                         "VQL lens " + spelled +
+                             " needs a replacement value after %; a bare % "
+                             "carries none");
+    ValueExpr replacement{.kind = ScalarLiteral{create.literal}};
+    if (create.kind == CreateValue::Kind::Expression)
       replacement = *create.expr;
     const DefDeclaration put{
         .name   = "#vql-lens-put-" + std::to_string(allOps_.size()),
@@ -211,6 +249,14 @@ std::vector<CellRef>
 VQLCompiler::compileLensCall(const FunctionInvocation &fn,
                              const std::optional<CellRef> /*context*/) {
   if (!isCallbackLens(fn)) refuseProviderLens(fn);
+  // A call hands its result back as a fresh run-time cell, not the handle the
+  // table knows, so a lens made inside a function body could not be resolved
+  // where the caller applies it.
+  if (compilingFrameDefinition_ || !activeCalls_.empty())
+    throw QueryRefusal(QueryErrorCategory::Unsupported,
+                       "VQL lens value is not statically known: a lens "
+                       "created inside a function body cannot be returned "
+                       "from it; bind it with let in the query body");
   const CellRef handle = registerLens(lensCallbacks(fn));
   GLEDITOR_LOG_DEBUG("vql.compile", "lens registered as handle {}",
                      static_cast<std::uint64_t>(handle));

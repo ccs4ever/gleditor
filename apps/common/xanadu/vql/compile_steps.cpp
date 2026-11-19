@@ -112,6 +112,12 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       const auto lens =
           functorBindings_.contains(name) ? std::nullopt : lensBoundTo(name);
       if (lens) {
+        if (step.yieldMode != YieldMode::Default &&
+            step.yieldMode != YieldMode::New)
+          throw QueryRefusal(QueryErrorCategory::Unsupported,
+                             "VQL lens " + dimension->dimName +
+                                 " does not take a yield mode (!keep, !last, "
+                                 "!both)");
         nextStream = emitMap(stream, [&](const CellRef source) {
           return compileLensApplication(*dimension, *lens, source, hasContext);
         });
@@ -135,6 +141,18 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                    bound != varBindings_.end() && bound->second) {
           aliases.push_back(*bound->second);
         }
+        // A session variable that holds an empty cell and no closure is what
+        // a lens handle looks like once the table that explained it is gone
+        // (another engine or session): say so instead of failing in the VM.
+        for (const CellRef alias : aliases)
+          if (constantCells_.contains(alias) &&
+              core_.arena().textOf(alias).empty() && !vm_.closureValue(alias))
+            throw QueryRefusal(
+                QueryErrorCategory::Unsupported,
+                "VQL lens value $" + name +
+                    " is not statically known: it is bound to an empty cell "
+                    "that is neither a closure nor a lens this session "
+                    "compiled (a handle from another engine or session)");
         if (!hasContext) {
           nextStream = aliases;
           hasContext = true;

@@ -2036,6 +2036,17 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
   }
   std::unordered_set<std::string> requiredDefaultNames;
   std::unordered_set<std::string> conditionalDefaultNames;
+  // A closure takes its captures as run-time cells; a lens is syntax the
+  // compiler resolves where it is applied, so inside a closure body it would
+  // be an empty cell that fails in the VM.
+  for (const auto &capture : captureNames)
+    if (lensBoundTo(capture))
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          "VQL lens value $" + capture +
+              " is not statically known inside a closure: a closure captures "
+              "its variables as run-time cells, and a lens exists only while "
+              "the query is compiled");
   const auto addCapture = [&](const std::string &alias) {
     if (captureNames.contains(alias)) return;
     if (captureNames.size() >= closureLimits.maxCaptureStreams)
