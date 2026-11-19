@@ -122,6 +122,18 @@ public:
   /// query registers no shape.
   void publishShapes(ShapeTable shapes,
                      std::span<const zigzag::CellRef> results);
+  /// Why a table entry is dropped when its key no longer names the cell it was
+  /// published for.
+  static constexpr std::string_view staleHandleReason =
+      "the handle's cell was released and its number now names a different "
+      "cell";
+  /// Drops every entry whose cell was minted in a different release epoch than
+  /// the one recorded when it was published, so a released handle's number,
+  /// reused by a new cell, cannot hand that cell the old entry. A live handle
+  /// keeps its entry across any number of releases of cells above it. Returns
+  /// the keys dropped. Run at the start of every query, and by publishShapes
+  /// on what it is handed.
+  std::vector<zigzag::CellRef> pruneStaleShapes();
   [[nodiscard]] const std::unordered_map<std::string, DefDeclaration> &
   userDefs() const noexcept {
     return userDefs_;
@@ -183,6 +195,10 @@ private:
   // taken because those paths consume syntax trees; moving the data half into
   // cells is a later card. It follows env_: clearVariables() empties it.
   ShapeTable compiledShapes_;
+  /// The epoch each key of compiledShapes_ was minted in when published: the
+  /// witness that the number still names that cell.
+  std::unordered_map<zigzag::CellRef, zigzag::ArenaManifold::ReleaseEpoch>
+      shapeEpochs_;
 
   // Shape values are immutable arena-local handles; their definitions live in
   // this side table so no store operation is minted for a query value.

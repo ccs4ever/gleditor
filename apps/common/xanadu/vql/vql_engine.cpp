@@ -21,6 +21,7 @@
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include <gleditor/cpp26_concat.hpp>
+#include <gleditor/logging.hpp>
 
 namespace xanadu::vql {
 using zigzag::DimVector;
@@ -173,8 +174,38 @@ void VQLEngine::publishCompilerBindings(
   putGetLenses_.swap(nextLenses);
 }
 
+std::vector<zigzag::CellRef> VQLEngine::pruneStaleShapes() {
+  std::vector<zigzag::CellRef> dropped;
+  const auto stale = [&](const zigzag::CellRef cell) {
+    const auto recorded = shapeEpochs_.find(cell);
+    return recorded != shapeEpochs_.end() &&
+           arena().epochOfCell(cell) != recorded->second;
+  };
+  for (auto it = compiledShapes_.begin(); it != compiledShapes_.end();) {
+    if (stale(it->first)) {
+      GLEDITOR_LOG_DEBUG("vql.execution", "dropped handle {}: {}", it->first,
+                         staleHandleReason);
+      dropped.push_back(it->first);
+      shapeEpochs_.erase(it->first);
+      it = compiledShapes_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  return dropped;
+}
+
 void VQLEngine::publishShapes(ShapeTable shapes,
                               const std::span<const zigzag::CellRef> results) {
+  std::erase_if(shapes, [&](const auto &entry) {
+    const auto recorded = shapeEpochs_.find(entry.first);
+    if (recorded == shapeEpochs_.end() ||
+        arena().epochOfCell(entry.first) == recorded->second)
+      return false;
+    GLEDITOR_LOG_DEBUG("vql.execution", "dropped handle {}: {}", entry.first,
+                       staleHandleReason);
+    return true;
+  });
   std::unordered_set<zigzag::CellRef> named(results.begin(), results.end());
   for (const auto &[name, cells] : env_)
     named.insert(cells.begin(), cells.end());
@@ -187,7 +218,18 @@ void VQLEngine::publishShapes(ShapeTable shapes,
       return !arena().contains(entry.first);
     return !named.contains(entry.first);
   });
+  std::unordered_map<zigzag::CellRef, zigzag::ArenaManifold::ReleaseEpoch>
+      epochs;
+  for (const auto &entry : shapes) {
+    const auto recorded = shapeEpochs_.find(entry.first);
+    if (recorded != shapeEpochs_.end()) {
+      epochs.emplace(*recorded);
+    } else if (const auto born = arena().epochOfCell(entry.first)) {
+      epochs.emplace(entry.first, *born);
+    }
+  }
   compiledShapes_.swap(shapes);
+  shapeEpochs_.swap(epochs);
 }
 
 void VQLEngine::publishUserDefs(const std::vector<DefDeclaration> &defs) {
