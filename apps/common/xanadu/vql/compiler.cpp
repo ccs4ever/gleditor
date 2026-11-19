@@ -1433,14 +1433,18 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           const auto rightValues    = compileArgument(*val->right, ctxCell);
           const CellRef rightStream = normalizeFrameStream(rightValues);
           for (const auto *operand : {&leftValues, &rightValues})
-            if (std::ranges::any_of(*operand, [this](const CellRef cell) {
-                  return shapeHandles_.contains(cell);
-                }))
+            for (const CellRef cell : *operand) {
+              const auto handle = shapeHandles_.find(cell);
+              if (handle == shapeHandles_.end()) continue;
+              const bool isShape =
+                  std::holds_alternative<ShapeLiteral>(handle->second);
               throw QueryRefusal(
                   QueryErrorCategory::Unsupported,
-                  "a shape value cannot be an operand of '+': a shape is "
-                  "syntax resolved while the query is compiled, not a value "
-                  "the graph computes with");
+                  std::string{"a "} + (isShape ? "shape" : "lens") +
+                      " value cannot be an operand of '+': it is syntax "
+                      "resolved while the query is compiled, not a value "
+                      "the graph computes with");
+            }
           const CellRef add = emitOp(OpcodeKind::VqlAdd, "#VQL_ADD");
           emitInput(add, leftStream);
           emitInput(add, rightStream);

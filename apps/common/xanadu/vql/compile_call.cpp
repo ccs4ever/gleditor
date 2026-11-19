@@ -534,12 +534,26 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   std::vector<std::string> requiredStaticProgramCaptures(
       staticProgramRequiredNames.begin(), staticProgramRequiredNames.end());
   std::ranges::sort(requiredStaticProgramCaptures);
+  // A lens is syntax the compiler resolves where it is applied; a reusable
+  // frame would receive only its handle cell at run time, so a call that is
+  // handed a lens is compiled inline.
+  if (std::ranges::any_of(arguments, [this](const ValueExpr &argument) {
+        if (const auto *name = std::get_if<std::string>(&argument.kind))
+          return lensBoundTo(*name).has_value();
+        if (const auto *call = std::get_if<std::shared_ptr<FunctionInvocation>>(
+                &argument.kind))
+          return *call && (*call)->name == "lens" &&
+                 !definitions_.contains("lens");
+        return false;
+      }))
+    unsupportedFunctorArgument = true;
   bool hasInlineCapture = false;
   if (const auto captures = frameFreeCaptureNames_.find(definition.name);
       captures != frameFreeCaptureNames_.end()) {
     hasInlineCapture =
         std::ranges::any_of(captures->second, [this](const std::string &name) {
           if (functorBindings_.contains(name)) return true;
+          if (lensBoundTo(name)) return true;
           if (const auto stream = streamBindings_.find(name);
               stream != streamBindings_.end()) {
             return std::ranges::any_of(stream->second, [this](CellRef cell) {
@@ -2022,6 +2036,17 @@ CellRef VQLCompiler::compileClosureLambda(const PathLambda &lambda) {
   }
   std::unordered_set<std::string> requiredDefaultNames;
   std::unordered_set<std::string> conditionalDefaultNames;
+  // A closure takes its captures as run-time cells; a lens is syntax the
+  // compiler resolves where it is applied, so inside a closure body it would
+  // be an empty cell that fails in the VM.
+  for (const auto &capture : captureNames)
+    if (lensBoundTo(capture))
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          "VQL lens value $" + capture +
+              " is not statically known inside a closure: a closure captures "
+              "its variables as run-time cells, and a lens exists only while "
+              "the query is compiled");
   const auto addCapture = [&](const std::string &alias) {
     if (captureNames.contains(alias)) return;
     if (captureNames.size() >= closureLimits.maxCaptureStreams)

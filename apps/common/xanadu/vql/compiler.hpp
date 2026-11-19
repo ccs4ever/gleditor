@@ -79,7 +79,7 @@ struct CompilationOptions {
   std::unordered_map<std::string, std::vector<PathStep>> initialFunctors;
   /// The shape handles earlier queries of the session left, handle cell to
   /// expanded shape, so a shape bound once can be projected by a later query.
-  std::unordered_map<zigzag::CellRef, ShapeLiteral> initialShapes;
+  CompiledHandleTable initialShapes;
   /// The session's mounts, by dimension name; the compiler consults them for
   /// every dimension step and adds the query's own declarations in order.
   std::unordered_map<std::string, Mount> mounts;
@@ -111,7 +111,7 @@ struct CompilationResult {
   /// The compile-time shape table at the end of the query: `initialShapes`
   /// plus the handles this query minted. Cells here are program cells until
   /// the executor settles the program, which may re-mint the live ones.
-  std::unordered_map<zigzag::CellRef, ShapeLiteral> shapes;
+  CompiledHandleTable shapes;
   /// Set exactly when success is false.
   std::optional<QueryErrorCategory> category;
 };
@@ -445,6 +445,15 @@ private:
                   std::optional<zigzag::CellRef> context);
   std::optional<zigzag::CellRef> compileLensValue(const FunctionInvocation &fn,
                                                   zigzag::CellRef ctxCell);
+  /// Q-LENS. A lens is a pair of callback lambdas the compiler keeps under a
+  /// handle cell (the shape table); applying `$source/$lens` compiles get, and
+  /// `$source/$lens%value` compiles put, at that step.
+  zigzag::CellRef registerLens(LensPair pair);
+  /// The lens variable @p name is bound to, if it is bound to one.
+  std::optional<LensPair> lensBoundTo(const std::string &name) const;
+  std::vector<zigzag::CellRef>
+  compileLensApplication(const SignedDimensionStep &step, const LensPair &lens,
+                         zigzag::CellRef source, bool hasContext);
   std::optional<zigzag::CellRef> compileShapeValue(const ShapeLiteral &shape,
                                                    zigzag::CellRef ctxCell);
   /// Q-SHAPEVAR, compile_shape_value.cpp. A shape is syntax: it is expanded
@@ -677,7 +686,7 @@ private:
   /// compiler resolves them and the VM never holds one). Seeded from
   /// CompilationOptions::initialShapes and grown only by registerShape, so it
   /// is bounded by the distinct shape values one query writes.
-  std::unordered_map<zigzag::CellRef, ShapeLiteral> shapeHandles_;
+  CompiledHandleTable shapeHandles_;
   std::unordered_set<const ShapeLiteral *> shapesExpanding_;
   std::vector<std::string> shapeCallsActive_;
   zigzag::CellRef compileShapePredicateImpl(const ShapeLiteral &shape,

@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -548,6 +549,24 @@ struct PathLambda {
   std::vector<LambdaParam> params;
   std::variant<std::shared_ptr<ValueExpr>, std::shared_ptr<ScriptBody>> body;
 };
+
+/// The two callbacks of `lens(get:, put:)`. They are syntax kept by the
+/// compiler, never data the VM reads: each is compiled at the step that
+/// applies the lens, so binding one runs neither (put is absent for a
+/// get-only lens).
+struct LensPair {
+  std::shared_ptr<const PathLambda> get;
+  std::shared_ptr<const PathLambda> put;
+};
+
+/// What a handle cell stands for in the compile-time table (decision D4 of
+/// the VM restoration): an expanded shape or a lens pair. Both are syntax the
+/// compiler resolves while lowering, so one table, one lifetime rule and one
+/// session persistence serve them. This is a deliberate exception to
+/// "cells and dimensions, not side tables"; moving the data half into cells
+/// is a later card.
+using CompiledHandle      = std::variant<ShapeLiteral, LensPair>;
+using CompiledHandleTable = std::unordered_map<zigzag::CellRef, CompiledHandle>;
 
 struct DefDeclaration {
   enum class Effect : std::uint8_t { Inferred, Pure, Weave };
