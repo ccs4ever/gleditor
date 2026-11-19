@@ -540,6 +540,7 @@ TEST(VortexGroupJournalTest, AFailedGroupCallLeavesEveryTableAsItFoundIt) {
                                    FrameTestAccess::top(s.vm, s.cursor), false);
     FrameTestAccess::seedRegisters(s.vm, s.it1,
                                    FrameTestAccess::top(s.vm, s.cursor), false);
+    s.vm.setCursorOpcode(s.cursor, chosen->second);
     const auto digest = FrameTestAccess::digest(s.vm);
     const auto cells  = s.arena.cellCount();
     std::size_t stops = 0;
