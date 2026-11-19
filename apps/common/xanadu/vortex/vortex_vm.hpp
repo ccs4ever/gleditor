@@ -236,9 +236,11 @@ enum class OpcodeKind : std::uint8_t {
   // HAZARD, stated plainly: a cell number held as an Int64 is not protected
   // against reuse. A number kept across a release() or discard() can later
   // name a different cell minted into the same slot, and this opcode will hand
-  // that cell back without complaint. The release epoch that closes this gap
-  // is a separate, later card; until then a program must not keep such a
-  // number past the lifetime of the cell it names. Not mesh-pure: the number
+  // that cell back without complaint. ArenaManifold::epochOfCell() closes the
+  // gap for a holder that records it beside the number and compares it again
+  // before trusting the number; this opcode does not consult it, so a program
+  // must still not keep such a number past the lifetime of the cell it names
+  // unless its host validates it. Not mesh-pure: the number
   // depends on the evaluating arena's snapshot. Appended to preserve persisted
   // opcode-kind integers.
   CellOfInt,
@@ -246,7 +248,8 @@ enum class OpcodeKind : std::uint8_t {
   // Cell -> Int64: the inverse of CellOfInt. One cell or reference slot in;
   // one raw Int64 out, equal to that cell's number (never itself published as
   // a reference). It refuses an absent or non-cell operand by name. It carries
-  // the same unprotected-number hazard as CellOfInt, and one more: an
+  // the same unprotected-number hazard as CellOfInt (record
+  // ArenaManifold::epochOfCell beside a number you keep), and one more: an
   // ephemeral cell's number has the ephemeral bit set, and promote() retargets
   // ephemeral references but not a bare Int64, so a number held across
   // promote() is stale (and can be persisted as data with that bit in it).

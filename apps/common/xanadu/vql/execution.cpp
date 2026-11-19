@@ -352,7 +352,8 @@ QueryExecutor::executeVortex(const QueryExpression &query,
         bindingSource_ ? bindingSource_->get() : bindings_;
     if (session_) {
       compilation.initialFunctors = session_->compilerFunctors();
-      compilation.initialShapes   = session_->compilerShapes();
+      session_->pruneStaleShapes();
+      compilation.initialShapes = session_->compilerShapes();
       for (const auto &[name, mount] : session_->compilerMounts())
         compilation.mounts.emplace(
             name, CompilationOptions::Mount{.direction = mount.direction,
