@@ -133,6 +133,20 @@ VQLCompiler::viewRoutines(const ViewDimensions &dims) {
     emitOutput(convert, target);
     emitRequire(emitCellPresence(target), gone);
   };
+  // The graph's own comparison of a cell's epoch now with the one recorded.
+  const auto epochOf = [&](const CellRef cell) {
+    const CellRef epoch = arena.makeCell();
+    const auto observe  = emitOp(OpcodeKind::EpochOfCell, "#VIEW_EPOCH");
+    emitInput(observe, cell);
+    emitOutput(observe, epoch);
+    return epoch;
+  };
+  const auto epochUnchanged = [&](const CellRef cell, const CellRef recorded,
+                                  const std::string &reused) {
+    emitRequire(
+        emitBinary(OpcodeKind::Eq, epochOf(cell), recorded, "#VIEW_EPOCH_SAME"),
+        reused);
+  };
   const CellRef falseConst = emitConstant(CellValue(false));
 
   // -- resolve: a handle to its source, its view and the view's number.
@@ -153,6 +167,42 @@ VQLCompiler::viewRoutines(const ViewDimensions &dims) {
            "VQL a dynamic view handle names a view that is no longer a cell: "
            "the cell it was made with was released");
     numberOf(routines.resolveView, routines.resolveNumber);
+
+    // The numbers just read are only as good as the epochs recorded beside
+    // them: a cell released and its number minted again answers a later
+    // epoch. Every handle carries that witness (source's epoch, then the
+    // view's): the wrap step writes it, and the compiler writes it for a
+    // handle it mints as a constant. One without a valid witness was not made
+    // here, so nothing says what its numbers name and it is refused, as the
+    // host refuses it.
+    const std::string missing = viewWitnessMissingReason();
+    const CellRef zero        = emitConstant(CellValue(std::int64_t{0}));
+    // Add and Sub coerce text, booleans and doubles, so it is the two together
+    // that hold only for an Int64: Add keeps an Int64 equal to itself and a
+    // Sub of two Int64s is an Int64 zero.
+    const auto isInt64 = [&](const CellRef value) {
+      const CellRef sum =
+          emitBinary(OpcodeKind::Add, value, zero, "#VIEW_WITNESS_ADD");
+      const CellRef difference =
+          emitBinary(OpcodeKind::Sub, value, value, "#VIEW_WITNESS_SUB");
+      return emitBinary(
+          OpcodeKind::And,
+          emitBinary(OpcodeKind::Eq, sum, value, "#VIEW_WITNESS_SAME"),
+          emitBinary(OpcodeKind::Eq, difference, zero, "#VIEW_WITNESS_ZERO"),
+          "#VIEW_WITNESS_INT");
+    };
+    const CellRef sourceEpoch =
+        emitLinkRead(routines.resolveHandle, dims.epoch);
+    emitRequire(emitCellPresence(sourceEpoch), missing);
+    const CellRef viewEpoch = emitLinkRead(sourceEpoch, dims.epoch);
+    emitRequire(emitCellPresence(viewEpoch), missing);
+    emitRequire(emitBinary(OpcodeKind::And, isInt64(sourceEpoch),
+                           isInt64(viewEpoch), "#VIEW_WITNESS_VALID"),
+                missing);
+    epochUnchanged(routines.resolveSource, sourceEpoch,
+                   viewNumberReusedReason("source"));
+    epochUnchanged(routines.resolveView, viewEpoch,
+                   viewNumberReusedReason("view"));
     routines.resolveEntry = finish();
   }
 
@@ -178,6 +228,20 @@ VQLCompiler::viewRoutines(const ViewDimensions &dims) {
       emitInputConstant(link, static_cast<std::int64_t>(dimension));
       emitInputConstant(link, forward);
       emitInput(link, target);
+    }
+    // The handle's witness, on cells of its own: the epochs the source and
+    // the view are in now, read by the graph. Only the new handle and two new
+    // boxes are linked, so nothing is written onto the view or the source.
+    const CellRef sourceEpochBox = box(epochOf(routines.wrapSource), slot());
+    const CellRef viewEpochBox   = box(epochOf(routines.wrapNumber), slot());
+    for (const auto &[from, to] :
+         {std::pair{routines.wrapHandle, sourceEpochBox},
+          std::pair{sourceEpochBox, viewEpochBox}}) {
+      const auto link = emitOp(OpcodeKind::Link, "#VIEW_WITNESS");
+      emitInput(link, from);
+      emitInputConstant(link, static_cast<std::int64_t>(dims.epoch));
+      emitInputConstant(link, forward);
+      emitInput(link, to);
     }
     routines.wrapEntry = finish();
   }

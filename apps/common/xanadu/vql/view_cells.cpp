@@ -126,10 +126,41 @@ void recordViewWitnesses(zigzag::ArenaManifold &arena,
   }
 }
 
+void refreshViewWitnesses(zigzag::ArenaManifold &arena,
+                          const ViewDimensions &dims,
+                          const std::span<const CellRef> cells) {
+  for (const CellRef cell : cells) {
+    const auto parts = handleParts(arena, dims, cell);
+    if (!parts) continue;
+    const auto first = arena.linked(cell, dims.epoch, DimVector::POS);
+    const auto second =
+        first ? arena.linked(*first, dims.epoch, DimVector::POS) : std::nullopt;
+    if (!first || !second) continue;
+    for (const auto &[witness, named] :
+         {std::pair{*first, parts->source}, std::pair{*second, parts->view}}) {
+      const auto born = arena.epochOfCell(named);
+      if (!born) continue;
+      zigzag::expectWritten(
+          arena.setValueBits(witness, xanadu::ValueKind::Int64, *born));
+    }
+  }
+}
+
+std::string viewWitnessMissingReason() {
+  return "VQL a dynamic view handle has no valid epoch witness: it was not "
+         "made by a query of this session, so whether its source and view "
+         "numbers still name their cells cannot be told";
+}
+
+std::string viewNumberReusedReason(const std::string_view what) {
+  return "VQL a dynamic view handle's " + std::string{what} +
+         " cell was released and its number reused: the handle no longer "
+         "names the cell it was made with";
+}
+
 std::optional<std::string> staleHandleReason(const zigzag::ArenaManifold &arena,
                                              const ViewDimensions &dims,
-                                             const CellRef cell,
-                                             const bool witnessed) {
+                                             const CellRef cell) {
   if (!arena.contains(cell)) return std::nullopt;
   const auto sourceBox = arena.linked(cell, dims.marker, DimVector::POS);
   const auto viewBox   = arena.linked(cell, dims.of, DimVector::POS);
@@ -140,10 +171,7 @@ std::optional<std::string> staleHandleReason(const zigzag::ArenaManifold &arena,
   const auto number = [&](const std::optional<CellRef> witness) {
     return witness ? arena.asInt64(*witness) : std::nullopt;
   };
-  if (witnessed && (!number(first) || !number(second)))
-    return "VQL a dynamic view handle has no valid epoch witness: it was not "
-           "made by a query of this session, so whether its source and view "
-           "numbers still name their cells cannot be told";
+  if (!number(first) || !number(second)) return viewWitnessMissingReason();
   const auto check = [&](const CellRef box,
                          const std::optional<std::int64_t> recorded,
                          const char *what) -> std::optional<std::string> {
@@ -154,9 +182,7 @@ std::optional<std::string> staleHandleReason(const zigzag::ArenaManifold &arena,
       return std::string{"VQL a dynamic view handle's "} + what +
              " cell is no longer a cell: it was released";
     if (recorded && static_cast<std::int64_t>(*now) != *recorded)
-      return std::string{"VQL a dynamic view handle's "} + what +
-             " cell was released and its number reused: the handle no longer "
-             "names the cell it was made with";
+      return viewNumberReusedReason(what);
     return std::nullopt;
   };
   if (const auto why = check(*sourceBox, number(first), "source")) return why;

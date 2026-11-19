@@ -4,6 +4,7 @@
 #include "common/xanadu/vql/contracts.hpp"
 
 #include <algorithm>
+#include <array>
 #include <string>
 
 #include <gleditor/logging.hpp>
@@ -326,7 +327,9 @@ VQLCompiler::lowerDynamicView(const ShapeLiteral &shape,
     zigzag::expectWritten(
         arena.link(handle, dims.of, false,
                    arena.makeScalarCell(static_cast<std::int64_t>(view))));
-    ownHandles_.insert(handle);
+    // The graph reads this witness when the handle is stepped in the same
+    // run, as it reads any other: the epochs are known here.
+    recordViewWitnesses(arena, dims, std::array{handle});
     made.emplace_back(owner, handle);
     handles.push_back(handle);
     GLEDITOR_LOG_DEBUG("vql.compile", "dynamic view handle {} over cell {}",

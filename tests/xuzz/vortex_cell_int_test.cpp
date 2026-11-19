@@ -6,8 +6,10 @@
  *        export, vagent).
  *
  * A cell number held as an Int64 is not protected against reuse after
- * release(); ReleasedNumberNamesALaterCell records that hazard as behaviour
- * so the release-epoch card has a test to turn.
+ * release(); ReleasedNumberNamesALaterCell records that hazard as behaviour of
+ * these two opcodes. The witness against it is EpochOfCell (see
+ * vortex_epoch_of_cell_test.cpp), which a holder records beside the number and
+ * compares in the graph.
  */
 #include <gtest/gtest.h>
 
@@ -362,7 +364,9 @@ TEST(VortexCellIntTest, ReleasedNumberNamesALaterCell) {
   EXPECT_EQ(h.vm.cellReferenceOf(out), later);
 }
 
-TEST(VortexCellIntTest, TheDecodeCeilingReachesIntOfCellAndStopsThere) {
+// IntOfCell is no longer the last kind (EpochOfCell follows it); the ceiling
+// itself is pinned in vortex_epoch_of_cell_test.cpp.
+TEST(VortexCellIntTest, TheDecodeCeilingReachesIntOfCell) {
   Harness h;
   EXPECT_EQ(h.vm.getOpcodeKind(h.arena.makeScalarCell(
                 static_cast<std::int64_t>(OpcodeKind::CellOfInt))),
@@ -370,11 +374,6 @@ TEST(VortexCellIntTest, TheDecodeCeilingReachesIntOfCellAndStopsThere) {
   EXPECT_EQ(h.vm.getOpcodeKind(h.arena.makeScalarCell(
                 static_cast<std::int64_t>(OpcodeKind::IntOfCell))),
             OpcodeKind::IntOfCell);
-  EXPECT_FALSE(h.vm.getOpcodeKind(h.arena.makeScalarCell(
-      static_cast<std::int64_t>(OpcodeKind::IntOfCell) + 1)));
-  const auto stale = h.arena.makeScalarCell(
-      static_cast<std::int64_t>(OpcodeKind::IntOfCell) + 1);
-  EXPECT_FALSE(h.vm.registerProgramOps(std::vector<CellRef>{stale}));
   const auto good =
       h.arena.makeScalarCell(static_cast<std::int64_t>(OpcodeKind::IntOfCell));
   EXPECT_TRUE(h.vm.registerProgramOps(std::vector<CellRef>{good}));
@@ -619,7 +618,7 @@ TEST(VortexCellIntTest, VagentRefusesBothByOrdinalAndStops) {
   ASSERT_TRUE(binds.has_value());
   xanadu::vagent::MetaRuntime meta(h.core, h.vm, *binds);
   EXPECT_EQ(h.arena.asInt64(binds->validate.linkedCeiling),
-            static_cast<std::int64_t>(OpcodeKind::IntOfCell));
+            static_cast<std::int64_t>(OpcodeKind::EpochOfCell));
   for (const auto kind : {OpcodeKind::CellOfInt, OpcodeKind::IntOfCell}) {
     const auto op = h.vm.mintOpcode(kind);
     h.core.bindInput(op, h.arena.makeScalarCell(std::int64_t{1}));
@@ -634,7 +633,7 @@ TEST(VortexCellIntTest, VagentRefusesBothByOrdinalAndStops) {
         << report.detail;
   }
   const auto beyond = h.arena.makeScalarCell(
-      static_cast<std::int64_t>(OpcodeKind::IntOfCell) + 1);
+      static_cast<std::int64_t>(OpcodeKind::EpochOfCell) + 1);
   const auto unknown = meta.validate(beyond, {.runReachable = false});
   EXPECT_FALSE(unknown.ok);
   EXPECT_NE(unknown.detail.find("not an op cell"), std::string::npos)

@@ -570,6 +570,23 @@ Subscription baseline. Rulings with these cards:
   argues no reachable program needs one); a handle copied by value without its witnesses is
   unchecked; shapes and lenses remain on the table, each move needing its own approval.
 
+Gate P (2026-11-19, shared branch after the EPOCHREAD merge, adding VLACE-ISEOF and EPOCHREAD):
+`xuzz_test` 11 failures of 4963, nothing newly failing; all 11 are the Evidence and Subscription
+baseline. Rulings with these cards:
+
+- **VLACE-ISEOF:** `isEOF : IO Bool` is a host-stream peek in the IO trampoline (the VM has no
+  handle on the stream); it blocks like `getLine` on an interactive stream and leaves `getLine`'s
+  named end-of-input error intact. Naming the variable in type errors for `if not isEOF` and for an
+  IO variable passed where a Bool is expected was not done.
+- **EPOCHREAD:** `EpochOfCell` (appended after `IntOfCell`) reads the epoch of a cell; an absent
+  operand refuses by name. It is mesh-impure and vagent-refused by ordinal like the other two cell
+  number opcodes. The wrap step writes each handle's witness cells in the graph (source epoch, then
+  view epoch, on `d.vql.epoch`; new cells only), and the shared resolve routine refuses by name a
+  handle whose witness is missing, not an Int64, or no longer matches. The witness exemption for
+  handles minted by the running program is gone. Open: after an arena assignment every witnessed
+  handle refuses as reused (host and graph agree); copies made other than by `settle()` are
+  untested.
+
 Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
 lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
 approval); `mesh::evaluate` of VQL source still runs `project` although a sealed portable artifact

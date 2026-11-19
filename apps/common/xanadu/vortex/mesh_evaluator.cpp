@@ -266,9 +266,12 @@ bool pureOpcode(OpcodeKind opcode) {
   // The evaluating arena is copy-on-write over the job's base snapshot, so a
   // literal Int64 names whatever cell the snapshot holds at that number, and
   // the numbers IntOfCell returns shift with the snapshot and with genesis.
-  // The same sealed bytes would answer differently per arena.
+  // The same sealed bytes would answer differently per arena. EpochOfCell is
+  // impure alike: the epochs depend on how the evaluating arena was built and
+  // released.
   case OpcodeKind::CellOfInt:
   case OpcodeKind::IntOfCell:
+  case OpcodeKind::EpochOfCell:
     return false;
   case OpcodeKind::ResumeInit:
   case OpcodeKind::ResumeSet:
@@ -362,13 +365,21 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
       throw std::runtime_error(
           "Vortex mesh does not support VqlMaskProbe: it reads the links of "
           "the evaluating arena");
-    if (instruction.opcode == OpcodeKind::CellOfInt ||
-        instruction.opcode == OpcodeKind::IntOfCell)
+    // The purity allowlist decides; these name why it refuses, so a mutation
+    // of the allowlist shows as the program being accepted.
+    if (!pureOpcode(instruction.opcode) &&
+        (instruction.opcode == OpcodeKind::CellOfInt ||
+         instruction.opcode == OpcodeKind::IntOfCell))
       throw std::runtime_error(
           std::string{"Vortex mesh does not support "} +
           (instruction.opcode == OpcodeKind::CellOfInt ? "CellOfInt"
                                                        : "IntOfCell") +
           ": a cell number depends on the evaluating arena's snapshot");
+    if (!pureOpcode(instruction.opcode) &&
+        instruction.opcode == OpcodeKind::EpochOfCell)
+      throw std::runtime_error(
+          "Vortex mesh does not support EpochOfCell: a release epoch depends "
+          "on how the evaluating arena was built and released");
     if (instruction.opcode == OpcodeKind::ProjectTopology)
       throw std::runtime_error(
           "Vortex mesh does not support ProjectTopology: it mints cells on "
@@ -576,7 +587,8 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::IntOfCell))
+    if (opcode < 0 ||
+        opcode > static_cast<std::int64_t>(OpcodeKind::EpochOfCell))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

@@ -91,7 +91,7 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
     return arena.makeScalarCell(value);
   };
   binds.validate.linkedCeiling =
-      mintInt(static_cast<std::int64_t>(OpcodeKind::IntOfCell));
+      mintInt(static_cast<std::int64_t>(OpcodeKind::EpochOfCell));
   binds.validate.arityTable    = arena.makeCell();
   binds.validate.variadicKinds = arena.makeCell();
   binds.validate.impureKinds   = arena.makeCell();
@@ -149,11 +149,11 @@ mintMetaBindSet(zigzag::ArenaManifold &arena, VortexCore &core,
       {static_cast<std::int64_t>(OpcodeKind::ChoiceDepth), 0, 1},
       {static_cast<std::int64_t>(OpcodeKind::Halt), 0, 0},
       {static_cast<std::int64_t>(OpcodeKind::Nop), 0, 0},
-      // The ceiling scalar above is IntOfCell, the enum's last ordinal.
-      // CellOfInt/IntOfCell are decodable (the ceiling reaches them) but stay
-      // absent: a constant number would forge a reference to any cell.
-      // Host-state operations and closure operations remain absent from this
-      // table; a kind absent here makes validation refuse it by ordinal.
+      // The ceiling scalar above is EpochOfCell, the enum's last ordinal.
+      // CellOfInt/IntOfCell/EpochOfCell are decodable (the ceiling reaches
+      // them) but stay absent: a constant number would forge a reference to any
+      // cell. Host-state operations and closure operations remain absent from
+      // this table; a kind absent here makes validation refuse it by ordinal.
       // The two kinds below are variadic: `in` is the fixed head and
       // kVariadic lists their stride.
       {static_cast<std::int64_t>(OpcodeKind::ProjectTopology), 3, 1},
@@ -339,7 +339,7 @@ bool MetaRuntime::isOpCell(CellRef cell) const {
   const auto ceiling =
       arena()
           .asInt64(binds_.validate.linkedCeiling)
-          .value_or(static_cast<std::int64_t>(OpcodeKind::IntOfCell));
+          .value_or(static_cast<std::int64_t>(OpcodeKind::EpochOfCell));
   return *ordinal >= 0 && *ordinal <= ceiling;
 }
 
@@ -523,7 +523,7 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
 
   const auto ceiling =
       arena.asInt64(binds_.validate.linkedCeiling)
-          .value_or(static_cast<std::int64_t>(OpcodeKind::IntOfCell));
+          .value_or(static_cast<std::int64_t>(OpcodeKind::EpochOfCell));
   if (!isOpCell(root)) return {false, "validate: root is not an op cell"};
 
   // Decode the bound arity table: `(op, in, out)` triples on `+d.step`.
@@ -592,7 +592,7 @@ MetaValidateReport MetaRuntime::validate(CellRef graphRootCell,
 
     const auto ordinal = arena.asInt64(op);
     if (!ordinal || *ordinal < 0 || *ordinal > ceiling)
-      return {false, "validate: op int64 outside [0, IntOfCell]"};
+      return {false, "validate: op int64 outside [0, EpochOfCell]"};
     const auto shape = arity.find(*ordinal);
     if (shape == arity.end())
       return {false, std::format("validate: op kind {} absent from the arity "
