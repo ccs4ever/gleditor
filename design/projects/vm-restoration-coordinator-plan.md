@@ -128,11 +128,11 @@ ccache follows it, so without them every worktree gets a private cache.
 
 **Hard rules.**
 
-- Do not call the residual interpreter helpers left in `vql/vql_engine.cpp`, `vql/sort.cpp`,
-  `vql/dynamic_view.cpp`, `vql/version_value.cpp` and `vql/shape_eval.cpp` from any execution path.
-  These include `sortInto`, `findInDocuments`, `evaluatePerspectiveStep`, `traverseView`,
-  `projectDynamic`, `versionValue`, `evaluatePredicate` and `evaluateShapePredicate`. They are the
-  behavioural oracle; read them, do not call them. The same holds for pre-cutoff code read with
+- The residual host interpreter (`executeBlock`, `executeScriptBody`, `evaluatePredicate`,
+  `evaluateShapePredicate`, `sortInto`, `traverseView`, `projectDynamic`, `versionValue` and the
+  rest of that chain) was deleted by the RESIDUAL card; `vql/sort.cpp`, `vql/dynamic_view.cpp`,
+  `vql/version_value.cpp` and `vql/shape_eval.cpp` no longer exist. Read the behaviour it had with
+  `git show 4bbaa050:<path>`; there is nothing left to call. The same holds for pre-cutoff code read with
   `git show e9090999^:<path>`.
 - Lowering emits ordinary Vortex graph operations through the existing compiler helpers (`emitOp`,
   `emitOutput`, streams, frames, mutation groups). It never stores an AST or a callback for the VM.
@@ -597,14 +597,14 @@ evaluator's own private arena, where the detached copies `copyTopology` mints ar
 outside the run, while an artifact is bytes that must answer alike in any arena and memoise by
 content, which fresh cells on every run defeat. `CellOfInt`, `IntOfCell` and `EpochOfCell` are
 refused the same way, for the same portability reason. The residual shape interpreter
-(`vql/shape_eval.cpp`) by code reading counts the store-ref index link on a foreign-owner proxy
+(`vql/shape_eval.cpp`, since deleted) by code reading counted the store-ref index link on a foreign-owner proxy
 (`{}` is false, `{*}` is true through `dimensionsOf`), unlike the VM's `VqlMaskProbe`, but it is
 dead: `evaluateShapePredicate` is private, reached only from `evaluateFactor`, `evaluateTerm` and
 `evaluatePredicate`, whose roots (`executeBlock`, `executeScriptBody`, `evaluateBindings`) have no
 caller in `apps/`, `tests/` or `tools/`, and every public entry (`execute`, `tryExecute`,
 `evaluatePath`, `pollWatch`) compiles and runs on the VM. No query, host-API call or test reaches
-it, so the quirk is confirmed but moot; deleting the residual interpreter as a whole is the cleanup,
-not a fix to this file; closure-creating VQL queries keep their program; VLace has no `isEOF` form;
+it, so the quirk is confirmed but moot; the residual interpreter was deleted as a whole (RESIDUAL card), not
+fixed in this file; closure-creating VQL queries keep their program; VLace has no `isEOF` form;
 nested enclose and an outer product with an empty operand refuse by name in VPL.
 
 **Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
