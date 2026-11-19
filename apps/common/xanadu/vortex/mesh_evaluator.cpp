@@ -260,6 +260,9 @@ bool pureOpcode(OpcodeKind opcode) {
   // Mints fresh cells on every run, so a memo key (content) would hand the
   // second caller the first caller's cells.
   case OpcodeKind::ProjectTopology:
+  // Reads the evaluating arena's links, which no artifact carries, so its
+  // answer is not a function of the operands.
+  case OpcodeKind::VqlMaskProbe:
     return false;
   case OpcodeKind::ResumeInit:
   case OpcodeKind::ResumeSet:
@@ -349,6 +352,10 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
     if (instruction.opcode == OpcodeKind::VqlMaskLinks)
       throw std::runtime_error(
           "Vortex mesh does not support shape projection mutations");
+    if (instruction.opcode == OpcodeKind::VqlMaskProbe)
+      throw std::runtime_error(
+          "Vortex mesh does not support VqlMaskProbe: it reads the links of "
+          "the evaluating arena");
     if (instruction.opcode == OpcodeKind::ProjectTopology)
       throw std::runtime_error(
           "Vortex mesh does not support ProjectTopology: it mints cells on "
@@ -557,7 +564,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
     if (opcode < 0 ||
-        opcode > static_cast<std::int64_t>(OpcodeKind::ProjectTopology))
+        opcode > static_cast<std::int64_t>(OpcodeKind::VqlMaskProbe))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

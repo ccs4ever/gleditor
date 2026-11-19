@@ -653,6 +653,9 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
   if (vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlFieldProbe)
     throw std::invalid_argument(
         "stdlib raw calls do not support named field probes");
+  if (vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlMaskProbe)
+    throw std::invalid_argument(
+        "stdlib raw calls do not support shape link probes");
   if (vm_.getOpcodeKind(fnOp) == OpcodeKind::VqlMaskLinks)
     throw std::invalid_argument(
         "stdlib raw calls do not support shape projection mutations");

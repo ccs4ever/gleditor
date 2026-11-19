@@ -216,6 +216,13 @@ enum class OpcodeKind : std::uint8_t {
   // bindings and link only to each other (VQL `project`). Appended to
   // preserve persisted opcode-kind integers.
   ProjectTopology,
+
+  // Read-only twin of VqlMaskLinks: answers whether that mask would remove at
+  // least one link of the owner, without removing it. VQL shape predicates
+  // `{}`, `{*}` and `{!*, ...}` need "every link the cell has", which no
+  // fixed-dimension probe can enumerate. Appended to preserve persisted
+  // opcode-kind integers.
+  VqlMaskProbe,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.
@@ -924,6 +931,23 @@ private:
   ExecutionResult executeRelationNext(CellRef opcode);
   ExecutionResult executeVqlMaskLinks(CellRef opcode,
                                       std::vector<CellValue> &outputs);
+  ExecutionResult executeVqlMaskProbe(CellRef opcode,
+                                      std::vector<CellValue> &outputs);
+  /// One directed link a mask would remove from the owner.
+  struct MaskRemoval {
+    DimRef dimension;
+    DimVector direction;
+  };
+  /// What a VqlMaskLinks-shaped operand list asks of its owner, resolved and
+  /// validated but not applied; `name` prefixes every refusal so each opcode
+  /// reports under its own name.
+  struct MaskPlan {
+    CellRef owner;
+    std::optional<std::uint32_t> foreignSpace;
+    std::vector<MaskRemoval> removals;
+  };
+  [[nodiscard]] std::expected<MaskPlan, std::string>
+  planMaskRemovals(std::string_view name, const std::vector<CellRef> &inputs);
   ExecutionResult executeClosureOpcodeBody(OpcodeKind kind, CellRef opcode,
                                            CellRef cursor);
   ExecutionResult executeRestoreBindings(CellRef opcode, CellRef cursor);

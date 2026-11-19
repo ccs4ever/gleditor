@@ -326,7 +326,7 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // ceiling with the generated-vocabulary bound in meta.cpp.
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::ProjectTopology)) {
+            static_cast<std::uint64_t>(OpcodeKind::VqlMaskProbe)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -602,7 +602,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::ProjectTopology)) {
+          static_cast<std::uint64_t>(OpcodeKind::VqlMaskProbe)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -1028,47 +1028,28 @@ ExecutionResult VortexVM::executeRelationNext(const CellRef opcode) {
   }
 }
 
-ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
-                                              std::vector<CellValue> &outputs) {
-  const auto fail = [opcode](std::string message) {
-    return ExecutionResult{.success       = false,
-                           .failingClause = opcode,
-                           .errorMessage  = std::move(message)};
+std::expected<VortexVM::MaskPlan, std::string>
+VortexVM::planMaskRemovals(const std::string_view name,
+                           const std::vector<CellRef> &inputs) {
+  const auto fail = [name](const std::string_view message) {
+    return std::unexpected(std::string{name} + " " + std::string{message});
   };
   try {
-    auto &arena       = core_.arena();
-    const auto inputs = inputsOf(opcode);
-    if (inputs.size() < 2 || (inputs.size() - 2) % 2 != 0 ||
-        !outputsOf(opcode).empty() || !outputs.empty())
-      return fail("VqlMaskLinks expects owner, default, and dimension/mask "
-                  "pairs with no outputs");
-    if (isMemoized(opcode)) return fail("VqlMaskLinks cannot be memoized");
-    if (!core_.preconditionsOf(opcode).empty() ||
-        !core_.postconditionsOf(opcode).empty())
-      return fail("VqlMaskLinks does not support pre/postconditions");
-    if (std::ranges::any_of(inputs, [&](const CellRef slot) {
-          return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
-        }))
-      return fail("VqlMaskLinks requires scalar reference slots");
-    if (std::ranges::any_of(inputs, [&](const CellRef slot) {
-          return core_.hasPipeline(slot);
-        }))
-      return fail("VqlMaskLinks does not support parameter pipelines");
+    auto &arena = core_.arena();
     if ((inputs.size() - 2) / 2 > projectionLimits_.maxRules)
-      return fail("VqlMaskLinks rule limit exceeded");
+      return fail("rule limit exceeded");
     for (const auto slot : inputs)
-      if (!arena.contains(slot))
-        return fail("VqlMaskLinks input slot is missing");
+      if (!arena.contains(slot)) return fail("input slot is missing");
 
     const auto owner = resolveCell(inputs, {}, cellReferences_, 0, arena);
-    if (!owner) return fail("VqlMaskLinks owner is not a cell reference");
+    if (!owner) return fail("owner is not a cell reference");
     if (arena.isQuoteOccurrence(*owner))
-      return fail("VqlMaskLinks does not support quote occurrences");
+      return fail("does not support quote occurrences");
     const auto foreignOwner = arena.foreignOf(*owner);
     if (cellReferences_.contains(inputs[1]))
-      return fail("VqlMaskLinks default must be a Boolean scalar");
+      return fail("default must be a Boolean scalar");
     const auto defaultKeep = arena.asBool(inputs[1]);
-    if (!defaultKeep) return fail("VqlMaskLinks default must be Boolean");
+    if (!defaultKeep) return fail("default must be Boolean");
 
     std::unordered_map<DimRef, std::uint8_t> rules;
     rules.reserve((inputs.size() - 2) / 2);
@@ -1076,27 +1057,23 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
       arena.consumeWork();
       if (cellReferences_.contains(inputs[index]) ||
           cellReferences_.contains(inputs[index + 1]))
-        return fail("VqlMaskLinks dimension and mask must be scalar values");
+        return fail("dimension and mask must be scalar values");
       const auto rawDimension = arena.asInt64(inputs[index]);
       if (!rawDimension || *rawDimension < 0 ||
           static_cast<std::uint64_t>(*rawDimension) >
               std::numeric_limits<DimRef>::max())
-        return fail("VqlMaskLinks dimension must be a valid 32-bit reference");
+        return fail("dimension must be a valid 32-bit reference");
       const auto dimension = static_cast<DimRef>(*rawDimension);
       if (dimension == noCell || !arena.contains(dimension))
-        return fail("VqlMaskLinks dimension must be a valid local dimension");
+        return fail("dimension must be a valid local dimension");
       const auto rawBits = arena.asInt64(inputs[index + 1]);
       if (!rawBits || *rawBits < 0 || *rawBits > 3)
-        return fail("VqlMaskLinks keep bits must be in the range 0..3");
+        return fail("keep bits must be in the range 0..3");
       if (!rules.emplace(dimension, static_cast<std::uint8_t>(*rawBits)).second)
-        return fail("VqlMaskLinks dimensions must be unique");
+        return fail("dimensions must be unique");
     }
 
-    struct Removal {
-      DimRef dimension;
-      DimVector direction;
-    };
-    std::vector<Removal> removals;
+    std::vector<MaskRemoval> removals;
     const auto foreignIndexDimension =
         foreignOwner.has_value() ? arena.storeRefsDimension(foreignOwner->space)
                                  : std::nullopt;
@@ -1105,8 +1082,8 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
                              const std::optional<EffectiveLinkNeighbor> &neg) {
       arena.consumeWork();
       if (!arena.contains(dimension)) {
-        throw std::logic_error(
-            "VqlMaskLinks encountered an unmapped local dimension");
+        throw std::logic_error(std::string{name} +
+                               " encountered an unmapped local dimension");
       }
       const auto rule          = rules.find(dimension);
       const auto planDirection = [&](const DimVector direction,
@@ -1133,7 +1110,7 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
       if (projectionLimits_.maxLinksPerOwner == 0 ||
           projectionLimits_.maxLinksPerOwner >
               std::numeric_limits<std::size_t>::max() / 2) {
-        return fail("VqlMaskLinks directed endpoint limit is invalid");
+        return fail("directed endpoint limit is invalid");
       }
       const auto projected = arena.snapshotLinks(
           *owner,
@@ -1146,29 +1123,28 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
       if (!projected) {
         switch (projected.error()) {
         case zigzag::EffectiveLinkRefusal::UnknownOwner:
-          return fail("VqlMaskLinks effective-link owner is unavailable");
+          return fail("effective-link owner is unavailable");
         case zigzag::EffectiveLinkRefusal::UnmappedDimension:
-          return fail("VqlMaskLinks encountered an unmapped foreign dimension");
+          return fail("encountered an unmapped foreign dimension");
         case zigzag::EffectiveLinkRefusal::AmbiguousDimension:
-          return fail("VqlMaskLinks foreign dimension mapping is ambiguous");
+          return fail("foreign dimension mapping is ambiguous");
         case zigzag::EffectiveLinkRefusal::NameResolutionRequired:
-          return fail(
-              "VqlMaskLinks requires explicit foreign dimension mappings");
+          return fail("requires explicit foreign dimension mappings");
         case zigzag::EffectiveLinkRefusal::LimitExceeded:
-          return fail("VqlMaskLinks effective-link snapshot limit exceeded");
+          return fail("effective-link snapshot limit exceeded");
         case zigzag::EffectiveLinkRefusal::InvalidDimensionDirectory:
-          return fail("VqlMaskLinks Vortex dimension directory is invalid");
+          return fail("Vortex dimension directory is invalid");
         }
       }
       if (projected->size() > projectionLimits_.maxLinksPerOwner)
-        return fail("VqlMaskLinks owner link limit exceeded");
+        return fail("owner link limit exceeded");
       for (const auto &row : *projected) {
         planRow(row.dim, row.pos, row.neg);
       }
     } else {
       const auto links = arena.dimensionsOf(*owner);
       if (links.size() > projectionLimits_.maxLinksPerOwner)
-        return fail("VqlMaskLinks owner link limit exceeded");
+        return fail("owner link limit exceeded");
       const std::vector<DimLink> snapshot(links.begin(), links.end());
       for (const auto &link : snapshot) {
         const auto asNeighbor = [](const std::optional<CellRef> neighbor)
@@ -1181,6 +1157,49 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
       }
     }
 
+    return MaskPlan{.owner        = *owner,
+                    .foreignSpace = foreignOwner
+                                        ? std::optional{foreignOwner->space}
+                                        : std::nullopt,
+                    .removals     = std::move(removals)};
+  } catch (const std::exception &error) {
+    return std::unexpected(std::string{error.what()});
+  }
+}
+
+ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
+                                              std::vector<CellValue> &outputs) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+  try {
+    auto &arena       = core_.arena();
+    const auto inputs = inputsOf(opcode);
+    if (inputs.size() < 2 || (inputs.size() - 2) % 2 != 0 ||
+        !outputsOf(opcode).empty() || !outputs.empty())
+      return fail("VqlMaskLinks expects owner, default, and dimension/mask "
+                  "pairs with no outputs");
+    if (isMemoized(opcode)) return fail("VqlMaskLinks cannot be memoized");
+    if (!core_.preconditionsOf(opcode).empty() ||
+        !core_.postconditionsOf(opcode).empty())
+      return fail("VqlMaskLinks does not support pre/postconditions");
+    if (std::ranges::any_of(inputs, [&](const CellRef slot) {
+          return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+        }))
+      return fail("VqlMaskLinks requires scalar reference slots");
+    if (std::ranges::any_of(inputs, [&](const CellRef slot) {
+          return core_.hasPipeline(slot);
+        }))
+      return fail("VqlMaskLinks does not support parameter pipelines");
+
+    const auto plan = planMaskRemovals("VqlMaskLinks", inputs);
+    if (!plan) return fail(plan.error());
+    const auto &owner       = plan->owner;
+    const auto &removals    = plan->removals;
+    const auto foreignOwner = plan->foreignSpace;
+
     // The proxy map and this rank's tail cache must remain in agreement. Until
     // unlink maintains that cache, reject the exact index axis before writes.
     if (foreignOwner.has_value() && !removals.empty()) {
@@ -1190,7 +1209,7 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
       }
       preflightWork++;
       arena.consumeWork();
-      const auto indexDimension = arena.storeRefsDimension(foreignOwner->space);
+      const auto indexDimension = arena.storeRefsDimension(*foreignOwner);
       if (!indexDimension) {
         return fail("VqlMaskLinks store-ref index identity is unavailable");
       }
@@ -1212,8 +1231,55 @@ ExecutionResult VortexVM::executeVqlMaskLinks(const CellRef opcode,
     zigzag::ArenaSavepoint savepoint(arena);
     for (const auto &removal : removals)
       zigzag::expectWritten(
-          arena.unlink(*owner, removal.dimension, removal.direction));
+          arena.unlink(owner, removal.dimension, removal.direction));
     savepoint.commit();
+    return {};
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+}
+
+// Polarity: the result is true when the mask is NOT satisfied, that is when at
+// least one present link of the owner would be removed. A shape predicate holds
+// exactly when this answer is false, so `{}` is "keep nothing" probing false.
+ExecutionResult VortexVM::executeVqlMaskProbe(const CellRef opcode,
+                                              std::vector<CellValue> &outputs) {
+  const auto fail = [opcode](std::string message) {
+    return ExecutionResult{.success       = false,
+                           .failingClause = opcode,
+                           .errorMessage  = std::move(message)};
+  };
+  try {
+    const auto inputs = inputsOf(opcode);
+    const auto slots  = outputsOf(opcode);
+    if (inputs.size() < 2 || (inputs.size() - 2) % 2 != 0 ||
+        slots.size() != 1 || !outputs.empty())
+      return fail("VqlMaskProbe expects owner, default, dimension/mask pairs "
+                  "and one output");
+    if (std::ranges::find(inputs, slots.front()) != inputs.end())
+      return fail("VqlMaskProbe output must not alias an input");
+    if (isMemoized(opcode)) return fail("VqlMaskProbe cannot be memoized");
+    if (!core_.preconditionsOf(opcode).empty() ||
+        !core_.postconditionsOf(opcode).empty())
+      return fail("VqlMaskProbe does not support pre/postconditions");
+    const auto typed = [this](const CellRef slot) {
+      return streamSlots_.contains(slot) || iteratorSlots_.contains(slot);
+    };
+    if (std::ranges::any_of(inputs, typed) || typed(slots.front()))
+      return fail("VqlMaskProbe requires scalar reference slots");
+    if (std::ranges::any_of(
+            inputs,
+            [&](const CellRef slot) { return core_.hasPipeline(slot); }) ||
+        core_.hasPipeline(slots.front()))
+      return fail("VqlMaskProbe does not support parameter pipelines");
+    if (!core_.arena().contains(slots.front()))
+      return fail("VqlMaskProbe output slot is missing");
+
+    // The same planner as VqlMaskLinks, so the probe and the mask cannot
+    // disagree about which links a mask would remove.
+    const auto plan = planMaskRemovals("VqlMaskProbe", inputs);
+    if (!plan) return fail(plan.error());
+    outputs.emplace_back(!plan->removals.empty());
     return {};
   } catch (const std::exception &error) {
     return fail(error.what());
@@ -1749,9 +1815,10 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
           "ScopedChoice cannot run in a parameter pipeline");
     }
     if (kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlFieldProbe ||
-        kind == OpcodeKind::VqlMaskLinks) {
-      throw std::invalid_argument("ProbeLink/VqlFieldProbe/VqlMaskLinks cannot "
-                                  "run in a parameter pipeline");
+        kind == OpcodeKind::VqlMaskLinks || kind == OpcodeKind::VqlMaskProbe) {
+      throw std::invalid_argument("ProbeLink/VqlFieldProbe/VqlMaskLinks/"
+                                  "VqlMaskProbe cannot run in a parameter "
+                                  "pipeline");
     }
     if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
         kind == OpcodeKind::VqlBoxScalar ||
@@ -1910,9 +1977,9 @@ bool VortexVM::evaluateCondition(CellRef clause,
   if (kind == OpcodeKind::ScopedChoice)
     throw std::invalid_argument("ScopedChoice cannot run as a condition");
   if (kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlFieldProbe ||
-      kind == OpcodeKind::VqlMaskLinks)
-    throw std::invalid_argument(
-        "ProbeLink/VqlFieldProbe/VqlMaskLinks cannot run as conditions");
+      kind == OpcodeKind::VqlMaskLinks || kind == OpcodeKind::VqlMaskProbe)
+    throw std::invalid_argument("ProbeLink/VqlFieldProbe/VqlMaskLinks/"
+                                "VqlMaskProbe cannot run as conditions");
   if (kind == OpcodeKind::VqlString || kind == OpcodeKind::VqlAdd ||
       kind == OpcodeKind::VqlBoxScalar || kind == OpcodeKind::CurrentTimestamp)
     throw std::invalid_argument("scalar opcodes cannot run as conditions");
@@ -2641,6 +2708,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return executeRelationNext(opcode);
   case OpcodeKind::VqlMaskLinks:
     return executeVqlMaskLinks(opcode, outputs);
+  case OpcodeKind::VqlMaskProbe:
+    return executeVqlMaskProbe(opcode, outputs);
   case OpcodeKind::CreateClosure:
   case OpcodeKind::ApplyClosure:
   case OpcodeKind::CheckClosureCall:
@@ -4333,7 +4402,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       const auto clauseKind = getOpcodeKind(actual);
       return clauseKind == OpcodeKind::ProbeLink ||
              clauseKind == OpcodeKind::VqlFieldProbe ||
-             clauseKind == OpcodeKind::VqlMaskLinks;
+             clauseKind == OpcodeKind::VqlMaskLinks ||
+             clauseKind == OpcodeKind::VqlMaskProbe;
     });
   };
   const auto hasVqlScalarCondition = [this](const auto &clauses) {
@@ -4414,7 +4484,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
     return {
         .success = false,
         .errorMessage =
-            "ProbeLink/VqlFieldProbe/VqlMaskLinks cannot run as conditions"};
+            "ProbeLink/VqlFieldProbe/VqlMaskLinks/VqlMaskProbe cannot run as "
+            "conditions"};
   }
   if (hasVqlScalarCondition(core_.preconditionsOf(*op)) ||
       hasVqlScalarCondition(core_.postconditionsOf(*op))) {
@@ -4645,6 +4716,7 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
           kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
           kind == OpcodeKind::CurrentTimestamp ||
           kind == OpcodeKind::ProbeLink || kind == OpcodeKind::VqlMaskLinks ||
+          kind == OpcodeKind::VqlMaskProbe ||
           kind == OpcodeKind::ScopedChoice ||
           kind == OpcodeKind::VqlFieldProbe ||
           kind == OpcodeKind::RelationNext) {
@@ -4688,8 +4760,8 @@ ExecutionResult VortexVM::stepImpl(CellRef cursor) {
       kind != OpcodeKind::SameCell && kind != OpcodeKind::ScopedChoice &&
       kind != OpcodeKind::ResumeInit && kind != OpcodeKind::ResumeSet &&
       kind != OpcodeKind::ProbeLink && kind != OpcodeKind::VqlMaskLinks &&
-      kind != OpcodeKind::VqlFieldProbe && !readsHostState(kind) &&
-      !publishesLogicReference(kind) && !stateful;
+      kind != OpcodeKind::VqlMaskProbe && kind != OpcodeKind::VqlFieldProbe &&
+      !readsHostState(kind) && !publishesLogicReference(kind) && !stateful;
   if (memoizable && isMemoized(*op)) {
     if (const auto key = getMemoKey(*op)) {
       CellRef pin = core_.getOrCreateMemoPin(*key);
