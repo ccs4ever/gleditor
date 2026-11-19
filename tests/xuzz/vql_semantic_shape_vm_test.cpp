@@ -88,13 +88,17 @@ TEST_F(VQLSemanticShapeVmTest, ApplyShapeMasksEveryStreamSubject) {
   EXPECT_EQ(arena.linked(subject, keep, DimVector::POS), kept);
 }
 
-TEST_F(VQLSemanticShapeVmTest, AssignmentsOverSeveralSubjectsRefuseByName) {
+// Two subjects sharing one reciprocal target collide; the check runs at run
+// time over cell identity, so the failure is a named collision, not a compile
+// refusal, and it comes before the mask.
+TEST_F(VQLSemanticShapeVmTest, AssignmentsOverSeveralSubjectsCollideByName) {
   const auto other  = arena.makeCell("other");
   const auto target = arena.makeCell("target");
   engine.setVariable("both", std::vector<zigzag::CellRef>{subject, other});
   engine.setVariable("target", target);
   const auto message = refusalOf("apply_shape($both, {+d.edge: $target})");
-  EXPECT_NE(message.find("cell-identity"), std::string::npos) << message;
+  EXPECT_NE(message.find("shape assignment collision"), std::string::npos)
+      << message;
   expectUntouched();
   EXPECT_FALSE(arena.linked(target, edge, DimVector::NEG));
 }
