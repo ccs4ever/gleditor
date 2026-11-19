@@ -880,6 +880,38 @@ public:
   /// Refused under the same rule as release().
   [[nodiscard]] MarkResult discard(const Mark &m) noexcept;
 
+  /// A release epoch: how many times release() has truncated cells away. A
+  /// cell number is reused after such a release, so a number alone does not
+  /// name a cell for long; a (number, epoch) pair does. A truncating
+  /// release(), hydratePrefix(), and assigning one arena over another (all of
+  /// which replace cells) advance it, so across every one of those it only
+  /// grows, and an assignment lands strictly above both arenas' epochs: a
+  /// witness taken from either arena before the assignment cannot validate a
+  /// cell after it. It is arena-local: it says nothing about a copy that has
+  /// since diverged.
+  using ReleaseEpoch = std::uint64_t;
+
+  /// The epoch cells minted now would be born in.
+  [[nodiscard]] ReleaseEpoch releaseEpoch() const noexcept {
+    return epochs_.epoch;
+  }
+
+  /**
+   * @brief The epoch @p ref was minted in, or nullopt when no such cell exists.
+   *
+   * The witness for a cell number held as a bare Int64 (a ref-box, a table
+   * key, a CellOfInt operand): record epochOfCell(n) when the number is taken,
+   * and it still names the same cell exactly when epochOfCell(n) is the
+   * recorded value. A released cell's number, minted again, answers a later
+   * epoch; a number no cell holds answers nullopt.
+   *
+   * A base cell is permanent (release() cannot truncate it) and answers
+   * epoch 0, as does a shadow of one: it is the same cell. compact() moves
+   * runs, never cells, so it changes no answer. promote() only reads the
+   * arena, so the arena cell it promoted keeps its epoch.
+   */
+  [[nodiscard]] std::optional<ReleaseEpoch> epochOfCell(CellRef ref) const;
+
   /// How many choice points are outstanding. Nonzero forbids compaction.
   [[nodiscard]] std::uint32_t outstandingMarks() const noexcept {
     return outstandingMarks_;
@@ -1029,6 +1061,44 @@ private:
   };
   std::vector<Floors> floors_;
   std::uint64_t lastMarkSerial_{0};
+
+  /// Cells [firstDense, next run's firstDense) were minted in `epoch`; cells
+  /// before the first run (and base cells) were minted in `floor`. Runs ascend
+  /// by firstDense. One is added only when a release truncates, so the cost is
+  /// one entry per truncating release above a live cell, not a word per cell.
+  struct EpochRun {
+    std::uint32_t firstDense{0};
+    ReleaseEpoch epoch{0};
+  };
+  /// Its own type so that the defaulted copy/move assignment of the arena
+  /// replaces cells *and* moves the epoch strictly forward, instead of
+  /// restarting it at 0 and letting an old witness validate a new cell.
+  struct EpochState {
+    ReleaseEpoch epoch{0};
+    ReleaseEpoch floor{0};
+    std::vector<EpochRun> runs;
+
+    EpochState()                       = default;
+    EpochState(const EpochState &)     = default;
+    EpochState(EpochState &&) noexcept = default;
+    EpochState &operator=(const EpochState &other) noexcept {
+      return replacedBy(other);
+    }
+    EpochState &operator=(EpochState &&other) noexcept {
+      return replacedBy(other);
+    }
+    ~EpochState() = default;
+
+  private:
+    EpochState &replacedBy(const EpochState &other) noexcept {
+      if (this == &other) return *this;
+      epoch = std::max(epoch, other.epoch) + 1;
+      floor = epoch;
+      runs.clear();
+      return *this;
+    }
+  };
+  EpochState epochs_;
 
   /// The refusal for releasing or discarding @p m now, if any.
   [[nodiscard]] std::optional<MarkRefusal>
