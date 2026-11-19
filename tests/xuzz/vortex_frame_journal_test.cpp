@@ -1,8 +1,13 @@
-// The frame opcodes' rollback must cost what a frame changes, not what the VM
-// has accumulated. Before the journal, InvokeFrame and ReturnFrame copied every
-// VM table on each call, so a host that runs the VM once per step (VLace's lazy
-// render and IO loop, the VQL executor) paid for every earlier run on every
-// call. These tests assert on counts (table entries copied), never on time.
+// What these tests assert: the size of the undo journal a frame opcode keeps,
+// read through VortexVM::frameTableEntriesCopied(), is the same on every call
+// of the same program, however many runs finished before it and however large
+// the VM's unrelated tables are. The tests need that counter, so they do not
+// compile against the code from before the journal (which had no such counter);
+// the failing-first evidence for the old behaviour is the same program with the
+// counter added to the old whole-table copies (16 entries on the first run,
+// 488 by run 60 in the nested case), recorded in commit 19e2c3cb. Exactness of
+// the rollback itself is vortex_frame_rollback_test.cpp. Counts only; nothing
+// here asserts on time.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -12,6 +17,7 @@
 
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "vortex_frame_test_access.hpp"
 
 namespace zigzag::vortex {
 namespace {
@@ -195,6 +201,27 @@ TEST(VortexFrameJournalTest, TheCostOfCreatingAClosureDoesNotGrowWithRuns) {
   }
   const auto [lowest, highest] = std::ranges::minmax(perRun);
   EXPECT_EQ(lowest, highest);
+}
+
+/// Entries one call of a program costs after @p unrelated entries were put in
+/// the reference and guard-scope tables, none of them named by the program.
+std::size_t costWithUnrelatedEntries(const std::size_t unrelated) {
+  Harness h;
+  const auto frame = h.addOneFrame();
+  // Keys far above every cell the program mints, so none is its own.
+  constexpr CellRef firstUnrelated = 1U << 24;
+  FrameTestAccess::seedUnrelated(h.vm, unrelated, firstUnrelated);
+  const auto before        = h.vm.frameTableEntriesCopied();
+  const auto [cursor, out] = h.freshRun(frame, firstArgument);
+  const auto execution     = h.vm.run(cursor, 100);
+  EXPECT_TRUE(execution.success) << execution.errorMessage;
+  return h.vm.frameTableEntriesCopied() - before;
+}
+
+TEST(VortexFrameJournalTest, TheCostOfACallDoesNotDependOnUnrelatedTables) {
+  constexpr std::size_t manyUnrelated = 10'000;
+  EXPECT_EQ(costWithUnrelatedEntries(0),
+            costWithUnrelatedEntries(manyUnrelated));
 }
 
 } // namespace
