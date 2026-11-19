@@ -80,12 +80,16 @@ TEST(VortexMaskProbeWiringTest, VagentCeilingReachesTheProbeAndStopsThere) {
   ASSERT_TRUE(binds.has_value());
   xanadu::vagent::MetaRuntime meta(h.core, h.vm, *binds);
 
-  // The probe is a decodable op, so validation gets as far as the arity table,
-  // which lists no host-state kinds and refuses the probe there by name.
+  // The probe is a decodable op the arity table lists (owner, default, then
+  // mask pairs, one output), so a bare one is refused on its wing arity and
+  // the refusal names the ordinal; a well-formed one passes.
   const auto probe = h.vm.mintOpcode(OpcodeKind::VqlMaskProbe);
   const auto known = meta.validate(probe, {.runReachable = false});
   EXPECT_FALSE(known.ok);
-  EXPECT_NE(known.detail.find("arity table"), std::string::npos)
+  EXPECT_NE(known.detail.find("wing arity"), std::string::npos) << known.detail;
+  EXPECT_NE(known.detail.find(
+                std::to_string(static_cast<int>(OpcodeKind::VqlMaskProbe))),
+            std::string::npos)
       << known.detail;
 
   // One ordinal further is not an op at all.

@@ -92,12 +92,20 @@ struct MetaDimensions {
 /// - `arityTable` — a cell whose `+d.step` rank lists one `(op, in, out)`
 ///   Int64 triple per op kind, in the recipe-tuple convention: three
 ///   consecutive members name the op ordinal, the input-wing arity and the
-///   output-wing arity. A visited op kind absent from the table fails.
+///   output-wing arity. A visited op kind absent from the table fails,
+///   and the refusal names the ordinal. For a kind listed in
+///   `variadicKinds` the input arity is a minimum.
+/// - `variadicKinds` — a cell whose `+d.step` rank lists `(op, stride)`
+///   Int64 pairs for the kinds whose input wing is a fixed head followed by
+///   repeated groups of `stride` operands (VqlMaskProbe's dimension/mask
+///   pairs, ProjectTopology's edge pairs): the input count must be the
+///   table's minimum plus a whole number of strides.
 /// - `impureKinds` — a cell whose `+d.step` rank lists the Int64 op ordinals
 ///   a `pure`-flagged fragment may not contain.
 struct MetaValidateConstants {
   CellRef linkedCeiling{noCell};
   CellRef arityTable{noCell};
+  CellRef variadicKinds{noCell};
   CellRef impureKinds{noCell};
 };
 
