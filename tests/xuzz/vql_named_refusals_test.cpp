@@ -52,8 +52,10 @@ TEST_F(VQLNamedRefusalTest, LensNamesItselfAndIsNotATypo) {
 TEST_F(VQLNamedRefusalTest, PivotAndComputedDimensionNameTheirForms) {
   const auto source = arena.makeCell("task");
   engine.setVariable("task", source);
-  EXPECT_THAT(refusalOf("$task{ d.1 <=> d.priority }"),
-              testing::HasSubstr("dimension pivot"));
+  // A pivot lowers to a dynamic view now (vql_dynamic_view_lowering_test.cpp);
+  // it still refuses inside project() and apply_shape().
+  EXPECT_THAT(refusalOf("project($task, { d.1 <=> d.priority })"),
+              testing::HasSubstr("pivot, computed-dimension"));
   EXPECT_THAT(refusalOf("$task{ +d.label := ./value() }"),
               testing::HasSubstr("computed dimension"));
 }

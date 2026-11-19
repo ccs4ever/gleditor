@@ -75,7 +75,24 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
                                                bool hasContext,
                                                bool allowInitialEmptyCall) {
   for (std::size_t stepIndex = 0; stepIndex < steps.size(); ++stepIndex) {
-    const auto &step = steps[stepIndex];
+    const auto &written = steps[stepIndex];
+    // A stream seen through a dynamic view: the step is compiled against the
+    // source with the view's rules (compile_dynamic_view.cpp).
+    auto view = viewOfStream(stream);
+    std::optional<PathStep> viewStep;
+    bool viewEnds = false;
+    if (view) {
+      auto plan = planViewStep(*view, written);
+      if (!plan.step) {
+        // Hidden by a mask: nothing is read and nothing is created.
+        if (written.yieldMode != YieldMode::Keep) stream = {emitStreamClear()};
+        hasContext = true;
+        continue;
+      }
+      viewStep = std::move(plan.step);
+      viewEnds = plan.endsView;
+    }
+    const PathStep &step = viewStep ? *viewStep : written;
     if (step.versionPin) {
       stream =
           compileVersionPinnedStep(step, std::move(stream), hasContext,
@@ -259,6 +276,22 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
 
     if (step.rangeClamp) nextStream = emitClamp(nextStream, *step.rangeClamp);
 
+    if (view && creationStep) {
+      // The created cell is a plain cell, not a handle (a handle needs a
+      // compile-time source). Marking it makes a later step from it refuse by
+      // name rather than walk it without the view's rules.
+      const auto marker =
+          static_cast<std::int64_t>(resolveDimension(viewMarkerDimension));
+      nextStream = emitMap(nextStream, [&](const CellRef created) {
+        const CellRef group = beginMutationGroup("#VIEW_MARK_GROUP");
+        const auto mint     = emitOp(OpcodeKind::New, "#VIEW_MARK");
+        emitInput(mint, created);
+        emitInputConstant(mint, marker);
+        emitInputConstant(mint, std::int64_t{1});
+        endMutationGroup(group, "#VIEW_MARK_GROUP_END");
+        return std::vector<CellRef>{created};
+      });
+    }
     if (creationStep) {
       if (step.yieldMode == YieldMode::Keep) {
         // Keep the incoming context while retaining the selector's writes.
@@ -280,6 +313,11 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
     }
     if (step.projectionAfter)
       stream = applyShapeProjection(stream, *step.projectionAfter);
+    if (view && !viewEnds) {
+      ViewMark reached = *view;
+      reached.created  = creationStep;
+      markViewStream(stream, reached);
+    }
     hasContext = true;
   }
 
