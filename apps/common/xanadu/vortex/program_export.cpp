@@ -152,6 +152,7 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
                                instructions);
   }
   std::set<CellRef> visitedInstructions;
+  std::vector<CellRef> numberOperands;
   for (std::size_t index = 0; index < instructions.size(); ++index) {
     const auto opcode = instructions[index];
     arena.consumeWork();
@@ -227,6 +228,19 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
             "structural dimension operand is not relocatable");
       dimensionOperands.emplace(inputs[1], static_cast<DimRef>(*value));
     }
+    // A cell number is data, not a reference operand, so export cannot
+    // relocate it: a constant naming a cell here would name a different cell
+    // (or none) once loaded. CellOfInt is therefore exportable only when its
+    // operand is computed by an exported instruction; the check runs after the
+    // walk, when every output slot is known.
+    if (*kind == OpcodeKind::CellOfInt || *kind == OpcodeKind::IntOfCell) {
+      if (core.inputsOf(opcode).size() != 1 ||
+          core.outputsOf(opcode).size() != 1)
+        throw std::runtime_error(
+            "cell-number conversion needs one input and one output");
+      if (*kind == OpcodeKind::CellOfInt)
+        numberOperands.push_back(core.inputsOf(opcode).front());
+    }
     // The probe carries the mask's operands and differs only by its one
     // output, so both name dimensions that must follow the program across.
     if (*kind == OpcodeKind::VqlMaskLinks ||
@@ -253,6 +267,16 @@ exportProgram(const VortexCore &core, const VortexVM &vm,
         dimensionOperands.emplace(inputs[index], static_cast<DimRef>(*value));
       }
     }
+  }
+  if (!numberOperands.empty()) {
+    std::set<CellRef> computed;
+    for (const auto opcode : visitedInstructions)
+      for (const auto output : core.outputsOf(opcode)) computed.insert(output);
+    for (const auto operand : numberOperands)
+      if (!computed.contains(operand))
+        throw std::runtime_error(
+            "CellOfInt operand is a constant Int64 cell number that export "
+            "cannot relocate");
   }
   for (const auto &[operand, axis] : dimensionOperands)
     referenceOperands.emplace(operand, axis);

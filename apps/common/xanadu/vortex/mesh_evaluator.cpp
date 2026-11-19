@@ -263,6 +263,12 @@ bool pureOpcode(OpcodeKind opcode) {
   // Reads the evaluating arena's links, which no artifact carries, so its
   // answer is not a function of the operands.
   case OpcodeKind::VqlMaskProbe:
+  // The evaluating arena is copy-on-write over the job's base snapshot, so a
+  // literal Int64 names whatever cell the snapshot holds at that number, and
+  // the numbers IntOfCell returns shift with the snapshot and with genesis.
+  // The same sealed bytes would answer differently per arena.
+  case OpcodeKind::CellOfInt:
+  case OpcodeKind::IntOfCell:
     return false;
   case OpcodeKind::ResumeInit:
   case OpcodeKind::ResumeSet:
@@ -356,6 +362,13 @@ void validateProgram(const VortexProgram &program, SyntaxLimits limits) {
       throw std::runtime_error(
           "Vortex mesh does not support VqlMaskProbe: it reads the links of "
           "the evaluating arena");
+    if (instruction.opcode == OpcodeKind::CellOfInt ||
+        instruction.opcode == OpcodeKind::IntOfCell)
+      throw std::runtime_error(
+          std::string{"Vortex mesh does not support "} +
+          (instruction.opcode == OpcodeKind::CellOfInt ? "CellOfInt"
+                                                       : "IntOfCell") +
+          ": a cell number depends on the evaluating arena's snapshot");
     if (instruction.opcode == OpcodeKind::ProjectTopology)
       throw std::runtime_error(
           "Vortex mesh does not support ProjectTopology: it mints cells on "
@@ -563,8 +576,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 ||
-        opcode > static_cast<std::int64_t>(OpcodeKind::VqlMaskProbe))
+    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::IntOfCell))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

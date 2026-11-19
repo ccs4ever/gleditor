@@ -363,6 +363,10 @@ VPLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "PROJECT_TOPOLOGY";
   case OpcodeKind::VqlMaskProbe:
     return "VQL_MASK_PROBE";
+  case OpcodeKind::CellOfInt:
+    return "CELL_OF_INT";
+  case OpcodeKind::IntOfCell:
+    return "INT_OF_CELL";
   default:
     return "UNKNOWN";
   }
