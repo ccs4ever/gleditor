@@ -21,6 +21,7 @@
 // count() as a path step needs the whole incoming walk, so compileSteps hands
 // it to compilePathFunctionWalk ahead of the per-cell emitMap.
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/prose_hits.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -64,13 +65,12 @@ void requirePositional(const FunctionInvocation &fn) {
                        QueryErrorCategory::Malformed);
 }
 
-// find reads store documents and answers quote cells over their spans; neither
-// is something a graph can do today.
-void refuseFind(const FunctionInvocation &fn) {
-  requireArity(fn, 1, "one needle");
-  refusePathFunction(fn, "is not compiled to Vortex yet: searching document "
-                         "prose needs a substring-search opcode and a quote "
-                         "constructor, and neither exists");
+// A step runs once per current cell, and find ignores the cell it is applied
+// to, so lowering it there would repeat every hit once per cell in the walk:
+// a wrong answer that looks right. It refuses instead.
+[[noreturn]] void refuseFindStep(const FunctionInvocation &fn) {
+  refusePathFunction(fn, "find is only supported as an anchor, not as a path "
+                         "step");
 }
 
 } // namespace
@@ -82,7 +82,7 @@ std::vector<CellRef> VQLCompiler::compilePathFunctionStep(
     refusePathFunction(fn, "without an argument counts the whole walk, and "
                            "step lowering runs once per cell; not compiled "
                            "yet");
-  if (fn.name == "find") refuseFind(fn);
+  if (fn.name == "find" && hasContext) refuseFindStep(fn);
   // A top-level call parses as a step, so the argument form is evaluated per
   // current cell, as the string builtin and user calls are.
   return compilePathFunctionCall(fn, hasContext ? std::optional{current}
@@ -121,9 +121,83 @@ VQLCompiler::compilePathFunctionWalk(const FunctionInvocation &fn,
 }
 
 std::vector<CellRef>
+VQLCompiler::compileFind(const FunctionInvocation &fn,
+                         const std::optional<CellRef> context) {
+  requireArity(fn, 1, "one needle");
+  requirePositional(fn);
+  const auto fresh = [&] { return core_.arena().makeCell(); };
+  const auto add   = [&](CellRef left, CellRef right, CellRef destination) {
+    const auto opcode = emitOp(OpcodeKind::Add, "#FIND_ADD");
+    emitInput(opcode, left);
+    emitInput(opcode, right);
+    emitOutput(opcode, destination);
+  };
+  const auto jump = [&](CellRef target) {
+    const auto opcode = emitOp(OpcodeKind::BranchFalseCell, "#FIND_JUMP");
+    emitInputConstant(opcode, false);
+    emitInput(opcode, target);
+  };
+
+  const auto needleCells = compileArgument(fn.args.front(), context);
+  const auto result      = emitStreamClear();
+  // An absent needle finds nothing, as the direct evaluator answered.
+  const auto present = emitStreamPresence(needleCells);
+  const auto done    = mintOpcode(OpcodeKind::Nop, "#FIND_END");
+  const auto skip    = emitOp(OpcodeKind::BranchFalseCell, "#FIND_NO_NEEDLE");
+  emitInput(skip, present);
+  emitInput(skip, done);
+
+  const auto begin = emitOp(OpcodeKind::StreamBegin, "#FIND_NEEDLE_BEGIN");
+  for (const auto cell : needleCells) emitInput(begin, cell);
+  const auto iterator = fresh();
+  emitOutput(begin, iterator);
+  const auto first = emitOp(OpcodeKind::IteratorNext, "#FIND_NEEDLE");
+  emitInput(first, iterator);
+  const auto needle = fresh();
+  const auto isLast = fresh();
+  emitOutput(first, needle);
+  emitOutput(first, isLast);
+
+  // The scan of emitRelationGoal without the logic layer: position and limit
+  // start at zero, the provider answers one hit per call, and a miss ends it.
+  // Outputs may not alias inputs, so the next position and limit are copied
+  // back through an Add.
+  const auto zero     = emitConstant(std::int64_t{0});
+  const auto position = fresh();
+  const auto limit    = fresh();
+  add(zero, zero, position);
+  add(zero, zero, limit);
+  const auto top  = emitOp(OpcodeKind::Nop, "#FIND_NEXT");
+  const auto next = emitOp(OpcodeKind::RelationNext, "#FIND_RELATION_NEXT");
+  emitInputConstant(next, std::string{findRelationName});
+  emitInput(next, position);
+  emitInput(next, limit);
+  emitInput(next, needle);
+  const auto found        = fresh();
+  const auto nextPosition = fresh();
+  const auto nextLimit    = fresh();
+  const auto hit          = fresh();
+  emitOutput(next, found);
+  emitOutput(next, nextPosition);
+  emitOutput(next, nextLimit);
+  emitOutput(next, hit);
+  const auto exhausted = emitOp(OpcodeKind::BranchFalseCell, "#FIND_EXHAUSTED");
+  emitInput(exhausted, found);
+  emitInput(exhausted, done);
+  const auto append = emitOp(OpcodeKind::StreamAppend, "#FIND_YIELD");
+  emitInput(append, hit);
+  emitOutput(append, result);
+  add(nextPosition, zero, position);
+  add(nextLimit, zero, limit);
+  jump(top);
+  appendOpcode(done);
+  return {result};
+}
+
+std::vector<CellRef>
 VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
                                      const std::optional<CellRef> context) {
-  if (fn.name == "find") refuseFind(fn);
+  if (fn.name == "find") return compileFind(fn, context);
   if (fn.name != "count" && fn.name != "sort_into" && fn.name != "contains")
     throwUnresolvedFunction(fn, QueryErrorCategory::Unsupported);
 

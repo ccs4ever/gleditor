@@ -7,9 +7,14 @@
 #include <vector>
 
 #include "common/xanadu/multi_store.hpp"
+#include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu::vql {
+
+/// The relation name a lowered `find` asks RelationNext for. It cannot collide
+/// with a logic relation, whose names carry no dot-qualified `vql.` prefix.
+inline constexpr std::string_view findRelationName = "vql.find";
 
 /// The quote cell of every line of every loaded store's current documents that
 /// holds @p needle, in the order stores, then `currentVersions()`, then offset
@@ -21,5 +26,22 @@ namespace xanadu::vql {
 [[nodiscard]] std::vector<zigzag::CellRef>
 proseHits(MultiStoreCoordinator &coordinator, std::string_view needle,
           zigzag::ArenaManifold &arena);
+
+/// What `find` answers: per store, in store order, first every manifold cell
+/// whose text holds @p needle (as the arena's proxy for it), then that store's
+/// document-line hits as proseHits() describes them. Mints and charges as
+/// proseHits() does.
+[[nodiscard]] std::vector<zigzag::CellRef>
+findHits(MultiStoreCoordinator &coordinator, std::string_view needle,
+         zigzag::ArenaManifold &arena);
+
+/// The provider RelationNext asks for findRelationName: one argument, the
+/// needle's cell. The first call of a scan (position 0) computes findHits() and
+/// keeps the list; later positions index into it, so a scan costs one search,
+/// not one per hit. The list is the provider's own and is dropped with it, so
+/// a second scan never sees the first one's hits. Register it for the length of
+/// one query run and remove it after.
+[[nodiscard]] zigzag::vortex::RelationProvider
+makeFindProvider(MultiStoreCoordinator &coordinator);
 
 } // namespace xanadu::vql
