@@ -551,6 +551,9 @@ private:
         foldMint{}, foldAllowed{}, foldPhysical{}, foldComputed{};
   };
   std::optional<ViewRoutines> viewRoutines_;
+  /// Handles this compile minted as constants: they get their epoch witness
+  /// when the run settles, so until then they have none and need none.
+  std::unordered_set<zigzag::CellRef> ownHandles_;
   const ViewRoutines &viewRoutines(const ViewDimensions &dims);
   void emitCallRoutine(zigzag::CellRef entry);
   void emitWrite(zigzag::CellRef slot, const zigzag::vortex::CellValue &value);

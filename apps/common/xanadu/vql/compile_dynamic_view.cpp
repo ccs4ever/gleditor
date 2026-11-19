@@ -326,6 +326,7 @@ VQLCompiler::lowerDynamicView(const ShapeLiteral &shape,
     zigzag::expectWritten(
         arena.link(handle, dims.of, false,
                    arena.makeScalarCell(static_cast<std::int64_t>(view))));
+    ownHandles_.insert(handle);
     made.emplace_back(owner, handle);
     handles.push_back(handle);
     GLEDITOR_LOG_DEBUG("vql.compile", "dynamic view handle {} over cell {}",

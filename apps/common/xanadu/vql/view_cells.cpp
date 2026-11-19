@@ -128,28 +128,39 @@ void recordViewWitnesses(zigzag::ArenaManifold &arena,
 
 std::optional<std::string> staleHandleReason(const zigzag::ArenaManifold &arena,
                                              const ViewDimensions &dims,
-                                             const CellRef cell) {
+                                             const CellRef cell,
+                                             const bool witnessed) {
   if (!arena.contains(cell)) return std::nullopt;
   const auto sourceBox = arena.linked(cell, dims.marker, DimVector::POS);
   const auto viewBox   = arena.linked(cell, dims.of, DimVector::POS);
-  const auto first     = arena.linked(cell, dims.epoch, DimVector::POS);
-  if (!sourceBox || !viewBox || !first) return std::nullopt;
-  const auto second  = arena.linked(*first, dims.epoch, DimVector::POS);
-  const auto differs = [&](const CellRef box, const CellRef witness) {
-    const auto named    = numberIn(arena, box);
-    const auto recorded = arena.asInt64(witness);
-    if (!named || !recorded) return false;
-    const auto now = arena.epochOfCell(*named);
-    return !now || static_cast<std::int64_t>(*now) != *recorded;
+  if (!sourceBox || !viewBox) return std::nullopt;
+  const auto first = arena.linked(cell, dims.epoch, DimVector::POS);
+  const auto second =
+      first ? arena.linked(*first, dims.epoch, DimVector::POS) : std::nullopt;
+  const auto number = [&](const std::optional<CellRef> witness) {
+    return witness ? arena.asInt64(*witness) : std::nullopt;
   };
-  if (differs(*sourceBox, *first))
-    return "VQL a dynamic view handle's source cell was released and its "
-           "number reused: the handle no longer names the cell it was made "
-           "over";
-  if (second && differs(*viewBox, *second))
-    return "VQL a dynamic view handle's view cell was released and its number "
-           "reused: the handle no longer names the view it was made with";
-  return std::nullopt;
+  if (witnessed && (!number(first) || !number(second)))
+    return "VQL a dynamic view handle has no valid epoch witness: it was not "
+           "made by a query of this session, so whether its source and view "
+           "numbers still name their cells cannot be told";
+  const auto check = [&](const CellRef box,
+                         const std::optional<std::int64_t> recorded,
+                         const char *what) -> std::optional<std::string> {
+    const auto named = numberIn(arena, box);
+    if (!named) return std::nullopt;
+    const auto now = arena.epochOfCell(*named);
+    if (!now)
+      return std::string{"VQL a dynamic view handle's "} + what +
+             " cell is no longer a cell: it was released";
+    if (recorded && static_cast<std::int64_t>(*now) != *recorded)
+      return std::string{"VQL a dynamic view handle's "} + what +
+             " cell was released and its number reused: the handle no longer "
+             "names the cell it was made with";
+    return std::nullopt;
+  };
+  if (const auto why = check(*sourceBox, number(first), "source")) return why;
+  return check(*viewBox, number(second), "view");
 }
 
 } // namespace xanadu::vql

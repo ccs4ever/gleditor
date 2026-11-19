@@ -88,8 +88,8 @@ std::vector<CellRef> VQLCompiler::compileSteps(std::span<const PathStep> steps,
       // nothing and say nothing. Only a cell the compiler holds can be seen.
       for (const CellRef cell : stream) {
         if (viewDims)
-          if (const auto stale =
-                  staleHandleReason(core_.arena(), *viewDims, cell))
+          if (const auto stale = staleHandleReason(
+                  core_.arena(), *viewDims, cell, !ownHandles_.contains(cell)))
             throw QueryRefusal(QueryErrorCategory::Unsupported, *stale);
         if (carriesForeignViewMarker(core_.arena(), viewDims, cell))
           throw QueryRefusal(

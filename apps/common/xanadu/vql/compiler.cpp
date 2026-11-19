@@ -479,6 +479,7 @@ CompilationResult VQLCompiler::compileOnce(const QueryExpression &query,
   viewGuardsSkipped_ = false;
   viewDimensions_.reset();
   viewRoutines_.reset();
+  ownHandles_.clear();
   if (nameViewDimensions) viewDimensions_ = ensureViewDimensions(core_);
   for (const auto &[name, cells] : options.initialBindings) {
     constantCells_.insert(cells.begin(), cells.end());
@@ -758,6 +759,7 @@ VQLCompiler::compilePathExpression(const PathExpression &path,
   } const guardScope{guardSteps_, guardSteps_};
   guardSteps_ = path.anchor.kind == AnchorKind::Variable ||
                 path.anchor.kind == AnchorKind::Context ||
+                path.anchor.kind == AnchorKind::LiteralCellId ||
                 static_cast<bool>(path.anchorProjection);
   std::vector<CellRef> stream;
   if (path.anchor.kind == AnchorKind::Variable &&

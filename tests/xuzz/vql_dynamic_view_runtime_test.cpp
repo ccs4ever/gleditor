@@ -490,6 +490,87 @@ void repoint(zigzag::ArenaManifold &arena, VQLEngine &engine,
 }
 } // namespace
 
+TEST_F(VQLDynamicViewRuntimeTest, ALiteralIdNamingAHandleStepsIt) {
+  const auto view = engine.execute("##{ d.1 <=> d.priority }");
+  ASSERT_EQ(view.size(), 1u);
+  const auto id = "#" + std::to_string(view.front());
+  EXPECT_EQ(textsOf(id + "/+d.1/value()"), "high,urgent");
+  EXPECT_EQ(textsOf(id + "/+d.1/+d.1/value()"), "urgent");
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, AStaleHandleNamedByIdRefuses) {
+  warm();
+  const auto view = engine.execute("$task{ d.1 <=> d.priority }");
+  ASSERT_EQ(view.size(), 1u);
+  const auto mark  = arena.mark();
+  const auto freed = static_cast<std::int64_t>(arena.makeCell("short lived"));
+  ASSERT_TRUE(arena.release(mark).has_value());
+  ASSERT_EQ(static_cast<std::int64_t>(arena.makeCell("reused")), freed);
+  repoint(arena, engine, view.front(), "d.vql.view", freed);
+  EXPECT_THAT(refusalOf("#" + std::to_string(view.front()) + "/+d.1/value()"),
+              testing::HasSubstr("number reused"));
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, AForeignHandleNamedByIdRefuses) {
+  const auto view = engine.execute("$task{ d.1 <=> d.priority }");
+  ASSERT_EQ(view.size(), 1u);
+  VQLEngine other{arena};
+  std::string message;
+  try {
+    (void)other.execute("#" + std::to_string(view.front()) + "/+d.1/value()");
+  } catch (const std::exception &error) {
+    message = error.what();
+  }
+  EXPECT_THAT(message, testing::HasSubstr("another core"));
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, ANumberNamingNoCellSaysSo) {
+  warm();
+  const auto view = engine.execute("$task{ d.1 <=> d.priority }");
+  ASSERT_EQ(view.size(), 1u);
+  const auto mark  = arena.mark();
+  const auto freed = static_cast<std::int64_t>(arena.makeCell("short lived"));
+  ASSERT_TRUE(arena.release(mark).has_value());
+  repoint(arena, engine, view.front(), "d.vql.view", freed);
+  engine.setVariable("v", view);
+  const auto message = refusalOf("$v/+d.1/value()");
+  EXPECT_THAT(message, testing::HasSubstr("no longer a cell"));
+  EXPECT_THAT(message, testing::Not(testing::HasSubstr("number reused")));
+}
+
+TEST_F(VQLDynamicViewRuntimeTest, AHandleWithoutAValidWitnessRefuses) {
+  warm();
+  const auto view = engine.execute("$task{ d.1 <=> d.priority }");
+  ASSERT_EQ(view.size(), 1u);
+  const auto box =
+      arena.linked(view.front(), engine.resolveDimension("d.vql.of"),
+                   zigzag::DimVector::POS);
+  ASSERT_TRUE(box.has_value());
+  // A forged handle: both boxes, no witness.
+  const auto forged = arena.makeCell("forged");
+  zigzag::expectWritten(
+      arena.link(forged, engine.resolveDimension("d.vql.view"), false,
+                 arena.makeScalarCell(static_cast<std::int64_t>(source))));
+  zigzag::expectWritten(arena.link(forged, engine.resolveDimension("d.vql.of"),
+                                   false,
+                                   arena.makeScalarCell(*arena.asInt64(*box))));
+  engine.setVariable("f", forged);
+  EXPECT_THAT(refusalOf("$f/+d.1/value()"),
+              testing::HasSubstr("epoch witness"));
+  // A real handle whose witness was overwritten with text.
+  const auto witness =
+      arena.linked(view.front(), engine.resolveDimension("d.vql.epoch"),
+                   zigzag::DimVector::POS);
+  ASSERT_TRUE(witness.has_value());
+  ASSERT_TRUE(engine.core()
+                  .writeValue(*witness, 0, std::nullopt,
+                              zigzag::vortex::CellValue{std::string{"x"}})
+                  .has_value());
+  engine.setVariable("v", view);
+  EXPECT_THAT(refusalOf("$v/+d.1/value()"),
+              testing::HasSubstr("epoch witness"));
+}
+
 TEST_F(VQLDynamicViewRuntimeTest, AReusedSourceNumberRefusesByName) {
   // A handle names its source by number and records, beside it, the epoch the
   // source was minted in. A number reused by a later cell answers another

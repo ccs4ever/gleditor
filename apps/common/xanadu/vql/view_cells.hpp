@@ -100,11 +100,14 @@ void recordViewWitnesses(zigzag::ArenaManifold &arena,
                          const ViewDimensions &dims,
                          std::span<const zigzag::CellRef> cells);
 
-/// Why @p cell, if a handle, can no longer be trusted: a box names a cell
-/// whose epoch is not the one recorded, so the number was released and reused.
+/// Why @p cell, if a handle, can no longer be trusted: a box names no cell, or
+/// a cell whose epoch is not the one recorded (the number was released and
+/// reused), or the witness itself is missing or not a number. A handle the
+/// host has not settled yet (@p witnessed false) is exempt from the last.
 [[nodiscard]] std::optional<std::string>
 staleHandleReason(const zigzag::ArenaManifold &arena,
-                  const ViewDimensions &dims, zigzag::CellRef cell);
+                  const ViewDimensions &dims, zigzag::CellRef cell,
+                  bool witnessed = true);
 
 /// True when @p cell carries a link on a dimension named like the marker.
 /// Looked up by the name on the cell's own links, not through a core's
