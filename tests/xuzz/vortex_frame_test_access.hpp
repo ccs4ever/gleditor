@@ -182,6 +182,13 @@ struct FrameTestAccess {
     }
   }
 
+  /// Makes @p cursor (or nobody) the stream owner, as an earlier run of another
+  /// cursor leaves it, so that the next stream opcode takes the handover path.
+  static void setStreamCursor(VortexVM &vm,
+                              const std::optional<CellRef> cursor) {
+    vm.streamCursor_ = cursor;
+  }
+
   static std::vector<CellRef> destinations(const VortexVM &vm,
                                            const CellRef cursor) {
     const auto frame = top(vm, cursor);

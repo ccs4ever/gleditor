@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -54,6 +55,7 @@ struct Scenario {
   VortexCore core{arena};
   VortexVM vm{core};
   CellRef cursor{};
+  CellRef other{}; // a finished cursor that can own the streams
   CellRef groups{}, it1{}, it2{}, m1{}, p1{}, m2{}, p2{}, value{}, plain{};
   CellRef begin{}, childNext{}, outerDescriptor{};
   std::vector<std::pair<std::string, CellRef>> pool;
@@ -168,6 +170,7 @@ struct Scenario {
       next(chain[index], chain[index + 1]);
     const auto halt = op(OpcodeKind::Halt);
     next(apply, halt);
+    other  = vm.spawnCursor(halt, "finished_owner");
     cursor = vm.spawnCursor(create, "group_journal");
     for (std::size_t index = 0; index < chain.size(); ++index)
       ASSERT_TRUE(vm.step(cursor).success) << "setup step " << index;
@@ -300,7 +303,7 @@ std::string runSequence(const std::uint64_t seed, MessageTable &messages) {
   for (std::size_t index = 0; index < stepsEach; ++index) {
     // Stale entries where a call will write or erase them, so a restore of a
     // prior value and not only of an absent key is checked.
-    switch (rng.below(6)) {
+    switch (rng.below(24)) {
     case 0:
       FrameTestAccess::seedRegisters(
           s.vm, s.m1, FrameTestAccess::top(s.vm, s.cursor), false);
@@ -310,6 +313,12 @@ std::string runSequence(const std::uint64_t seed, MessageTable &messages) {
       break;
     case 2:
       FrameTestAccess::seedStaleStreamArgument(s.vm, s.p1);
+      break;
+    case 3:
+      FrameTestAccess::setStreamCursor(s.vm, s.other);
+      break;
+    case 4:
+      FrameTestAccess::setStreamCursor(s.vm, std::nullopt);
       break;
     default:
       break;
@@ -483,6 +492,30 @@ TEST(VortexGroupJournalTest, TheCostDoesNotScaleWithTheTableSize) {
   EXPECT_EQ(small.begin, large.begin);
   EXPECT_EQ(small.next, large.next);
   EXPECT_EQ(small.restore, large.restore);
+}
+
+/// Prints, and asserts nothing: wall time of one call of each opcode with the
+/// tables full, for the commit message and reports.
+TEST(VortexGroupJournalTest, ReportsMicrosecondsPerCallWithFullTables) {
+  const auto time = [](const auto &call) {
+    const auto start = std::chrono::steady_clock::now();
+    call();
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now() - start)
+        .count();
+  };
+  Scenario s;
+  s.enterFrame(2);
+  s.buildPool();
+  FrameTestAccess::seedBulk(s.vm, bulkEntries, bulkFirstKey);
+  const auto step = [&](const CellRef opcode) {
+    s.vm.setCursorOpcode(s.cursor, opcode);
+    return [&s] { s.vm.step(s.cursor); };
+  };
+  const auto begin = time(step(s.begin));
+  const auto next  = time(step(s.childNext));
+  GTEST_LOG_(INFO) << "GroupBegin " << begin << " us, GroupNext " << next
+                   << " us with " << bulkEntries << " entries per table";
 }
 
 // ---- rollback ---------------------------------------------------------
