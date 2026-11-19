@@ -31,13 +31,17 @@ namespace xanadu::vql {
 /// plain cell, which is what lets a step tell the two apart with one read.
 inline constexpr std::string_view viewMarkerDimension = "d.vql.view";
 inline constexpr std::string_view viewOfDimension     = "d.vql.of";
-inline constexpr std::string_view viewRuleDimension   = "d.vql.rule";
-inline constexpr std::string_view viewKindDimension   = "d.vql.kind";
-inline constexpr std::string_view viewToDimension     = "d.vql.to";
-inline constexpr std::string_view viewNegDimension    = "d.vql.neg";
-inline constexpr std::string_view viewBidirDimension  = "d.vql.bidir";
-inline constexpr std::string_view viewDirDimension    = "d.vql.dir";
-inline constexpr std::string_view viewBaseDimension   = "d.vql.base";
+/// A shape handle carries one link on this dimension to a box cell of its own,
+/// so a handle is told from a plain cell by the cell itself, wherever it came
+/// from (the table that records the shape is the compiler's and the session's).
+inline constexpr std::string_view shapeMarkerDimension = "d.vql.shape";
+inline constexpr std::string_view viewRuleDimension    = "d.vql.rule";
+inline constexpr std::string_view viewKindDimension    = "d.vql.kind";
+inline constexpr std::string_view viewToDimension      = "d.vql.to";
+inline constexpr std::string_view viewNegDimension     = "d.vql.neg";
+inline constexpr std::string_view viewBidirDimension   = "d.vql.bidir";
+inline constexpr std::string_view viewDirDimension     = "d.vql.dir";
+inline constexpr std::string_view viewBaseDimension    = "d.vql.base";
 /// The witness rank of a handle: the release epoch its source was minted in,
 /// then the one its view was. A number held as an Int64 names the same cell
 /// only while the cell's epoch is the one recorded beside it.
@@ -133,6 +137,11 @@ staleHandleReason(const zigzag::ArenaManifold &arena,
 /// arena is still recognised as a handle.
 [[nodiscard]] bool carriesViewMarker(const zigzag::ArenaManifold &arena,
                                      zigzag::CellRef cell);
+
+/// True when @p cell carries the shape marker, by the dimension's name, so it
+/// holds for a handle minted by another compile, session or engine.
+bool carriesShapeMarker(const zigzag::ArenaManifold &arena,
+                        zigzag::CellRef cell);
 
 /// True when @p cell carries the marker, but not the one @p dims names: a
 /// handle another core made. Its rules and boxes sit on dimensions this core

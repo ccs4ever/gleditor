@@ -54,6 +54,16 @@ bool carriesViewMarker(const zigzag::ArenaManifold &arena, const CellRef cell) {
       });
 }
 
+bool carriesShapeMarker(const zigzag::ArenaManifold &arena,
+                        const CellRef cell) {
+  if (!arena.contains(cell)) return false;
+  return std::ranges::any_of(
+      arena.dimensionsOf(cell), [&](const zigzag::DimLink &link) {
+        return (link.pos != zigzag::noCell || link.neg != zigzag::noCell) &&
+               arena.textOf(link.dim) == shapeMarkerDimension;
+      });
+}
+
 bool carriesForeignViewMarker(const zigzag::ArenaManifold &arena,
                               const std::optional<ViewDimensions> &dims,
                               const CellRef cell) {

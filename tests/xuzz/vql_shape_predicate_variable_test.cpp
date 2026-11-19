@@ -268,8 +268,6 @@ TEST_F(VQLShapePredicateVariableTest, NonShapeVariableIsRefusedByName) {
                              testing::HasSubstr("$n")));
   EXPECT_THAT(refusalOf("let $n := 3 return ##/d.items[{ +d.tag: { $n } }]"),
               testing::HasSubstr("not statically known"));
-  EXPECT_THAT(refusalOf("let $n := 3 return ##/d.items[{ +d.tag: $n }]"),
-              testing::HasSubstr("not statically known"));
   EXPECT_THAT(refusalOf("def n() := 3; ##/d.items[{ n() }]"),
               testing::HasSubstr("did not return a Shape value"));
 }
@@ -320,6 +318,102 @@ TEST_F(VQLShapePredicateVariableTest,
   for (int round = 0; round < rounds; ++round)
     (void)run("let $s := { +d.tag } return ##/d.items[$s]");
   EXPECT_LE(arena.cellCount() - shapeBefore, scalarGrowth);
+}
+
+// Review round: a shape handle is marked, so no path reads it as a value.
+TEST_F(VQLShapePredicateVariableTest,
+       ClearedOrForeignHandleRefusesInBareForms) {
+  const auto handle = run("let $s := { +d.tag } return $s");
+  ASSERT_EQ(handle.size(), 1u);
+  engine.clearVariables();
+  engine.setVariable("s", handle);
+  for (const std::string query :
+       {"##/d.items[$s]", "##/d.items[not $s]", "any(##/d.items, $s)",
+        "for $x in ##/d.items where ?$s return $x",
+        "for $x in ##/d.items where not $s return $x",
+        "def f($m) := ##/d.items[$m]; f($s)", "##/d.items[{ $s }]"}) {
+    SCOPED_TRACE(query);
+    EXPECT_THAT(refusalOf(query), testing::HasSubstr("not statically known"));
+  }
+  VQLEngine other{core};
+  other.setVariable("q", handle);
+  EXPECT_THAT([&] { (void)other.execute("##/d.items[$q]"); },
+              testing::ThrowsMessage<std::runtime_error>(
+                  testing::HasSubstr("not statically known")));
+}
+
+TEST_F(VQLShapePredicateVariableTest, PlainCellInAVariableIsStillAValue) {
+  engine.setVariable("s", std::vector<CellRef>{a});
+  EXPECT_EQ(run("##/d.items[$s]"), (std::vector<CellRef>{a, b, c}));
+}
+
+TEST_F(VQLShapePredicateVariableTest, CompoundBareParametersInADefinition) {
+  EXPECT_EQ(run("def f($m) := ##/d.items[$m and $m]; f({ +d.tag })"),
+            (std::vector<CellRef>{a, b}));
+  EXPECT_EQ(run("def f($m) := ##/d.items[?$m and ?$m]; f({ +d.tag })"),
+            (std::vector<CellRef>{a, b}));
+  EXPECT_EQ(run("def f($m, $n) := ##/d.items[$m or $n]; "
+                "f({ +d.tag }, { +d.keep })"),
+            (std::vector<CellRef>{a, b, c}));
+}
+
+TEST_F(VQLShapePredicateVariableTest, ShapePassedThroughANonShapeDefinition) {
+  EXPECT_EQ(run("def idf($m) := $m; let $s := { +d.tag } return "
+                "##/d.items[idf($s)]"),
+            (std::vector<CellRef>{a, b}));
+  const auto none = run("def id($x) := $x; let $s := { +d.nothere } return "
+                        "any(##/d.items, id($s))");
+  ASSERT_EQ(none.size(), 1u);
+  EXPECT_EQ(truthOf(none.front()), std::optional{false});
+  const auto wrapped = run("def g($m) := $m; def f($m) := any(##/d.items, "
+                           "g($m)); f({ +d.nothere })");
+  ASSERT_EQ(wrapped.size(), 1u);
+  EXPECT_EQ(truthOf(wrapped.front()), std::optional{false});
+}
+
+TEST_F(VQLShapePredicateVariableTest, ShapeHandlesAreNotComparable) {
+  for (const std::string query :
+       {"let $s := { +d.tag }; let $t := { +d.keep }; "
+        "for $x in ##/d.items where $s = $t return $x",
+        "let $s := { +d.tag }; for $x in ##/d.items where $s = $s return $x",
+        "let $s := { +d.tag }; for $x in ##/d.items where $s != 1 return $x",
+        "def f($m, $n) := $m = $n; f({ +d.tag }, { +d.keep })"}) {
+    SCOPED_TRACE(query);
+    EXPECT_THAT(refusalOf(query),
+                testing::AllOf(testing::HasSubstr("shape value"),
+                               testing::HasSubstr("operand")));
+  }
+}
+
+TEST_F(VQLShapePredicateVariableTest, RecursionWithAPlainFlagStillCompiles) {
+  EXPECT_EQ(run("def pure walk($f, $n: Int) := { if $n > 0 return "
+                "walk($f, $n + -1) else return ##/d.items[$f]; }; walk(1, 2)"),
+            (std::vector<CellRef>{a, b, c}));
+}
+
+TEST_F(VQLShapePredicateVariableTest, RecursionTakingAShapeRefusesByName) {
+  const auto refusal =
+      refusalOf("def pure walk($m, $n: Int) := { if $n > 0 return "
+                "walk($m, $n + -1) else return ##/d.items[$m]; }; "
+                "walk({ +d.tag }, 3)");
+  EXPECT_THAT(refusal, testing::HasSubstr("shape"));
+  EXPECT_THAT(refusal, testing::HasSubstr("walk"));
+}
+
+TEST_F(VQLShapePredicateVariableTest, LongForwardingChainCompiles) {
+  std::string defs;
+  constexpr int depth = 40;
+  for (int level = 0; level < depth; ++level)
+    defs += "def f" + std::to_string(level) + "($m) := " +
+            (level + 1 == depth ? "##/d.items[$m]"
+                                : "f" + std::to_string(level + 1) + "($m)") +
+            "; ";
+  EXPECT_EQ(run(defs + "f0({ +d.tag })"), (std::vector<CellRef>{a, b}));
+}
+
+TEST_F(VQLShapePredicateVariableTest, ScalarTargetVariableIsDiagnosedAsSuch) {
+  EXPECT_THAT(refusalOf("let $n := 3 return ##/d.items[{ +d.tag: $n }]"),
+              testing::HasSubstr("only a shape-valued variable"));
 }
 
 // Foreign-owner proxies carry a store-ref index link that is bookkeeping: `{}`

@@ -939,11 +939,22 @@ neighborhood shapes:
   existing shape expression:
   - `{ $shape, !d.tag }`: derives a shape inheriting from `$shape`, filtering out `d.tag`.
   - `{ $shape, +d.tag: "new_value" }`: inherits from `$shape`, adding or overriding `+d.tag`.
-  - `{ $shape_a, $shape_b }`: composes two shapes, unioning their rules with right-to-left
-    precedence for overrides.
-- **Dynamic Shape Embedding (`{ func(.) }`)**: Because any `BaseShapeRule` can be a
-  `FunctionInvocation`, dynamic shape generation is fully coherent:
-  `{ func_returning_shape(.), !d.tag }` evaluates the shape at runtime and modifies it.
+  - `{ $shape_a, $shape_b }`: composes two shapes by concatenating their rules in source order. As
+    built, a later rule overrides an earlier one on the same dimension (a mask is built left to
+    right), which for dimension rules answers what "right-to-left precedence" meant; what is
+    order-sensitive is a wildcard, which resets every earlier dimension rule.
+- **Shape Embedding (`{ func(.) }`)**: Because any `BaseShapeRule` can be a `FunctionInvocation`, a
+  function that returns a shape can be named inside one: `{ func_returning_shape(), !d.tag }`. As
+  built, the shape is resolved **while the query is compiled** (decision D4(a): a shape is syntax,
+  held in the compiler's handle table, not data the graph computes with), not at run time. So the
+  function must be a definition whose whole body is a shape literal, a parameter that was given a
+  shape, or a call of such a definition, and its arguments must be shapes known at compile time. A
+  shape chosen at run time, such as the value of a `for` variable, refuses by name ("not statically
+  known"). The same resolution serves a shape held by a variable or returned by a call wherever a
+  predicate takes one: `[$s]`, `[{ $s, +d.x }]`, `?$s`, and the second argument of `any`, `all` and
+  `none`; a `{}` or `{*}` reached that way is tested exactly as the literal is (the foreign-owner
+  store-reference link is skipped). A shape handle is not a value: it cannot be an operand of `+` or
+  of a comparison, and a definition handed one is compiled inline rather than as a call frame.
 
 #### 4.8.2 Short-Form Shape Matching and Predicate Invariants
 

@@ -201,6 +201,14 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
     varBindings_["."]    = item;
     streamBindings_["."] = {item};
 
+    // A definition that returned its argument leaves the handle itself as the
+    // one compiled value, which is the shape it stands for.
+    const auto singleShapePredicate =
+        [&](const std::vector<CellRef> &results) -> std::optional<CellRef> {
+      if (results.size() != 1 || dynamicStreams_.contains(results.front()))
+        return std::nullopt;
+      return shapePredicateOfCell(results.front(), item);
+    };
     const auto compilePredicate = [&]() -> CellRef {
       std::optional<CellRef> matchCell;
       const auto &predArg = fn.args[1];
@@ -292,6 +300,8 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
           const auto results = compileArgument(predArg, item);
           if (results.empty()) {
             matchCell = emitConstant(false);
+          } else if (const auto named = singleShapePredicate(results)) {
+            matchCell = *named;
           } else if (results.size() > 1 ||
                      std::ranges::any_of(results, [&](CellRef result) {
                        return dynamicStreams_.contains(result);
@@ -314,6 +324,8 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
         const auto results = compileArgument(predArg, item);
         if (results.empty()) {
           matchCell = emitConstant(false);
+        } else if (const auto named = singleShapePredicate(results)) {
+          matchCell = *named;
         } else if (results.size() > 1 ||
                    std::ranges::any_of(results, [&](CellRef result) {
                      return dynamicStreams_.contains(result);

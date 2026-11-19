@@ -554,6 +554,14 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
         return false;
       }))
     unsupportedFunctorArgument = true;
+  // A shape is syntax the compiler resolves where it is used (Q-SHAPEPRED), so
+  // a call handed one is compiled inline, as a lens is, and a parameter used as
+  // a shape finds it known. Only a call that is given one pays for this.
+  const bool shapeArgument =
+      std::ranges::any_of(arguments, [this](const ValueExpr &argument) {
+        return argumentNamesShape(argument);
+      });
+  if (shapeArgument) unsupportedFunctorArgument = true;
   bool hasInlineCapture = false;
   if (const auto captures = frameFreeCaptureNames_.find(definition.name);
       captures != frameFreeCaptureNames_.end()) {
@@ -589,7 +597,13 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   if (entersActiveCallStack &&
       std::ranges::contains(activeCalls_, definition.name))
     throw std::invalid_argument(
-        "recursive compiled call requires a VM frame: " + definition.name);
+        shapeArgument
+            ? "recursive definition '" + definition.name +
+                  "' cannot take a shape argument: a shape is resolved while "
+                  "the query is compiled, which a recursive call frame cannot "
+                  "do"
+            : "recursive compiled call requires a VM frame: " +
+                  definition.name);
 
   auto savedVariables     = varBindings_;
   auto savedStreams       = streamBindings_;
@@ -1340,8 +1354,20 @@ std::vector<CellRef> VQLCompiler::compileReusableFrameCall(
         (program != key.staticFunctorPrograms.end() &&
          program->formalIndex == actualFormalIndex))
       actuals.emplace_back();
-    else
+    else {
       actuals.push_back(compileArgument(argument, context));
+      // A frame carries a copy of the cell, which is not the handle: refuse a
+      // shape that still reached one (for instance through a call result).
+      for (const CellRef cell : actuals.back())
+        if (const auto kind = handleKindOf(cell);
+            kind == HandleKind::Shape || kind == HandleKind::UnrecordedShape)
+          throw QueryRefusal(
+              QueryErrorCategory::Unsupported,
+              "a shape value cannot be passed to the call frame of '" +
+                  definition.name +
+                  "': a frame carries only the handle cell, and a shape is "
+                  "resolved while the query is compiled");
+    }
     ++actualFormalIndex;
   }
 

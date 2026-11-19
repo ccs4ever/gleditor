@@ -652,13 +652,6 @@ private:
     if (target == definitions_.end() && call.name != "string" &&
         call.name != "now")
       readOnlyCandidate_ = false;
-    // A quantifier's predicate that is a bare variable may be a shape, which
-    // a frame would hold only as a handle cell (Q-SHAPEPRED).
-    if (!staticFunctorProgramMode_ && target == definitions_.end() &&
-        (call.name == "any" || call.name == "all" || call.name == "none") &&
-        call.args.size() == 2 &&
-        std::holds_alternative<std::string>(call.args[1].kind))
-      refuse("a quantifier predicate that names a variable may be a shape");
     for (std::size_t index = 0; index < call.args.size(); ++index) {
       tick(depth + 1);
       const auto &argument = call.args[index];
@@ -1088,11 +1081,6 @@ private:
     sequence(step.predicates, depth + 1,
              [&](const BooleanExpr &predicate, const std::size_t childDepth) {
                booleanExpr(predicate, scope, childDepth);
-               // `[$m]` may name a shape, which a frame would hold only as a
-               // handle cell (Q-SHAPEPRED).
-               if (!staticFunctorProgramMode_ && namesBareVariable(predicate))
-                 refuse("a bracket predicate that names a variable may be a "
-                        "shape");
              });
     sequence(step.shapePredicates, depth + 1,
              [&](const ShapeLiteral &shape, const std::size_t childDepth) {
@@ -1204,17 +1192,6 @@ private:
           }
         },
         test.kind);
-  }
-
-  static bool namesBareVariable(const BooleanExpr &expr) {
-    if (expr.terms.size() != 1 || expr.terms.front().factors.size() != 1)
-      return false;
-    const auto *test =
-        std::get_if<PredicateTest>(&expr.terms.front().factors.front().test);
-    if (!test) return false;
-    const auto *value = std::get_if<std::shared_ptr<ValueExpr>>(&test->kind);
-    return value && *value &&
-           std::holds_alternative<std::string>((*value)->kind);
   }
 
   void shapeLiteral(const ShapeLiteral &shape, const Scope &scope,
@@ -1621,14 +1598,8 @@ private:
                    },
                    binding);
              });
-    if (block.where) {
+    if (block.where)
       booleanExpr(block.where->condition, workingScope, depth + 1);
-      // `where $m` may name a shape, which a frame would hold only as a
-      // handle cell (Q-SHAPEPRED).
-      if (!staticFunctorProgramMode_ &&
-          namesBareVariable(block.where->condition))
-        refuse("a where condition that names a variable may be a shape");
-    }
     actionClause(block.action, workingScope, depth + 1);
     if (!loopStarted) scope = std::move(workingScope);
   }

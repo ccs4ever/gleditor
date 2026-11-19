@@ -452,8 +452,19 @@ private:
   /// What a table-lookup site is looking at. Every site that asks the table
   /// "what is this cell?" asks this instead, so a view handle (which the
   /// table does not hold) is never taken for a plain cell.
-  enum class HandleKind : std::uint8_t { None, Shape, Lens, ViewHandle };
+  enum class HandleKind : std::uint8_t {
+    None,
+    Shape,
+    /// Carries the shape marker but is not in the table: cleared, or made by
+    /// another session or engine. Its shape is unknown, so it refuses.
+    UnrecordedShape,
+    Lens,
+    ViewHandle
+  };
   [[nodiscard]] HandleKind handleKindOf(zigzag::CellRef cell) const;
+  /// Refuses, by name, a handle used where the graph would compute with a
+  /// value; @p op is the operator.
+  void refuseHandleOperand(HandleKind kind, std::string_view op) const;
   /// The view dimensions when the core names them; absent while no view was
   /// ever made, which means no handle exists and no step needs a guard.
   [[nodiscard]] std::optional<ViewDimensions> viewDimensions() const;
@@ -583,6 +594,9 @@ private:
   zigzag::CellRef registerShape(ShapeLiteral expanded);
   void appendShapeRules(ShapeLiteral &result, const ShapeLiteral &from);
   ShapeLiteral shapeOfVariable(const std::string &name);
+  /// The rules a marked handle stands for; refuses a handle with no record.
+  const ShapeLiteral &shapeOfHandle(zigzag::CellRef cell,
+                                    const std::string &name);
   ShapeLiteral expandShape(const ShapeLiteral &shape);
   ShapeLiteral staticShapeOfCall(const FunctionInvocation &call);
   /// A literal, a variable or a call of a shape-returning definition as a
@@ -791,14 +805,26 @@ private:
   /// @p shape with every variable, call and nested-literal rule (also inside
   /// targets) replaced by the rules it names. Returns @p shape itself when it
   /// names nothing, so a plain literal compiles exactly as before.
+  /// The predicate of a compiled cell that turns out to be a shape handle;
+  /// nullopt for any other cell.
+  std::optional<zigzag::CellRef>
+  shapePredicateOfCell(zigzag::CellRef value, zigzag::CellRef candidate);
   const ShapeLiteral &resolvedPredicateShape(const ShapeLiteral &shape);
   ShapeLiteral expandPredicateShape(const ShapeLiteral &shape);
   std::optional<ShapeLiteral> shapeNamedByTarget(const ValueExpr &target);
   bool variableHoldsHandle(const std::string &name) const;
-  /// True when @p name is bound to a cell the table records as a shape.
-  bool variableHoldsShape(const std::string &name) const;
-  /// True when @p definition's whole body is a shape literal.
-  static bool returnsShapeLiteral(const DefDeclaration &definition);
+  /// True when @p argument is known while compiling to be a shape: a literal,
+  /// a variable bound to a shape handle (recorded or not), or a call of a
+  /// definition whose whole body is a shape literal.
+  bool argumentNamesShape(const ValueExpr &argument) const;
+  /// True when calling @p call returns a shape: the definition's whole body is
+  /// a shape literal, names a parameter that was given a shape, or calls a
+  /// definition that does, so a definition that returns its argument is
+  /// followed instead of its result being read as a value.
+  bool callReturnsShape(const FunctionInvocation &call) const;
+  bool returnsShapeGiven(const DefDeclaration &definition,
+                         const std::vector<bool> &argumentIsShape,
+                         std::size_t depth) const;
 
   // Library / Executable structure emission
   zigzag::CellRef linkAsExecutable(zigzag::CellRef entryOp);

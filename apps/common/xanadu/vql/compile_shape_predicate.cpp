@@ -113,25 +113,43 @@ bool VQLCompiler::variableHoldsHandle(const std::string &name) const {
   return false;
 }
 
-bool VQLCompiler::variableHoldsShape(const std::string &spelled) const {
-  const std::string name =
-      spelled.starts_with('$') ? spelled.substr(1) : spelled;
-  const auto isShape = [&](const CellRef cell) {
-    return handleKindOf(cell) == HandleKind::Shape;
-  };
-  if (const auto found = streamBindings_.find(name);
-      found != streamBindings_.end())
-    return std::ranges::any_of(found->second, isShape);
-  if (const auto found = varBindings_.find(name);
-      found != varBindings_.end() && found->second)
-    return isShape(*found->second);
+bool VQLCompiler::argumentNamesShape(const ValueExpr &argument) const {
+  if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(argument.kind))
+    return true;
+  if (const auto *spelled = std::get_if<std::string>(&argument.kind)) {
+    const std::string name =
+        spelled->starts_with('$') ? spelled->substr(1) : *spelled;
+    const auto isShape = [&](const CellRef cell) {
+      const auto kind = handleKindOf(cell);
+      return kind == HandleKind::Shape || kind == HandleKind::UnrecordedShape;
+    };
+    if (const auto found = streamBindings_.find(name);
+        found != streamBindings_.end())
+      return std::ranges::any_of(found->second, isShape);
+    if (const auto found = varBindings_.find(name);
+        found != varBindings_.end() && found->second)
+      return isShape(*found->second);
+    return false;
+  }
+  if (const auto *call =
+          std::get_if<std::shared_ptr<FunctionInvocation>>(&argument.kind);
+      call && *call) {
+    return callReturnsShape(**call);
+  }
   return false;
 }
 
-bool VQLCompiler::returnsShapeLiteral(const DefDeclaration &definition) {
-  const auto *body = std::get_if<std::shared_ptr<ValueExpr>>(&definition.body);
-  return body && *body &&
-         std::holds_alternative<std::shared_ptr<ShapeLiteral>>((*body)->kind);
+std::optional<CellRef>
+VQLCompiler::shapePredicateOfCell(const CellRef value,
+                                  const CellRef candidate) {
+  const auto kind = handleKindOf(value);
+  if (kind != HandleKind::Shape && kind != HandleKind::UnrecordedShape)
+    return std::nullopt;
+  // A value that is itself a handle (a definition returned its argument) is
+  // the shape it stands for, wherever it was computed.
+  expandedPredicateShapes_.push_back(
+      expandPredicateShape(shapeOfHandle(value, "(a call result)")));
+  return compileShapePredicate(expandedPredicateShapes_.back(), candidate);
 }
 
 std::optional<CellRef>
@@ -151,8 +169,7 @@ VQLCompiler::compileShapePredicateValue(const ValueExpr &expression,
   if (const auto *call =
           std::get_if<std::shared_ptr<FunctionInvocation>>(&expression.kind);
       call && *call) {
-    const auto definition = definitions_.find((*call)->name);
-    if (definition == definitions_.end()) return std::nullopt;
+    if (!callReturnsShape(**call)) return std::nullopt;
     auto shape = resolveShapeValue(expression);
     if (!shape) return std::nullopt;
     expandedPredicateShapes_.push_back(expandPredicateShape(*shape));
@@ -166,14 +183,22 @@ VQLCompiler::shapeNamedByTarget(const ValueExpr &target) {
   if (const auto *spelled = std::get_if<std::string>(&target.kind)) {
     const std::string name =
         spelled->starts_with('$') ? spelled->substr(1) : *spelled;
-    // A target variable is only supported as a shape. An unbound one would
-    // have to be bound by the match (spec 4.8.2), which is not lowered.
-    if (!variableHoldsHandle(name) && !streamBindings_.contains(name) &&
-        !varBindings_.contains(name))
+    // Spec 4.8.2 reads `+d.tag: $t` as a value constraint or a binding; only
+    // a variable holding a shape is lowered, and the rest says so.
+    const bool bound = streamBindings_.contains(name) ||
+                       varBindings_.contains(name) ||
+                       functorBindings_.contains(name);
+    if (!bound)
       throw TypeContractError(
           "shape predicate target $" + name +
           " is not bound (binding a variable from a shape predicate is not "
           "supported)");
+    if (!variableHoldsHandle(name))
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          "shape predicate target $" + name +
+              ": only a shape-valued variable is lowered here; a value "
+              "constraint or a variable binding (spec 4.8.2) is not");
     return shapeOfVariable(name);
   }
   if (const auto *call =

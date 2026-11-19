@@ -1122,6 +1122,10 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
                           compileShapePredicateValue(*t, ctxCell))
                     return named;
                   const auto value = compileValueExpr(*t, ctxCell);
+                  if (value)
+                    if (const auto named =
+                            shapePredicateOfCell(*value, ctxCell))
+                      return named;
                   return value ? *value : emitConstant(false);
                 }
                 return emitConstant(false);
@@ -1136,7 +1140,12 @@ std::optional<CellRef> VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
                   if (const auto named =
                           compileShapePredicateValue(call, ctxCell))
                     return named;
-                  return compileValueExpr(call, ctxCell);
+                  const auto value = compileValueExpr(call, ctxCell);
+                  if (value)
+                    if (const auto named =
+                            shapePredicateOfCell(*value, ctxCell))
+                      return named;
+                  return value;
                 }
                 return emitConstant(false);
               } else {
@@ -1203,6 +1212,40 @@ bool compareText(const std::string &left, const CompOp op,
 
 } // namespace
 
+void VQLCompiler::refuseHandleOperand(const HandleKind kind,
+                                      const std::string_view op) const {
+  if (kind == HandleKind::None) return;
+  throw QueryRefusal(
+      QueryErrorCategory::Unsupported,
+      std::string{"a "} +
+          (kind == HandleKind::ViewHandle ? "dynamic view"
+           : kind == HandleKind::Lens     ? "lens"
+                                          : "shape") +
+          " value cannot be an operand of '" + std::string{op} +
+          "': it is syntax resolved while the query is compiled, not a value "
+          "the graph computes with");
+}
+
+namespace {
+std::string_view compOpText(const CompOp op) {
+  switch (op) {
+  case CompOp::Equal:
+    return "=";
+  case CompOp::NotEqual:
+    return "!=";
+  case CompOp::LessThan:
+    return "<";
+  case CompOp::LessEqual:
+    return "<=";
+  case CompOp::GreaterThan:
+    return ">";
+  case CompOp::GreaterEqual:
+    return ">=";
+  }
+  return "?";
+}
+} // namespace
+
 std::optional<CellRef>
 VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef) {
   // Two string literals are text, so they compare as text. Minting a literal
@@ -1242,6 +1285,10 @@ VQLCompiler::compileComparison(const ComparisonExpr &comp, CellRef) {
     comparison = Comparison::GreaterEqual;
     break;
   }
+
+  for (const auto *operand : {&lhs, &rhs})
+    for (const CellRef cell : *operand)
+      refuseHandleOperand(handleKindOf(cell), compOpText(comp.op));
 
   // An empty operand makes every comparison false, including !=. Both
   // expressions have already been compiled left-to-right, as their effects
@@ -1504,16 +1551,7 @@ std::optional<CellRef> VQLCompiler::compileValueExpr(const ValueExpr &expr,
           for (const auto *operand : {&leftValues, &rightValues})
             for (const CellRef cell : *operand) {
               const auto kind = handleKindOf(cell);
-              if (kind == HandleKind::None) continue;
-              throw QueryRefusal(
-                  QueryErrorCategory::Unsupported,
-                  std::string{"a "} +
-                      (kind == HandleKind::ViewHandle ? "dynamic view"
-                       : kind == HandleKind::Shape    ? "shape"
-                                                      : "lens") +
-                      " value cannot be an operand of '+': it is syntax "
-                      "resolved while the query is compiled, not a value "
-                      "the graph computes with");
+              refuseHandleOperand(kind, "+");
             }
           for (const auto *operand : {&leftValues, &rightValues})
             rejectViewHandlesAtRunTime(
