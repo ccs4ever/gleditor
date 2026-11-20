@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -97,12 +98,6 @@ struct VQLShapeCellsTest : testing::Test {
       rules.push_back(std::move(view));
     }
     return rules;
-  }
-
-  std::size_t programSize(const std::string &query) {
-    EXPECT_TRUE(executor.execute(query).has_value());
-    const std::string text{executor.disassembly()};
-    return static_cast<std::size_t>(std::ranges::count(text, '\n'));
   }
 };
 
@@ -314,6 +309,17 @@ TEST_F(VQLShapeCellsTest, AHandleWhoseWitnessNamesAnotherEpochRefuses) {
               testing::HasSubstr("released and its number reused"));
 }
 
+TEST_F(VQLShapeCellsTest, EveryConsumerOfAShapeVariableChecksTheWitness) {
+  const auto handle  = handleOf("let $s := { +d.keep } return $s");
+  const auto witness = *neighbour(handle, dims().epoch);
+  ASSERT_TRUE(arena.setValueBits(witness, xanadu::ValueKind::Int64, 12345));
+  for (const char *query : {"##{ $s }", "##[$s]", "project(##, $s)",
+                            "apply_shape(##, $s)", "##[{ $s, +d.tag }]"})
+    EXPECT_THAT(refusalOf(query),
+                testing::HasSubstr("released and its number reused"))
+        << query;
+}
+
 TEST_F(VQLShapeCellsTest, ANestedShapeWithAStaleWitnessRefusesTheOuter) {
   const auto handle  = handleOf("let $s := { +d.keep: { +d.tag } } return $s");
   const auto inner   = *rulesOf(handle).front().nested;
@@ -415,28 +421,67 @@ TEST(VQLShapeSettings, AHostHandsItsConfiguredLimitsToItsEngine) {
   EXPECT_EQ(host.vqlEngine().shapeLimits(), config.shapeLimits);
 }
 
-// The static path is unchanged by the cells: these counts were taken from the
-// compiler at df0967b6, before shape values were written as cells, so a count
-// that moves means a shape started costing the graph something.
-TEST_F(VQLShapeCellsTest, StaticProgramsAreUnchangedByTheCells) {
+// The static path is unchanged by the cells. Each hash is FNV-1a over the
+// program's disassembly with the cell numbers and addresses erased (they move
+// when a shape mints cells; the opcodes, labels and operand shapes must not),
+// taken from the compiler at df0967b6 before shape values were cells. A line
+// count could stay put while an operand changed; a hash cannot.
+namespace {
+std::string withoutCellNumbers(const std::string_view text) {
+  std::string out;
+  for (std::size_t at = 0; at < text.size();) {
+    if (text.substr(at, 3) == "[0x") {
+      at = text.find(']', at) + 1;
+    } else if (std::isdigit(static_cast<unsigned char>(text[at]))) {
+      while (at < text.size() &&
+             std::isdigit(static_cast<unsigned char>(text[at])))
+        ++at;
+      out += 'N';
+    } else {
+      out += text[at++];
+    }
+  }
+  return out;
+}
+
+std::uint64_t fnv1a(const std::string_view text) {
+  constexpr std::uint64_t offsetBasis = 0xcbf29ce484222325ULL;
+  constexpr std::uint64_t prime       = 0x100000001b3ULL;
+  std::uint64_t hash                  = offsetBasis;
+  for (const char c : text)
+    hash = (hash ^ static_cast<unsigned char>(c)) * prime;
+  return hash;
+}
+} // namespace
+
+TEST(VQLShapeStaticPrograms, AreUnchangedByTheCells) {
   struct Pin {
     const char *query;
-    std::size_t lines;
+    std::uint64_t hash;
   };
   const std::vector<Pin> pins = {
-      {"##{ +d.keep }", 11},
-      {"##{ +d.keep, !d.drop }", 11},
-      {"let $s := { +d.keep } return ##{ $s }", 19},
-      {"apply_shape(##, {*, +d.tag: \"x\"})", 27},
-      {"##[{ +d.keep }]", 27},
-      {"project(##, { +d.keep, !d.drop })", 16},
-      {"let $s := { +d.keep, !d.drop } return ##[$s]", 44},
-      {"##[{ +d.keep: { +d.tag } }]", 40},
-      {"let $a := { +d.keep }; let $b := { $a, +d.tag } return ##{ $b }", 21},
+      {"##{ +d.keep }", 0x46cbf4ae8509fb6cULL},
+      {"##{ +d.keep, !d.drop }", 0x59285a096f2b7f90ULL},
+      {"let $s := { +d.keep } return ##{ $s }", 0xdb83b43c358abab2ULL},
+      {"apply_shape(##, {*, +d.tag: \"x\"})", 0xba457276be09d120ULL},
+      {"##[{ +d.keep }]", 0x5ab3999c493f3d49ULL},
+      {"project(##, { +d.keep, !d.drop })", 0xd0ee9b0368cd0aeeULL},
+      {"let $s := { +d.keep, !d.drop } return ##[$s]", 0x4d3da1446c8ef7abULL},
+      {"##[{ +d.keep: { +d.tag } }]", 0xc897280d9747c68cULL},
+      {"let $a := { +d.keep }; let $b := { $a, +d.tag } return ##{ $b }",
+       0x5dbef0d0f47de7cfULL},
   };
   for (const auto &pin : pins) {
     SCOPED_TRACE(pin.query);
-    EXPECT_EQ(programSize(pin.query), pin.lines);
+    // A fresh engine each, as the hashes were taken.
+    zigzag::ArenaManifold arena;
+    VQLEngine engine{arena};
+    zigzag::vortex::VortexVM vm{engine.core()};
+    xanadu::vql::QueryExecutor executor{engine, vm};
+    for (const char *name : {"d.keep", "d.drop", "d.tag", "d.n"})
+      (void)engine.resolveDimension(name);
+    ASSERT_TRUE(executor.execute(pin.query).has_value());
+    EXPECT_EQ(fnv1a(withoutCellNumbers(executor.disassembly())), pin.hash);
   }
 }
 
