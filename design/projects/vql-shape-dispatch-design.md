@@ -1,9 +1,12 @@
 # VQL shape dispatch: the run-time half of V5 (shapes as cells)
 
-Status: proposal, nothing built, no core or stdlib change made. Branch `shapedispatch`, based on the
-`q-shapepred` tip `f713bd50` (marked shape handles, shapes refused as values, shapes followed
-through definitions). Author's note on method: every claim about code cites `path:line` at that tip;
-no measurement is quoted because none was taken (§2.5 says which to take).
+Status: proposal, nothing built, no core or stdlib change made; the owner ruled on P1 to P5 on
+2026-11-20 (§6), so the opcode, setting, vagent and stdlib items below are approved to build, and
+two spikes (S1, S2) and two witness cards (W1, W2) are ordered (§7). Q5 is analysed in §8 and awaits
+the owner. Branch `shapedispatch`, based on the `q-shapepred` tip `f713bd50` (marked shape handles,
+shapes refused as values, shapes followed through definitions). Author's note on method: every claim
+about code cites `path:line` at that tip; no measurement is quoted because none was taken (§2.5 says
+which to take).
 
 Sources read: `.logs/w1/D4b-spike.md` (the V5 card and the representation it assumes),
 `design/projects/vm-restoration-coordinator-plan.md` (D4, gates K to P),
@@ -254,7 +257,8 @@ until that probe has run.
 ## 3. Recommendation
 
 **Adopt (d) with (c) as the run-time half, and spike (a) first for the cases it can cover.** The
-reasoning is by exclusion, from §2.2:
+owner has since approved P1 to P5 (§6); the paragraph below is kept as the argument those approvals
+rest on, and §4.3 carries the order of work. The reasoning is by exclusion, from §2.2:
 
 - The wildcard family needs link enumeration and `project` needs a variable edge count. Neither is
   expressible over existing opcodes (§2.3 a, b). A recommendation that left them refused would lift
@@ -265,10 +269,11 @@ reasoning is by exclusion, from §2.2:
   untouched.
 
 The spike (S1, no approval, read/test only) builds the (a) interpreter for non-exact predicates and
-measures it, as V0 did. If its cost per rule is acceptable and the owner prefers fewer opcodes, the
-fallback is **(d)+(b)** for non-exact predicates and a named refusal for the wildcard family and for
-`project` of a run-time shape; this is a smaller feature, stated honestly, not a silent subset. If
-S1 is not run, the recommendation stands on the capability argument alone.
+measures it, as V0 did. With P1 approved, S1 no longer decides whether the opcode exists; it decides
+what `std:shape` (P5) contains besides thin wrappers, and whether the (a) graph is worth keeping as
+the oracle the differential test (§4.1) compares P1 against. The smaller fallback, **(d)+(b)** with
+a named refusal for the wildcard family, is no longer on the table for predicates: the owner chose
+the full feature.
 
 ### 3.1 What this lifts and what stays refused
 
@@ -283,9 +288,10 @@ shape is a value", but the operator still refuses by name.
 
 ### 3.2 Numbered approvals
 
-Each is a separate owner decision. None is taken by this document.
+Each was a separate owner decision. All five were approved on 2026-11-20 (§6); the text below is the
+request as it was put, with the approval noted on each item.
 
-**P1. Opcode `ShapeHolds(candidate, shape) -> Bool`, appended after `EpochOfCell`. Core.**
+**P1. Opcode `ShapeHolds(candidate, shape) -> Bool`, appended after `EpochOfCell`. Core. Approved.**
 Justification: the in-graph interpreter cannot enumerate links (§2.2), and the existing
 `VqlMaskProbe` has a compile-time pair count. The op reads the rule rank on `d.vql.rule`, folds it
 with the same left-to-right rules as `compile_shape_predicate.cpp:343-364`, probes each rule's
@@ -299,28 +305,35 @@ handling (shape operand named by cell, a constant operand refused), `mesh_evalua
 walked, or the op is an unmetered loop; the V12 precedent charges per step and CellOfInt "one unit
 of work" (`vortex_vm.hpp` CellOfInt comment), so this is the same discipline at a larger unit.
 
-**P2. Opcode `ShapeProject(stream, shape) -> stream`, appended after P1. Core.** Justification:
-`project` of a shape with unknown rule count needs a variable edge selection; `ProjectTopology`
-cannot take one (`vortex_streams.cpp:728`) and must not change (§2.4 item 5). The op folds the rules
-to an `EdgeSelection` (the fold in `compile_semantic_shape.cpp:49-70`) and calls the same
-`copyTopology`. Same family as `ProjectTopology`: impure, mints cells each run, refused at seal by
-name like it. Costs as P1 plus the `ProjectTopology`-by-name refusal wording extended to
-`ShapeProject` at `mesh_evaluator.cpp:383-386`. Estimate: M. Optional: drop P2 and keep `project` of
-a run-time shape refused (Q3).
+**P2. Opcode `ShapeProject(stream, shape) -> stream`, appended after P1. Core. Approved; whether
+anything consumes it is S2's decision (§7.1).** Justification: `project` of a shape with unknown
+rule count needs a variable edge selection; `ProjectTopology` cannot take one
+(`vortex_streams.cpp:728`) and must not change (§2.4 item 5). The op folds the rules to an
+`EdgeSelection` (the fold in `compile_semantic_shape.cpp:49-70`) and calls the same `copyTopology`.
+Same family as `ProjectTopology`: impure, mints cells each run, refused at seal by name like it.
+Costs as P1 plus the `ProjectTopology`-by-name refusal wording extended to `ShapeProject` at
+`mesh_evaluator.cpp:383-386`. Estimate: M. Dropping P2 and keeping `project` of a run-time shape
+refused was the alternative (Q3); S2 now measures before that is decided.
 
-**P3. Settings entry for the shape ceilings (D5). Config, VQL/system settings.** Moves the 4096 and
-128 constants to `defaultSettingSpecs()` (`AGENTS.md`: "Adding a setting means adding a
+**P3. Settings entry for the shape ceilings (D5). Config, VQL/system settings. Approved.** Moves the
+4096 and 128 constants to `defaultSettingSpecs()` (`AGENTS.md`: "Adding a setting means adding a
 `defaultSettingSpecs()` entry, which is easy to skip") so the compiler and P1/P2 read one value.
 Estimate: S. Prerequisite of P1.
 
-**P4. vagent arity rows for P1/P2.** Separate pass, as VAGENT-ARITY was for `ProjectTopology` and
-`VqlMaskProbe`; without it vagent refuses both by ordinal, which is the CELLINT precedent and costs
-nothing. Recommend: do not add rows now; vagent has no shape values to pass. Estimate: S if wanted.
+**P4. vagent arity rows for P1/P2. Approved (overrides the recommendation below).** Separate pass,
+as VAGENT-ARITY was for `ProjectTopology` and `VqlMaskProbe`; without it vagent refuses both by
+ordinal, which is the CELLINT precedent and costs nothing. I had recommended no rows now, because
+vagent has no shape values to pass; the owner's ruling makes vagent a caller of `std:shape` (P5).
+Estimate: S.
 
-**P5. `std:shape` stdlib module.** Not requested. Listed because the card says "`std:` package": (a)
-would be that module, and S1 builds it only as a spike under a test namespace, not in `bootstrap()`.
-If the owner later wants shapes callable from Vortex/vagent programs, that is its own stdlib
-approval then.
+**P5. `std:shape` stdlib module. Approved.** I had listed it as not requested; the owner has asked
+for it. Its place is after the opcodes (§4.3): it is the Vortex-callable face of P1/P2 plus whatever
+S1 proves worth keeping, so it cannot precede the ordinals it wraps. Governance applies: it reuses
+existing stdlib routines (the rank iteration view dispatch uses, `D4b-spike.md` l.~100, and the
+witness check built from `CellOfInt`/`EpochOfCell`) rather than re-deriving them, and the card lists
+which routines it reuses; any routine it adds must say why an existing one does not serve
+(`.claude/rules/architectural_governance.md` §4). Built through `VortexStdLib::bootstrap`
+(`vortex_stdlib.cpp:100-135`) like the other modules, and callable from vagent once P4's rows exist.
 
 Compiler-side changes (D2's mint-time target evaluation; the run-time branch at each consumer site;
 narrowing `refuseShapeCells`) are VQL-only and, by the V1 to V3 precedent, need no core approval.
@@ -361,49 +374,331 @@ narrowing `refuseShapeCells`) are VQL-only and, by the V1 to V3 precedent, need 
   (governance rule 3).
 - `make format-check` and `make lint` pass; `make tidy` is clean on touched lines.
 
-### 4.3 Sequencing relative to lenses (V6)
+### 4.3 Sequencing, and relative to lenses (V6)
 
-1. Data half (D1 to D5) and P3.
-1. S1 spike and the §2.5 probe. Decision point: (c) or the (a)/(b) fallback.
-1. P1, then P2 if approved.
+1. Data half (D1 to D5) and P3 (approved; P3 is a prerequisite of P1).
+1. In parallel, none needing further approval: **S1** (the (a) interpreter under a test namespace),
+   **S2** (§7.1, what run-time `project`/`apply_shape` costs), the §2.5 probe, and **W1** (§7.2,
+   views' witness; independent of everything here).
+1. **P1**, with **W2** (§7.3) as its own card landing in the same series, then the differential test
+   of §4.1 against S1's graph.
+1. **P2**, only if S2's decision rule (§7.1) says run-time `project`/`apply_shape` is worth
+   supporting. P2 is approved, but building an opcode whose only consumer is undecided would invert
+   the order the owner chose; if S2 says no, P2 stays approved-but-unbuilt and `project` of a
+   run-time shape refuses by name.
+1. **P4** (arity rows for P1, and for P2 if built), then **P5** (`std:shape`). `std:shape` sits
+   after the opcodes because it wraps them, and after S1 because S1 decides whether any of the (a)
+   graph survives into it; it does not sit before P1, since a module with no ordinal to call would
+   be (a) rebuilt, the case S1 exists to price.
 1. Lenses (V6) after this. Reason: V6's blocker is lifetime (a closure descriptor dies with the
    program, `D4b-spike.md` l.~90, `arena_copy_out.cpp:74-83`), not dispatch, and it needs its own
-   core change (descriptor assembly outside the program area). Shapes need none of that (D2). Doing
-   V6 first would not unblock this design; doing this first narrows the compile-time table to lenses
-   alone and lets the `handleKindOf` site list (`compile_shape_value.cpp:122-141`) shrink to one
-   remaining special case. The ast.hpp exception comment (`ast.hpp:563-570`) is narrowed again at
-   that point.
+   core change (descriptor assembly outside the program area). Shapes need none of that (D2, and §8
+   on why it matters). Doing V6 first would not unblock this design; doing this first narrows the
+   compile-time table to lenses alone and lets the `handleKindOf` site list
+   (`compile_shape_value.cpp:122-141`) shrink to one remaining special case. The ast.hpp exception
+   comment (`ast.hpp:563-570`) is narrowed again at that point.
 
 ## 5. Open questions for the owner
 
-Q1. **Predicate scope.** Is a run-time shape that is only non-exact (probes, targets, nested; the
-(a)/(b) subset) worth shipping alone, with `{}`/`{*}`/`{!*}` and `project` refused by name at run
-time? It needs no opcode, but it lifts the capability only partly. My recommendation is no, because
-a user who writes `?{*}` cannot tell why a run-time shape differs from a literal one.
+Status after the 2026-11-20 rulings (§6): Q1 moot, Q3 ordered to a spike, Q4 answered yes and
+carded, Q5 analysed in §8 and awaiting the owner, Q7 settled; Q2 and Q6 remain open. The original
+wording follows where it still carries information.
 
-Q2. **Fuel for P1.** A C++ rule walk is one VM step to the scheduler. Should P1 charge per rule
-(accurate, but a rule list of 4096 costs 4096 units) or one unit (CellOfInt's discipline, but then a
-hostile shape cell is an unmetered loop)? Recommendation: per rule, with the ceiling from P3.
+Q1. **Predicate scope.** *Moot.* P1 is approved, so the wildcard family and run-time shapes in
+predicates are in scope together; the question of shipping only the non-exact subset no longer
+arises. (The case against the subset stands as the reason: a user who writes `?{*}` cannot tell why
+a run-time shape differs from a literal one.)
 
-Q3. **`project` of a run-time shape (P2).** Detached copies are already mesh-impure and refused at
-seal. Is a second opcode for them worth it, or should `project` stay literal-only and run-time
-shapes feed predicates and `apply_shape` only? `apply_shape` also needs a mutation-time reader,
-which this document has not priced; it is the largest unscoped item.
+Q2. **Fuel for P1.** *Open.* A C++ rule walk is one VM step to the scheduler. Should P1 charge per
+rule (accurate, but a rule list of 4096 costs 4096 units) or one unit (CellOfInt's discipline, but
+then a hostile shape cell is an unmetered loop)? Recommendation: per rule, with the ceiling from P3,
+which the owner has approved and which makes the per-rule charge bounded. P3 narrows this question
+but does not answer it, since the choice is about unit price, not the bound.
 
-Q4. **Witness on shapes.** D3 says every consumer checks the epoch witness. A shape handle that is
-copied by value without its witnesses is the same unchecked hole gate O recorded for views. Do you
-want the shape half to close it (witnesses in the cell as a required rank, reader refuses without)
-rather than inherit it?
+Q3. **`project` and `apply_shape` of a run-time shape.** *Undecided pending cost; spike S2 (§7.1)
+ordered.* Detached copies are already mesh-impure and refused at seal. `apply_shape` also needs a
+mutation-time reader, which this document has not priced; it is the largest unscoped item, and S2
+exists to price it.
 
-Q5. **Computed targets at mint time (D2).** Capture by value means `{+d.tag: $n}` freezes `$n` when
-the shape value is made, not when it is applied. That is the usual reading of a first-class value,
-but the spec's §4.8.2 wording on "a value constraint or a binding" is not settled by it. Confirm the
-capture-by-value reading, or require the owner's spec ruling first.
+Q4. **Witness on shapes.** *Yes; carded as W1 (views) and W2 (shapes), §7.2 and §7.3.* D3 says every
+consumer checks the epoch witness. A shape handle copied by value without its witnesses is the same
+unchecked hole gate O recorded for views.
 
-Q6. **Where a shape cell lives.** Session cells survive in the session arena and refer to a
+Q5. **Computed targets at mint time (D2).** *Analysed in §8; the decision is the owner's.*
+
+Q6. **Where a shape cell lives.** *Open.* Session cells survive in the session arena and refer to a
 foreign-store shape only by an Int64 box (the view rule, `D4b-spike.md` l.~120). Should a shape be
 allowed to span arenas by promotion to a store (`promote`), or stay session-local until a separate
-card? Staying local keeps D3's witness sufficient.
+card? Staying local keeps D3's witness sufficient. Q5's recommendation (§8) assumes session-local.
 
-Q7. **vagent.** Do you want P4 now, or the CELLINT precedent (refused by ordinal until a vagent
-shape value exists)?
+Q7. **vagent.** *Settled by the approval of P4:* the arity rows are in scope, the CELLINT precedent
+(refused by ordinal) is not followed.
+
+## 6. Owner rulings, 2026-11-20
+
+The owner ruled on the design as follows. Each ruling is recorded with what it changes in this
+document and what it costs, since a ruling that adds work should say so.
+
+| item | ruling                 | what it changes                                                                                                             |
+| ---- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| P1   | approved               | `ShapeHolds` is built; (c) is the run-time predicate half, not a candidate. Q1 falls away.                                  |
+| P2   | approved               | `ShapeProject` is approved as an opcode; whether it has a consumer rides on S2 (§4.3 item 4).                               |
+| P3   | approved               | The 4096 and 128 ceilings become a `defaultSettingSpecs()` entry; prerequisite of P1.                                       |
+| P4   | approved               | vagent arity rows for P1/P2: reverses my recommendation, adds an S pass and makes vagent a caller of shape ops. Settles Q7. |
+| P5   | approved               | `std:shape` is in scope, after the opcodes (§4.3 item 5), reusing existing stdlib per governance.                           |
+| Q1   | moot                   | Follows from P1.                                                                                                            |
+| Q3   | undecided pending cost | Spike S2 (§7.1) ordered. Nothing in P2's implementation starts before its decision rule is applied.                         |
+| Q4   | yes                    | Own cards W1 and W2 (§7.2, §7.3), not folded into the shape cards, so each is accepted or rejected on its own evidence.     |
+| Q5   | analysis requested     | §8, with a recommendation and no decision.                                                                                  |
+| Q2   | open                   | P3 bounds the charge but does not choose the unit price.                                                                    |
+| Q6   | open                   | §8 assumes session-local shapes.                                                                                            |
+| Q7   | settled by P4          | See above.                                                                                                                  |
+
+Net price of the rulings: five approved items (three core-adjacent, one config, one stdlib), two
+spikes, two witness cards. Nothing in them changes the static path (D4): a program whose shapes are
+all static stays byte-identical, which is the acceptance gate the later cards inherit.
+
+## 7. Spike and card definitions ordered by the rulings
+
+### 7.1 Spike S2: what run-time `project` and `apply_shape` cost (read and test only)
+
+*Question (Q3).* Is it worth letting a run-time shape feed `project` and `apply_shape`, given that
+both are detached or arena-mutating operations today lowered only from a literal? Not "can it be
+done": P2's fold plus `copyTopology` plainly can for `project`; the unpriced part is `apply_shape`'s
+mutation-time reader, which has no opcode and no cell-reading path.
+
+*What is measured.* Three paths over the same corpus and subjects:
+
+1. **Baseline: static `ProjectTopology`** as `compile_semantic_shape.cpp:77-90` lowers it, edge
+   pairs folded at compile time. For `apply_shape`, the existing literal path of the S1 semantic
+   builtin (`compile_semantic_shape.cpp:127-131`).
+1. **Prototype run-time `project`:** a test-only reader that walks the rule rank on `d.vql.rule`,
+   folds to an `EdgeSelection` as `compile_semantic_shape.cpp:49-70` does, and calls `copyTopology`
+   (`vortex_streams.cpp:710-775`). It is the body P2 would have, without the opcode, the ordinal or
+   the export edits.
+1. **Prototype run-time `apply_shape`:** the same fold, applied at the point where `apply_shape`
+   validates assignments and then masks (`vql-query-language.md` §4.8.3). The spike must identify
+   and name that mutation-time reader in code before measuring it; if no existing reader can take a
+   rule cell without a new mutation opcode, that finding is the result for this path and the spike
+   stops there rather than prototyping a core change.
+
+*Per path, report:* ops executed and fuel per call (the V0 discipline, `D4b-spike.md` card V0); wall
+time per call; cells minted and arena bytes per call for `project` (which mints each run) and links
+changed for `apply_shape`; rollback behaviour under `mark()`/`release()` for `apply_shape` (an arena
+edit must undo by truncation); the fold's share of the whole call, separated from the copy or
+mutation cost the static path pays too. The comparison that matters is the rule-reading overhead
+against the cost the operation already pays, not the absolute time.
+
+*Workload.* The shared corpus of §2.5 (flat presence rules, targets, nested depth 1, 8, 64,
+wildcard-led, 4096 rules), crossed with subject streams that vary in cardinality and cell valence,
+since `copyTopology` cost scales with the reachable topology and the fold cost with the rule count
+and these must be told apart. Projection-only masks (`project` accepts masks only, §4.8.3) for the
+`project` path; the assignment-bearing subset for `apply_shape`. Headless, under `make`, per the
+headless rule.
+
+*Tool.* A probe beside `tools/vql-rank-benchmark.cpp` (or a mode of it) rather than a new harness
+style; governance rule 3 requires the data to come from a probe tool, not a hand timing. The corpus
+and subjects are generated by the probe, not fixtures, so no fixture regeneration is involved.
+
+*Decision rule, fixed before the run so the result cannot pick its own threshold.*
+
+1. **Correctness gate (not a trade):** each prototype's result must be structurally identical to the
+   static path over the whole corpus, by the differential comparison of §4.1. One disagreement ends
+   the evaluation for that path.
+1. **Cost test:** the owner states, before the probe is read, the acceptable ratio of run-time
+   rule-reading overhead to the operation's own cost. This document does not choose it, and no
+   figure appears here. If the measured overhead is within it for `project`, the answer to Q3 for
+   `project` is yes and P2 proceeds (§4.3 item 4); otherwise `project` of a run-time shape refuses
+   by name and P2 stays unbuilt.
+1. **`apply_shape` is decided separately,** because its reader may need a new mutation opcode. If a
+   reader exists without one, the cost test above applies. If it needs one, that is a new core
+   approval request with S2's numbers attached, not something S2 or the P-items authorise.
+1. A hot path that allocates where the static path does not (governance rule 3) is a finding the
+   owner weighs, not an automatic veto, since `project` mints cells by construction.
+
+### 7.2 Card W1: close the copied-by-value witness hole for views
+
+*Problem.* Gate O records it as open: "a handle copied by value without its witnesses is unchecked"
+(`vm-restoration-coordinator-plan.md` l.~570); `D4b-spike.md` l.~156-159 gives the mechanism (an
+integer naming a cell passes `contains()` after number reuse) and notes the same-arena
+different-engine case works only because the marker is found. The gate-O reviewer argued no
+reachable program needs an in-graph epoch read; the owner's ruling is that the hole is closed
+anyway.
+
+*Scope.* Views only: the consumers `viewOfStream` and `planViewStep` (`compile_view_steps.cpp`)
+verify the handle's `d.vql.epoch` witness in-graph (`EpochOfCell`, already in the enum) and refuse
+by name when it is absent or stale, so a handle copied without the witness rank refuses instead of
+reading whatever sits at that number. VQL-only: no new opcode, no layout change.
+
+*Price.* The view dispatch is pinned at about 57 ops per step site (pin 60,
+`vm-restoration-coordinator-plan.md` l.~565); the check adds a read and a branch per site, so the
+pin must be re-measured and re-pinned in the same commit, not assumed. Programs that read the
+witness use `EpochOfCell`, so they are mesh-impure; views over run-time sources already are, so the
+sealed-artifact surface does not change. Estimate: M (compiler emission plus the refusal tests and
+the re-pin).
+
+*Acceptance.* A handle minted, then copied by value (integer round-trip through `IntOfCell`/
+`CellOfInt`, and a cell copy that omits the rank), refuses by name at the step; a released-and-
+reused cell number refuses; a legitimately minted handle runs with no behaviour change; the op-count
+pin reports the new figure.
+
+### 7.3 Card W2: the same for shapes
+
+*Scope.* The shape half of D3. The handle wrap step writes `d.vql.epoch` on every shape handle
+(`view_cells.cpp:22`, as gate P did for views), and every run-time reader requires the rank:
+`ShapeHolds` and `ShapeProject` refuse by name on a handle that lacks it, and a nested target's
+shape cell is checked at each level so a witness-less inner shape cannot be smuggled under a valid
+outer one.
+
+*Why its own card.* P1's text already says it fails by name on a stale witness, so a reader that
+checks one is part of P1. W2 is the part P1 does not cover: that the witness is *required* (absent
+means refuse, not treat-as-unwitnessed), that the wrap step writes it for every handle including
+those minted by compile-time `registerShape` (`compile_shape_value.cpp:93`), and the negative tests.
+Keeping it separate lets W1 land first and lets W2 be accepted on tests that do not depend on P1's
+fold being right.
+
+*Price.* Estimate: S to M. Depends on P1's opcode existing for the opcode-side check; the wrap-step
+half can land before it. Static shapes are unaffected (D4). Acceptance mirrors W1: copied-by-value
+handle, reused number, absent rank and nested witness-less inner shape each refuse by name.
+
+## 8. Q5: computed shape targets read as capture-by-value at mint
+
+The owner asked for the implications of reading `{+d.tag: $n + 1}` as capture by value at the moment
+the shape is minted, and for the source of that reading. The decision is the owner's; §8.6 gives a
+recommendation.
+
+### 8.1 The source, quoted, and what it supports
+
+**The spec is silent on when a computed shape target is evaluated.** The reading is this document's
+own assumption (D2, §2.1, written for the design; line 63 of this file), and the earlier wording of
+Q5 said the spec "is not settled by it". Every source I was pointed to, quoted exactly:
+
+- `design/vql-query-language.md:387`, the grammar, which admits an expression and says nothing about
+  time: `DimensionShapeRule ::= "!"? ( "+" | "-" | "~" )? DimensionIdentifier ( ":" ValueExpr )?`.
+- `design/vql-query-language.md:984-985`, §4.8.2, the only prose on a target: "If a value constraint
+  or variable binding is specified (`+d.tag: "mp4"` or `+d.tag: $t`), the neighbor cell along that
+  dimension matches the value or binds to `$t`." This is a *test* description. It shows `$t` as a
+  binder (an output of the match), which is the opposite direction from a computed read, and gives
+  no evaluation time for either.
+- `design/vql-query-language.md:666`: "a missing shape target does not match." This constrains the
+  empty-result case below but not the timing.
+- `design/vql-query-language.md:2218` (§4.12 status): "Non-closed formal defaults, computed shape
+  targets, ordered projections, historical pins and creation at that recursive boundary remain
+  outside this subset". `design/projects/vql-412-completion-gates.md:70` (C4): "non-closed defaults,
+  computed shape targets and historical/projection forms remain". Both say *open*, not *how*.
+- `design/vql-implementation-status.md` §4.8 (l.~16-18): "arena-local first-class shape handles". It
+  does not speak to targets. `design/vql-implementation-status.md` has no §4.12 sentence on computed
+  shape targets beyond the C4 repeat.
+- `.logs/w1/D4b-spike.md:48`: "Computed rules stay refused (section b, "computed")." That is a
+  refusal, written about views' rules, and it too is silent on timing.
+- `design/projects/vm-restoration-coordinator-plan.md`: no sentence on computed shape targets. It
+  records only that shape values live in a compile-time table "a deliberate exception ... to be
+  moved to cells later" (l.~508).
+
+So: **the spec neither supports nor contradicts capture by value; it is silent.** The present
+compiler is also silent in code: `compile_shape_predicate.cpp:80-84` refuses everything but a
+scalar-literal or nested-literal target, so no run of the system has ever fixed a timing.
+
+The nearest precedents, by analogy and not by text, lean towards by-value for first-class values:
+"Decorated functor captures freeze their body across rebinding" (`vql-query-language.md:2286`) and
+"Captures freeze ordered membership at creation ... and retain live cell identity"
+(`vql-implementation-status.md:937`). Note the second sentence: even there, *membership* freezes
+while cell identity stays live. That distinction matters in §8.2.
+
+### 8.2 Implications of capture by value
+
+- **Stale, not live, by construction.** After `let $s := {+d.tag: $n + 1}`, rebinding `$n` or
+  editing a cell `$n` was read from leaves `$s` unchanged. That matches how the compiler already
+  treats a `let` of a first-class value and the "freeze across rebinding" precedent, and it keeps a
+  shape referentially transparent, which is the purity vlace's design leans on
+  (`design/vlace-functional-language.md`). The price is that a user who expects `$s` to track `$n`
+  is surprised; this should be stated in §4.8, not discovered.
+- **Per evaluation of the literal, not per program.** A literal inside a function body or `for`
+  re-mints each time it is evaluated, so "frozen" means frozen for that evaluation. A loop of N
+  iterations mints N shapes (one scalar target cell per computed rule each, plus the rule cells).
+- **The value is copied, not the cell.** D2 says "the resulting cell is stored as the target". If
+  `$n` is an existing cell (`$x/value`), storing that cell makes the target a live reference to
+  something that can change or be released: capture by identity, which is by reference. The reading
+  is only by-value if mint copies the scalar into a fresh cell (`value()` "snapshots its operands",
+  `vql-implementation-status.md` §4.2/§7.4, is the precedent). Typed scalars come from canonical
+  text by design, so the copy keeps comparing as `VqlCompare` Equal does ("`2.0 = 2` is true").
+- **Cardinality and absence.** A computed target is a stream. Capture needs exactly one value.
+  Several is a refusal naming `one`, consistent with the scalar-cardinality guidance beside
+  `vql-query-language.md:660`. Zero is the case line 666 decides: the rule never matches. D2's
+  "absent target" (presence-only rule) must therefore be distinct from "computed, empty, never
+  matches": an edge-presence flag (cells and dimensions, not a reserved value), or a rule of a
+  distinct kind. Conflating them silently turns "no tag with this value" into "any tag".
+- **Binders are not computed targets.** `+d.tag: $t` with `$t` unbound is a binder (spec l.985). A
+  binder cannot be evaluated at mint; it needs the match, which is run time per candidate. Capture
+  by value is the reading for a *read* of a bound expression only. Which of the two a `$name` is
+  must be decided by scope, as today's `{+d.tag: $t}` handling will need to when C4 lifts the
+  refusal. This is a separate ruling the owner should expect to make.
+- **Hypertime, R8, stores.** The target cell is minted in the session arena, which mints no
+  operation (R8: arena cells carry bits only, `store-slice-convergence.md`), so a shape mint mutates
+  no visited store. A version-pinned read in the target (`x@(v1)`) is evaluated at the pin and
+  frozen. `apply_shape` mutates the arena neighbourhood only; the assignment value is fixed at mint,
+  so applying twice assigns the same value (idempotent), where a live target would not.
+- **Session persistence and epoch witnesses.** The copied target cell is a child of the shape's rule
+  rank, so it shares the handle's lifetime and is covered by the one witness (D3, W2). Capture by
+  reference would need a witness *per referenced cell per rule*. `clearVariables()` and arena
+  release drop shape and targets together. A shape that crosses arenas by `promote` (Q6) must map
+  its target cells too; staying session-local is simpler and is assumed here.
+- **Closures and lenses (V6).** By-value avoids the closure-lifetime problem: a closure descriptor
+  dies with the program (`D4b-spike.md` l.~90, `arena_copy_out.cpp:74-83`), and a lens callback with
+  captures is refused. A by-value shape needs no descriptor, so it does not block on V6 and V6 does
+  not block it. This is the main reason the design leans this way.
+- **Mesh purity and sealed artifacts.** A literal-target shape lowers as today and seals
+  byte-identically (D4). A computed target adds ordinary graph ops that evaluate the expression and
+  one mint; that mint makes the program impure like any cell-minting op, but the evaluation itself
+  introduces no opcode. The static lowering of a computed target in an immediately used predicate
+  (`?{+d.tag: $n + 1}`) can compile as `ProbeLink` plus `VqlCompare` against the computed operand
+  with no shape cell, which is sealable. For that static form to agree with the run-time form, a
+  shape held in a `let` must evaluate its target at the `let` into a hidden binding and read that
+  later, not re-run the expression at each use after `$n` was rebound. The differential test (§4.1)
+  must cover this pair.
+- **Cost.** One expression evaluation and one scalar-cell mint per computed rule per evaluation of
+  the literal; zero extra reads at use, since the target is a plain rule cell `ShapeHolds` already
+  compares. No figure is claimed. The §2.5 probe should add a computed-target row so the by-value
+  and by-reference costs below are measured, not argued.
+
+### 8.3 The alternative: capture by reference, or re-evaluate at use
+
+Each computed rule would hold an expression, and the target would be evaluated each time the shape
+is applied or tested. What it requires:
+
+- **A code value per rule**, a closure with its captured environment. That is precisely V6's blocker
+  (descriptor dies with the program; assembly outside the program area is a core change). Shapes
+  would then wait on V6, reversing §4.3's order.
+- **A way for the reader to run code.** `ShapeHolds` is a C++ opcode; it would need to re-enter the
+  VM for each computed rule, or the predicate would move back to the graph interpreter (a)/(b) with
+  `ApplyClosure`, giving up the wildcard family (§2.3 a) for any shape with a computed target.
+- **Live environment lookups** with witnesses on every captured binding, since a program's registers
+  die when the program is released (`programRetained_`, O2).
+- **Evaluation count and ordering:** O(candidates x expression cost) unless hoisted, and a result
+  that depends on when the test runs, so memoisation keys and sealed artifacts cannot be sound, and
+  differential testing against the static path needs the evaluation moment pinned anyway.
+- It *would* give the "live" reading some users expect, and make a shape a true thunk. A first-class
+  live value is better expressed as an explicit closure the user writes (`$f`) and applies, which
+  spec §4.12's closure work already provides, than as hidden laziness inside a shape literal.
+
+### 8.4 What each choice needs recorded
+
+By value needs a sentence in §4.8.1/§4.8.2 (the timing, the one-value rule, empty never matches,
+binders excluded), the fresh-copy rule, and the distinct empty-target representation. By reference
+needs V6 first. Neither is in the spec today, so either needs the owner's spec ruling; this document
+does not edit the spec.
+
+### 8.5 Open points this analysis does not close
+
+The binder-versus-read rule for `$name` in a target (§8.2), the hidden-binding rule for a `let`-held
+static shape, and Q6 (cross-arena shapes). Each is a ruling or a small design, not a measurement.
+
+### 8.6 Recommendation
+
+Adopt capture by value at mint, with four conditions: the target is a fresh scalar copy (never the
+source cell), exactly one value (several refuses, naming `one`), an empty result is a distinct
+"never matches" rule (spec l.666), and unbound `$name` stays a binder outside this ruling. Write the
+timing into spec §4.8.2 so it stops being an assumption of this design. Reasons, in order: the spec
+is silent so nothing contradicts it; it keeps shapes off V6's critical path; it keeps one witness
+per shape and static-path parity; and the live reading remains available through an explicit
+closure. The decision is the owner's.
