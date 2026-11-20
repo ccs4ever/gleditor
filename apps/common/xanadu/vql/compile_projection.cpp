@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <functional>
 #include <limits>
 #include <map>
@@ -42,7 +43,8 @@ bool hasStaticProjectionRuleShape(const ShapeLiteral &shape) {
 void VQLCompiler::validateShapeProjection(const ShapeLiteral &shape) {
   if (shape.rules.size() > remainingShapeProjectionRules_)
     throw std::invalid_argument(
-        "compiled query exceeds maximum shape projection size 4096");
+        std::format("compiled query exceeds maximum shape projection size {}",
+                    shapeLimits_.maxRules));
   remainingShapeProjectionRules_ -= shape.rules.size();
   if (!isStaticShapeProjectionSyntax(shape) &&
       !hasStaticProjectionRuleShape(shape))

@@ -400,6 +400,8 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     VQLCompiler compiler(coordinator_, vm_);
     CompilationOptions compilation;
     compilation.contextCells = contextCells;
+    compilation.limits.shape =
+        session_ ? session_->shapeLimits() : options_.shape;
     // Variables whose handles went stale are rebound before they are copied.
     if (session_) session_->pruneStaleShapes();
     compilation.initialBindings =
@@ -521,12 +523,16 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     // compiler. A handle settle() re-minted may name a view that is now a new
     // cell in a later epoch, so those copies, and only those, are witnessed
     // again; a handle the session already held keeps the witness it has.
-    if (const auto viewDims = findViewDimensions(vm_.core());
-        viewDims && !replaced.empty()) {
+    if (!replaced.empty()) {
       std::vector<zigzag::CellRef> remade;
       remade.reserve(replaced.size());
       for (const auto &[from, to] : replaced) remade.push_back(to);
-      refreshViewWitnesses(vm_.core().arena(), *viewDims, remade);
+      if (const auto viewDims = findViewDimensions(vm_.core()))
+        refreshViewWitnesses(vm_.core().arena(), *viewDims, remade);
+      // A shape's witness names the epoch of the cell it sits on, and the copy
+      // is a cell of the epoch the release began.
+      if (const auto shapeDims = findShapeDimensions(vm_.core()))
+        refreshShapeWitnesses(vm_.core().arena(), *shapeDims, remade);
     }
     if (session_) {
       publishMounts(session_, result.sessionBindings);

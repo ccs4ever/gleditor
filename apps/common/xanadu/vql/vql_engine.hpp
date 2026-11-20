@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "common/xanadu/vql/query_error.hpp"
+#include "common/xanadu/vql/shape_limits.hpp"
 #include <gleditor/cpp26.hpp>
 
 #include "common/xanadu/multi_store.hpp"
@@ -170,6 +171,17 @@ public:
   /// Removes a session mount alias without changing any store.
   void executeUnmount(const UnmountDeclaration &unmount);
 
+  /// The ceilings a shape is expanded, validated and written to cells under.
+  /// A host that has read system://settings hands them over here; without it
+  /// the defaults in shape_limits.hpp apply.
+  VQLEngine *setShapeLimits(const ShapeLimits &limits) noexcept {
+    shapeLimits_ = limits;
+    return this;
+  }
+  [[nodiscard]] const ShapeLimits &shapeLimits() const noexcept {
+    return shapeLimits_;
+  }
+
   /// Resolves dimension name to DimRef, minting dynamically if new.
   zigzag::DimRef resolveDimension(std::string_view name);
 
@@ -199,6 +211,7 @@ private:
   // taken because those paths consume syntax trees; moving the data half into
   // cells is a later card. It follows env_: clearVariables() empties it.
   ShapeTable compiledShapes_;
+  ShapeLimits shapeLimits_{};
   /// The epoch each key of compiledShapes_ was minted in when published: the
   /// witness that the number still names that cell.
   std::unordered_map<zigzag::CellRef, zigzag::ArenaManifold::ReleaseEpoch>

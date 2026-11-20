@@ -98,6 +98,8 @@ private:
 
   DefDeclaration parseDefDeclaration();
   ShapeLiteral parseShapeLiteral();
+  /// Refuses a `:=` default following a shape rule's target.
+  void refuseShapeDefault(const std::string &dimName);
   ShapeRule parseShapeRule();
   VersionPin parseVersionPin();
   VersionExpr parseVersionExpr();

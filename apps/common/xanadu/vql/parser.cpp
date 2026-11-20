@@ -2004,6 +2004,20 @@ ShapeLiteral Parser::parseShapeLiteral() {
   return ShapeLiteral{.rules = std::move(rules)};
 }
 
+void Parser::refuseShapeDefault(const std::string &dimName) {
+  // A default is lazy and belongs to one field of a contract's destructuring
+  // pattern, which runs it only when the field is absent. A shape value is
+  // captured whole when it is made, so a default written in one would either be
+  // run eagerly or wait for a closure, and no meaning was chosen for it.
+  if (check(TokenKind::Assign))
+    throw ParseError("a ':=' default after the target of shape rule '" +
+                         dimName +
+                         "' is not part of a shape: defaults belong to a "
+                         "contract's destructuring pattern, where they are "
+                         "lazy",
+                     current_.loc);
+}
+
 ShapeRule Parser::parseShapeRule() {
   if (match(TokenKind::Star)) {
     return ShapeRule{.rule = ShapeWildcard::Everything};
@@ -2036,6 +2050,7 @@ ShapeRule Parser::parseShapeRule() {
     std::shared_ptr<ValueExpr> targetValue = nullptr;
     if (match(TokenKind::Arrow) || match(TokenKind::Colon)) {
       targetValue = std::make_shared<ValueExpr>(parseValueOrComparisonExpr());
+      refuseShapeDefault(key);
     }
     return ShapeRule{.rule = DimensionShapeRule{
                          .dimName     = std::move(key),
@@ -2075,6 +2090,7 @@ ShapeRule Parser::parseShapeRule() {
   std::shared_ptr<ValueExpr> targetValue = nullptr;
   if (match(TokenKind::Colon) || match(TokenKind::Arrow)) {
     targetValue = std::make_shared<ValueExpr>(parseValueOrComparisonExpr());
+    refuseShapeDefault(dimName);
   }
 
   return ShapeRule{.rule = DimensionShapeRule{

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -17,23 +18,24 @@ using zigzag::vortex::CellValue;
 using zigzag::vortex::OpcodeKind;
 
 namespace {
-constexpr std::size_t maxShapeDepth = 128;
-
 std::size_t validateShape(const ShapeLiteral &shape, std::size_t depth,
                           std::unordered_set<const ShapeLiteral *> &active,
-                          std::size_t &remainingValidationNodes) {
-  if (depth > maxShapeDepth) {
+                          std::size_t &remainingValidationNodes,
+                          const ShapeLimits &limits) {
+  if (depth > limits.maxDepth) {
     throw std::invalid_argument(
-        "compiled shape predicates exceed maximum nesting depth 128");
+        std::format("compiled shape predicates exceed maximum nesting depth {}",
+                    limits.maxDepth));
   }
   if (!active.insert(&shape).second) {
     throw std::invalid_argument("compiled shape predicates contain a cycle");
   }
   std::size_t expanded = 0;
   const auto add       = [&](std::size_t amount) {
-    if (amount > maxCompiledShapePredicateRules - expanded) {
-      throw std::invalid_argument(
-          "compiled shape predicates exceed maximum expanded size 4096");
+    if (amount > limits.maxRules - expanded) {
+      throw std::invalid_argument(std::format(
+          "compiled shape predicates exceed maximum expanded size {}",
+          limits.maxRules));
     }
     expanded += amount;
   };
@@ -42,8 +44,9 @@ std::size_t validateShape(const ShapeLiteral &shape, std::size_t depth,
     if (shape.rules.empty()) add(1);
     for (const auto &entry : shape.rules) {
       if (remainingValidationNodes == 0) {
-        throw std::invalid_argument(
-            "compiled query exceeds maximum shape validation size 4096");
+        throw std::invalid_argument(std::format(
+            "compiled query exceeds maximum shape validation size {}",
+            limits.maxRules));
       }
       --remainingValidationNodes;
       if (std::holds_alternative<ShapeWildcard>(entry.rule)) {
@@ -82,8 +85,8 @@ std::size_t validateShape(const ShapeLiteral &shape, std::size_t depth,
             "compiled shape predicates support only scalar literal or nested "
             "literal targets");
       }
-      const auto nestedSize =
-          validateShape(**nested, depth + 1, active, remainingValidationNodes);
+      const auto nestedSize = validateShape(**nested, depth + 1, active,
+                                            remainingValidationNodes, limits);
       // Legacy !dimension rules ignore their target after checking absence.
       // Validate that target, but do not charge code that will not be emitted.
       if (!dimension->negated) {
@@ -285,11 +288,12 @@ CellRef VQLCompiler::compileShapePredicate(const ShapeLiteral &written,
   // shape, so a variable lowers as the literal it stands for.
   const ShapeLiteral &shape = resolvedPredicateShape(written);
   std::unordered_set<const ShapeLiteral *> active;
-  const auto expanded =
-      validateShape(shape, 1, active, remainingShapePredicateValidationNodes_);
+  const auto expanded = validateShape(
+      shape, 1, active, remainingShapePredicateValidationNodes_, shapeLimits_);
   if (expanded > remainingShapePredicateRules_) {
-    throw std::invalid_argument(
-        "compiled query exceeds maximum expanded shape predicate size 4096");
+    throw std::invalid_argument(std::format(
+        "compiled query exceeds maximum expanded shape predicate size {}",
+        shapeLimits_.maxRules));
   }
   remainingShapePredicateRules_ -= expanded;
   return compileShapePredicateImpl(shape, candidate);

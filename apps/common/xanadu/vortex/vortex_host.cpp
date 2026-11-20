@@ -103,6 +103,18 @@ VortexHostConfig VortexHostConfig::fromStore(const xanadu::Store &store) {
         static_cast<std::size_t>(std::get<std::int64_t>(logicVals[0]));
   }
 
+  // A ceiling of zero would refuse every shape, so only a positive setting
+  // replaces the default, as logic_max_cycles does.
+  const auto positive = [&store](const std::string_view name,
+                                 std::size_t &into) {
+    const auto values = xanadu::getSetting(store, name);
+    if (!values.empty() && std::holds_alternative<std::int64_t>(values[0]) &&
+        std::get<std::int64_t>(values[0]) > 0)
+      into = static_cast<std::size_t>(std::get<std::int64_t>(values[0]));
+  };
+  positive(xanadu::settings::kVqlShapeMaxRules, cfg.shapeLimits.maxRules);
+  positive(xanadu::settings::kVqlShapeMaxDepth, cfg.shapeLimits.maxDepth);
+
   return cfg;
 }
 
@@ -704,6 +716,7 @@ std::vector<std::vector<std::string>> VortexHost::executeVQLBatchParallel(
     WorkerContext &ctx = *contexts[i];
     prepare(ctx, i);
     xanadu::vql::VQLEngine engine(ctx.core);
+    engine.setShapeLimits(config_.shapeLimits);
     xanadu::vql::QueryExecutor executor(engine, ctx.vm, vqlOptions_);
     const auto execution = executor.execute(queries[i]);
     const auto cells     = execution ? *execution : std::vector<CellRef>{};
