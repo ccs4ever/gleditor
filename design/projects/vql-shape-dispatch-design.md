@@ -415,12 +415,38 @@ narrowing `refuseShapeCells`) are VQL-only and, by the V1 to V3 precedent, need 
    (`compile_shape_value.cpp:122-141`) shrink to one remaining special case. The ast.hpp exception
    comment (`ast.hpp:563-570`) is narrowed again at that point.
 
+**Revised 2026-11-20, fifth round (§6.1.2): RP2 is scheduled now, as its own card.** What RP2
+actually depends on is narrower than "after RP1 and P1". It needs (a) RP1's step rank, the cells and
+their constants, minted from a closed functor, which is the part of RP1 that does not involve a
+shape rule; (b) P1b's walker, a bounded function over a step rank with a step ceiling and per-cell
+fuel, which is the part of P1 that does not involve folding a rule rank; (c) P3's ceilings; and (d)
+the D1 constants and marker style (`view_cells.hpp`). It does not need P1's `ShapeHolds` fold, W2,
+S1, S2, P2, P4 or P5. The shortest sound order is therefore:
+
+1. **D1 and P3.** The `d.vql.*` constants (SHAPECELLS, landing) and the ceilings as a setting, with
+   the path-step ceiling added.
+1. **RP1 step mint**, as a free function `mintPath(closed functor) -> path cell`, with the refusals
+   of §8.9 (a `$name`, a `.` anchor, a step outside the closed subset). The shape rule's `d.vql.via`
+   edge and the mapping reader stay in RP1 proper and need not land first.
+1. **P1b's walker**, extracted as a free function over a path cell, a subject and a fuel budget,
+   with its own tests, ahead of the rest of P1. This asks to reorder an approved card (P1 split into
+   P1-walker and P1-fold); nothing in P1's scope changes. See Q15 in §5.
+1. **RP2** items 1 to 5 (§8.10), then item 7 only if vagent is to apply a handle. Item 6 is ruled
+   (share where possible, copy where not; §8.10). All seven items are approved.
+
+P1's fold, W2, S1 and S2 run in parallel and are not on RP2's path. **RECLAIM** (§7.4) is not on
+RP2's path either, but its footprint test and its interning stage (stage E) land with D1 so that RP2
+mints its third handle kind into a design that already bounds the arena, and its collection stage
+lands before RP2 reaches a user (§7.4 sequencing). Lenses (V6) still come after.
+
 ## 5. Open questions for the owner
 
 Status after the 2026-11-20 rulings (§6): Q1 moot, Q3 ordered to a spike, Q4 answered yes and
 carded, Q5 accepted (§6.1), Q8 and Q9 ruled in the third round (§6.1), Q7 settled; Q2 and Q6 remain
-open. §8.9 added Q10 to Q13 on the rootless partial path; the fourth round (§6.1) ruled Q10 to Q12
-and left Q13 to §8.10. The original wording follows where it still carries information.
+open. §8.9 added Q10 to Q13 on the rootless partial path; the fourth round (§6.1.1) ruled Q10 to Q12
+and left Q13 to §8.10; the fifth round (§6.1.2) accepted Q13's recommendation (RP2 is a separate
+card) and scheduled it now. New in the fifth round: Q14 to Q17 below and card RECLAIM (§7.4). The
+original wording follows where it still carries information.
 
 Q1. **Predicate scope.** *Moot.* P1 is approved, so the wildcard family and run-time shapes in
 predicates are in scope together; the question of shipping only the non-exact subset no longer
@@ -466,9 +492,30 @@ Q11. **Test comparison of a path target.** *Ruled 2026-11-20: by value.*
 Q12. **Does RP1 widen P1?** *Ruled 2026-11-20: yes; P1b approved* (a bounded path walker in
 `ShapeHolds` for functor-tier path targets).
 
-Q13. **First-class path handle (RP2).** *Open; analysed in §8.10* (a path becomes a value outside
-shapes: `let $p := /+d.fwd[1]` kept past compile, applied as `/$p` at run time). Recommendation: a
-separate card, after RP1.
+Q13. **First-class path handle (RP2).** *Ruled 2026-11-20 (fifth round): the recommendation is
+ACCEPTED, RP2 is a separate card, and the owner wants it done now (§6.1.2, §8.10).* A path becomes a
+value outside shapes: `let $p := /+d.fwd[1]` kept past compile, applied as `/$p` at run time. The
+seven approval items of §8.10 are each APPROVED (later in the same round).
+
+Q14. **Does the loop guard keep any refusal?** *Open, a question the ruling leaves.* The fifth round
+loosens the SHAPECELLS guard so `def g($x) := {*, +d.tag: $x}; g(##)` works (§6.1.2). Which refusal
+remains is for the owner: the recommendation in §8.9 is that a handle made in a function body or
+loop of the *same* query is read where it is made, and only a handle carried to a *later* query
+(`lateHandles_`, `compile_shape_value.cpp:156-165` on the shapecells branch) keeps the refusal.
+
+Q15. **Split P1 so the walker lands first?** *Open.* RP2 depends on P1b's walker and on nothing else
+in P1 (§4.3). Splitting approved P1 into a walker card and a fold card changes no scope but reorders
+an approved item; it is asked rather than assumed.
+
+Q16. **Does "standard rank cycle protection" drop the `seen` set in `walkShapes`?** *Open.* The
+ruling (§6.1.2) is to walk until the end or until the starting cell is reached, which `zigzag::rank`
+already does for a rank. The `seen` set also guards the `d.vql.nested` edge, which is not a rank: a
+shape nesting itself would recurse until the depth ceiling (128, P3). Recommendation: keep `rank`
+for the rule rank, and keep a depth-bounded recursion on `nested` using P3's ceiling instead of a
+set, so that the ruling is followed to the letter and the bound is still a number.
+
+Q17. **RECLAIM stage choice.** *Open, §7.4.* Which stages (E, C) to approve, and the setting that
+triggers a collection.
 
 Q7. **vagent.** *Settled by the approval of P4:* the arity rows are in scope, the CELLINT precedent
 (refused by ordinal) is not followed.
@@ -531,6 +578,24 @@ Rulings on the rootless partial path (§8.9) and the SHAPECELLS implementer's qu
 
 Cost: P1b is the one item that adds work (a bounded walker, S to M, §8.9); the other rulings remove
 or confirm behaviour. Nothing here changes the static path (D4).
+
+### 6.1.2 Fifth round, 2026-11-20
+
+Rulings on RP2 and the SHAPECELLS guard, and one new card.
+
+| item                       | ruling                                    | what it changes                                                                                                                                                                                                                            |
+| -------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Q13                        | recommendation ACCEPTED                   | RP2 is a separate card (§8.10), not folded into RP1. Q13 is closed as to structure.                                                                                                                                                        |
+| RP2 sharing                | share where possible, copy where not      | A shape rule that names an RP2 path shares the path cell by reference where it can and copies the steps where it cannot (§8.10 sets out both and the witness). Resolves approval item 6 of §8.10.                                          |
+| RP2 timing                 | NOW                                       | Scheduled immediately, not waiting for a UX journey. §4.3 states what it depends on: RP1's step rank and P1b's walker, hence P1's walker, and gives the shortest order. The consumer question of §8.10's earlier reason (1) is overridden. |
+| RP2 approvals              | all seven items APPROVED, each separately | The owner approved each of the seven items of §8.10 (2026-11-20, after "let's do RP2 now"), recorded one by one there. RP2 is approved and scheduled; build starts at the §4.3 order.                                                      |
+| SHAPECELLS: computed guard | loosened                                  | Supersedes the 6.1.1 "extends to all loop forms" row, which was too broad. `def g($x) := {*, +d.tag: $x}; g(##)` must work. Acceptance test and the refusal that remains: §8.9 (Q14).                                                      |
+| `walkShapes`               | standard rank cycle protection            | Walk until the end of the rank or until the starting cell is reached, as `zigzag::rank` does. Whether the nested-edge `seen` set goes too is Q16.                                                                                          |
+| RECLAIM                    | new card; unchecked arena growth is real  | Defined in §7.4: a one-rule shape leaves 7 cells per query, never reclaimed. Options priced, stages, tests and approvals there; none approved yet.                                                                                         |
+
+Cost: RP2 is M to L (§8.10) and now sits on the critical path, ahead of P1's fold, W2 and S1; the
+price of that is that P1 is asked to split (Q15). RECLAIM is S for its first stage and M to L for
+its second. Nothing here changes the static path (D4).
 
 ## 7. Spike and card definitions ordered by the rulings
 
@@ -634,6 +699,109 @@ fold being right.
 *Price.* Estimate: S to M. Depends on P1's opcode existing for the opcode-side check; the wrap-step
 half can land before it. Static shapes are unaffected (D4). Acceptance mirrors W1: copied-by-value
 handle, reused number, absent rank and nested witness-less inner shape each refuse by name.
+
+### 7.4 Card RECLAIM: reclaiming the arena cells of dropped shape and view handles
+
+*Problem.* The owner reports that a one-rule shape leaves 7 cells per query, never reclaimed (the
+count is the owner's; the footprint test below is what measures it). The session's handle table is
+bounded by the handles still named: `publishShapes` keeps only the entries a variable or a result
+still names, "bounded by the shapes held rather than by the queries run" (`vql_engine.hpp:117-123`).
+The arena is not. A table entry is a number; dropping the entry frees no cell, so the arena grows
+linearly in the queries that minted handles. "Unchecked arena growth must be taken seriously"
+(owner): the bounded-rate tests of today assert the rate of growth per query, which a long session
+still pays without limit. RP2 adds a third handle kind (a path cell with its step rank, marker and
+witness) to the same problem, so it is cheaper to fix before RP2 reaches a user than after.
+
+*What exists, read from the code.*
+
+- Every query already runs in a program area. `ProgramArea` takes a mark when the program is
+  compiled, releases it afterwards (`release()` truncates every cell minted under the mark), and
+  re-mints the cells the result and the session's bindings still name through `CopyOut`
+  (`execution.cpp:40-228`, `arena_copy_out.hpp:75-130`). A handle's view is carried with it and its
+  box rewritten (`execution.cpp:104-170`). The `replaced` map then re-keys the shape table
+  (`execution.cpp:540-552`). So the *nursery* is already collected per query, and a handle that dies
+  with its query costs nothing.
+- Two things escape it. (1) A handle that survives a query (bound by `let`, or returned) is
+  re-minted *above* everything older. When a later query drops the binding, its cells sit mid-arena
+  and no mark spans them, so nothing truncates them. (2) `retain()` keeps the whole program
+  (`execution.cpp:150-157`, `:203-210`) when the run named a dimension, wrote an older cell, or
+  `CopyOut` refused (a runtime object, a proxy, a quote, a handle-valued cell, a view whose source
+  the program minted). Every cell of a retained program stays, handles included, with no later
+  chance of release.
+- Release is a tail operation. `release(mark)` truncates everything above the mark and is refused
+  unless the mark is the innermost (`arena_manifold.hpp:868-881`, `MarkRefusal`). A cell below a
+  later live cell cannot be freed on its own. `compact()` does not help: it "moves runs, never
+  cells" and reclaims dead link runs only (`arena_manifold.hpp:936-941`, and the epoch comment at
+  `:908-911`); it is refused while any mark is outstanding (`ArenaRefusal::MarksOutstanding`,
+  `arena_manifold.hpp:260`). Cell numbers are dense indices, so a free list would reuse a number
+  without advancing the epoch, and the epoch witness (`epochOfCell`, `:913`) would then validate a
+  stale handle; that is why reuse is refused below.
+- R8 is not in the way: arena cells append no operation, so reclaiming them touches no store, no
+  permascroll and no activity walk. A promoted cell (`promote()`) is a copy in the store and is
+  untouched.
+- A session-long mark is not available as a trick. `discard()` clears the undo trail only when the
+  last mark is gone (`arena_manifold.cpp:2541-2555`), so a mark held for the whole session would
+  make the trail record every write to an older cell for as long as the session runs: the same
+  linear growth, moved from cells to journal entries, and `compact()` refused throughout.
+
+*Options, each priced.*
+
+| option                                              | what it does                                                                                                                                                                                                                 | bounds                                      | price and objection                                                                                                                                                                                                                                           |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A. Per-query release or truncation                  | What `ProgramArea` already does.                                                                                                                                                                                             | handles that die with their query           | Nothing to build. Does not touch the two escapes above. Not a fix by itself.                                                                                                                                                                                  |
+| B. A mark taken around a query                      | The same mark under another name.                                                                                                                                                                                            | as A                                        | Refused as a duplicate of A. A mark that outlives the query is the session-long mark above.                                                                                                                                                                   |
+| C. Reachability collection from the session's roots | At a query boundary (no mark outstanding), take the roots: session variables, the shape and view tables, `d.vql.via` boxes (an RP2 shared path), home. Copy what they reach into a fresh arena, swap, and re-key the tables. | the live set, whatever the history          | The one that bounds the footprint. M to L. Needs `CopyOut` generalised from "above a mark" to "from these roots" and an arena swap; the swap advances the epoch (`replacedBy`), so every old witness fails by name, as designed. Cost O(live) per collection. |
+| D. Generational arenas                              | A second arena for handles, so dead ones are whole-arena garbage.                                                                                                                                                            | handle cells only                           | L. A handle spanning two arenas contradicts Q6 (session-local, one arena) and D3's single witness. Refused unless C proves too slow.                                                                                                                          |
+| E. Intern the handle (hash-consing)                 | Mint a shape or path once per canonical content: a repeated query finds its handle instead of minting.                                                                                                                       | repeated queries; distinct shapes unbounded | S, VQL-only, no core change. Sound because a shape handle is immutable and by-value (D2, Q5). A path is immutable too. A view is keyed by (source, shape). It bounds the common REPL loop, not a stream of distinct shapes.                                   |
+| F. Free-list cell reuse                             | Reuse a dead cell's number.                                                                                                                                                                                                  | nothing safely                              | Refused. Reuse without an epoch bump lets `epochOfCell` validate a stale handle, the hole W1 and W2 close.                                                                                                                                                    |
+
+*Scope.* Every handle kind the session keeps: dynamic views (`view_cells`), first-class shapes
+(`shape_cells`, SHAPECELLS), lenses when V6 gives them a home, and RP2 path handles. The collector
+treats a handle by its marker and its roots (the box in `d.vql.via`, the view a view handle names),
+so a new kind registers its root-following in one place. Compiled-program cells that `retain()`
+keeps are in scope too: they are the second escape, and C collects them when nothing the session
+holds reaches them.
+
+*Stages.*
+
+1. **R0, the footprint test (S, no approval).** Red first, as the test the other stages must turn
+   green; see Tests.
+1. **R-E, interning (S, VQL-only, no core approval by the V1 to V3 precedent).** Keyed on canonical
+   content; a witness-checked hit; a miss mints as today.
+1. **R-C, collection (M to L, core-adjacent).** The roots protocol, `CopyOut` from roots, the swap
+   and re-key, and the trigger.
+
+*Tests.* A bounded-footprint test replaces today's bounded-rate tests. Rate tests assert that one
+query adds at most k cells; they pass while a session of a million queries grows without limit. The
+footprint test runs N queries (N large enough that linear growth is unmistakable, for example the
+ceiling in P3 times ten), each minting and then dropping a one-rule shape, a view, a lens-free path
+handle (once RP2 lands) and a nested shape, and asserts that `arena.liveCells()` after the last
+collection is within a constant of the live set's size, independent of N. Variants: handles kept and
+dropped alternately; a retained program (a query that names a dimension); a handle carried across a
+collection (its witness fails by name if copied by number, passes if re-keyed); two sessions on one
+engine; a collection mid-script. Headless, in `xuzz_test`, per the headless rule. The rate tests
+stay as the per-query regression check; they are no longer the bound.
+
+*Approvals, each separate and PENDING.*
+
+1. R-E, interning: VQL-only; asked as an owner decision because it changes what "mint" means for a
+   repeated query (one handle, not two).
+1. `CopyOut` generalised to a root set with no floor mark (`arena_copy_out.*`, core).
+1. An arena swap entry point that advances the epoch and keeps every `CellRef` the caller re-keys
+   (`ArenaManifold`, core); the existing assignment already advances it
+   (`arena_manifold.hpp:885-890`), so the question is whether the swap is exposed as a named, tested
+   operation.
+1. The trigger setting (cells before a collection, or a growth factor) as a `defaultSettingSpecs()`
+   entry (config; `AGENTS.md` says adding one "is easy to skip").
+1. Where a collection may run: only at a query boundary with no mark outstanding; refused inside a
+   script mid-statement or a `watch`. A rule, not code, but it limits the feature and is the owner's
+   to confirm.
+
+*Recommendation.* Approve R0 and R-E now (both S, no core change); R-E bounds the repeated-query
+case the owner observed and R0 proves it. Approve R-C as the real bound and schedule it after P1's
+walker and before RP2 reaches a user: RP2's mint then registers one more root kind instead of
+inheriting the leak. Do not take D or F. If the owner prefers one stage, take R-C, not R-E: R-E is a
+rate reduction, R-C is the bound. Estimates: R0 S, R-E S, R-C M to L. This is Q17.
 
 ## 8. Q5: computed shape targets read as capture-by-value at mint
 
@@ -1043,6 +1211,36 @@ with cells and dims" asks for. So a multi-result path target would be a rank, no
   lifetime, and falls under V6 for anything kept past the program. No core opcode is needed for (1)
   to (3).
 
+*Lists and streams, what the code and spec add (fifth round).* Three drifts bear on any "many" mode
+and on the Q10 expansion. (1) The morphism compiler accepts only a dimension subject:
+`compile_path_morphism.cpp:29-45` takes a string literal as a *dimension name*
+(`dimName = *dimension`, `:33`) and refuses a variable or path subject (`:37`, `:44`), so the spec's
+`"key" => list(...)` d.vars/d.values sprout and `$cell => list($c1, ...)`
+(`vql-query-language.md:1033-1042`) are not built; only `±dim => [ ... ]` is, linking one fresh cell
+per target in a chain (`:80-110`). (2) The spec says the context stays on the subject
+(`:1026-1028`); the compiler returns the spawned target cells (`:127`), which
+`vql_engine_test.cpp:417-420` relies on. (3) Duplicates and order: a `let` of a path binds the cells
+themselves in order with duplicates (`streamBindings_`, `compile_block.cpp:78`; run-time
+`StreamAppend`, `vortex_streams.cpp:253-290`); a sprout list writes a fresh chain and is positional.
+A "many" path target would therefore mean a chain of clones in result order, duplicates kept, which
+is the sprout's behaviour, not a `let`'s.
+
+*The loop guard, loosened (fifth round).* The 6.1.1 row extended the computed-target guard to every
+loop form; the owner finds it too broad and loosens it. Acceptance:
+`def g($x) := {*, +d.tag: $x}; g(##)` compiles and runs, minting a shape whose computed target is
+captured by value from the call's actual (D2, Q5). The refusal that remains, recommended and pending
+Q14, is the one that protects a *later* query: a handle carrying a computed target as an expression
+(`hasLateRule`, `lateHandles_`) read in a scope that has no such name. A handle made and consumed in
+the same query, whatever loop or function body made it, is not refused. Tests: the function above; a
+loop minting one shape per iteration, each consumed in the iteration; a frame group; a handle
+carried to a later query (still refused, naming it).
+
+*`walkShapes`, cycle protection (fifth round).* The walk of the rule rank uses the standard rank
+protection and nothing more: it ends at the end of the rank or when the starting cell is reached,
+which is what `zigzag::rank` does (`shape_cells.cpp:66-72`, on the shapecells branch). Whether the
+`seen` set on the `nested` edge is dropped too is Q16; the recommendation keeps a depth ceiling from
+P3 there so that a self-nesting shape ends at a number rather than at a set.
+
 **Fuel, purity, sealing, witnesses, R8.** Fuel is charged per step cell visited and per rule, the
 ceiling from P3 plus a step-count ceiling. A literal inline target compiles as today (D4,
 byte-identical, sealable). A minted path is session-local cells in the shape's arena: no operation
@@ -1085,8 +1283,8 @@ ruling does not require it.
 
 ### 8.10 Card RP2: the first-class path handle (Q13)
 
-The owner asked for a fuller account of RP2 as a possible separate card. Everything here is a
-proposal over what exists; no approval is taken.
+The owner asked for a fuller account of RP2 as a possible separate card. Everything here was a
+proposal over what exists; the fifth round (§6.1.2) accepted it and approved all seven items.
 
 **RP1 versus RP2.** RP1 (§8.9) makes a closed path a *part of a shape rule*: the steps are cells
 under the rule, read only by the shape consumers (`ShapeHolds`, `apply_shape`), and the user never
@@ -1154,8 +1352,36 @@ shapes do (`view_cells.hpp:36-62`):
 - *Composition*: `$a / $b` mints a new path cell whose rank is a fresh copy of both step runs (never
   a shared tail), so the composite stands alone and its witness covers it.
 - *RP1 relation*: a shape rule's `d.vql.via` edge may point at an RP2 path cell instead of a
-  rule-owned one; the walker reads the same cells either way. Whether the rule shares the path cell
-  or copies it is a ruling (copy is safer under release; sharing is cheaper).
+  rule-owned one; the walker reads the same cells either way. **Ruled 2026-11-20 (fifth round):
+  share where possible, copy where not**, set out below.
+
+**Sharing and copying a path from a shape rule (ruled).** A reference cannot be a link: a cell has
+at most one neighbour per direction on a dimension, so one path cell cannot be linked from two rules
+without a clone fan-out. A shared reference is therefore a box cell on the rule holding the path
+cell's number as an Int64, with the path's epoch recorded beside it, the way a view handle names its
+source and view. Sound only because a path is immutable after mint (nothing writes a step).
+
+- *Share* when the path cell is in the same arena as the shape, the epoch recorded on the box is
+  current (`epochOfCell(path) == recorded`), and the shape is not leaving the session.
+- *Copy* the step rank into the rule (a rule-owned rank, as RP1) whenever sharing is impossible: (1)
+  **a different arena**: a number from another arena names nothing here (Q6, session-local); (2)
+  **an epoch or witness mismatch found at mint**: the handle is stale, so there is nothing to copy
+  from and the mint refuses by name; a mismatch found *later* means the shape outlived the path's
+  cell, and the consumer refuses by name, naming the rule, rather than reading what now sits at that
+  number; (3) **promotion**: a shape promoted to a store has no arena numbers, so the steps are
+  copied into the promoted rule (or the promotion refuses by name if the path is not copyable); (4)
+  **composition**: `$a / $b` always mints a fresh copy of both step runs (never a shared tail); (5)
+  **copy-out at `settle()`**: when the program is released and the shape is re-minted, a shared path
+  that was minted by the program is carried with it and the box rewritten, as a view handle's box is
+  (`execution.cpp:104-170`); one the session already held is shared as is, and one that cannot be
+  carried keeps the whole program, as a view does.
+- *How the witness covers the shared reference.* The shape's own W2 witness covers the shape's cells
+  and says nothing about a cell reached by number. So each shared reference carries its own: the box
+  records the path cell's epoch, every consumer (`ShapeHolds`, `apply_shape`'s reader) checks the
+  shape witness, then each shared path's recorded epoch against `epochOfCell`, and a mismatch
+  refuses by name (the rule, the path cell). A copied rule needs no second witness: its steps are
+  children of the rule rank and the shape's witness covers them, as RP1's do. The collector (§7.4)
+  follows the box as a root, so a shared path is live while any shape names it.
 
 **Run-time application: which opcode.** Two options.
 
@@ -1197,27 +1423,34 @@ removes (one more approval then, with its own capture ruling).
   Application: O(steps visited) with the fuel charge per cell, the same unit as P1b (Q2). One
   witness check per application, an Int64 compare against the epoch rank.
 
-**Approvals it would need, each separate.**
+**Approvals, each separate. All seven APPROVED 2026-11-20 (fifth round).** *The owner said "let's do
+RP2 now", which set the schedule (§4.3), and then approved each item below individually. RP2's
+status is therefore: approved and scheduled, not started.*
 
-1. The `d.vql.path` marker and the rank constants as a compile-time table in `view_cells.hpp`
-   (data-half, no core change; the V1 to V3 precedent).
-1. A handle value kind for the VM: a path handle boxed like a view or shape handle, with its witness
-   (W1 and W2 style). Needed only if the handle crosses a call boundary.
-1. The run-time application: a new opcode (`ApplyPath`, option (i)), or the graph lowering (option
-   (ii)). Core-adjacent and its own approval; it takes the P1b walker as given.
-1. A P3 addition for a handle's step ceiling at mint (it may reuse RP1's) and the
+1. **APPROVED.** The `d.vql.path` marker and the rank constants as a compile-time table in
+   `view_cells.hpp` (data-half, no core change; the V1 to V3 precedent).
+1. **APPROVED.** A handle value kind for the VM: a path handle boxed like a view or shape handle,
+   with its witness (W1 and W2 style). Needed only if the handle crosses a call boundary.
+1. **APPROVED.** The run-time application: a new opcode (`ApplyPath`, option (i)), or the graph
+   lowering (option (ii)). Core-adjacent and its own approval; it takes the P1b walker as given.
+1. **APPROVED.** A P3 addition for a handle's step ceiling at mint (it may reuse RP1's) and the
    `defaultSettingSpecs()` entry.
-1. Lifting the two refusals at `compile_functor.cpp:65` and `:227` for the closed subset only.
-1. Whether a shape rule shares an RP2 path cell or copies it.
-1. A vagent arity row if vagent is to apply a handle (P4's precedent; may be dropped with the opcode
-   if vagent does not call it).
+1. **APPROVED.** Lifting the two refusals at `compile_functor.cpp:65` and `:227` for the closed
+   subset only.
+1. **APPROVED.** Sharing versus copying, **ruled** (share where possible, copy where not, as above),
+   with the mechanism: the box cell with a recorded epoch, and its check in each consumer.
+1. **APPROVED.** A vagent arity row if vagent is to apply a handle (P4's precedent; may be dropped
+   with the opcode if vagent does not call it).
 
 **Size and sequencing.** M for the data half and the compile-time lift (items 1, 2, 4, 5), S for the
 opcode (item 3, given P1b's walker), plus W-style witness tests: M to L in all, mostly tests (values
-passed, returned, composed, stored, released, copied by value, refused with `$var`). Sequence: after
-RP1 and P1 (the step cells and the walker exist), before or independent of V6; it needs no lens and
-gains nothing from one until a path with free variables is wanted. Not before P1b, since the opcode
-would otherwise duplicate its walker.
+passed, returned, composed, stored, released, copied by value, refused with `$var`, shared and
+copied from a shape rule, collected by RECLAIM). **Scheduled now (fifth round).** The earlier text
+said "after RP1 and P1"; what RP2 needs is narrower: RP1's step rank (the free `mintPath`), P1b's
+walker as a standalone function, and P3's ceilings; it does not need P1's `ShapeHolds` fold, W2, S1
+or S2. The order is D1 and P3, then `mintPath`, then the walker, then RP2 items 1 to 5 (§4.3, which
+also asks, as Q15, to split P1 so the walker goes first). Not before the walker, since the opcode
+would otherwise duplicate it.
 
 **Refused alternatives.** Making RP2 part of RP1: it adds an opcode, a value kind and a lifted
 refusal to a card that was priced without them, and so would force a second approval inside an
@@ -1228,11 +1461,11 @@ the witness and `d.vql.step` reuse, the "cells and dims" ruling in memory. Captu
 by reference: conflicts with Q5. Keeping the compile-time expansion only: leaves
 `compile_functor.cpp:65` as the permanent answer for any functor not statically known.
 
-**Recommendation: a separate card.** Reasons: (1) RP1 has a clear consumer and an approved walker;
-RP2's consumers (functor arguments to functions, handles stored on cells) are not yet demanded by a
-journey, so its value is not yet measured; (2) it needs a new opcode and a new value kind, which RP1
-does not, and a separate card keeps RP1's price as quoted; (3) it lifts two existing refusals and so
-touches the functor path, tested separately from shapes; (4) it reuses RP1's cells and P1b's walker
-entirely, so deferring it costs nothing and a later build adds no rework. Take RP2 after RP1 lands,
-on a concrete consumer (a UX journey that passes a path to a function), and ask for items 1 to 7
-above then.
+**Recommendation: a separate card (ACCEPTED 2026-11-20, and scheduled now).** Reasons it stays
+separate: (1) it needs a new opcode and a new value kind, which RP1 does not, and a separate card
+keeps RP1's price as quoted; (2) it lifts two existing refusals and so touches the functor path,
+tested separately from shapes; (3) it reuses RP1's cells and P1b's walker entirely. The earlier
+reason that its consumers were not yet demanded by a journey is overridden by the owner's decision
+to do it now; the consumer is then the owner's own use, and the card should still name its first
+journey (a path passed to a function) so the acceptance tests have a user to be written from. The
+seven items above were asked for individually and each is approved.
