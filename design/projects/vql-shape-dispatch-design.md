@@ -60,16 +60,27 @@ with the spike's kinds extended: `dim` (a dimension rule), `wildcard` (everythin
 `nested` (a nested shape: one `d.vql.nested` edge to a shape cell), and `pivot`/`virtual` only if §3
 admits them. Dimension name, direction and the `!`/`~` flags are cells or edge presence exactly as
 `d.vql.to`, `d.vql.neg`, `d.vql.bidir`, `d.vql.dir` already are for views (`D4b-spike.md` l.40-47).
-Source order is part of the data: both the mask fold (`compile_shape_predicate.cpp:343-364`) and the
-project fold (`compile_semantic_shape.cpp:49-70`) are order-dependent.
+A dimension rule's value, when it has one, is one scalar cell on `d.vql.target` and nothing says
+whether it is a test value or an assignment value: the literal is the same in both uses and the
+*consumer* chooses the reading (§8.7). An empty computed target is marked by a `d.vql.void` edge on
+the rule cell, distinct from the absence of `d.vql.target` (a presence-only rule). Source order is
+part of the data: both the mask fold (`compile_shape_predicate.cpp:343-364`) and the project fold
+(`compile_semantic_shape.cpp:49-70`) are order-dependent.
 
-D2. **Targets are values, resolved at mint time.** A rule's target is one of: absent, a scalar cell
-(`d.vql.target`, compared with `VqlCompare` Equal, `compile_shape_predicate.cpp:407-415`), or a
-shape cell. A computed target (`{+d.tag: $n + 1}`) is *evaluated where the shape literal is
-evaluated*, in the scope that has `$n`, and the resulting cell is stored as the target. This is
-capture by value, which is why the dispatch half needs no closures: the lens problem (a descriptor
-that dies with the program, `D4b-spike.md` l.~80-90) does not arise for shapes. The compiler change
-is VQL-only and belongs to the data half.
+D2. **Targets are values, captured by value at mint time (ruled 2026-11-20; §6.1, §8).** A rule's
+target is one of: absent, a scalar cell (`d.vql.target`), a `d.vql.void` marker (computed, empty),
+or a shape cell. A computed target (`{+d.tag: $n + 1}`) is *evaluated where the shape literal is
+evaluated*, in the scope that has `$n`, copied into a fresh scalar cell, and that cell is stored.
+The same cell is read in two ways, by consumer (§8.7): P1 `ShapeHolds` compares it with `VqlCompare`
+Equal (`compile_shape_predicate.cpp:407-415`) as a **match target**; the assignment consumers
+(`apply_shape`, a mask, and `ShapeProject` where S2 admits it) link a fresh copy of it per subject
+as a **mapping assignment** (`compile_semantic_shape.cpp:236-252`, `:261`;
+`compile_projection.cpp:334`). A **default** (`:= expr`) is neither: it belongs to the destructure
+pattern, is lazy by spec, and is not stored in a shape cell (§8.7, question Q8). A target that
+depends on the subject (anchored on `.`) cannot be captured at mint and is refused there (Q9).
+Capture by value is why the dispatch half needs no closures: the lens problem (a descriptor that
+dies with the program, `D4b-spike.md` l.~80-90) does not arise for shapes. The compiler change is
+VQL-only and belongs to the data half.
 
 D3. **A shape handle is a shape cell with a marker and an epoch witness**, as a view handle is: the
 marker dimension already exists (`shapeMarkerDimension = "d.vql.shape"`, `view_cells.hpp:37`;
@@ -401,8 +412,8 @@ narrowing `refuseShapeCells`) are VQL-only and, by the V1 to V3 precedent, need 
 ## 5. Open questions for the owner
 
 Status after the 2026-11-20 rulings (§6): Q1 moot, Q3 ordered to a spike, Q4 answered yes and
-carded, Q5 analysed in §8 and awaiting the owner, Q7 settled; Q2 and Q6 remain open. The original
-wording follows where it still carries information.
+carded, Q5 accepted (§6.1) and refined by the readings in §8.7 (new Q8, Q9), Q7 settled; Q2 and Q6
+remain open. The original wording follows where it still carries information.
 
 Q1. **Predicate scope.** *Moot.* P1 is approved, so the wildcard family and run-time shapes in
 predicates are in scope together; the question of shipping only the non-exact subset no longer
@@ -424,12 +435,20 @@ Q4. **Witness on shapes.** *Yes; carded as W1 (views) and W2 (shapes), §7.2 and
 consumer checks the epoch witness. A shape handle copied by value without its witnesses is the same
 unchecked hole gate O recorded for views.
 
-Q5. **Computed targets at mint time (D2).** *Analysed in §8; the decision is the owner's.*
+Q5. **Computed targets at mint time (D2).** *Accepted 2026-11-20 with four conditions (§6.1); §8.7
+separates the readings it applies to and raises Q8 and Q9.*
 
 Q6. **Where a shape cell lives.** *Open.* Session cells survive in the session arena and refer to a
 foreign-store shape only by an Int64 box (the view rule, `D4b-spike.md` l.~120). Should a shape be
 allowed to span arenas by promotion to a store (`promote`), or stay session-local until a separate
 card? Staying local keeps D3's witness sufficient. Q5's recommendation (§8) assumes session-local.
+
+Q8. **Defaults in a shape literal.** *Open; §8.7.* Spec defaults (`:= expr`) are lazy and live in
+destructure patterns, not in shape literals. If the owner wants a "use this if the relation is
+absent" form in a mapping shape, it is a new semantics that conflicts with capture at mint.
+
+Q9. **Subject-relative computed targets.** *Open; §8.7.* A target such as `./+d.fwd[1]` is resolved
+per subject today and cannot be captured at mint.
 
 Q7. **vagent.** *Settled by the approval of P4:* the arity rows are in scope, the CELLINT precedent
 (refused by ordinal) is not followed.
@@ -457,6 +476,18 @@ document and what it costs, since a ruling that adds work should say so.
 Net price of the rulings: five approved items (three core-adjacent, one config, one stdlib), two
 spikes, two witness cards. Nothing in them changes the static path (D4): a program whose shapes are
 all static stays byte-identical, which is the acceptance gate the later cards inherit.
+
+### 6.1 Second round, 2026-11-20
+
+| item | ruling                             | what it changes                                                                                                                                |
+| ---- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| P2   | gated on S2: accepted              | `ShapeProject` is built only if S2's decision rule (§7.1) is met; D1 and D2 are unaffected either way.                                         |
+| Q5   | capture by value at mint: accepted | D2 as revised. Four conditions: fresh scalar copy, exactly one value, empty never matches, an unbound `$name` stays a binder (§8.6).           |
+| Q8   | raised by the readings check       | The owner's recollection of a "default if absent" mapping form is not what the code or the spec has for shape literals (§8.7). Needs a ruling. |
+| Q9   | raised by the readings check       | A subject-relative computed target cannot be captured at mint (§8.7). Needs a ruling.                                                          |
+
+Cost: nothing in D1 grows beyond one marker edge (`d.vql.void`); the by-value ruling applies to
+match and assignment targets and does not touch defaults.
 
 ## 7. Spike and card definitions ordered by the rulings
 
@@ -693,7 +724,7 @@ does not edit the spec.
 The binder-versus-read rule for `$name` in a target (§8.2), the hidden-binding rule for a `let`-held
 static shape, and Q6 (cross-arena shapes). Each is a ruling or a small design, not a measurement.
 
-### 8.6 Recommendation
+### 8.6 Recommendation (accepted 2026-11-20)
 
 Adopt capture by value at mint, with four conditions: the target is a fresh scalar copy (never the
 source cell), exactly one value (several refuses, naming `one`), an empty result is a distinct
@@ -702,3 +733,99 @@ timing into spec §4.8.2 so it stops being an assumption of this design. Reasons
 is silent so nothing contradicts it; it keeps shapes off V6's critical path; it keeps one witness
 per shape and static-path parity; and the live reading remains available through an explicit
 closure. The decision is the owner's.
+
+### 8.7 The readings of a value attached to a dimension
+
+The owner recalled two functions: a MATCH form (`[{ d.1: Int: 1 }]`, a test) and a MAPPING form
+(`$path{*, d.1: Int: 1}`, a default used if the relation does not exist). Checked against the spec
+and the code: the first is confirmed, the second is **contradicted**, and there are four readings,
+not two. The spelling `d.1: Int: 1` is in neither grammar: a shape rule is `Dim ( ":" ValueExpr )?`
+(`vql-query-language.md:387`, parsed at `parser.cpp:2038`; the AST holds one `ValueExpr`,
+`ast.hpp:154-160`), and a typed field is `+d.fps: $fps: Int := 60` (`ast.hpp:388-396`;
+`parser.cpp:1812-1832`).
+
+1. **Match target (test) - confirmed.** `vql-query-language.md:984-985`: "the neighbor cell along
+   that dimension matches the value or binds to `$t`"; `:666`: a missing target does not match.
+   Code: `compile_shape_predicate.cpp:75-76` accepts a scalar literal, `:314-326` emits the
+   constant, `:407-415` compares with Equal. Read-only (`vql-query-language.md:993-994`: predicates
+   "remain read-only tests").
+1. **Mapping assignment - refined, and not a default.** `$path{...}` is a mask, and a target in it
+   is an assignment: `vql-query-language.md:991-992` ("assignments are validated before the mask,
+   and reciprocal collisions refuse") and `:953` ("adding or overriding `+d.tag`"). Code:
+   `compile_projection.cpp:295-300` evaluates each target eagerly, once per execution, before the
+   mask (`first` cell of the stream); `:334` emits an unconditional `Link`.
+   `compile_semantic_shape.cpp:236-252` is the same for `apply_shape`; `:261` is the `Link`;
+   `:289-290` resolves a target per subject with that subject as context, which the test at
+   `tests/xuzz/vql_apply_shape_multi_test.cpp:153` (`./+d.fwd[1]`) relies on. Nothing tests whether
+   the relation exists first, so it sets, it does not default. `project` refuses assignments
+   (`vql-query-language.md:998`).
+1. **Default (`:= expr`) - a third reading, in a different production.** It lives in
+   `DestructureField::defaultValue` (`ast.hpp:388-396`), not in a shape rule.
+   `vql-query-language.md: 2194-2195`: "A default is used only when the field is absent ... A
+   literal field default mints its scalar only when it is used"; `:2232-2236`: "Supported field
+   defaults are lazy ... Path/call defaults execute compiled graphs only when absent". The status
+   document lists "nonliteral shape-field default thunks" as open
+   (`vql-implementation-status.md:159`); C2 keeps "static AST-functor defaults" open and C4 keeps
+   "non-closed defaults, computed shape targets" open (`vql-412-completion-gates.md:68,70`;
+   `vql-query-language.md:2218`). So the "use if absent" idea exists, is lazy and is per-field, but
+   belongs to contracts and destructuring, not to `$path{...}`.
+1. **Binder (`+d.tag: $t`) - a fourth.** An output of the match (`:985`); `parser.cpp:1812-1822` for
+   the destructure form. Also `!d.x` ignores its target after the absence check
+   (`compile_shape_predicate.cpp:80-83`), which is a degenerate fifth case, not a reading.
+
+**What capture by value means for each.**
+
+- *Match target:* applies in full, with the four conditions. P1 `ShapeHolds` compares the stored
+  scalar cell; empty is the `d.vql.void` marker and never matches (`:666`).
+- *Mapping assignment:* applies, with two additions. The consumer links a **fresh copy of the
+  captured scalar per subject and per application**, since a reciprocal link would steal a shared
+  cell (`vql_apply_shape_multi_test.cpp:124-131`, `ta != tb`); the capture is the value, never the
+  cell. Evaluation count becomes once per mint instead of once per application, an observable change
+  for a shape held in a `let` and applied repeatedly (idempotent, as §8.2 says). For an inline
+  literal, mint and application coincide, so the static path (D4) is byte-identical. P2/S2 consume
+  the same cell. Empty or several values still refuse at the consumer, as
+  `emitRequiredContractMatch` does today. **Genuine gap (Q9):** a target anchored on `.` is a
+  function of the subject and has no value at mint; capture by value cannot hold it.
+- *Default:* does **not** apply. A default is lazy by spec: it runs only when the relation is
+  absent, per field and per row, preserves stream order and duplicates, and a supplied empty stream
+  suppresses it. Capturing at mint would make it eager: evaluated even when never used, charged fuel
+  and any side effect once at mint rather than zero or once per absent row, and its result could not
+  see the owning row (`:2236`, "the exact owning nested cell"). It also meets C2/C4 head on: those
+  gates keep non-closed and computed shape defaults open precisely because they need the thunk (a
+  closure), which is V6's blocker (§8.3). Recommendation: the ruling covers match and assignment
+  targets only; defaults stay in contracts, lazy, and a shape literal that carries `:=` refuses at
+  mint by name until Q8 is ruled.
+
+**Q8 (owner).** Do you want a shape-literal mapping form whose value applies only when the relation
+is absent (for example `$path{*, +d.tag ?: "x"}`)? Today's `{*, +d.tag: "x"}` overwrites. Choices:
+(a) none; defaults stay in contracts (recommended: no new semantics, no V6 dependency); (b) a
+default captured eagerly by value at mint, applied only on absence, which loses laziness and per-row
+context and must be stated as an exception to the contract rule; (c) a lazy default, which is a code
+value per rule and waits on V6. Each is a spec ruling; none is made here.
+
+**Q9 (owner).** A subject-relative computed target in a first-class shape: refuse at mint by name
+and keep it available only in an inline literal at its consumer (recommended; static path
+unchanged), or defer evaluation per subject (a closure, V6).
+
+### 8.8 Proposed wording for spec §4.8.2 (a proposal; the spec is not edited here)
+
+> **When a target is evaluated.** A shape's dimension target is evaluated once, at the moment the
+> shape is created, in the scope of the shape literal, and its value is copied: later changes to the
+> variables or cells it read do not change the shape. The target must yield exactly one value
+> (several is an error naming `one`); a target that yields none is a target that no cell matches. A
+> `$name` that is not bound where the shape is created is a binder, not a read. A target that
+> depends on the cell being tested or edited (one anchored on `.`) is not evaluated at creation and
+> is allowed only in a shape written where it is used.
+>
+> *As a test* (`[...]`, `?`, `where`) the copied value is compared with the neighbour along that
+> dimension; the test reads and changes nothing. *As a mapping* (`apply_shape`, `$path{...}`) a
+> fresh copy of the value is linked to each subject, replacing any link already there; applying the
+> same shape twice assigns the same value. A mapping does not test whether the relation exists. A
+> *default* (`:= expr`) in a shape type is a different thing: it is evaluated lazily, only when the
+> field is absent, and is not part of a shape value.
+
+How the consumers read the cells: P1 `ShapeHolds` reads `d.vql.target` as a test value and
+`d.vql.void` as never-matches, and ignores everything else. P2 `ShapeProject` and the S2 prototypes
+read no target at all (`project` refuses assignments); `apply_shape`'s mutation-time reader, which
+S2 must name, links a per-subject copy of `d.vql.target` and refuses `d.vql.void`. No consumer reads
+a default, because none is stored.
