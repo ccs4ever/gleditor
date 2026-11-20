@@ -175,6 +175,11 @@ VQLCompiler::HandleKind VQLCompiler::handleKindOf(const CellRef cell) const {
   // The marker is how a handle is told from a plain cell, wherever it came
   // from: this compile, an earlier one, or another engine over the same core.
   if (carriesViewMarker(core_.arena(), cell)) return HandleKind::ViewHandle;
+  // The marker lives on the cell and is released with it, so a number reused
+  // by a later cell cannot inherit it; the table's own epoch witness covers the
+  // other half (an entry kept for a cell that was released).
+  if (carriesShapeMarker(core_.arena(), cell))
+    return HandleKind::UnrecordedShape;
   return HandleKind::None;
 }
 

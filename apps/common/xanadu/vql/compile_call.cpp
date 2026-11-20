@@ -197,17 +197,21 @@ VQLCompiler::compileBuiltinInvocation(const FunctionInvocation &invocation,
 std::vector<CellRef>
 VQLCompiler::compileArgument(const ValueExpr &argument,
                              std::optional<CellRef> context) {
+  const ShapeUse shapeUse = takeShapeUse();
   if (const auto *name = std::get_if<std::string>(&argument.kind)) {
+    std::vector<CellRef> held;
     if (const auto found = streamBindings_.find(*name);
         found != streamBindings_.end())
-      return found->second;
-    if (const auto found = varBindings_.find(*name);
-        found != varBindings_.end() && found->second)
-      return {*found->second};
-    return {};
+      held = found->second;
+    else if (const auto found = varBindings_.find(*name);
+             found != varBindings_.end() && found->second)
+      held = {*found->second};
+    if (!shapeUse.consumes) refuseShapeCells(held, shapeUse.use);
+    return held;
   }
   if (const auto *path =
           std::get_if<std::shared_ptr<PathExpression>>(&argument.kind)) {
+    const ShapeUseScope pass{*this, shapeUse.consumes, shapeUse.use};
     const auto saved = ambientContext_;
     ambientContext_  = context;
     const RestoreScope restore{[&] { ambientContext_ = saved; }};
@@ -554,6 +558,14 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
         return false;
       }))
     unsupportedFunctorArgument = true;
+  // A shape is syntax the compiler resolves where it is used (Q-SHAPEPRED), so
+  // a call handed one is compiled inline, as a lens is, and a parameter used as
+  // a shape finds it known. Only a call that is given one pays for this.
+  const bool shapeArgument =
+      std::ranges::any_of(arguments, [this](const ValueExpr &argument) {
+        return argumentNamesShape(argument);
+      });
+  if (shapeArgument) unsupportedFunctorArgument = true;
   bool hasInlineCapture = false;
   if (const auto captures = frameFreeCaptureNames_.find(definition.name);
       captures != frameFreeCaptureNames_.end()) {
@@ -589,7 +601,13 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   if (entersActiveCallStack &&
       std::ranges::contains(activeCalls_, definition.name))
     throw std::invalid_argument(
-        "recursive compiled call requires a VM frame: " + definition.name);
+        shapeArgument
+            ? "recursive definition '" + definition.name +
+                  "' cannot take a shape argument: a shape is resolved while "
+                  "the query is compiled, which a recursive call frame cannot "
+                  "do"
+            : "recursive compiled call requires a VM frame: " +
+                  definition.name);
 
   auto savedVariables     = varBindings_;
   auto savedStreams       = streamBindings_;
@@ -621,6 +639,8 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
           std::holds_alternative<std::string>(parameter.target))
         functor = functorArgument(argument);
     }
+    const ShapeUseScope passesOn{*this, namesBareVariable(argument),
+                                 "an argument of a call"};
     values.push_back(functor ? std::vector<CellRef>{}
                              : compileArgument(argument, context));
     functors.push_back(std::move(functor));
@@ -780,6 +800,10 @@ VQLCompiler::compileCall(const DefDeclaration &definition,
   std::vector<CellRef> bodyResults;
   if (const auto *value =
           std::get_if<std::shared_ptr<ValueExpr>>(&definition.body)) {
+    const ShapeUseScope bodyUse{
+        *this, false,
+        "a definition's result (only a definition whose whole body is a "
+        "shape, a parameter or a call of one is followed)"};
     bodyResults = compileArgument(
         **value, ambientContext_.has_value() ? ambientContext_ : context);
   } else {

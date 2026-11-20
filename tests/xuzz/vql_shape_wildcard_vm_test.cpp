@@ -173,10 +173,10 @@ TEST(VQLShapeWildcardVMTest, PredicateLowersToTheProbeOpcode) {
 
 TEST(VQLShapeWildcardVMTest, FormsThatStayUnsupportedStillNameTheForm) {
   Fixture h;
-  const auto result = h.executor.execute("##/d.a[{$shape}]");
+  // A variable rule now lowers (Q-SHAPEPRED); a pivot still names itself.
+  const auto result = h.executor.execute("##/d.a[{d.old<=>d.new}]");
   ASSERT_FALSE(result);
-  EXPECT_NE(result.error().message.find("variable, function"),
-            std::string::npos)
+  EXPECT_NE(result.error().message.find("pivot or virtual"), std::string::npos)
       << result.error().message;
 }
 

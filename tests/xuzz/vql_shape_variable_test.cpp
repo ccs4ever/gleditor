@@ -175,11 +175,12 @@ TEST_F(VQLShapeVariableTest, ShapeVariableWhereAValueIsExpectedIsRefused) {
   EXPECT_THAT(refusalOf("let $s := { +d.keep }; let $x := $s + 1; return $x"),
               testing::AllOf(testing::HasSubstr("shape value"),
                              testing::HasSubstr("'+'")));
-  // Behind a call frame the value is only known at run time: the VM names the
-  // failed operation rather than reading a shape as a number.
+  // A call handed a shape is compiled inline (Q-SHAPEPRED), so the same
+  // refusal is reached at compile time rather than from the VM.
   EXPECT_THAT(refusalOf("def pure add($l: Any, $r: Any): Any := $l + $r; "
                         "let $s := { +d.keep } return add($s, 1)"),
-              testing::HasSubstr("VqlAdd"));
+              testing::AllOf(testing::HasSubstr("shape value"),
+                             testing::HasSubstr("'+'")));
 }
 
 TEST_F(VQLShapeVariableTest, VariableHoldingAScalarIsNotAShape) {

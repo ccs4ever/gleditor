@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <format>
+#include <stdexcept>
 #include <utility>
 
 #include <gleditor/logging.hpp>
@@ -43,8 +44,64 @@ const ShapeLiteral *shapeBody(const DefDeclaration &definition) {
 
 } // namespace
 
+bool VQLCompiler::returnsShapeGiven(const DefDeclaration &definition,
+                                    const std::vector<bool> &argumentIsShape,
+                                    const std::size_t depth) const {
+  constexpr std::size_t maxFollowDepth = 64;
+  if (depth > maxFollowDepth) return false;
+  const auto *body = std::get_if<std::shared_ptr<ValueExpr>>(&definition.body);
+  if (!body || !*body) return false;
+  const ValueExpr &expression = **body;
+  if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(expression.kind))
+    return true;
+  // What an expression in this definition's body is, given which parameters
+  // were handed a shape: a literal, a parameter that was, or a call of a
+  // definition that returns one in turn.
+  const auto isShape = [&](const ValueExpr &value) {
+    if (std::holds_alternative<std::shared_ptr<ShapeLiteral>>(value.kind))
+      return true;
+    const auto *name = std::get_if<std::string>(&value.kind);
+    if (!name) return false;
+    const std::string bare = name->starts_with('$') ? name->substr(1) : *name;
+    for (std::size_t index = 0; index < definition.params.size(); ++index) {
+      const auto *parameter =
+          std::get_if<std::string>(&definition.params[index].target);
+      if (parameter && *parameter == bare)
+        return index < argumentIsShape.size() && argumentIsShape[index];
+    }
+    return false;
+  };
+  if (std::holds_alternative<std::string>(expression.kind))
+    return isShape(expression);
+  const auto *call =
+      std::get_if<std::shared_ptr<FunctionInvocation>>(&expression.kind);
+  if (!call || !*call) return false;
+  const auto inner = definitions_.find((*call)->name);
+  if (inner == definitions_.end()) return false;
+  std::vector<bool> flags;
+  for (const ValueExpr &argument : (*call)->args)
+    flags.push_back(isShape(argument));
+  return returnsShapeGiven(inner->second, flags, depth + 1);
+}
+
+bool VQLCompiler::callReturnsShape(const FunctionInvocation &call) const {
+  const auto found = definitions_.find(call.name);
+  if (found == definitions_.end()) return false;
+  std::vector<bool> flags;
+  for (const ValueExpr &argument : call.args)
+    flags.push_back(argumentNamesShape(argument));
+  return returnsShapeGiven(found->second, flags, 0);
+}
+
 CellRef VQLCompiler::registerShape(ShapeLiteral expanded) {
   const CellRef handle = core_.arena().makeCell();
+  // A one-cell closed rank on the marker dimension: a handle is told from a
+  // plain cell by the cell itself, at no cost in cells (a rank holds one
+  // neighbour a side, so handles could not share an anchor). The dimension is
+  // named when the first shape is made.
+  zigzag::expectWritten(core_.arena().link(
+      handle, core_.findOrMintDimension(shapeMarkerDimension),
+      zigzag::DimVector::POS, handle));
   shapeHandles_.emplace(handle, std::move(expanded));
   return handle;
 }
@@ -77,24 +134,50 @@ ShapeLiteral VQLCompiler::shapeOfVariable(const std::string &name) {
   }
   ShapeLiteral result;
   bool known = false;
+  bool other = false;
   for (const CellRef cell : cells) {
     const auto kind = handleKindOf(cell);
-    if (kind == HandleKind::None) continue;
-    if (kind != HandleKind::Shape)
-      throw TypeContractError(
-          "variable $" + name + " does not contain a Shape value (it is a " +
-          (kind == HandleKind::ViewHandle ? "dynamic view" : "lens") + ")");
-    const auto *shape =
-        std::get_if<ShapeLiteral>(&shapeHandles_.find(cell)->second);
+    if (kind == HandleKind::None) {
+      other = true;
+      continue;
+    }
+    appendShapeRules(result, shapeOfHandle(cell, name));
     known = true;
-    appendShapeRules(result, *shape);
   }
   if (!known)
     refuseShape("shape value '$" + name +
                 "' is not statically known: it is bound to cells the compiler "
                 "did not record as shapes (a value computed at run time, or a "
                 "handle from another session)");
+  if (other)
+    refuseShape("shape value '$" + name +
+                "' is bound to a mix of shape handles and other values; a "
+                "shape cannot be taken from part of a stream");
   return result;
+}
+
+const ShapeLiteral &VQLCompiler::shapeOfHandle(const CellRef cell,
+                                               const std::string &name) {
+  switch (handleKindOf(cell)) {
+  case HandleKind::Shape:
+    return std::get<ShapeLiteral>(shapeHandles_.find(cell)->second);
+  case HandleKind::UnrecordedShape:
+    refuseShape(
+        "shape value '$" + name +
+        "' is not statically known: it is a shape handle the compiler "
+        "has no record of (the session was cleared, its cell was released, "
+        "or it came from another session or engine)");
+  case HandleKind::ViewHandle:
+    throw TypeContractError("variable $" + name +
+                            " does not contain a Shape value (it is a "
+                            "dynamic view)");
+  case HandleKind::Lens:
+    throw TypeContractError("variable $" + name +
+                            " does not contain a Shape value (it is a lens)");
+  case HandleKind::None:
+    break;
+  }
+  throw std::logic_error("shapeOfHandle was given a plain cell");
 }
 
 ShapeLiteral VQLCompiler::expandShape(const ShapeLiteral &shape) {
@@ -118,7 +201,7 @@ ShapeLiteral VQLCompiler::expandShape(const ShapeLiteral &shape) {
       if (definition == definitions_.end())
         throw TypeContractError("shape function '" + (*call)->name +
                                 "' is not defined");
-      if (!shapeBody(definition->second))
+      if (!callReturnsShape(**call))
         throw TypeContractError("function '" + (*call)->name +
                                 "' did not return a Shape value");
       appendShapeRules(result, staticShapeOfCall(**call));
@@ -134,9 +217,7 @@ ShapeLiteral VQLCompiler::expandShape(const ShapeLiteral &shape) {
 
 ShapeLiteral VQLCompiler::staticShapeOfCall(const FunctionInvocation &call) {
   const auto found = definitions_.find(call.name);
-  const ShapeLiteral *body =
-      found == definitions_.end() ? nullptr : shapeBody(found->second);
-  if (!body)
+  if (found == definitions_.end() || !callReturnsShape(call))
     throw TypeContractError("function '" + call.name +
                             "' did not return a Shape value");
   const DefDeclaration &definition = found->second;
@@ -192,7 +273,15 @@ ShapeLiteral VQLCompiler::staticShapeOfCall(const FunctionInvocation &call) {
     streamBindings_[name] = {handle};
     varBindings_[name]    = handle;
   }
-  return expandShape(*body);
+  // A literal body expands; a body that names a parameter or calls another
+  // shape-returning definition resolves in the scope just bound.
+  if (const auto *literal = shapeBody(definition)) return expandShape(*literal);
+  const auto &expression =
+      *std::get<std::shared_ptr<ValueExpr>>(definition.body);
+  if (auto resolved = resolveShapeValue(expression))
+    return std::move(*resolved);
+  throw TypeContractError("function '" + call.name +
+                          "' did not return a Shape value");
 }
 
 std::optional<ShapeLiteral>
@@ -205,18 +294,14 @@ VQLCompiler::resolveShapeValue(const ValueExpr &expression) {
   if (const auto *call =
           std::get_if<std::shared_ptr<FunctionInvocation>>(&expression.kind);
       call && *call) {
-    const auto definition = definitions_.find((*call)->name);
-    if (definition != definitions_.end() && shapeBody(definition->second))
-      return staticShapeOfCall(**call);
+    if (callReturnsShape(**call)) return staticShapeOfCall(**call);
   }
   return std::nullopt;
 }
 
 std::optional<CellRef>
 VQLCompiler::compileShapeCall(const FunctionInvocation &call) {
-  const auto definition = definitions_.find(call.name);
-  if (definition == definitions_.end() || !shapeBody(definition->second))
-    return std::nullopt;
+  if (!callReturnsShape(call)) return std::nullopt;
   const CellRef handle = registerShape(staticShapeOfCall(call));
   GLEDITOR_LOG_DEBUG("vql.compile", "shape function '{}' resolved to handle {}",
                      call.name, static_cast<std::uint64_t>(handle));

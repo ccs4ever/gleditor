@@ -400,12 +400,13 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     VQLCompiler compiler(coordinator_, vm_);
     CompilationOptions compilation;
     compilation.contextCells = contextCells;
+    // Variables whose handles went stale are rebound before they are copied.
+    if (session_) session_->pruneStaleShapes();
     compilation.initialBindings =
         bindingSource_ ? bindingSource_->get() : bindings_;
     if (session_) {
       compilation.initialFunctors = session_->compilerFunctors();
-      session_->pruneStaleShapes();
-      compilation.initialShapes = session_->compilerShapes();
+      compilation.initialShapes   = session_->compilerShapes();
       for (const auto &[name, mount] : session_->compilerMounts())
         compilation.mounts.emplace(
             name, CompilationOptions::Mount{.direction = mount.direction,

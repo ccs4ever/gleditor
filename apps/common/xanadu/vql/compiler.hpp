@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -451,8 +452,60 @@ private:
   /// What a table-lookup site is looking at. Every site that asks the table
   /// "what is this cell?" asks this instead, so a view handle (which the
   /// table does not hold) is never taken for a plain cell.
-  enum class HandleKind : std::uint8_t { None, Shape, Lens, ViewHandle };
+  enum class HandleKind : std::uint8_t {
+    None,
+    Shape,
+    /// Carries the shape marker but is not in the table: cleared, or made by
+    /// another session or engine. Its shape is unknown, so it refuses.
+    UnrecordedShape,
+    Lens,
+    ViewHandle
+  };
   [[nodiscard]] HandleKind handleKindOf(zigzag::CellRef cell) const;
+  /// Refuses, by name, a handle used where the graph would compute with a
+  /// value; @p op is the operator.
+  void refuseHandleOperand(HandleKind kind, std::string_view op) const;
+
+  /// A marked shape handle may be read only where a shape is consumed (a shape
+  /// rule or target, a predicate, any/all/none, project/apply_shape, a call
+  /// argument or let that passes it on, a top-level return). Every other read
+  /// of a variable that holds one refuses through refuseShapeCells with this
+  /// one message family. A consumer says so for the very next read only:
+  /// compileArgument and compilePathExpression take the flag on entry, so
+  /// nothing nested inherits it.
+  struct ShapeUse {
+    bool consumes{false};
+    std::string_view use{"a value here"};
+  };
+  ShapeUse shapeUse_{};
+  ShapeUse takeShapeUse() {
+    const ShapeUse taken = shapeUse_;
+    shapeUse_            = {};
+    return taken;
+  }
+  struct ShapeUseScope {
+    ShapeUseScope(VQLCompiler &compiler, const bool consumes,
+                  const std::string_view use)
+        : compiler_(compiler), saved_(compiler.shapeUse_) {
+      compiler.shapeUse_ = {consumes, use};
+    }
+    ~ShapeUseScope() { compiler_.shapeUse_ = saved_; }
+    ShapeUseScope(const ShapeUseScope &)            = delete;
+    ShapeUseScope &operator=(const ShapeUseScope &) = delete;
+
+  private:
+    VQLCompiler &compiler_;
+    ShapeUse saved_;
+  };
+  void refuseShapeCells(std::span<const zigzag::CellRef> cells,
+                        std::string_view use) const;
+  /// True for `$name` alone, as a value or as a path with nothing after it.
+  static bool namesBareVariable(const ValueExpr &expression);
+  static bool namesBareVariable(const PathExpression &path);
+  /// Refuses a bare shape variable among the factors of @p condition, where no
+  /// candidate exists for it to be tested against.
+  void refuseShapeConditions(const BooleanExpr &condition,
+                             std::string_view use) const;
   /// The view dimensions when the core names them; absent while no view was
   /// ever made, which means no handle exists and no step needs a guard.
   [[nodiscard]] std::optional<ViewDimensions> viewDimensions() const;
@@ -582,6 +635,9 @@ private:
   zigzag::CellRef registerShape(ShapeLiteral expanded);
   void appendShapeRules(ShapeLiteral &result, const ShapeLiteral &from);
   ShapeLiteral shapeOfVariable(const std::string &name);
+  /// The rules a marked handle stands for; refuses a handle with no record.
+  const ShapeLiteral &shapeOfHandle(zigzag::CellRef cell,
+                                    const std::string &name);
   ShapeLiteral expandShape(const ShapeLiteral &shape);
   ShapeLiteral staticShapeOfCall(const FunctionInvocation &call);
   /// A literal, a variable or a call of a shape-returning definition as a
@@ -779,6 +835,37 @@ private:
                              std::span<const zigzag::CellRef> right);
   zigzag::CellRef compileShapePredicate(const ShapeLiteral &shape,
                                         zigzag::CellRef candidate);
+  /// Q-SHAPEPRED, compile_shape_predicate.cpp. A predicate that is a shape
+  /// held by a variable, or returned by a call, lowers as the literal it
+  /// stands for; nullopt when @p expression is neither (an ordinary value, a
+  /// functor, a variable bound to no handle), which the caller keeps handling
+  /// as before.
+  std::optional<zigzag::CellRef>
+  compileShapePredicateValue(const ValueExpr &expression,
+                             zigzag::CellRef candidate);
+  /// @p shape with every variable, call and nested-literal rule (also inside
+  /// targets) replaced by the rules it names. Returns @p shape itself when it
+  /// names nothing, so a plain literal compiles exactly as before.
+  /// The predicate of a compiled cell that turns out to be a shape handle;
+  /// nullopt for any other cell.
+  std::optional<zigzag::CellRef>
+  shapePredicateOfCell(zigzag::CellRef value, zigzag::CellRef candidate);
+  const ShapeLiteral &resolvedPredicateShape(const ShapeLiteral &shape);
+  ShapeLiteral expandPredicateShape(const ShapeLiteral &shape);
+  std::optional<ShapeLiteral> shapeNamedByTarget(const ValueExpr &target);
+  bool variableHoldsHandle(const std::string &name) const;
+  /// True when @p argument is known while compiling to be a shape: a literal,
+  /// a variable bound to a shape handle (recorded or not), or a call of a
+  /// definition whose whole body is a shape literal.
+  bool argumentNamesShape(const ValueExpr &argument) const;
+  /// True when calling @p call returns a shape: the definition's whole body is
+  /// a shape literal, names a parameter that was given a shape, or calls a
+  /// definition that does, so a definition that returns its argument is
+  /// followed instead of its result being read as a value.
+  bool callReturnsShape(const FunctionInvocation &call) const;
+  bool returnsShapeGiven(const DefDeclaration &definition,
+                         const std::vector<bool> &argumentIsShape,
+                         std::size_t depth) const;
 
   // Library / Executable structure emission
   zigzag::CellRef linkAsExecutable(zigzag::CellRef entryOp);
@@ -810,6 +897,9 @@ private:
   /// is bounded by the distinct shape values one query writes.
   CompiledHandleTable shapeHandles_;
   std::unordered_set<const ShapeLiteral *> shapesExpanding_;
+  /// Shapes a predicate expanded; the predicate compiler keys caches by
+  /// address, so these must outlive the compile and never move.
+  std::deque<ShapeLiteral> expandedPredicateShapes_;
   std::vector<std::string> shapeCallsActive_;
   zigzag::CellRef compileShapePredicateImpl(const ShapeLiteral &shape,
                                             zigzag::CellRef candidate);

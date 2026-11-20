@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -202,6 +203,12 @@ private:
   /// witness that the number still names that cell.
   std::unordered_map<zigzag::CellRef, zigzag::ArenaManifold::ReleaseEpoch>
       shapeEpochs_;
+  /// The epoch of each marked handle a variable holds, keyed by the variable
+  /// and the cell, from when it was bound; pruneStaleShapes compares them.
+  std::map<std::pair<std::string, zigzag::CellRef>,
+           zigzag::ArenaManifold::ReleaseEpoch>
+      heldEpochs_;
+  void witnessHeldHandles();
 
   [[nodiscard]] zigzag::DimRef arenaDimensionFor(zigzag::CellRef cell,
                                                  zigzag::DimRef foreignDim);

@@ -1208,6 +1208,10 @@ private:
                   return;
                 } else if constexpr (std::same_as<Part, std::string>) {
                   variable(part, scope);
+                  // A frame holds only the handle cell, and the shape behind
+                  // it is resolved while compiling (Q-SHAPEPRED).
+                  if (!projectionCandidate && !staticFunctorProgramMode_)
+                    refuse("shape rules are not frame eligible");
                 } else if constexpr (std::same_as<
                                          Part,
                                          std::shared_ptr<FunctionInvocation>>) {
@@ -1216,6 +1220,8 @@ private:
                               const std::size_t nestedDepth) {
                             invocation(call, scope, nestedDepth);
                           });
+                  if (!projectionCandidate && !staticFunctorProgramMode_)
+                    refuse("shape rules are not frame eligible");
                 } else if constexpr (std::same_as<Part, DimensionShapeRule>) {
                   bool literalStaticTarget = !part.targetValue;
                   if (part.targetValue)
