@@ -108,16 +108,21 @@ dialectic between ideological purity, mechanical sympathy, and existing codebase
    are intertwingled. A file forces an author to decide whether a project note belongs under "Work"
    or "Personal" or "2026". In Zigzag, a cell simultaneously belongs to `d.category`, `d.time`,
    `d.author`, `d.importance`, and `d.provenance` without duplication.
+
 1. **Absolute Transclusion**: There is no copy-paste. When a process communicates with another, or
    when data is displayed in multiple views, it is transcluded via `vspans` or linked along
    `d.clone`. Every byte has immutable provenance in the permascroll.
+
 1. **The 2-Rank Manifold Invariant**: Along any dimension $d$, every cell $C$ has at most one
    positive neighbor ($+1$) and at most one negative neighbor ($-1$):
+
    ```math
    \text{deg}^+(C, d) \le 1, \quad \text{deg}^-(C, d) \le 1
    ```
+
    Ranks are linear sequences. Branching is not allowed within a single dimension; branching is
    achieved orthogonally by introducing a new dimension.
+
 1. **Universal Symmetry**: All operations are bidirectional. Walking $+d$ is inverted by $-d$. Every
    link is indexed from both endpoints.
 
@@ -546,10 +551,13 @@ When a lens attaches to a remote node:
 Just as Plan 9 lets you `import host /proc /remote_proc`:
 
 - In Zigzag, a user can mount a remote node's `ProcLens` or `NetLens`:
+
   ```vql
   mount_lens("bep46:5f2a...7c", "sys:proc", d.remote_procs)
   ```
+
 - The remote process tree appears as a rank along `d.remote_procs`.
+
 - A user operating an `AcmeLens` or `LatticeLens` can browse, inspect, and step through processes
   running on remote cluster nodes as if they were local, with complete location transparency!
 
