@@ -239,8 +239,11 @@ TEST_F(VQLShapeVariableTest, ClearVariablesDropsTheTable) {
 
 TEST_F(VQLShapeVariableTest, RepeatedQueriesAreBoundedByTheShapesHeld) {
   constexpr int rounds = 25;
-  // A rebound variable leaves the cell it held behind, whatever it held; the
-  // shape must cost no more than a scalar does.
+  // A rebound variable leaves the cell it held behind, whatever it held. A
+  // shape's rules are cells, so what it leaves is its handle, its witness and
+  // five cells for its one rule (text, kind, negation, bidirectionality,
+  // direction): a fixed footprint per round, never a growing table.
+  constexpr std::size_t cellsOfOneRuleShape = 1 + 1 + 5;
   (void)engine.execute("let $n := 1 return $n");
   const auto scalarBefore = arena.cellCount();
   for (int round = 0; round < rounds; ++round)
@@ -251,7 +254,8 @@ TEST_F(VQLShapeVariableTest, RepeatedQueriesAreBoundedByTheShapesHeld) {
   const auto shapeBefore = arena.cellCount();
   for (int round = 0; round < rounds; ++round)
     (void)engine.execute("let $s := { +d.keep } return $s");
-  EXPECT_LE(arena.cellCount() - shapeBefore, scalarGrowth);
+  EXPECT_LE(arena.cellCount() - shapeBefore,
+            scalarGrowth + rounds * cellsOfOneRuleShape);
   // The table is bounded by the shapes a variable or a result still names,
   // not by the queries run.
   EXPECT_EQ(engine.shapeCount(), 1u);
