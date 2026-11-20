@@ -40,7 +40,10 @@ void VQLCompiler::emitIteratorLoop(
       emitOp(OpcodeKind::BranchFalseCell, "#ITERATOR_EXHAUSTED");
   emitInput(branch, present);
   emitInput(branch, end);
-  body(item);
+  {
+    const LoopScope inLoop{*this};
+    body(item);
+  }
   const auto repeat = emitOp(OpcodeKind::BranchFalseCell, "#ITERATOR_REPEAT");
   emitInputConstant(repeat, false);
   emitInput(repeat, next);

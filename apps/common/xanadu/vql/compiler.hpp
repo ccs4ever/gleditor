@@ -805,6 +805,20 @@ private:
   std::vector<FrameDefinitionKey> pendingFrameDefinitions_;
   std::unordered_set<zigzag::CellRef> frameMutableSlots_;
   bool compilingFrameDefinition_{false};
+  /// How many iterator or quantifier bodies the code being emitted is inside:
+  /// a cell the compiler mints once is written once per turn there.
+  std::size_t loopDepth_{0};
+  struct LoopScope {
+    explicit LoopScope(VQLCompiler &compiler) : compiler_(compiler) {
+      ++compiler_.loopDepth_;
+    }
+    ~LoopScope() { --compiler_.loopDepth_; }
+    LoopScope(const LoopScope &)            = delete;
+    LoopScope &operator=(const LoopScope &) = delete;
+
+  private:
+    VQLCompiler &compiler_;
+  };
   std::string compilingFrameDefinitionName_;
   std::vector<std::string> activeCalls_;
   std::size_t maxNamedFrameVariants_{};

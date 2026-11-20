@@ -266,13 +266,14 @@ bool VQLCompiler::captureShapeTarget(const CellRef rule,
 void VQLCompiler::emitShapeTargetCapture(const CellRef rule,
                                          const DimensionShapeRule &spec,
                                          const ShapeDimensions &dims) {
-  // The handle is one cell for every call of a body that makes it, so a target
-  // written to it at run time would be written once per call.
-  if (compilingFrameDefinition_ || !activeCalls_.empty())
+  // The handle is one cell for every call of a body or turn of a loop that
+  // makes it, so a target written to it at run time would be overwritten by
+  // the next one and the earlier shape would silently change.
+  if (compilingFrameDefinition_ || !activeCalls_.empty() || loopDepth_ > 0)
     refuseTarget("VQL shape rule '" + spec.dimName +
-                 "' has a computed target inside a function body: the shape "
-                 "it makes is one cell, which each call would write again. "
-                 "Make the shape in the query body");
+                 "' has a computed target inside a function body or a loop: "
+                 "the shape it makes is one cell, which each call or turn "
+                 "would write again. Make the shape in the query body");
   auto &arena       = core_.arena();
   const auto values = compileArgument(*spec.targetValue, std::nullopt);
 

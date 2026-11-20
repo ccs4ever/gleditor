@@ -340,6 +340,7 @@ std::vector<CellRef> VQLCompiler::compileSemanticQuantifierCall(
       return matchCell.value();
     };
 
+    const LoopScope inLoop{*this};
     const CellRef predicate  = compilePredicate();
     CellRef accumulatorInput = predicate;
     if (fn.name == "none") {
