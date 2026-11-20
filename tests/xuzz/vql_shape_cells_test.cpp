@@ -292,6 +292,35 @@ TEST_F(VQLShapeCellsTest, AComputedTargetInALoopRefusesByName) {
       2u);
 }
 
+// Every form whose body runs more than once, or whose code is not the query
+// body, refuses a computed target because the handle is one cell. Several of
+// these are also inside a def, which the function-body guard alone refuses
+// with the same words; the quantifier, rest-group and element-contract bodies
+// each also bump the loop depth, so the guard holds if a form is ever reached
+// from the query body.
+TEST_F(VQLShapeCellsTest, EveryRepeatedFormRefusesAComputedTarget) {
+  const auto refused = testing::HasSubstr("inside a function body or a loop");
+  const std::string make = "def mk() := {+d.keep: $n + 1}; let $n := 1 ";
+  // A function body.
+  EXPECT_THAT(refusalOf(make + "return mk()"), refused);
+  // A quantifier body (any, all, none share one loop).
+  for (const char *quantifier : {"any", "all", "none"})
+    EXPECT_THAT(
+        refusalOf(make + "return " + quantifier + "(##, count(mk()) > 0)"),
+        refused)
+        << quantifier;
+  // A rest parameter whose groups are matched one by one.
+  EXPECT_THAT(
+      refusalOf("def f(...$r: Stream<{d.tag := {+d.keep: $n + 1}}>): Any := "
+                "$r; let $n := 1 return f(##)"),
+      refused);
+  // An element-wise contract (a stream type) whose pattern has a default.
+  EXPECT_THAT(
+      refusalOf("def f($x: Stream<{d.tag := {+d.keep: $n + 1}}>): Any := $x; "
+                "let $n := 1 return f(##)"),
+      refused);
+}
+
 TEST_F(VQLShapeCellsTest, EveryHandleCarriesAnEpochWitness) {
   const auto handle  = handleOf("let $s := { +d.keep } return $s");
   const auto witness = neighbour(handle, dims().epoch);
