@@ -3,10 +3,11 @@
 Status: proposal, nothing built, no core or stdlib change made; the owner ruled on P1 to P5 on
 2026-11-20 (§6), so the opcode, setting, vagent and stdlib items below are approved to build, and
 two spikes (S1, S2) and two witness cards (W1, W2) are ordered (§7). Q5 is analysed in §8 and awaits
-the owner. Branch `shapedispatch`, based on the `q-shapepred` tip `f713bd50` (marked shape handles,
-shapes refused as values, shapes followed through definitions). Author's note on method: every claim
-about code cites `path:line` at that tip; no measurement is quoted because none was taken (§2.5 says
-which to take).
+the owner (Q5 since accepted; Q8 and Q9 ruled in the third round, §6.1, and the owner's rootless
+partial path is analysed in §8.9 as card RP1). Branch `shapedispatch`, based on the `q-shapepred`
+tip `f713bd50` (marked shape handles, shapes refused as values, shapes followed through
+definitions). Author's note on method: every claim about code cites `path:line` at that tip; no
+measurement is quoted because none was taken (§2.5 says which to take).
 
 Sources read: `.logs/w1/D4b-spike.md` (the V5 card and the representation it assumes),
 `design/projects/vm-restoration-coordinator-plan.md` (D4, gates K to P),
@@ -63,24 +64,29 @@ admits them. Dimension name, direction and the `!`/`~` flags are cells or edge p
 A dimension rule's value, when it has one, is one scalar cell on `d.vql.target` and nothing says
 whether it is a test value or an assignment value: the literal is the same in both uses and the
 *consumer* chooses the reading (§8.7). An empty computed target is marked by a `d.vql.void` edge on
-the rule cell, distinct from the absence of `d.vql.target` (a presence-only rule). Source order is
-part of the data: both the mask fold (`compile_shape_predicate.cpp:343-364`) and the project fold
-(`compile_semantic_shape.cpp:49-70`) are order-dependent.
+the rule cell, distinct from the absence of `d.vql.target` (a presence-only rule). A rule whose
+target is a rootless partial path (§8.9, card RP1) carries one `d.vql.via` edge to a path cell
+instead of `d.vql.target`; the edge, not the cell's type, tells the reader which of the four it has.
+Source order is part of the data: both the mask fold (`compile_shape_predicate.cpp:343-364`) and the
+project fold (`compile_semantic_shape.cpp:49-70`) are order-dependent.
 
 D2. **Targets are values, captured by value at mint time (ruled 2026-11-20; §6.1, §8).** A rule's
-target is one of: absent, a scalar cell (`d.vql.target`), a `d.vql.void` marker (computed, empty),
-or a shape cell. A computed target (`{+d.tag: $n + 1}`) is *evaluated where the shape literal is
-evaluated*, in the scope that has `$n`, copied into a fresh scalar cell, and that cell is stored.
-The same cell is read in two ways, by consumer (§8.7): P1 `ShapeHolds` compares it with `VqlCompare`
-Equal (`compile_shape_predicate.cpp:407-415`) as a **match target**; the assignment consumers
-(`apply_shape`, a mask, and `ShapeProject` where S2 admits it) link a fresh copy of it per subject
-as a **mapping assignment** (`compile_semantic_shape.cpp:236-252`, `:261`;
+target is one of: absent, a scalar cell (`d.vql.target`), a `d.vql.void` marker (computed, empty), a
+shape cell, or a path cell (`d.vql.via`, §8.9). A computed target (`{+d.tag: $n + 1}`) is *evaluated
+where the shape literal is evaluated*, in the scope that has `$n`, copied into a fresh scalar cell,
+and that cell is stored. The same cell is read in two ways, by consumer (§8.7): P1 `ShapeHolds`
+compares it with `VqlCompare` Equal (`compile_shape_predicate.cpp:407-415`) as a **match target**;
+the assignment consumers (`apply_shape`, a mask, and `ShapeProject` where S2 admits it) link a fresh
+copy of it per subject as a **mapping assignment** (`compile_semantic_shape.cpp:236-252`, `:261`;
 `compile_projection.cpp:334`). A **default** (`:= expr`) is neither: it belongs to the destructure
 pattern, is lazy by spec, and is not stored in a shape cell (§8.7, question Q8). A target that
-depends on the subject (anchored on `.`) cannot be captured at mint and is refused there (Q9).
-Capture by value is why the dispatch half needs no closures: the lens problem (a descriptor that
-dies with the program, `D4b-spike.md` l.~80-90) does not arise for shapes. The compiler change is
-VQL-only and belongs to the data half.
+depends on the subject (anchored on `.`, or any implicit-context path) cannot be captured at mint:
+ruled 2026-11-20 (Q9, §6.1), it refuses at mint by name when a shape *value* is made, and stays
+legal only in a literal written directly where it is consumed (§8.7). The first-class way to get
+that effect is a rootless partial path (§8.9). A `:=` default inside a shape literal refuses at mint
+by name (Q8, ruled). Capture by value is why the dispatch half needs no closures: the lens problem
+(a descriptor that dies with the program, `D4b-spike.md` l.~80-90) does not arise for shapes. The
+compiler change is VQL-only and belongs to the data half.
 
 D3. **A shape handle is a shape cell with a marker and an epoch witness**, as a view handle is: the
 marker dimension already exists (`shapeMarkerDimension = "d.vql.shape"`, `view_cells.hpp:37`;
@@ -412,8 +418,9 @@ narrowing `refuseShapeCells`) are VQL-only and, by the V1 to V3 precedent, need 
 ## 5. Open questions for the owner
 
 Status after the 2026-11-20 rulings (§6): Q1 moot, Q3 ordered to a spike, Q4 answered yes and
-carded, Q5 accepted (§6.1) and refined by the readings in §8.7 (new Q8, Q9), Q7 settled; Q2 and Q6
-remain open. The original wording follows where it still carries information.
+carded, Q5 accepted (§6.1), Q8 and Q9 ruled in the third round (§6.1), Q7 settled; Q2 and Q6 remain
+open, and §8.9 adds Q10 to Q13 on the rootless partial path. The original wording follows where it
+still carries information.
 
 Q1. **Predicate scope.** *Moot.* P1 is approved, so the wildcard family and run-time shapes in
 predicates are in scope together; the question of shipping only the non-exact subset no longer
@@ -443,12 +450,25 @@ foreign-store shape only by an Int64 box (the view rule, `D4b-spike.md` l.~120).
 allowed to span arenas by promotion to a store (`promote`), or stay session-local until a separate
 card? Staying local keeps D3's witness sufficient. Q5's recommendation (§8) assumes session-local.
 
-Q8. **Defaults in a shape literal.** *Open; §8.7.* Spec defaults (`:= expr`) are lazy and live in
-destructure patterns, not in shape literals. If the owner wants a "use this if the relation is
-absent" form in a mapping shape, it is a new semantics that conflicts with capture at mint.
+Q8. **Defaults in a shape literal.** *Ruled 2026-11-20, option (a).* No "apply only when absent"
+form in a shape literal; a `:=` default inside one refuses at mint by name; defaults stay lazy in
+contracts (§8.7).
 
-Q9. **Subject-relative computed targets.** *Open; §8.7.* A target such as `./+d.fwd[1]` is resolved
-per subject today and cannot be captured at mint.
+Q9. **Subject-relative computed targets.** *Ruled 2026-11-20: forbidden in first-class shape values;
+refuse at mint by name.* The inline-at-consumer form stays (§8.7); the rootless partial path (§8.9)
+is the first-class way to the same effect.
+
+Q10. **Many results from a path target.** *Open; §8.9.* In a test, refuse by name (recommended) or
+read it existentially (any result equals the neighbour)?
+
+Q11. **Test comparison of a path target.** *Open; §8.9.* Value equality, as for a scalar target
+(recommended), or same-cell identity?
+
+Q12. **Does RP1 widen P1?** *Open; §8.9.* Recommended: yes, so a separate approval (P1b) is asked;
+P1 as approved refuses a path-target rule by name until it is given.
+
+Q13. **First-class path handle (RP2).** *Open; §8.9.* Whether a path becomes a value outside shapes
+(`let $p := /+d.fwd[1]` kept past compile, applied as `/$p` at run time) as its own card.
 
 Q7. **vagent.** *Settled by the approval of P4:* the arity rows are in scope, the CELLINT precedent
 (refused by ordinal) is not followed.
@@ -479,15 +499,19 @@ all static stays byte-identical, which is the acceptance gate the later cards in
 
 ### 6.1 Second round, 2026-11-20
 
-| item | ruling                             | what it changes                                                                                                                                |
-| ---- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| P2   | gated on S2: accepted              | `ShapeProject` is built only if S2's decision rule (§7.1) is met; D1 and D2 are unaffected either way.                                         |
-| Q5   | capture by value at mint: accepted | D2 as revised. Four conditions: fresh scalar copy, exactly one value, empty never matches, an unbound `$name` stays a binder (§8.6).           |
-| Q8   | raised by the readings check       | The owner's recollection of a "default if absent" mapping form is not what the code or the spec has for shape literals (§8.7). Needs a ruling. |
-| Q9   | raised by the readings check       | A subject-relative computed target cannot be captured at mint (§8.7). Needs a ruling.                                                          |
+| item | ruling                             | what it changes                                                                                                                            |
+| ---- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| P2   | gated on S2: accepted              | `ShapeProject` is built only if S2's decision rule (§7.1) is met; D1 and D2 are unaffected either way.                                     |
+| Q5   | capture by value at mint: accepted | D2 as revised. Four conditions: fresh scalar copy, exactly one value, empty never matches, an unbound `$name` stays a binder (§8.6).       |
+| Q8   | option (a) accepted (third round)  | No "apply only when absent" form in a shape literal; a `:=` default there refuses at mint by name; defaults stay lazy in contracts (§8.7). |
+| Q9   | forbid accepted (third round)      | A subject-relative computed target in a first-class shape value refuses at mint by name. The inline-at-consumer form stays (§8.7, §8.9).   |
+| RP1  | analysis requested (third round)   | The owner's rootless partial path as a target: analysed and priced in §8.9, with a recommendation and no approval taken.                   |
 
 Cost: nothing in D1 grows beyond one marker edge (`d.vql.void`); the by-value ruling applies to
-match and assignment targets and does not touch defaults.
+match and assignment targets and does not touch defaults. Q8 (a) costs nothing: it is a refusal
+where no semantics existed. Q9 adds one refusal at mint (a target anchored on `.` or on an implicit
+context, in a shape that must be a value) and removes the Q9 row from the open list; what it takes
+from the user is the first-class spelling of "relative to the subject", which §8.9 prices as RP1.
 
 ## 7. Spike and card definitions ordered by the rulings
 
@@ -784,28 +808,36 @@ not two. The spelling `d.1: Int: 1` is in neither grammar: a shape rule is `Dim 
   for a shape held in a `let` and applied repeatedly (idempotent, as §8.2 says). For an inline
   literal, mint and application coincide, so the static path (D4) is byte-identical. P2/S2 consume
   the same cell. Empty or several values still refuse at the consumer, as
-  `emitRequiredContractMatch` does today. **Genuine gap (Q9):** a target anchored on `.` is a
-  function of the subject and has no value at mint; capture by value cannot hold it.
+  `emitRequiredContractMatch` does today. **Q9, ruled forbidden in a value:** a target anchored on
+  `.` is a function of the subject and has no value at mint; it refuses at mint by name (§8.9 gives
+  the first-class route).
 - *Default:* does **not** apply. A default is lazy by spec: it runs only when the relation is
   absent, per field and per row, preserves stream order and duplicates, and a supplied empty stream
   suppresses it. Capturing at mint would make it eager: evaluated even when never used, charged fuel
   and any side effect once at mint rather than zero or once per absent row, and its result could not
   see the owning row (`:2236`, "the exact owning nested cell"). It also meets C2/C4 head on: those
   gates keep non-closed and computed shape defaults open precisely because they need the thunk (a
-  closure), which is V6's blocker (§8.3). Recommendation: the ruling covers match and assignment
-  targets only; defaults stay in contracts, lazy, and a shape literal that carries `:=` refuses at
-  mint by name until Q8 is ruled.
+  closure), which is V6's blocker (§8.3). Ruled (Q8, option (a), 2026-11-20): the by-value ruling
+  covers match and assignment targets only; defaults stay in contracts, lazy, and a shape literal
+  that carries `:=` refuses at mint by name.
 
-**Q8 (owner).** Do you want a shape-literal mapping form whose value applies only when the relation
-is absent (for example `$path{*, +d.tag ?: "x"}`)? Today's `{*, +d.tag: "x"}` overwrites. Choices:
-(a) none; defaults stay in contracts (recommended: no new semantics, no V6 dependency); (b) a
-default captured eagerly by value at mint, applied only on absence, which loses laziness and per-row
-context and must be stated as an exception to the contract rule; (c) a lazy default, which is a code
-value per rule and waits on V6. Each is a spec ruling; none is made here.
+**Q8, ruled 2026-11-20: option (a).** No shape-literal "apply only when absent" mapping form. The
+alternatives (b) an eagerly captured default that loses laziness and per-row context, and (c) a lazy
+default that is a code value per rule and waits on V6, are refused (§8.9 records them with the other
+refusals).
 
-**Q9 (owner).** A subject-relative computed target in a first-class shape: refuse at mint by name
-and keep it available only in an inline literal at its consumer (recommended; static path
-unchanged), or defer evaluation per subject (a closure, V6).
+**Q9, ruled 2026-11-20: forbidden in first-class shape values.** Decision on the inline form, from
+the evidence: it **stays allowed as today**, because it never becomes a value. (1) The compile-time
+table keeps the expanded literal and the handle cell carries no rules unless D1 must fill it (D4;
+`compile_shape_value.cpp:93-105`), so a literal written directly as the argument of `apply_shape`,
+`$path{...}` or a predicate is syntax at its consumer, as a dynamic view's computed dimension is
+(`compile_dynamic_view.cpp:470-495`, one value per source, a second is a named error). (2)
+Forbidding it would break shipped, tested behaviour and the D4 byte-identity gate: four rules in
+`tests/xuzz/vql_apply_shape_multi_test.cpp` use `./+d.fwd[1]`-style targets, among them `:153`. (3)
+The ruling's reason (a value has no subject to capture) does not apply to syntax that is lowered
+once per subject where it is written. So the refusal fires only when a shape *value* is made from
+such a literal (a `let`, an argument, a collection member, a result, a D1 fill), naming the rule and
+saying "relative to the subject: write it where it is applied, or use a rootless path (§8.9)".
 
 ### 8.8 Proposed wording for spec §4.8.2 (a proposal; the spec is not edited here)
 
@@ -814,8 +846,9 @@ unchanged), or defer evaluation per subject (a closure, V6).
 > variables or cells it read do not change the shape. The target must yield exactly one value
 > (several is an error naming `one`); a target that yields none is a target that no cell matches. A
 > `$name` that is not bound where the shape is created is a binder, not a read. A target that
-> depends on the cell being tested or edited (one anchored on `.`) is not evaluated at creation and
-> is allowed only in a shape written where it is used.
+> depends on the cell being tested or edited (one anchored on `.`) is an error in a shape that is
+> kept as a value, and is allowed only in a shape written where it is used. A default (`:= expr`) is
+> an error in a shape literal.
 >
 > *As a test* (`[...]`, `?`, `where`) the copied value is compared with the neighbour along that
 > dimension; the test reads and changes nothing. *As a mapping* (`apply_shape`, `$path{...}`) a
@@ -829,3 +862,133 @@ How the consumers read the cells: P1 `ShapeHolds` reads `d.vql.target` as a test
 read no target at all (`project` refuses assignments); `apply_shape`'s mutation-time reader, which
 S2 must name, links a per-subject copy of `d.vql.target` and refuses `d.vql.void`. No consumer reads
 a default, because none is stored.
+
+### 8.9 Card RP1: a rootless path as a shape target, from the features the language already has
+
+The owner's idea is not a new spelling. The grammar already has rootless paths, and they behave like
+lambdas. Everything below is based on what exists; no syntax is proposed.
+
+**What exists (grammar and semantics).**
+
+- `design/vql-query-language.md:301-302`:
+  `PathExpression ::= ( AnchorNode | PartialPathFunctor ) ...` and
+  `PartialPathFunctor ::= "/" StepSelector`. §4.12.3 (`:2082-2096`): "Writing a path step without a
+  leading anchor creates an anonymous **Topological Functor** (`PartialPathFunctor`)", with
+  `let $to_parent := /+d.parent;` and composition `$to_parent / $to_author`. The sign is optional
+  (`:373`), so `/d.fwd[1]` is already a functor; `[1]` is a literal `RangeClamp` (`:398-399`), never
+  a variable.
+- Parser and AST: `parser.cpp:405-406` ("A leading '/' has no anchor to read from"),
+  `ast.hpp:359-363` (`isFunctor`: "Evaluated in place it reads from the context, as it always did;
+  bound by `let` or passed as an argument it is kept as steps and applied later").
+- The lambda spelling of the same thing: `\(.) ./+d.fwd[1]`. Spec `:1108-1109` ("`by: +d.tag` is
+  exact syntax sugar for the path lambda `by: \(.) ./+d.tag`"; lambdas "evaluate lazily over each
+  candidate cell"), `:1167-1181` (anonymous path step lambdas), grammar `:423`.
+- `/` is not division: a value expression has only `+` (`:410-420`), and `parser.cpp:1745-1759`
+  refuses numeric division after a call by name. A leading `/` after `:` in a shape rule reaches
+  `parseValueOrComparisonExpr` and is a functor path; there is no collision.
+
+**What is implemented, and what is only specified.**
+
+| piece                                                                      | state                                                                                                                                                                                           |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| functor `let $f := /+d.step`, composition, application `/$f`               | implemented at compile time: bound steps are an AST in `functorBindings_` (`compiler.hpp:885`), expanded to ordinary traversals (`vql-implementation-status.md:35`), never stored at run time   |
+| functor frozen across rebinding                                            | implemented: `vql_shape_predicate_vm_test.cpp:137-138` (`let $frozen := /$selected; let $selected := /d.absent`); `vql_compiler_test.cpp:113,136`; `vql_closed_functor_frames_test.cpp:310-312` |
+| functor as a value at run time                                             | refused by name: "qualified functor anchors require runtime functor handles" (`compile_functor.cpp:65`, `:227`)                                                                                 |
+| functor in place as a shape target, evaluated with the subject as context  | the `ast.hpp:359-363` contract; same effect as `./+d.fwd[1]` (`compile_semantic_shape.cpp:236-248`); not separately tested here                                                                 |
+| lambda value (`CreateClosure`/`ApplyClosure`, captures frozen at creation) | implemented for a bounded set: `vql-implementation-status.md:911-952`; broader forms specified (`vql-query-language.md:2245-2262`) and listed open (`:2341`)                                    |
+| closure descriptor outliving its program                                   | not implemented: it dies with the program (§4.3 item 6, `arena_copy_out.cpp:74-83`), which is V6                                                                                                |
+| either as a shape target in a value                                        | not implemented; `compile_shape_predicate.cpp:80-84` refuses everything but literals                                                                                                            |
+
+**Answers to the coordinator's questions.**
+
+1. *Can a first-class shape value use an existing rootless path as a target?* Two tiers, and they
+   differ. **Functor tier**: a closed functor (signed dimension steps and literal clamps, no
+   predicate, no `$name`) is data-shaped: it can be minted as cells and read by a C++ walker with no
+   code and no environment. **Lambda tier**: a closure value is code plus a captured environment and
+   is applied by `ApplyClosure` through a native frame. It can be a target only by VM re-entry.
+1. *Representation.* Functor tier, cells (no side table): a rule with a path target carries one
+   `d.vql.via` edge to a path cell, in place of `d.vql.target`; the edge tells the reader which of
+   scalar, void, nested, path it has, with no type sniffing. The path cell heads a rank on
+   `d.vql.step`, one step cell per step, reusing `d.vql.to`, `d.vql.neg`, `d.vql.dir`, `d.vql.bidir`
+   (`view_cells.hpp:38-60`) for the signed dimension, and `d.vql.clamp` to a start cell and an
+   optional end cell (an absent end is an absent edge, not a value). Mintability is the existing
+   closed-functor classification (`closedFunctorArgumentSteps`, `compile_functor.cpp:57`;
+   `ClosedFunctorStepKey`, `compiler.hpp:211-219`) cut down to those two step kinds. A path cell is
+   distinct from a scalar target and from `d.vql.void` (an empty *mint-time* result); an empty
+   result per subject is a run-time fact, not a marker. Lambda tier: the closure value is already a
+   cell with a structural root (`VORTEX_CLOSURE_VALUE/1`, `vortex-closure-runtime-plan.md`); a rule
+   would hold it on the same `d.vql.via` edge. No new representation is needed there.
+1. *Free variables.* Functor tier: none allowed, so there is nothing to capture and **no V6
+   dependency**; a `$name` anywhere in the path refuses at mint naming the variable. (Note `[$n]` is
+   a predicate on `$n`'s truthiness, not an index: the clamp grammar takes literals only,
+   `:398-399`.) Lambda tier with free variables: the existing closure rule is that "captures freeze
+   ordered membership at creation ... and retain live cell identity"
+   (`vql-implementation-status.md: 936-937`). That is capture of the source cells, which conflicts
+   with the accepted Q5 ruling's first condition (a fresh scalar copy, never the source cell, §8.6),
+   so the owner would have to rule which one governs a shape. And the closure must outlive its
+   program, which is V6. A lambda with free variables is therefore a V6 dependency, not capture by
+   value. Recommended: not in RP1.
+1. *Does matching widen P1?* Functor tier: yes, modestly. P1 as approved reads scalar targets and
+   recurses into nested shapes. A path walker in the opcode is new traversal: per candidate it walks
+   the steps (link follows and a bounded run walk, the same reads `ProbeLink` does,
+   `vortex_vm.hpp:121`), needs a step ceiling in P3's settings and a per-cell fuel charge (Q2's unit
+   again). No VM re-entry. It is still a pure read, so mesh classification is unchanged. It is a
+   capability P1's approval did not name, so ask for it as **P1b**. Until given, P1 refuses a rule
+   carrying `d.vql.via` by name. Lambda tier: far beyond P1. `ApplyClosure` runs native frames with
+   choice points, guards and effects (`vortex-closure-runtime-plan.md`), which a pure-read opcode
+   must not do; it would force the predicate back to the graph interpreter (a), losing the wildcard
+   family (§8.3). Refuse by name in tests.
+
+**Per consumer (functor tier).**
+
+- *`apply_shape`, mapping.* Per subject, walk the path from that subject; require exactly one cell
+  (several refuses naming `one`, none refuses naming the subject, as `emitRequiredContractMatch`
+  does today, `compile_semantic_shape.cpp:240-248`); link a fresh clone (existing-cell attachments
+  use fresh clones, `vql-query-language.md:2307-2308`). All subjects are resolved before the first
+  write, so the refusal leaves no partial effect (`:280-292`). The reader that does this for a
+  run-time shape is the same unpriced item S2 must name; the walker is shared with P1b.
+- *Test, `ShapeHolds` (P1b).* Walk from the candidate. None: the rule fails (`:666`). One: compare
+  by value with the neighbour (Q11: value, because an assignment linked a clone, so identity would
+  fail after `apply_shape`). Several: refuse by name (Q10), consistent with "exactly one value"; the
+  existential reading is refused below.
+- *`project`, P2, S2.* No cost: `project` refuses assignments (`:998`), so a path target there is
+  refused as every assignment is, and P2 ignores `d.vql.via`.
+
+**Fuel, purity, sealing, witnesses, R8.** Fuel is charged per step cell visited and per rule, the
+ceiling from P3 plus a step-count ceiling. A literal inline target compiles as today (D4,
+byte-identical, sealable). A minted path is session-local cells in the shape's arena: no operation
+is appended (R8), the path cells are children of the rule rank, so the shape's one witness covers
+them (D3, W2); a path handle by itself (RP2) needs its own marker and witness. The walk reads the
+subject's current state at application time, so the *shape* stays referentially transparent (a
+description) while the *result* depends on the store, as any assignment does.
+
+**Use outside shapes.** `let $p := /+d.fwd[1]` kept past compile and applied as `/$p` at run time is
+exactly the missing "runtime functor handle" (`compile_functor.cpp:65`, `:227`). RP1's step cells
+are designed so it can reuse them; it needs a marker, a witness, an application opcode or graph
+reader, and V6 only if free variables are admitted. That is a different feature with its own
+consumers: **RP2, a separate card**, not asked for here.
+
+**Card RP1 (priced).** Mint the functor-tier path as cells (`d.vql.via`, `d.vql.step`,
+`d.vql.clamp`); refuse by name at mint any step or `$name` outside the closed subset and any
+`.`-anchored target (Q9); `apply_shape` per-subject resolution from cells; `ShapeHolds` walker
+(P1b). Estimate: M for the mint and the mapping reader (VQL and data half, no core approval), plus S
+to M for P1b's walker. No V6 dependency, no change to the static path.
+
+**Approval items.** P1b (widen P1: a bounded path walker in `ShapeHolds`, with its fuel and
+ceiling); a P3 addition (path-step ceiling) and its `defaultSettingSpecs()` entry; nothing for P2 or
+P4 (the `ShapeHolds` arity row is unchanged, since its operand count is). The mint and the mapping
+reader need no core approval by the V1 to V3 precedent.
+
+**Recommendation.** Build RP1 after D1 to D5 and P1, as the owner's route to subject-relative
+targets, with the inline form retained. Ask for P1b with it. Do not take the lambda tier or free
+variables until V6.
+
+**Refused alternatives.** A new spelling for "relative to the subject": the grammar has two already.
+The path as text or an AST blob in a cell, or in a side table: parsing at use and a grammar lock
+(`AGENTS.md`, "ZigZag cell representation"). Capturing the subject at mint: contradicts Q9.
+Evaluating the path at mint against some subject: has no subject. VM re-entry from `ShapeHolds` per
+candidate: V6-class and not a pure read. Capturing free variables in RP1: conflicts with the closure
+capture rule above and needs V6. An existential reading of many results in a test: differs from the
+scalar rule, makes a filter's truth depend on cardinality. Same-cell identity as the test: fails
+after `apply_shape` links a clone. A default form: option (b) and (c) of Q8, refused by the ruling.
+Forbidding the inline literal outright: breaks tested behaviour, and the ruling does not require it.
