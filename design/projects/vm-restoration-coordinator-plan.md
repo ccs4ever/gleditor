@@ -604,6 +604,39 @@ with these cards:
 - **SMALL1:** `mesh::evaluate` of VQL source runs `project` in the evaluator's own arena; a sealed
   artifact naming `ProjectTopology`, `CellOfInt`, `IntOfCell` or `EpochOfCell` is refused by name.
 
+SHAPECELLS (2026-11-20, branch `shapecells`, from `df0967b6`): the data half of V5, D1 to D5 of
+`vql-shape-dispatch-design.md`, plus P3. A shape value is now a handle that heads its rules as cells
+(`vql/shape_cells.hpp`, `compile_shape_cells.cpp`): the `d.vql.rule` rank a view uses, with kind,
+negation, direction and bidirectionality cells per rule and one of four target forms (a scalar on
+`d.vql.target`, a `d.vql.void` self-edge, a `d.vql.nested` shape cell, or a `$name` binder on
+`d.vql.to`). No flag says test or assignment, since the consumer chooses the reading (§8.7). A
+computed target is graph code emitted where the shape is made (`emitShapeTargetCapture`): one
+`IteratorNext` pair asserts exactly one value, a `VqlBoxScalar` copy is linked on, and an empty
+stream takes the void branch; this is why the copy is fresh and why a later rebinding cannot move
+it. Handle and nested shape cells carry an epoch witness (`staleShapeReason`, refreshed after
+`settle()` re-mints, as for views), and `shapeOfHandle` refuses a stale one by name. The ceilings
+4096 and 128 are `vql.shape.max_rules` and `vql.shape.max_depth` in `system://settings`; the
+engine's `ShapeLimits` default to `shape_limits.hpp` and `VortexHostConfig::fromStore` hands the
+stored values to its engine. `vquery`, the mesh evaluator and a bare `VQLEngine` have no settings
+store and keep the defaults, as the other VQL limits (`CompilationOptions::Limits`) always did.
+
+What stayed on the table, and why. The `Shape` alternative stays in `CompiledHandleTable`: the
+variant is shared with `LensPair` and `ComputedViewRules` (`ast.hpp:579`), the static lowerings take
+a `ShapeLiteral`, and a captured target exists only when the program runs, so a compile-time
+consumer cannot read it back. The visible cost is that `apply_shape` of a held shape with a computed
+target still evaluates the expression at the consumer (as before) while the cells hold the captured
+value; closing that is the consumer cards' (P1, P2 and the `apply_shape` reader). Static programs
+are pinned by op count in `vql_shape_cells_test.cpp`. W2 keeps its remainder: a handle with no
+witness is not refused here, only one whose witness is wrong. Q8 refuses at parse, not at mint,
+because the grammar had no node for a default in a shape and a node added only to be refused is dead
+weight. A computed target inside a function body or an iterator or quantifier body refuses by name,
+since the one handle cell would be written again on each call; path, functor and closure targets
+(`d.vql.via`, RP1) refuse by name. The price is cells: a one-rule shape is seven (handle, witness,
+five for the rule), and a rebound variable leaves them behind as it always left its cell, so three
+growth tests now bound that by the shape's own footprint, not by one scalar. The shape dimensions
+are named when the engine is made, as the marker was, so the first shape of a session keeps no
+program.
+
 Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
 lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
 approval); `mesh::evaluate` of VQL source runs `project` by the owner's ruling, and a sealed
