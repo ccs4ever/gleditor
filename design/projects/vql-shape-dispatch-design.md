@@ -419,8 +419,8 @@ narrowing `refuseShapeCells`) are VQL-only and, by the V1 to V3 precedent, need 
 
 Status after the 2026-11-20 rulings (§6): Q1 moot, Q3 ordered to a spike, Q4 answered yes and
 carded, Q5 accepted (§6.1), Q8 and Q9 ruled in the third round (§6.1), Q7 settled; Q2 and Q6 remain
-open, and §8.9 adds Q10 to Q13 on the rootless partial path. The original wording follows where it
-still carries information.
+open. §8.9 added Q10 to Q13 on the rootless partial path; the fourth round (§6.1) ruled Q10 to Q12
+and left Q13 to §8.10. The original wording follows where it still carries information.
 
 Q1. **Predicate scope.** *Moot.* P1 is approved, so the wildcard family and run-time shapes in
 predicates are in scope together; the question of shipping only the non-exact subset no longer
@@ -458,17 +458,17 @@ Q9. **Subject-relative computed targets.** *Ruled 2026-11-20: forbidden in first
 refuse at mint by name.* The inline-at-consumer form stays (§8.7); the rootless partial path (§8.9)
 is the first-class way to the same effect.
 
-Q10. **Many results from a path target.** *Open; §8.9.* In a test, refuse by name (recommended) or
-read it existentially (any result equals the neighbour)?
+Q10. **Many results from a path target.** *Ruled 2026-11-20 (fourth round): refuse by name in a
+match test. A POTENTIAL EXPANSION POINT (§8.9): several results could become a list value.*
 
-Q11. **Test comparison of a path target.** *Open; §8.9.* Value equality, as for a scalar target
-(recommended), or same-cell identity?
+Q11. **Test comparison of a path target.** *Ruled 2026-11-20: by value.*
 
-Q12. **Does RP1 widen P1?** *Open; §8.9.* Recommended: yes, so a separate approval (P1b) is asked;
-P1 as approved refuses a path-target rule by name until it is given.
+Q12. **Does RP1 widen P1?** *Ruled 2026-11-20: yes; P1b approved* (a bounded path walker in
+`ShapeHolds` for functor-tier path targets).
 
-Q13. **First-class path handle (RP2).** *Open; §8.9.* Whether a path becomes a value outside shapes
-(`let $p := /+d.fwd[1]` kept past compile, applied as `/$p` at run time) as its own card.
+Q13. **First-class path handle (RP2).** *Open; analysed in §8.10* (a path becomes a value outside
+shapes: `let $p := /+d.fwd[1]` kept past compile, applied as `/$p` at run time). Recommendation: a
+separate card, after RP1.
 
 Q7. **vagent.** *Settled by the approval of P4:* the arity rows are in scope, the CELLINT precedent
 (refused by ordinal) is not followed.
@@ -512,6 +512,25 @@ match and assignment targets and does not touch defaults. Q8 (a) costs nothing: 
 where no semantics existed. Q9 adds one refusal at mint (a target anchored on `.` or on an implicit
 context, in a shape that must be a value) and removes the Q9 row from the open list; what it takes
 from the user is the first-class spelling of "relative to the subject", which §8.9 prices as RP1.
+
+### 6.1.1 Fourth round, 2026-11-20
+
+Rulings on the rootless partial path (§8.9) and the SHAPECELLS implementer's questions.
+
+| item                          | ruling                             | what it changes                                                                                                                                                             |
+| ----------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1b                           | approved                           | `ShapeHolds` gains a bounded path walker for functor-tier path targets, with a step ceiling (a P3 addition) and per-cell fuel. A rule with `d.vql.via` no longer refuses.   |
+| Q10                           | recommendation approved            | In a match test a path target that yields several cells refuses by name. Marked a POTENTIAL EXPANSION POINT: the owner asks whether a list can be a value (§8.9, answered). |
+| Q11                           | by value                           | A path target compares by value with the neighbour, as a scalar target does; same-cell identity is refused.                                                                 |
+| Q12                           | yes                                | Settled by P1b.                                                                                                                                                             |
+| Q13                           | analysis requested                 | RP2, the first-class path handle: §8.10, with a recommendation and no approval taken.                                                                                       |
+| SHAPECELLS: `:=` default      | refuses at parse, not at mint      | ACCEPTED. A `:=` default inside a shape literal is a parse error naming the form. Narrows Q8 (a) from "refuse at mint" to "refuse at parse".                                |
+| SHAPECELLS: unbound `$name`   | stored as `$name` text on d.vql.to | CONFIRMED. A POTENTIAL EXPANSION POINT for a more powerful representation (for example a binder cell with its own rank).                                                    |
+| SHAPECELLS: computed guard    | extends to all loop forms          | ACCEPTED, frame groups included. The owner notes this may be too restrictive and will revisit once it can be exercised.                                                     |
+| SHAPECELLS: no settings store | keeps the default ceilings         | ACCEPTED. An engine with no settings store uses the compiled-in P3 defaults (4096 and 128).                                                                                 |
+
+Cost: P1b is the one item that adds work (a bounded walker, S to M, §8.9); the other rulings remove
+or confirm behaviour. Nothing here changes the static path (D4).
 
 ## 7. Spike and card definitions ordered by the rulings
 
@@ -933,11 +952,12 @@ lambdas. Everything below is based on what exists; no syntax is proposed.
    the steps (link follows and a bounded run walk, the same reads `ProbeLink` does,
    `vortex_vm.hpp:121`), needs a step ceiling in P3's settings and a per-cell fuel charge (Q2's unit
    again). No VM re-entry. It is still a pure read, so mesh classification is unchanged. It is a
-   capability P1's approval did not name, so ask for it as **P1b**. Until given, P1 refuses a rule
-   carrying `d.vql.via` by name. Lambda tier: far beyond P1. `ApplyClosure` runs native frames with
-   choice points, guards and effects (`vortex-closure-runtime-plan.md`), which a pure-read opcode
-   must not do; it would force the predicate back to the graph interpreter (a), losing the wildcard
-   family (§8.3). Refuse by name in tests.
+   capability P1's approval did not name, so it was asked for as **P1b**, approved 2026-11-20
+   (§6.1.1). P1 therefore reads a rule carrying `d.vql.via`. Lambda tier: far beyond P1.
+   `ApplyClosure` runs native frames with choice points, guards and effects
+   (`vortex-closure-runtime-plan.md`), which a pure-read opcode must not do; it would force the
+   predicate back to the graph interpreter (a), losing the wildcard family (§8.3). Refuse by name in
+   tests.
 
 **Per consumer (functor tier).**
 
@@ -948,11 +968,80 @@ lambdas. Everything below is based on what exists; no syntax is proposed.
   write, so the refusal leaves no partial effect (`:280-292`). The reader that does this for a
   run-time shape is the same unpriced item S2 must name; the walker is shared with P1b.
 - *Test, `ShapeHolds` (P1b).* Walk from the candidate. None: the rule fails (`:666`). One: compare
-  by value with the neighbour (Q11: value, because an assignment linked a clone, so identity would
-  fail after `apply_shape`). Several: refuse by name (Q10), consistent with "exactly one value"; the
-  existential reading is refused below.
+  by value with the neighbour (Q11, ruled: value, because an assignment linked a clone, so identity
+  would fail after `apply_shape`). Several: refuse by name (Q10, ruled), consistent with "exactly
+  one value"; the existential reading is refused below. This refusal is a potential expansion point,
+  set out next.
 - *`project`, P2, S2.* No cost: `project` refuses assignments (`:998`), so a path target there is
   refused as every assignment is, and P2 ignores `d.vql.via`.
+
+**Q10 as a potential expansion point: can a list be a value?** The owner asked. The answer, from the
+spec, `vql-implementation-status.md` and the code, is: **a collection is a value only as a run-time
+stream, not as a stored or first-class list value.**
+
+*Specified.*
+
+- The type grammar has `Stream<T>` (`vql-query-language.md:280`, `:2026` "Collections & Streams:
+  `Stream<T>`, `Any`, and union types").
+- Variadics "gather all trailing arguments into a stream" (`:1165`), and the example at `:1155-1157`
+  collects them with `list($first, $rest)`.
+- `"key" => list(...)` is a sprout (`:191-192`, `:367-370`, `:1034`):
+  `SproutList ::= "list" "(" ValueExpr ( "," ValueExpr )* ")"` sprouts the values chained along
+  `+d.values`. It is a morphism right-hand side, not a `ValueExpr` alternative: the `ValueExpr`
+  production (`:405-420`) has no list member, so `let $xs := list(1, 2)` is not in the grammar.
+- Comparing a stream to a scalar is existential (`:452-460`, `:640-650`).
+
+*Implemented.*
+
+- Streams: `let $xs := path` binds the path's cells, not a copy (`:2194-2196`). The compiler keeps
+  the binding as a vector of cells (`compiler.hpp:795`, `streamBindings_`), and a run-time stream
+  accumulates by `emitAppendStream` (`compiler.hpp:329-333`). Typed `Stream<Cell>`, `Stream<Int>`
+  and variadic `...$rest: Stream<Int>` ports are exercised in
+  `vql_closure_signature_routes_test.cpp:220,235`, `vql_execution_test.cpp:216` and
+  `vql_capture_frames_test.cpp:124`. Status file lines 126-128, 158 say general lazy streams and
+  mesh stream transport remain incomplete.
+- The sprout list is implemented in the bracket spelling: `parser.cpp:949-958` parses `=> [ a, b ]`
+  into `PathMorphism::isSproutList` (`ast.hpp:283-284`), `compile_path_morphism.cpp:80-110` links
+  each target in turn, and tests are `vql_parser_test.cpp:494-503` and `vql_engine_test.cpp:409-420`
+  (two sprouts, read back in order).
+
+*Specified only.* The `list(...)` spelling: `list` is lexed as a keyword (`lexer.cpp:781-782`,
+`token.hpp:108`) but no parser path consumes `KwList` (no hit outside the lexer), so the spec's
+spelling and the implemented `[ ... ]` spelling differ. Also unimplemented: a list as an independent
+value (storable, passable past a call, held on a cell), and its lifetime beyond the program (V6
+class, `arena_copy_out.cpp:74-83`).
+
+*What the expansion would look like.* A list value, in this repository's terms, is a rank: ordered
+cells on one dimension, which is what the sprout already builds along `+d.values` and what "solve
+with cells and dims" asks for. So a multi-result path target would be a rank, not a new type.
+
+- *Representation.* A rule carrying `d.vql.via` and a declared "many" mode (a marker cell, or a
+  `d.vql.list` edge in place of the single-result reading; the choice is for the owner) would, at
+  application time, produce an ordered run of cells. At mint there is nothing to store (a path
+  target is not evaluated at mint, §8.9), so the list lives only in the application result.
+- *Match test.* `ShapeHolds` already walks the path per candidate. With the expansion the walk
+  returns N cells; the comparison is then either existential (some result equals the neighbour, the
+  spec's own stream-to-scalar rule, `:452`, which is why this reading is the natural one for VQL) or
+  sequence equality against a neighbour that is itself a rank (the neighbour's
+  `d.vql.target`-equivalent rank, compared pairwise in order). The earlier objection to the
+  existential reading (a filter's truth then depends on cardinality, refused below) is exactly what
+  the owner would be accepting; the ruling to refuse is the conservative reading and costs nothing
+  to keep.
+- *Mapping assignment.* Link each result as a fresh clone in order along the target dimension, which
+  is `"key" => list(...)` exactly (`:192`, `:1034`; existing-cell attachments use fresh clones,
+  `:2307-2308`). The all-subjects-resolved-before-first-write rule still holds (`:280-292`); an
+  empty result is "link nothing" for a list and would need its own ruling against today's "none
+  refuses naming the subject".
+- *Cost.* S to M beyond P1b: the walker already returns cells, so the work is the mode marker, the
+  second comparison rule, the clone-chain write, tests for empty, one and many, and the differential
+  against the graph interpreter. It stays a pure read, mesh class unchanged.
+- *Approvals.* (1) The "many" mode itself, since it widens the Q10 ruling and Q5's "exactly one
+  value" condition for path targets (mint-time computed targets stay single-valued). (2) Which
+  comparison reading governs a test (existential or sequence). (3) Whether an empty list links
+  nothing or refuses. (4) If the owner also wants `let $xs := list(...)` as a storable value, that
+  is a separate, larger card: it needs the `list(...)` parse path, a value representation and its
+  lifetime, and falls under V6 for anything kept past the program. No core opcode is needed for (1)
+  to (3).
 
 **Fuel, purity, sealing, witnesses, R8.** Fuel is charged per step cell visited and per rule, the
 ceiling from P3 plus a step-count ceiling. A literal inline target compiles as today (D4,
@@ -966,22 +1055,22 @@ description) while the *result* depends on the store, as any assignment does.
 exactly the missing "runtime functor handle" (`compile_functor.cpp:65`, `:227`). RP1's step cells
 are designed so it can reuse them; it needs a marker, a witness, an application opcode or graph
 reader, and V6 only if free variables are admitted. That is a different feature with its own
-consumers: **RP2, a separate card**, not asked for here.
+consumers: **RP2, analysed in §8.10**.
 
-**Card RP1 (priced).** Mint the functor-tier path as cells (`d.vql.via`, `d.vql.step`,
-`d.vql.clamp`); refuse by name at mint any step or `$name` outside the closed subset and any
-`.`-anchored target (Q9); `apply_shape` per-subject resolution from cells; `ShapeHolds` walker
-(P1b). Estimate: M for the mint and the mapping reader (VQL and data half, no core approval), plus S
-to M for P1b's walker. No V6 dependency, no change to the static path.
+**Card RP1 (priced; P1b approved 2026-11-20).** Mint the functor-tier path as cells (`d.vql.via`,
+`d.vql.step`, `d.vql.clamp`); refuse by name at mint any step or `$name` outside the closed subset
+and any `.`-anchored target (Q9); `apply_shape` per-subject resolution from cells; `ShapeHolds`
+walker (P1b). Estimate: M for the mint and the mapping reader (VQL and data half, no core approval),
+plus S to M for P1b's walker. No V6 dependency, no change to the static path.
 
-**Approval items.** P1b (widen P1: a bounded path walker in `ShapeHolds`, with its fuel and
-ceiling); a P3 addition (path-step ceiling) and its `defaultSettingSpecs()` entry; nothing for P2 or
-P4 (the `ShapeHolds` arity row is unchanged, since its operand count is). The mint and the mapping
-reader need no core approval by the V1 to V3 precedent.
+**Approval items.** P1b (widen P1: a bounded path walker in `ShapeHolds`, with its fuel and ceiling)
+is **approved** (§6.1.1); a P3 addition (path-step ceiling) and its `defaultSettingSpecs()` entry;
+nothing for P2 or P4 (the `ShapeHolds` arity row is unchanged, since its operand count is). The mint
+and the mapping reader need no core approval by the V1 to V3 precedent.
 
 **Recommendation.** Build RP1 after D1 to D5 and P1, as the owner's route to subject-relative
-targets, with the inline form retained. Ask for P1b with it. Do not take the lambda tier or free
-variables until V6.
+targets, with the inline form retained. P1b is approved and lands with it. Do not take the lambda
+tier or free variables until V6.
 
 **Refused alternatives.** A new spelling for "relative to the subject": the grammar has two already.
 The path as text or an AST blob in a cell, or in a side table: parsing at use and a grammar lock
@@ -990,5 +1079,160 @@ Evaluating the path at mint against some subject: has no subject. VM re-entry fr
 candidate: V6-class and not a pure read. Capturing free variables in RP1: conflicts with the closure
 capture rule above and needs V6. An existential reading of many results in a test: differs from the
 scalar rule, makes a filter's truth depend on cardinality. Same-cell identity as the test: fails
-after `apply_shape` links a clone. A default form: option (b) and (c) of Q8, refused by the ruling.
-Forbidding the inline literal outright: breaks tested behaviour, and the ruling does not require it.
+after `apply_shape` links a clone (Q11 ruled by value). A default form: option (b) and (c) of Q8,
+refused by the ruling. Forbidding the inline literal outright: breaks tested behaviour, and the
+ruling does not require it.
+
+### 8.10 Card RP2: the first-class path handle (Q13)
+
+The owner asked for a fuller account of RP2 as a possible separate card. Everything here is a
+proposal over what exists; no approval is taken.
+
+**RP1 versus RP2.** RP1 (§8.9) makes a closed path a *part of a shape rule*: the steps are cells
+under the rule, read only by the shape consumers (`ShapeHolds`, `apply_shape`), and the user never
+holds the path. RP2 makes the path a *value of its own*: `let $p := /+d.fwd[1]` keeps it past
+compile, it can be passed as an argument, stored in a cell, returned, composed, and applied anywhere
+a path can be applied (`/$p`, `$cell/$p`, `[$p = "x"]`, `by: $p`). RP1 is "a path inside a shape";
+RP2 is "a path as a thing".
+
+**What exists to build on.**
+
+- The language already has the value, at compile time.
+  `PathExpression ::= ( AnchorNode | PartialPathFunctor )` and
+  `PartialPathFunctor ::= "/" StepSelector` (`vql-query-language.md:301-302`); §4.12.3
+  (`:2082-2096`) binds one with `let $to_parent := /+d.parent;` and composes
+  `$to_parent / $to_author`. The compiler holds the bound steps as an AST in `functorBindings_`
+  (`compiler.hpp:885`) and expands every application to ordinary traversals
+  (`vql-implementation-status.md:35`). Frozen-across-rebinding is tested (§8.9 table).
+- What is missing is only the run-time case. A functor that must outlive its static expansion (a
+  functor argument that is not statically known, one returned from a function, or one read back from
+  a cell) refuses by name: "qualified functor anchors require runtime functor handles"
+  (`compile_functor.cpp:65`, `:227`).
+- Lambdas are the neighbouring feature: `\(.) ./+d.fwd[1]` is the same path as code
+  (`vql-query-language.md:1108-1109`, `:1167-1181`), is a real run-time value
+  (`CreateClosure`/`ApplyClosure`, `vql-implementation-status.md:911-952`; broader forms specified,
+  `vql-query-language.md:2245-2262`), but carries code and an environment and so dies with its
+  program (`arena_copy_out.cpp:74-83`), which is V6. A `PartialPathFunctor` is the data-shaped
+  subset of the same idea: no code, and with no free variable no environment. RP2 is that subset as
+  a value, which is why it can precede V6 where a lambda cannot.
+
+**What it enables that RP1 does not.**
+
+```vql
+-- keep a path and use it later, in a different query statement or a function
+let $next := /+d.fwd[1];
+$doc/$next/$next                      -- two hops, applied from a run-time handle
+
+-- pass one to a function that does not know it statically
+def hop($start, $by) := $start/$by;
+hop($doc, $next)                      -- today: refuses at compile_functor.cpp:65
+
+-- a path chosen at run time, stored on a cell and read back
+$config/+d.nav/. = $next              -- store a handle, compare it, apply it later
+
+-- one shape rule and one query share the same named path
+let $subject_to_owner := /+d.meta/+d.owner;
+{ +d.owner: $subject_to_owner }       -- RP1 form: path as target, now by name
+$cells[$subject_to_owner = "alice"]   -- the same handle as a predicate
+```
+
+RP1 gives only the fourth form's first line and only inside a shape; none of the others.
+
+**Representation, as cells.** Reuse RP1's rank exactly, and add the handle on top, as views and
+shapes do (`view_cells.hpp:36-62`):
+
+- *Path cell*: heads the `d.vql.step` rank (one step cell per step, `d.vql.to`, `d.vql.neg`,
+  `d.vql.dir`, `d.vql.bidir`, `d.vql.clamp` to a start and an optional end), unchanged from RP1.
+- *Marker*: the path cell is the target of a `d.vql.path` marker edge (a new constant beside
+  `shapeMarkerDimension`, `view_cells.hpp:36`), so a consumer can tell a path handle from a shape or
+  view handle by an edge, not by type sniffing. A handle value in the VM is an Int64 box of the path
+  cell, as views and shapes are held.
+- *Epoch witness*: the `d.vql.epoch` rank (`view_cells.hpp:46`) records the release epoch the path
+  was minted in; every consumer checks it, so a copied-by-value box fails by name instead of naming
+  a reused cell (D3, W1 and W2 are the same discipline). This is the same hole W1 and W2 close for
+  views and shapes, and RP2 adds it to a third handle kind rather than creating it.
+- *Composition*: `$a / $b` mints a new path cell whose rank is a fresh copy of both step runs (never
+  a shared tail), so the composite stands alone and its witness covers it.
+- *RP1 relation*: a shape rule's `d.vql.via` edge may point at an RP2 path cell instead of a
+  rule-owned one; the walker reads the same cells either way. Whether the rule shares the path cell
+  or copies it is a ruling (copy is safer under release; sharing is cheaper).
+
+**Run-time application: which opcode.** Two options.
+
+- (i) *Reuse P1b's walker.* P1b is a bounded C++ walker over a step rank, from a subject, with a
+  step ceiling and per-cell fuel (§8.9). RP2 application is the same function with a different
+  caller: expose it as one more opcode (name for the owner, for example `ApplyPath`) that takes a
+  handle and a context stream and yields a stream. The walker is shared by `ShapeHolds`,
+  `apply_shape`'s reader and this opcode, so the cost of RP2's core change is one opcode, not a
+  second traversal engine.
+- (ii) *Graph lowering with no new opcode.* The compiler emits, for `/$p`, a guarded fold over the
+  step cells with the ordinary `Link` opcodes, as `emitViewStep` does for view handles
+  (`compiler.hpp:542-546`). It needs no core approval but its length depends on the step count, so
+  it needs a loop form or a ceiling at compile time, and every application inlines it.
+
+Recommended: (i), because the walker exists by then and bounded fuel is easier to state in one
+place. Option (ii) is the fallback if the owner will not approve a new opcode; it can only be used
+for paths whose step count is known at compile time.
+
+**`$var` and V6.** The closed subset has no free variable, so RP2 has no V6 dependency. A `$name`
+inside the path (a predicate, `[$n]`, or a captured value) refuses at mint naming the variable, as
+RP1 does. Two clarifications: composition with another bound functor (`$a / $b`) is not a free
+variable, since both are frozen paths and expand at mint; and a `$var` that is itself a functor
+handle is applied, not captured. A path *with* free variables is a closure by another name: it needs
+capture, the capture rule conflicts with Q5's by-value ruling for shapes (§8.9), and the descriptor
+must outlive its program. That is V6, and RP2 leaves it there. The refusal is the seam V6 later
+removes (one more approval then, with its own capture ruling).
+
+**Mesh purity, sealing, R8, cost.**
+
+- *Mesh purity.* A handle is session-local cells and an application is a pure read, so the
+  classification matches P1b's. A handle copied out of the arena is refused at seal exactly as a
+  detached shape copy is (§2). A program that applies no handle is byte-identical (D4).
+- *Sealing.* A statically known handle (`let $p := /+d.fwd[1]; ... /$p`) still compiles by the
+  existing expansion and seals as today. Only the run-time case mints cells and so is unsealable
+  until V6 gives descriptors a home; the refusal names the handle.
+- *R8.* Minting a path cell appends no Structure operation (arena only, as shapes and views are).
+  Applying one reads the visited store and mints nothing, so activity-store walks are unaffected.
+- *Cost.* Mint: one cell per step plus the path and marker cells, amortised once per `let`.
+  Application: O(steps visited) with the fuel charge per cell, the same unit as P1b (Q2). One
+  witness check per application, an Int64 compare against the epoch rank.
+
+**Approvals it would need, each separate.**
+
+1. The `d.vql.path` marker and the rank constants as a compile-time table in `view_cells.hpp`
+   (data-half, no core change; the V1 to V3 precedent).
+1. A handle value kind for the VM: a path handle boxed like a view or shape handle, with its witness
+   (W1 and W2 style). Needed only if the handle crosses a call boundary.
+1. The run-time application: a new opcode (`ApplyPath`, option (i)), or the graph lowering (option
+   (ii)). Core-adjacent and its own approval; it takes the P1b walker as given.
+1. A P3 addition for a handle's step ceiling at mint (it may reuse RP1's) and the
+   `defaultSettingSpecs()` entry.
+1. Lifting the two refusals at `compile_functor.cpp:65` and `:227` for the closed subset only.
+1. Whether a shape rule shares an RP2 path cell or copies it.
+1. A vagent arity row if vagent is to apply a handle (P4's precedent; may be dropped with the opcode
+   if vagent does not call it).
+
+**Size and sequencing.** M for the data half and the compile-time lift (items 1, 2, 4, 5), S for the
+opcode (item 3, given P1b's walker), plus W-style witness tests: M to L in all, mostly tests (values
+passed, returned, composed, stored, released, copied by value, refused with `$var`). Sequence: after
+RP1 and P1 (the step cells and the walker exist), before or independent of V6; it needs no lens and
+gains nothing from one until a path with free variables is wanted. Not before P1b, since the opcode
+would otherwise duplicate its walker.
+
+**Refused alternatives.** Making RP2 part of RP1: it adds an opcode, a value kind and a lifted
+refusal to a card that was priced without them, and so would force a second approval inside an
+approved one. Treating a path handle as a lambda (`\(.) ./...`): code and environment, V6, and the
+wrong tier for a data-shaped path. Text or an AST in a cell, applied by re-parsing: a grammar lock
+and parse at use (`AGENTS.md`, "ZigZag cell representation"). A side table keyed by an Int64: loses
+the witness and `d.vql.step` reuse, the "cells and dims" ruling in memory. Capturing free variables
+by reference: conflicts with Q5. Keeping the compile-time expansion only: leaves
+`compile_functor.cpp:65` as the permanent answer for any functor not statically known.
+
+**Recommendation: a separate card.** Reasons: (1) RP1 has a clear consumer and an approved walker;
+RP2's consumers (functor arguments to functions, handles stored on cells) are not yet demanded by a
+journey, so its value is not yet measured; (2) it needs a new opcode and a new value kind, which RP1
+does not, and a separate card keeps RP1's price as quoted; (3) it lifts two existing refusals and so
+touches the functor path, tested separately from shapes; (4) it reuses RP1's cells and P1b's walker
+entirely, so deferring it costs nothing and a later build adds no rework. Take RP2 after RP1 lands,
+on a concrete consumer (a UX journey that passes a path to a function), and ask for items 1 to 7
+above then.
