@@ -132,8 +132,8 @@ ccache follows it, so without them every worktree gets a private cache.
   `evaluateShapePredicate`, `sortInto`, `traverseView`, `projectDynamic`, `versionValue` and the
   rest of that chain) was deleted by the RESIDUAL card; `vql/sort.cpp`, `vql/dynamic_view.cpp`,
   `vql/version_value.cpp` and `vql/shape_eval.cpp` no longer exist. Read the behaviour it had with
-  `git show 4bbaa050:<path>`; there is nothing left to call. The same holds for pre-cutoff code read with
-  `git show e9090999^:<path>`.
+  `git show 4bbaa050:<path>`; there is nothing left to call. The same holds for pre-cutoff code read
+  with `git show e9090999^:<path>`.
 - Lowering emits ordinary Vortex graph operations through the existing compiler helpers (`emitOp`,
   `emitOutput`, streams, frames, mutation groups). It never stores an AST or a callback for the VM.
 - The `OpcodeKind` enum is append-only. A new opcode, or a new C++ standard-library function, needs
@@ -593,11 +593,11 @@ baseline. `gleditor_test` and `zigzag_test` show one failure each, as in every g
 with these cards:
 
 - **FRAME2:** `GroupBegin` and `GroupNext` journal per key (worst case 7 and 13 records);
-  `RestoreBindings` moves the old tables aside and swaps them back on failure. Behaviour is identical
-  on every success path and every failure before the first change; after a failure injected after a
-  change, hash iteration order may differ (documented in `table_undo.hpp`), and `rollback()` is
-  `noexcept` but allocates. The golden transcript `tests/samples/vortex/group_opcode_transcript.txt`
-  was captured from the unchanged code.
+  `RestoreBindings` moves the old tables aside and swaps them back on failure. Behaviour is
+  identical on every success path and every failure before the first change; after a failure
+  injected after a change, hash iteration order may differ (documented in `table_undo.hpp`), and
+  `rollback()` is `noexcept` but allocates. The golden transcript
+  `tests/samples/vortex/group_opcode_transcript.txt` was captured from the unchanged code.
 - **RESIDUAL:** the pre-cutoff host interpreter in `vql/` is deleted (about 2,350 lines); it held a
   known divergence from §4.8.1. Anything that cited it as an oracle reads
   `git show 4bbaa050:<path>`.
@@ -626,16 +626,24 @@ a `ShapeLiteral`, and a captured target exists only when the program runs, so a 
 consumer cannot read it back. The visible cost is that `apply_shape` of a held shape with a computed
 target still evaluates the expression at the consumer (as before) while the cells hold the captured
 value; closing that is the consumer cards' (P1, P2 and the `apply_shape` reader). Static programs
-are pinned by op count in `vql_shape_cells_test.cpp`. W2 keeps its remainder: a handle with no
-witness is not refused here, only one whose witness is wrong. Q8 refuses at parse, not at mint,
-because the grammar had no node for a default in a shape and a node added only to be refused is dead
-weight. A computed target inside a function body or an iterator or quantifier body refuses by name,
-since the one handle cell would be written again on each call; path, functor and closure targets
-(`d.vql.via`, RP1) refuse by name. The price is cells: a one-rule shape is seven (handle, witness,
-five for the rule), and a rebound variable leaves them behind as it always left its cell, so three
-growth tests now bound that by the shape's own footprint, not by one scalar. The shape dimensions
-are named when the engine is made, as the marker was, so the first shape of a session keeps no
-program.
+are pinned by an operand-shape hash of their disassembly in `vql_shape_cells_test.cpp`. W2 keeps its
+remainder: a handle with no witness is not refused here, only one whose witness is wrong. Q8 refuses
+at parse, not at mint, because the grammar had no node for a default in a shape and a node added
+only to be refused is dead weight. A computed target made where the one handle cell serves many
+turns or calls (a function body, an iterator or quantifier body, a rest group, an element-wise
+contract) is not captured: the rule carries a `d.vql.late` self-edge and no target, and this query's
+consumers (`apply_shape`, a predicate, `project`, a returned handle) read the expression where they
+stand, as they did before shapes were cells, so every form that compiled at `df0967b6` still does.
+The one remaining refusal is a later query naming such a handle, whose free names have no scope to
+be read in; and a target relative to the subject stays refused (Q9). A cell reader must refuse a
+late rule by name, not take it for presence-only. Reading a rank or a nested edge of cells it did
+not write uses `zigzag::rank` (ends at a dead end, a self-link, a ring closing on its start, or the
+traversal bound) and a seen-set across nested edges, so a hand-built cyclic shape is walked once.
+Path, functor and closure targets (`d.vql.via`, RP1) refuse by name. The price is cells: a one-rule
+shape is seven (handle, witness, five for the rule), and a rebound variable leaves them behind as it
+always left its cell, so three growth tests now bound that by the shape's own footprint, not by one
+scalar. The shape dimensions are named when the engine is made, as the marker was, so the first
+shape of a session keeps no program.
 
 Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
 lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
@@ -647,15 +655,16 @@ evaluator's own private arena, where the detached copies `copyTopology` mints ar
 outside the run, while an artifact is bytes that must answer alike in any arena and memoise by
 content, which fresh cells on every run defeat. `CellOfInt`, `IntOfCell` and `EpochOfCell` are
 refused the same way, for the same portability reason. The residual shape interpreter
-(`vql/shape_eval.cpp`, since deleted) by code reading counted the store-ref index link on a foreign-owner proxy
-(`{}` is false, `{*}` is true through `dimensionsOf`), unlike the VM's `VqlMaskProbe`, but it is
-dead: `evaluateShapePredicate` is private, reached only from `evaluateFactor`, `evaluateTerm` and
-`evaluatePredicate`, whose roots (`executeBlock`, `executeScriptBody`, `evaluateBindings`) have no
-caller in `apps/`, `tests/` or `tools/`, and every public entry (`execute`, `tryExecute`,
-`evaluatePath`, `pollWatch`) compiles and runs on the VM. No query, host-API call or test reaches
-it, so the quirk is confirmed but moot; the residual interpreter was deleted as a whole (RESIDUAL card), not
-fixed in this file; closure-creating VQL queries keep their program; VLace has no `isEOF` form;
-nested enclose and an outer product with an empty operand refuse by name in VPL.
+(`vql/shape_eval.cpp`, since deleted) by code reading counted the store-ref index link on a
+foreign-owner proxy (`{}` is false, `{*}` is true through `dimensionsOf`), unlike the VM's
+`VqlMaskProbe`, but it is dead: `evaluateShapePredicate` is private, reached only from
+`evaluateFactor`, `evaluateTerm` and `evaluatePredicate`, whose roots (`executeBlock`,
+`executeScriptBody`, `evaluateBindings`) have no caller in `apps/`, `tests/` or `tools/`, and every
+public entry (`execute`, `tryExecute`, `evaluatePath`, `pollWatch`) compiles and runs on the VM. No
+query, host-API call or test reaches it, so the quirk is confirmed but moot; the residual
+interpreter was deleted as a whole (RESIDUAL card), not fixed in this file; closure-creating VQL
+queries keep their program; VLace has no `isEOF` form; nested enclose and an outer product with an
+empty operand refuse by name in VPL.
 
 **Model usage is a capacity limit too.** Eight mid-tier workers at once exhausted the five-hour
 usage limit twice, and four exhausted it again. By the owner's instruction (2026-11-12), run at most

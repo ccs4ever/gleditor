@@ -34,6 +34,7 @@ struct RuleView {
   std::int64_t sign{};
   std::optional<CellRef> target;
   bool voided{};
+  bool late{};
   std::optional<CellRef> nested;
   std::optional<std::string> binder;
 };
@@ -92,6 +93,7 @@ struct VQLShapeCellsTest : testing::Test {
       view.sign          = *arena.asInt64(*neighbour(*rule, d.dir));
       view.target        = neighbour(*rule, d.target);
       view.voided        = neighbour(*rule, d.voided) == rule;
+      view.late          = neighbour(*rule, d.late) == rule;
       view.nested        = neighbour(*rule, d.nested);
       if (const auto to = neighbour(*rule, d.to))
         view.binder = arena.textOf(*to);
@@ -279,46 +281,94 @@ TEST_F(VQLShapeCellsTest, PathAndFunctorTargetsAreRefusedByName) {
               testing::HasSubstr("rootless partial path"));
 }
 
-TEST_F(VQLShapeCellsTest, AComputedTargetInALoopRefusesByName) {
+// A computed target made where the handle is one cell for many turns or calls
+// (a loop, a def) is not captured: the cells hold none, the rule says so
+// (d.vql.late), and this query's consumers read the expression where they
+// stand, as they did before shapes were cells. Everything df0967b6 compiled
+// still compiles.
+TEST_F(VQLShapeCellsTest, AComputedTargetInALoopIsLateNotCaptured) {
   engine.setVariable(
       "items", std::vector<CellRef>{arena.makeCell("a"), arena.makeCell("b")});
-  EXPECT_THAT(
-      refusalOf("for $i in ##/+d.keep let $s := { +d.tag: $i } return $s"),
-      testing::HasSubstr("inside a function body or a loop"));
-  // A literal target is the same cell every turn and nothing is written.
-  EXPECT_EQ(
-      engine.execute("for $i in $items let $s := { +d.tag: \"x\" } return $s")
-          .size(),
-      2u);
+  const auto handles =
+      engine.execute("for $i in $items let $s := { +d.tag: $i } return $s");
+  ASSERT_EQ(handles.size(), 2u);
+  const auto rules = rulesOf(handles.front());
+  ASSERT_EQ(rules.size(), 1u);
+  EXPECT_TRUE(rules[0].late);
+  EXPECT_FALSE(rules[0].target);
+  EXPECT_FALSE(rules[0].voided);
+  // A static consumer in the loop evaluates at the consumer.
+  EXPECT_NO_THROW(
+      (void)engine.execute("for $i in $items let $s := { *, +d.tag: $i } "
+                           "return apply_shape($i, $s)"));
+  // A literal target is the same cell every turn and nothing is late.
+  const auto literal =
+      engine.execute("for $i in $items let $s := { +d.tag: \"x\" } return $s");
+  ASSERT_EQ(literal.size(), 2u);
+  EXPECT_FALSE(rulesOf(literal.front())[0].late);
 }
 
-// Every form whose body runs more than once, or whose code is not the query
-// body, refuses a computed target because the handle is one cell. Several of
-// these are also inside a def, which the function-body guard alone refuses
-// with the same words; the quantifier, rest-group and element-contract bodies
-// each also bump the loop depth, so the guard holds if a form is ever reached
-// from the query body.
-TEST_F(VQLShapeCellsTest, EveryRepeatedFormRefusesAComputedTarget) {
-  const auto refused = testing::HasSubstr("inside a function body or a loop");
+TEST_F(VQLShapeCellsTest, ALateHandleIsRefusedByNameInALaterQuery) {
+  engine.setVariable("items", std::vector<CellRef>{arena.makeCell("a")});
+  const auto handles =
+      engine.execute("for $i in $items let $s := { +d.tag: $i } return $s");
+  ASSERT_EQ(handles.size(), 1u);
+  ASSERT_TRUE(rulesOf(handles.front())[0].late);
+  // The session still holds the handle (it was a result); a later query that
+  // names it has no scope to read `$i` in.
+  engine.setVariable("s", handles.front());
+  EXPECT_THAT(refusalOf("##{ $s }"),
+              testing::HasSubstr("of another query, where its computed target "
+                                 "is read at each use"));
+}
+
+// The forms below are also the ones that run a body more than once; each is
+// accepted, and a handle made in one is late.
+TEST_F(VQLShapeCellsTest, EveryRepeatedFormAcceptsAComputedTarget) {
   const std::string make = "def mk() := {+d.keep: $n + 1}; let $n := 1 ";
-  // A function body.
-  EXPECT_THAT(refusalOf(make + "return mk()"), refused);
-  // A quantifier body (any, all, none share one loop).
+  // A def body, however it is reached.
+  EXPECT_NO_THROW((void)engine.execute("def g($x) := {*, +d.tag: $x}; g(##)"));
+  EXPECT_NO_THROW((void)engine.execute(make + "return mk()"));
+  EXPECT_NO_THROW((void)engine.execute(make + "return count(mk())"));
+  // let $s := mk() at the query body is captured, as it always was.
+  const auto handle = handleOf(make + "let $s := mk() return $s");
+  EXPECT_FALSE(rulesOf(handle)[0].late);
+  EXPECT_EQ(arena.asInt64(*rulesOf(handle)[0].target), 2);
   for (const char *quantifier : {"any", "all", "none"})
-    EXPECT_THAT(
-        refusalOf(make + "return " + quantifier + "(##, count(mk()) > 0)"),
-        refused)
+    EXPECT_NO_THROW((void)engine.execute(make + "return " + quantifier +
+                                         "(##, count(mk()) > 0)"))
         << quantifier;
-  // A rest parameter whose groups are matched one by one.
-  EXPECT_THAT(
-      refusalOf("def f(...$r: Stream<{d.tag := {+d.keep: $n + 1}}>): Any := "
-                "$r; let $n := 1 return f(##)"),
-      refused);
-  // An element-wise contract (a stream type) whose pattern has a default.
-  EXPECT_THAT(
-      refusalOf("def f($x: Stream<{d.tag := {+d.keep: $n + 1}}>): Any := $x; "
-                "let $n := 1 return f(##)"),
-      refused);
+  // Rest groups and element-wise contracts.
+  EXPECT_NO_THROW((void)engine.execute(
+      "def f(...$r: Stream<{d.tag := {+d.keep: $n + 1}}>): Any := $r; "
+      "let $n := 1 return f(##)"));
+  EXPECT_NO_THROW((void)engine.execute(
+      "def f($x: Stream<{d.tag := {+d.keep: $n + 1}}>): Any := $x; "
+      "let $n := 1 return f(##)"));
+}
+
+TEST_F(VQLShapeCellsTest, ASubjectRelativeTargetStaysRefusedInALoop) {
+  engine.setVariable("items", std::vector<CellRef>{arena.makeCell("a")});
+  EXPECT_THAT(refusalOf("for $i in $items let $s := { +d.tag: ./+d.keep[1] } "
+                        "return $s"),
+              testing::HasSubstr("relative to the subject"));
+}
+
+TEST_F(VQLShapeCellsTest, ACyclicShapeIsWalkedOnceNotForever) {
+  const auto handle = handleOf("let $s := { +d.keep: { +d.tag } } return $s");
+  const auto d      = dims();
+  // The rank of rules closes on itself, and the nested shape nests its parent.
+  const auto outerRule = *neighbour(handle, d.rule);
+  const auto inner     = *neighbour(outerRule, d.nested);
+  ASSERT_TRUE(arena.link(outerRule, d.rule, DimVector::POS, outerRule));
+  ASSERT_TRUE(
+      arena.link(*neighbour(inner, d.rule), d.nested, DimVector::POS, handle));
+  EXPECT_FALSE(xanadu::vql::hasLateRule(arena, d, handle));
+  EXPECT_FALSE(xanadu::vql::staleShapeReason(arena, d, handle));
+  // A rank that rings back through the head ends there too.
+  ASSERT_TRUE(
+      arena.link(*neighbour(inner, d.rule), d.rule, DimVector::POS, inner));
+  EXPECT_FALSE(xanadu::vql::hasLateRule(arena, d, inner));
 }
 
 TEST_F(VQLShapeCellsTest, EveryHandleCarriesAnEpochWitness) {

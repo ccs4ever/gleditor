@@ -808,6 +808,11 @@ private:
   /// How many iterator or quantifier bodies the code being emitted is inside:
   /// a cell the compiler mints once is written once per turn there.
   std::size_t loopDepth_{0};
+  /// Shape handles this compile made with a rule marked d.vql.late, and
+  /// whether the one being filled has one. A late handle is read by the
+  /// consumers of this query only (shapeOfHandle).
+  std::unordered_set<zigzag::CellRef> lateHandles_;
+  bool lateTargetMade_{false};
   struct LoopScope {
     explicit LoopScope(VQLCompiler &compiler) : compiler_(compiler) {
       ++compiler_.loopDepth_;

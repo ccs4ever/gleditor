@@ -128,7 +128,9 @@ CellRef VQLCompiler::registerShape(ShapeLiteral expanded,
   zigzag::expectWritten(
       arena.link(handle, dims.marker, zigzag::DimVector::POS, handle));
   std::size_t rulesLeft = shapeLimits_.maxRules;
+  lateTargetMade_       = false;
   fillShapeCells(handle, expanded, dims, mint, 0, rulesLeft);
+  if (lateTargetMade_) lateHandles_.insert(handle);
   shapeHandles_.emplace(handle, std::move(expanded));
   return handle;
 }
@@ -273,12 +275,17 @@ void VQLCompiler::emitShapeTargetCapture(const CellRef rule,
                                          const ShapeDimensions &dims) {
   // The handle is one cell for every call of a body or turn of a loop that
   // makes it, so a target written to it at run time would be overwritten by
-  // the next one and the earlier shape would silently change.
-  if (compilingFrameDefinition_ || !activeCalls_.empty() || loopDepth_ > 0)
-    refuseTarget("VQL shape rule '" + spec.dimName +
-                 "' has a computed target inside a function body or a loop: "
-                 "the shape it makes is one cell, which each call or turn "
-                 "would write again. Make the shape in the query body");
+  // the next one and the earlier shape would silently change. Nothing is
+  // written there: the consumers in this query (apply_shape, a predicate,
+  // project, a returned handle) read the expression from the compile-time
+  // table and evaluate it where they are, as they did before shapes were
+  // cells, and the rule says so (d.vql.late) so a reader of the cells alone
+  // refuses it by name instead of taking it for a presence-only rule.
+  if (compilingFrameDefinition_ || !activeCalls_.empty() || loopDepth_ > 0) {
+    zigzag::expectWritten(core_.arena().link(rule, dims.late, false, rule));
+    lateTargetMade_ = true;
+    return;
+  }
   auto &arena       = core_.arena();
   const auto values = compileArgument(*spec.targetValue, std::nullopt);
 

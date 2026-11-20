@@ -14,6 +14,11 @@
  *  - a d.vql.void edge to the rule itself: the expression yielded no value, so
  *    nothing matches it;
  *  - one d.vql.nested edge to a shape cell, for a nested shape target;
+ *  - a d.vql.late edge to the rule itself: the shape was made where its
+ *    consumers re-evaluate the target (a loop body, a function body), so no
+ *    value was captured and the cells hold none. The consumer in the same
+ *    query reads the expression where it is consumed; a reader with only the
+ *    cells must refuse the rule by name rather than treat it as presence-only;
  *  - a d.vql.to cell holding a `$name` that was not bound where the shape was
  *    made, which is a binder and not a read.
  *
@@ -38,6 +43,7 @@ namespace xanadu::vql {
 inline constexpr std::string_view shapeTargetDimension = "d.vql.target";
 inline constexpr std::string_view shapeVoidDimension   = "d.vql.void";
 inline constexpr std::string_view shapeNestedDimension = "d.vql.nested";
+inline constexpr std::string_view shapeLateDimension   = "d.vql.late";
 
 /// A shape rule's kind, in the text of its kind cell. Pivot and computed rules
 /// keep the view kinds (viewKindPivot, viewKindComputed): they are the same
@@ -57,6 +63,7 @@ struct ShapeDimensions {
   zigzag::DimRef target{};
   zigzag::DimRef voided{};
   zigzag::DimRef nested{};
+  zigzag::DimRef late{};
   zigzag::DimRef epoch{};
 };
 
@@ -86,6 +93,13 @@ void refreshShapeWitnesses(zigzag::ArenaManifold &arena,
 [[nodiscard]] std::optional<std::string>
 staleShapeReason(const zigzag::ArenaManifold &arena,
                  const ShapeDimensions &dims, zigzag::CellRef shape);
+
+/// True when @p shape, or a shape nested under it, has a rule marked
+/// d.vql.late: made where its consumers re-evaluate the target, so the cells
+/// alone do not say what it matches.
+[[nodiscard]] bool hasLateRule(const zigzag::ArenaManifold &arena,
+                               const ShapeDimensions &dims,
+                               zigzag::CellRef shape);
 
 } // namespace xanadu::vql
 

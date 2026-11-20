@@ -471,6 +471,7 @@ CompilationResult VQLCompiler::compileOnce(const QueryExpression &query,
   remainingShapePredicateRules_    = shapeLimits_.maxRules;
   remainingShapePredicateValidationNodes_ = shapeLimits_.maxRules;
   shapeTargetConstants_.clear();
+  lateHandles_.clear();
   expandedPredicateShapes_.clear();
   entryOp_.reset();
   currentOp_.reset();
