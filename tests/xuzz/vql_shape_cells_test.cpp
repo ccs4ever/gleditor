@@ -199,6 +199,15 @@ TEST_F(VQLShapeCellsTest, ComputedTargetIsCapturedByValueAtMint) {
   EXPECT_EQ(arena.asInt64(*later[0].target), 6);
 }
 
+TEST_F(VQLShapeCellsTest, AShapeReturnedByAFunctionCapturesWhereItIsCalled) {
+  const auto handle = handleOf(
+      "def f() := { +d.tag: $n + 1 }; let $n := 2; let $s := f() return $s");
+  const auto rules = rulesOf(handle);
+  ASSERT_EQ(rules.size(), 1u);
+  ASSERT_TRUE(rules[0].target);
+  EXPECT_EQ(arena.asInt64(*rules[0].target), 3);
+}
+
 TEST_F(VQLShapeCellsTest, CapturedValueIsACopyNotTheCellItReadFrom) {
   const auto source = arena.makeScalarCell(std::int64_t{41});
   engine.setVariable("v", source);
@@ -273,6 +282,19 @@ TEST_F(VQLShapeCellsTest, TheInlineFormAtItsConsumerStillWorks) {
 TEST_F(VQLShapeCellsTest, PathAndFunctorTargetsAreRefusedByName) {
   EXPECT_THAT(refusalOf("let $s := { +d.tag: /+d.keep } return $s"),
               testing::HasSubstr("rootless partial path"));
+}
+
+TEST_F(VQLShapeCellsTest, AComputedTargetInALoopRefusesByName) {
+  engine.setVariable(
+      "items", std::vector<CellRef>{arena.makeCell("a"), arena.makeCell("b")});
+  EXPECT_THAT(
+      refusalOf("for $i in ##/+d.keep let $s := { +d.tag: $i } return $s"),
+      testing::HasSubstr("inside a function body or a loop"));
+  // A literal target is the same cell every turn and nothing is written.
+  EXPECT_EQ(
+      engine.execute("for $i in $items let $s := { +d.tag: \"x\" } return $s")
+          .size(),
+      2u);
 }
 
 TEST_F(VQLShapeCellsTest, EveryHandleCarriesAnEpochWitness) {
@@ -393,9 +415,9 @@ TEST(VQLShapeSettings, AHostHandsItsConfiguredLimitsToItsEngine) {
   EXPECT_EQ(host.vqlEngine().shapeLimits(), config.shapeLimits);
 }
 
-// The static path is unchanged by the cells: these programs are what the
-// compiler emitted before shape values were written as cells, so a count that
-// moves means a shape started costing the graph something.
+// The static path is unchanged by the cells: these counts were taken from the
+// compiler at df0967b6, before shape values were written as cells, so a count
+// that moves means a shape started costing the graph something.
 TEST_F(VQLShapeCellsTest, StaticProgramsAreUnchangedByTheCells) {
   struct Pin {
     const char *query;
@@ -407,6 +429,10 @@ TEST_F(VQLShapeCellsTest, StaticProgramsAreUnchangedByTheCells) {
       {"let $s := { +d.keep } return ##{ $s }", 19},
       {"apply_shape(##, {*, +d.tag: \"x\"})", 27},
       {"##[{ +d.keep }]", 27},
+      {"project(##, { +d.keep, !d.drop })", 16},
+      {"let $s := { +d.keep, !d.drop } return ##[$s]", 44},
+      {"##[{ +d.keep: { +d.tag } }]", 40},
+      {"let $a := { +d.keep }; let $b := { $a, +d.tag } return ##{ $b }", 21},
   };
   for (const auto &pin : pins) {
     SCOPED_TRACE(pin.query);
