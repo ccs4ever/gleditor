@@ -243,6 +243,11 @@ bool VQLCompiler::captureShapeTarget(const CellRef rule,
         varBindings_.contains(name) || streamBindings_.contains(name);
     if (!bound) {
       // Not a read: the rule binds what it matches to this name.
+      // The name is kept as `$name` text on d.vql.to, which a pivot rule uses
+      // for its dimension; the kind tells them apart. That is enough for a
+      // plain binder and deliberately no more: a binder that needs a pattern,
+      // a type or a scope would want cells of its own, so this is the place a
+      // richer representation would grow from.
       zigzag::expectWritten(
           arena.link(rule, dims.to, false, arena.makeCell("$" + name)));
       return false;
