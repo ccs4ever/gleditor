@@ -446,7 +446,8 @@ carded, Q5 accepted (§6.1), Q8 and Q9 ruled in the third round (§6.1), Q7 sett
 open. §8.9 added Q10 to Q13 on the rootless partial path; the fourth round (§6.1.1) ruled Q10 to Q12
 and left Q13 to §8.10; the fifth round (§6.1.2) accepted Q13's recommendation (RP2 is a separate
 card) and scheduled it now. New in the fifth round: Q14 to Q17 below and card RECLAIM (§7.4). The
-original wording follows where it still carries information.
+sixth and seventh rounds (§6.1.3) answered Q14 to Q17: all four are closed. The original wording
+follows where it still carries information.
 
 Q1. **Predicate scope.** *Moot.* P1 is approved, so the wildcard family and run-time shapes in
 predicates are in scope together; the question of shipping only the non-exact subset no longer
@@ -497,25 +498,30 @@ ACCEPTED, RP2 is a separate card, and the owner wants it done now (§6.1.2, §8.
 value outside shapes: `let $p := /+d.fwd[1]` kept past compile, applied as `/$p` at run time. The
 seven approval items of §8.10 are each APPROVED (later in the same round).
 
-Q14. **Does the loop guard keep any refusal?** *Open, a question the ruling leaves.* The fifth round
+Q14. **Does the loop guard keep any refusal?** *Accepted 2026-11-20 (sixth round, §6.1.3); built in
+`9d813896`.* The fifth round
 loosens the SHAPECELLS guard so `def g($x) := {*, +d.tag: $x}; g(##)` works (§6.1.2). Which refusal
 remains is for the owner: the recommendation in §8.9 is that a handle made in a function body or
 loop of the *same* query is read where it is made, and only a handle carried to a *later* query
 (`lateHandles_`, `compile_shape_value.cpp:156-165` on the shapecells branch) keeps the refusal.
 
-Q15. **Split P1 so the walker lands first?** *Open.* RP2 depends on P1b's walker and on nothing else
+Q15. **Split P1 so the walker lands first?** *Yes (sixth round, §6.1.3): P1b lands first,
+standalone.* RP2 depends on P1b's walker and on nothing else
 in P1 (§4.3). Splitting approved P1 into a walker card and a fold card changes no scope but reorders
 an approved item; it is asked rather than assumed.
 
-Q16. **Does "standard rank cycle protection" drop the `seen` set in `walkShapes`?** *Open.* The
+Q16. **Does "standard rank cycle protection" drop the `seen` set in `walkShapes`?** *Accepted
+(sixth round, §6.1.3), with one change to the recommendation: the nested edge is bounded by the P3
+ceiling and refuses by name, as below. Built on `shapewalk`.* The
 ruling (§6.1.2) is to walk until the end or until the starting cell is reached, which `zigzag::rank`
 already does for a rank. The `seen` set also guards the `d.vql.nested` edge, which is not a rank: a
 shape nesting itself would recurse until the depth ceiling (128, P3). Recommendation: keep `rank`
 for the rule rank, and keep a depth-bounded recursion on `nested` using P3's ceiling instead of a
 set, so that the ruling is followed to the letter and the bound is still a number.
 
-Q17. **RECLAIM stage choice.** *Open, §7.4.* Which stages (E, C) to approve, and the setting that
-triggers a collection.
+Q17. **RECLAIM stage choice.** *Accepted, the recommended path (seventh round, §6.1.3).* R0 and R-E
+are built now, in the card SHAPEWALK; R-C is a later card, after the walker and before RP2 reaches a
+user, and is not built. The trigger setting and the roots protocol stay PENDING with R-C (§7.4).
 
 Q7. **vagent.** *Settled by the approval of P4:* the arity rows are in scope, the CELLINT precedent
 (refused by ordinal) is not followed.
@@ -596,6 +602,31 @@ Rulings on RP2 and the SHAPECELLS guard, and one new card.
 Cost: RP2 is M to L (§8.10) and now sits on the critical path, ahead of P1's fold, W2 and S1; the
 price of that is that P1 is asked to split (Q15). RECLAIM is S for its first stage and M to L for
 its second. Nothing here changes the static path (D4).
+
+### 6.1.3 Sixth and seventh rounds, 2026-11-20
+
+Rulings on Q14 to Q17, the questions the fifth round left. They are built by the card SHAPEWALK plus
+RECLAIM stages R0 and R-E, on branch `shapewalk`.
+
+| item | ruling                         | what it changes                                                                                                                                                                                                                                                                                                                                                   |
+| ---- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q14  | accepted                       | After loosening, only a later query naming a handle with a `d.vql.late` rule refuses. Already built in `9d813896`.                                                                                                                                                                                                                                                |
+| Q15  | yes                            | P1 is split: the P1b walker lands first, standalone, ahead of the fold, so RP2 waits on nothing else of P1 (§4.3).                                                                                                                                                                                                                                                |
+| Q16  | accepted                       | `walkShapes` drops its `seen` set on the nested edge. A rule rank is walked with `zigzag::rank` (to the end, or until the starting cell is reached). Nested-edge recursion is bounded by the P3 ceiling `vql.shape.max_depth` and refuses by name past it. A shape that nests itself therefore refuses at the ceiling rather than being walked once, as it was. |
+| Q17  | accepted, the recommended path | R0 (a bounded-footprint test replacing the bounded-rate tests) and R-E (interning, VQL-only, S) are built now, in SHAPEWALK. R-C (a reachability copy from the session roots plus an arena swap) is a later card, after the walker and before RP2 reaches a user. It is not built.                                                                                |
+
+Cost and what the rulings change.
+
+- Q16 trades a set for a number. The old walk allocated a hash set per call and answered a nested
+  cycle with "walked once"; the new one allocates nothing and answers it by name after the ceiling
+  (128 by default) levels of recursion. A hand-built nested cycle is not something the compiler
+  writes, so only a reader of cells it did not write meets the refusal. The three readers
+  (`staleShapeReason`, `hasLateRule`, `refreshShapeWitnesses`) take the ceiling and report the
+  refusal in their result instead of throwing, so none changes meaning for a well-formed shape.
+- Q17 builds the part of RECLAIM that needs no core change. R-E turns a repeated query's seven
+  cells into none, but a stream of distinct shapes still grows the arena, which is R-C's. The rate
+  tests that asserted a per-query bound are replaced by footprint tests (§7.4); where growth remains
+  that only R-C can fix, an honest rate test stays, named as awaiting it.
 
 ## 7. Spike and card definitions ordered by the rulings
 
@@ -796,6 +827,14 @@ stay as the per-query regression check; they are no longer the bound.
 1. Where a collection may run: only at a query boundary with no mark outstanding; refused inside a
    script mid-statement or a `watch`. A rule, not code, but it limits the feature and is the owner's
    to confirm.
+
+*Status (2026-11-20, sixth and seventh rounds, §6.1.3).* R0 and R-E are built, on branch
+`shapewalk`; R-C is not. R-E interns in `VQLCompiler::registerShape`, against the session's own
+handle table (no second index): a shape whose cells follow from its text alone (wildcard, pivot and
+dimension rules with no target, a literal target, or a nested shape that is itself so) reuses an
+equal held handle whose witness still holds. A computed or late target, a name, a computed rule and
+a Binding mint are not interned, because the cells or the compile-time table hold something the text
+does not. Views are not interned.
 
 *Recommendation.* Approve R0 and R-E now (both S, no core change); R-E bounds the repeated-query
 case the owner observed and R0 proves it. Approve R-C as the real bound and schedule it after P1's

@@ -638,12 +638,50 @@ The one remaining refusal is a later query naming such a handle, whose free name
 be read in; and a target relative to the subject stays refused (Q9). A cell reader must refuse a
 late rule by name, not take it for presence-only. Reading a rank or a nested edge of cells it did
 not write uses `zigzag::rank` (ends at a dead end, a self-link, a ring closing on its start, or the
-traversal bound) and a seen-set across nested edges, so a hand-built cyclic shape is walked once.
+traversal bound) and a seen-set across nested edges, so a hand-built cyclic shape is walked once
+(superseded by SHAPEWALK below: the nested edge is bounded by the depth ceiling instead).
 Path, functor and closure targets (`d.vql.via`, RP1) refuse by name. The price is cells: a one-rule
 shape is seven (handle, witness, five for the rule), and a rebound variable leaves them behind as it
 always left its cell, so three growth tests now bound that by the shape's own footprint, not by one
 scalar. The shape dimensions are named when the engine is made, as the marker was, so the first
 shape of a session keeps no program.
+
+Gate R (2026-11-20, shared branch at `7717d58e`, adding SHAPEPRED, SHAPECELLS and SHAPEDISPATCH):
+`xuzz_test` 11 failures of 5049, 73 more tests than gate Q and nothing newly failing; all 11 are the
+Evidence and Subscription baseline (EvidenceIrcController 1, EvidenceIrcTransport 2,
+EvidenceWorkflow 5, Subscription 3). `gleditor_test` and `zigzag_test` show one failure each
+(`UiWidgetTest`, `EvidencePanelTest`), as in every gate since K. The per-card counts were not
+recorded at their merges; the figures here are the gate's, and `ArrayfiladeBenchmarkTest.
+VQLPredicatePushdownPruning` is load-flaky and passes alone. Rulings with these cards:
+
+- **SHAPEPRED** (merge `df0967b6`): a shape handle is marked (a one-cell closed rank on
+  `d.vql.shape`), so a handle the table has no record of refuses by name in a bare or braced
+  predicate instead of reading as a value, and a shape used as a value (an operand, a builtin
+  argument, an anchor, a step, an `if` condition) refuses with "a shape value cannot be used as".
+  A shape named by a variable or returned by a definition lowers like the literal. The frame
+  eligibility widening on bare variables was removed.
+- **SHAPECELLS** (merge `eb529878`): the paragraph above. Rulings: Q5 capture by value at mint with
+  four conditions; Q8 refuses a `:=` default at parse; Q9 refuses a subject-relative target at mint;
+  the ceilings 4096 and 128 are settings; the compile-time table keeps its `Shape` alternative.
+- **SHAPEDISPATCH** (design merge `7717d58e`): no code. Fifth-round rulings: RP2 (the first-class
+  path handle) approved on all seven items and scheduled now; the computed guard loosened so
+  `def g($x) := {*, +d.tag: $x}; g(##)` works (built in `9d813896`); `walkShapes` takes standard
+  rank cycle protection; card RECLAIM defined (§7.4 of `vql-shape-dispatch-design.md`) because a
+  one-rule shape leaves seven cells per query that nothing reclaims.
+
+SHAPEWALK and RECLAIM stages R0 and R-E (2026-11-20, branch `shapewalk`, from `7717d58e`): the sixth
+and seventh rounds (§6.1.3 of the design), no core change. `walkShapes` drops its seen-set: a rule
+rank ends under `zigzag::rank`, and the nested edge is bounded by `vql.shape.max_depth` and refuses
+by name past it, so `staleShapeReason`, `hasLateRule` and `refreshShapeWitnesses` take the ceiling
+and report the refusal in their result. `registerShape` interns: a shape whose cells follow from its
+text alone (wildcard, pivot and dimension rules with no target, a literal target, or a nested shape
+that is itself so) answers the equal handle the session already holds, looked up in the handle table
+that exists rather than in a second index, when that handle's witness is present and still the
+cell's own epoch. A computed or late target, a name, a computed rule, a Binding mint and a view are
+not interned. The three growth tests are now footprint tests (a repeated query adds nothing to the
+cost of rebinding a scalar), and one honest rate test stays, named as awaiting R-C, for a stream of
+distinct shapes. R-C (a reachability copy from the session roots and an arena swap) is a later card,
+after P1b's walker and before RP2 reaches a user, and is not built.
 
 Open after gate K: the VM frame opcodes copy their tables on every call and return, so rendering a
 lazy VLace list and long IO loops cost time quadratic in their length (needs a core change, awaiting
