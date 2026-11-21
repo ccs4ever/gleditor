@@ -851,6 +851,13 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {static_cast<std::int64_t>(
                           vql::defaultShapeMaxDepth)}}}},
+        {.name    = std::string(settings::kVqlPathMaxSteps),
+         .notes   = "Most steps one rootless VQL path (a functor such as "
+                    "/+d.fwd[1]) may hold; a longer one is refused when it is "
+                    "made and when it is walked",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {static_cast<std::int64_t>(
+                          vql::defaultPathMaxSteps)}}}},
         {.name    = std::string(settings::kVagentReadyPerMessage),
          .notes   = "Consecutive mailbox services before one local wake is "
                     "forced; bounds P4 wake starvation (actor-executor §4.1)",

@@ -19,6 +19,7 @@
 
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/vql/path_cells.hpp"
 #include "common/xanadu/vql/shape_cells.hpp"
 #include "common/xanadu/vql/view_cells.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -35,12 +36,14 @@ using zigzag::DimVector;
 VQLEngine::VQLEngine(MultiStoreCoordinator &coordinator)
     : coordinator_(coordinator), core_(&coordinator.core()) {
   (void)ensureShapeDimensions(*core_);
+  (void)ensurePathDimensions(*core_);
 }
 
 VQLEngine::VQLEngine(zigzag::vortex::VortexCore &core)
     : ownedCoordinator_(std::make_unique<MultiStoreCoordinator>(core)),
       coordinator_(*ownedCoordinator_), core_(&core) {
   (void)ensureShapeDimensions(*core_);
+  (void)ensurePathDimensions(*core_);
 }
 
 VQLEngine::VQLEngine(zigzag::ArenaManifold &arena)
@@ -48,6 +51,7 @@ VQLEngine::VQLEngine(zigzag::ArenaManifold &arena)
       ownedCoordinator_(std::make_unique<MultiStoreCoordinator>(*ownedCore_)),
       coordinator_(*ownedCoordinator_), core_(ownedCore_.get()) {
   (void)ensureShapeDimensions(*core_);
+  (void)ensurePathDimensions(*core_);
 }
 
 zigzag::DimRef VQLEngine::resolveDimension(std::string_view name) {

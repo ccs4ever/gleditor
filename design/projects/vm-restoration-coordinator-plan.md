@@ -768,6 +768,20 @@ New cards from these rulings:
 | V4b      | Bounded views: a stop cell on reversed axes, honoured by every walker and by read-back                                                                                                           | O2    |
 | O2       | Cell-identity compare, `PinHistorical`, arena space undo, program-cell release, project                                                                                                          | O1    |
 
+RP-PATH (2026-11-20, branch `rppath`, from `7717d58e`): steps 1 to 3 of the shortest order to RP2
+(`vql-shape-dispatch-design.md` §4.3), data half and standalone walker only.
+`vql/path_cells.{hpp,cpp}` add the `d.vql.path` and `d.vql.step` and `d.vql.clamp` constants
+(direction, bidirectionality and the witness reuse the shape rule's dimensions; a step has no
+negation and its text is its dimension), `mintPath` (refuses a `$name`, anything beyond signed steps
+and literal clamps, and more steps than `vql.path.max_steps`, before minting a cell), `readPath`
+with rank cycle protection and a stale-witness refusal, `walkPath` (a bounded C++ walker over the
+same linked reads as `RankBegin`, charged to the arena's work budget, returning every cell reached)
+and `pathTargetMatches` (Q10: several refuse by name; Q11: by value). The ceiling is
+`ShapeLimits::maxPathSteps`, plumbed from `VortexHostConfig::fromStore`. No opcode, no VM change,
+and neither `compile_functor.cpp` refusal is lifted. Next RP2 card: the `ApplyPath` opcode over
+`walkPath`, the path handle kind, lifting the two refusals for the closed subset, and sharing by box
+and recorded epoch.
+
 ## 5a. Original decision table (before W0)
 
 | Id  | Before | Decision                                                                                                                   | Recommendation                                                                                                                                                          |
