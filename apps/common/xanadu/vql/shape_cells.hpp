@@ -31,11 +31,13 @@
 #ifndef COMMON_XANADU_VQL_SHAPE_CELLS_HPP
 #define COMMON_XANADU_VQL_SHAPE_CELLS_HPP
 
+#include <expected>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 
+#include "common/xanadu/vql/shape_limits.hpp"
 #include "common/xanadu/vql/view_cells.hpp"
 
 namespace xanadu::vql {
@@ -81,25 +83,31 @@ void recordShapeWitness(zigzag::ArenaManifold &arena,
 /// Records the witness of each shape of @p handles, and of every shape nested
 /// under it, afresh. For handles a program's release re-minted: the copies were
 /// born in a later epoch than the one the compiler recorded. Only for cells
-/// this run made, as refreshViewWitnesses is.
-void refreshShapeWitnesses(zigzag::ArenaManifold &arena,
-                           const ShapeDimensions &dims,
-                           std::span<const zigzag::CellRef> handles);
+/// this run made, as refreshViewWitnesses is. A nest deeper than @p maxDepth
+/// is refused by name (the reason is returned), as the compiler refuses to
+/// write one.
+[[nodiscard]] std::optional<std::string>
+refreshShapeWitnesses(zigzag::ArenaManifold &arena, const ShapeDimensions &dims,
+                      std::span<const zigzag::CellRef> handles,
+                      std::size_t maxDepth = defaultShapeMaxDepth);
 
 /// Why @p shape, or a shape nested under it, can no longer be trusted: its
 /// witness is not a number, or names an epoch other than the one the cell is
-/// in now (the number was released and reused). A shape with no witness at all
-/// is not refused here: requiring one is card W2's.
+/// in now (the number was released and reused), or it nests deeper than
+/// @p maxDepth, which only cells written by hand can. A shape with no witness
+/// at all is not refused here: requiring one is card W2's.
 [[nodiscard]] std::optional<std::string>
 staleShapeReason(const zigzag::ArenaManifold &arena,
-                 const ShapeDimensions &dims, zigzag::CellRef shape);
+                 const ShapeDimensions &dims, zigzag::CellRef shape,
+                 std::size_t maxDepth = defaultShapeMaxDepth);
 
 /// True when @p shape, or a shape nested under it, has a rule marked
 /// d.vql.late: made where its consumers re-evaluate the target, so the cells
-/// alone do not say what it matches.
-[[nodiscard]] bool hasLateRule(const zigzag::ArenaManifold &arena,
-                               const ShapeDimensions &dims,
-                               zigzag::CellRef shape);
+/// alone do not say what it matches. A nest deeper than @p maxDepth answers
+/// the refusal instead.
+[[nodiscard]] std::expected<bool, std::string>
+hasLateRule(const zigzag::ArenaManifold &arena, const ShapeDimensions &dims,
+            zigzag::CellRef shape, std::size_t maxDepth = defaultShapeMaxDepth);
 
 } // namespace xanadu::vql
 

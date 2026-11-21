@@ -7,6 +7,8 @@
 // only the handle: a stored shape, a result, a value that crossed a query.
 #include "common/xanadu/vql/compiler.hpp"
 
+#include <algorithm>
+#include <bit>
 #include <format>
 #include <stdexcept>
 #include <variant>
@@ -114,10 +116,116 @@ void linkKind(zigzag::ArenaManifold &arena, const ShapeDimensions &dims,
       arena.link(rule, dims.kind, false, arena.makeCell(std::string{kind})));
 }
 
+bool plainShape(const ShapeLiteral &shape);
+
+/// A target whose cells are decided by the text alone: no target, a literal,
+/// or a nested shape that is itself plain. A name is not: it is read from the
+/// scope the shape is made in (a bound scalar is captured at run time, a bound
+/// handle is nested, an unbound one is a binder), and any other expression is
+/// evaluated by the program.
+bool plainTarget(const std::shared_ptr<ValueExpr> &target) {
+  if (!target) return true;
+  if (std::holds_alternative<ScalarLiteral>(target->kind)) return true;
+  if (const auto *inner =
+          std::get_if<std::shared_ptr<ShapeLiteral>>(&target->kind))
+    return *inner && plainShape(**inner);
+  return false;
+}
+
+/// True when a shape's cells follow from its text alone, so that two equal
+/// ones are the same cells. A computed rule is out: its expression is not in
+/// the cells but in the compile-time table, which a hit would answer with the
+/// earlier query's. A name or a call is out for the reason plainTarget gives.
+bool plainShape(const ShapeLiteral &shape) {
+  return std::ranges::all_of(shape.rules, [](const ShapeRule &entry) {
+    if (std::holds_alternative<ShapeWildcard>(entry.rule) ||
+        std::holds_alternative<DimensionPivotRule>(entry.rule))
+      return true;
+    if (const auto *spec = std::get_if<DimensionShapeRule>(&entry.rule))
+      return plainTarget(spec->targetValue);
+    return false;
+  });
+}
+
+bool sameScalar(const ScalarLiteral &left, const ScalarLiteral &right) {
+  if (left.value.index() != right.value.index()) return false;
+  // Bits, not ==: 0.0 and -0.0 compare equal and are two different values to
+  // the cell that holds them, and a NaN is never equal to itself.
+  if (const auto *real = std::get_if<double>(&left.value))
+    return std::bit_cast<std::uint64_t>(*real) ==
+           std::bit_cast<std::uint64_t>(std::get<double>(right.value));
+  return left.value == right.value;
+}
+
+/// Equality of two plain shapes (plainShape holds for both).
+bool sameShape(const ShapeLiteral &left, const ShapeLiteral &right) {
+  const auto sameTarget = [](const std::shared_ptr<ValueExpr> &one,
+                             const std::shared_ptr<ValueExpr> &other) {
+    if (!one || !other) return !one && !other;
+    if (const auto *scalar = std::get_if<ScalarLiteral>(&one->kind)) {
+      const auto *peer = std::get_if<ScalarLiteral>(&other->kind);
+      return peer && sameScalar(*scalar, *peer);
+    }
+    const auto *inner = std::get_if<std::shared_ptr<ShapeLiteral>>(&one->kind);
+    const auto *peer = std::get_if<std::shared_ptr<ShapeLiteral>>(&other->kind);
+    return inner && peer && *inner && *peer && sameShape(**inner, **peer);
+  };
+  return std::ranges::equal(
+      left.rules, right.rules, [&](const ShapeRule &one, const ShapeRule &two) {
+        if (one.rule.index() != two.rule.index()) return false;
+        if (const auto *wildcard = std::get_if<ShapeWildcard>(&one.rule))
+          return *wildcard == std::get<ShapeWildcard>(two.rule);
+        if (const auto *pivot = std::get_if<DimensionPivotRule>(&one.rule)) {
+          const auto &other = std::get<DimensionPivotRule>(two.rule);
+          return pivot->fromDim == other.fromDim && pivot->toDim == other.toDim;
+        }
+        const auto &spec  = std::get<DimensionShapeRule>(one.rule);
+        const auto &other = std::get<DimensionShapeRule>(two.rule);
+        return spec.dimName == other.dimName && spec.negated == other.negated &&
+               spec.isBidir == other.isBidir &&
+               spec.direction == other.direction &&
+               sameTarget(spec.targetValue, other.targetValue);
+      });
+}
+
 } // namespace
+
+std::optional<CellRef>
+VQLCompiler::heldShapeEqualTo(const ShapeLiteral &expanded) const {
+  if (!plainShape(expanded)) return std::nullopt;
+  const auto dims = findShapeDimensions(core_);
+  if (!dims) return std::nullopt;
+  const auto &arena = core_.arena();
+  std::optional<CellRef> found;
+  // The table is the index: it already holds exactly the shapes the session
+  // names, so a handle nothing names is never a candidate and no second
+  // structure has to be kept in step with it.
+  for (const auto &[cell, held] : shapeHandles_) {
+    const auto *literal = std::get_if<ShapeLiteral>(&held);
+    if (!literal || (found && *found < cell)) continue;
+    if (!arena.contains(cell) || !carriesShapeMarker(arena, cell) ||
+        lateHandles_.contains(cell) || !plainShape(*literal) ||
+        !sameShape(expanded, *literal))
+      continue;
+    // A witness must be there and must still be the cell's own epoch: a number
+    // reused by a later cell is not the shape it names. Requiring one here is
+    // stricter than the readers, which only refuse a wrong one (W2).
+    if (!arena.linked(cell, dims->epoch, zigzag::DimVector::POS) ||
+        staleShapeReason(arena, *dims, cell, shapeLimits_.maxDepth))
+      continue;
+    found = cell;
+  }
+  return found;
+}
 
 CellRef VQLCompiler::registerShape(ShapeLiteral expanded,
                                    const ShapeMint mint) {
+  // A shape written again is the shape held: its cells are immutable once
+  // written and a plain shape's follow from its text, so a second copy would
+  // only be seven more cells per query that nothing reclaims (RECLAIM, R-E).
+  // A Binding is a scratch handle for one body's expansion, not a value.
+  if (mint == ShapeMint::Value)
+    if (const auto held = heldShapeEqualTo(expanded)) return *held;
   auto &arena          = core_.arena();
   const CellRef handle = arena.makeCell();
   // A one-cell closed rank on the marker dimension: a handle is told from a

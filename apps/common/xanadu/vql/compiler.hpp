@@ -641,6 +641,12 @@ private:
   enum class ShapeMint : std::uint8_t { Value, Binding };
   zigzag::CellRef registerShape(ShapeLiteral expanded,
                                 ShapeMint mint = ShapeMint::Value);
+  /// compile_shape_cells.cpp. The handle, among those the session or this
+  /// query already holds, that stands for exactly @p expanded, when its cells
+  /// follow from its text alone and the held handle's witness still holds.
+  /// The lowest such cell, so the answer does not depend on table order.
+  [[nodiscard]] std::optional<zigzag::CellRef>
+  heldShapeEqualTo(const ShapeLiteral &expanded) const;
   /// compile_shape_cells.cpp. Writes @p expanded's rules under @p shape as
   /// cells; @p rulesLeft is the rule budget the whole tree shares.
   void fillShapeCells(zigzag::CellRef shape, const ShapeLiteral &expanded,

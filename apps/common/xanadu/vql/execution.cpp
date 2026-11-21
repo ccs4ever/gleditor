@@ -532,7 +532,10 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       // A shape's witness names the epoch of the cell it sits on, and the copy
       // is a cell of the epoch the release began.
       if (const auto shapeDims = findShapeDimensions(vm_.core()))
-        refreshShapeWitnesses(vm_.core().arena(), *shapeDims, remade);
+        if (const auto refused =
+                refreshShapeWitnesses(vm_.core().arena(), *shapeDims, remade,
+                                      compilation.limits.shape.maxDepth))
+          throw std::runtime_error(*refused);
     }
     if (session_) {
       publishMounts(session_, result.sessionBindings);

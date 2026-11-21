@@ -151,18 +151,23 @@ const ShapeLiteral &VQLCompiler::shapeOfHandle(const CellRef cell,
     // release: the handle's own witness says whether this is the cell the
     // shape was made as.
     if (const auto dims = findShapeDimensions(core_))
-      if (const auto stale = staleShapeReason(core_.arena(), *dims, cell))
+      if (const auto stale = staleShapeReason(core_.arena(), *dims, cell,
+                                              shapeLimits_.maxDepth))
         refuseShape(*stale + " (shape value '$" + name + "')");
     // A shape made in a loop or a function body keeps its computed targets as
     // expressions, read where this query consumes it. A later query has no
     // such scope: its free names would be read in whatever scope it has.
     if (const auto dims = findShapeDimensions(core_);
-        dims && !lateHandles_.contains(cell) &&
-        hasLateRule(core_.arena(), *dims, cell))
-      refuseShape("shape value '$" + name +
-                  "' was made in a loop or a function body of another query, "
-                  "where its computed target is read at each use; make the "
-                  "shape in the query that uses it");
+        dims && !lateHandles_.contains(cell)) {
+      const auto late =
+          hasLateRule(core_.arena(), *dims, cell, shapeLimits_.maxDepth);
+      if (!late) refuseShape(late.error() + " (shape value '$" + name + "')");
+      if (*late)
+        refuseShape("shape value '$" + name +
+                    "' was made in a loop or a function body of another query, "
+                    "where its computed target is read at each use; make the "
+                    "shape in the query that uses it");
+    }
     return std::get<ShapeLiteral>(shapeHandles_.find(cell)->second);
   case HandleKind::UnrecordedShape:
     refuseShape(
