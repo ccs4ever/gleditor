@@ -114,6 +114,7 @@ VortexHostConfig VortexHostConfig::fromStore(const xanadu::Store &store) {
   };
   positive(xanadu::settings::kVqlShapeMaxRules, cfg.shapeLimits.maxRules);
   positive(xanadu::settings::kVqlShapeMaxDepth, cfg.shapeLimits.maxDepth);
+  positive(xanadu::settings::kVqlPathMaxSteps, cfg.shapeLimits.maxPathSteps);
 
   return cfg;
 }

@@ -67,8 +67,8 @@ struct VortexHostConfig {
   /// VM cycles one logic solve may spend (`vortex.logic_max_cycles`).
   std::size_t logicMaxCycles{kDefaultLogicCycleBudget};
 
-  /// Ceilings every VQL shape this host compiles is held to
-  /// (`vql.shape.max_rules`, `vql.shape.max_depth`).
+  /// Ceilings every VQL shape and rootless path this host compiles is held to
+  /// (`vql.shape.max_rules`, `vql.shape.max_depth`, `vql.path.max_steps`).
   xanadu::vql::ShapeLimits shapeLimits{};
 
   [[nodiscard]] static VortexHostConfig fromStore(const xanadu::Store &store);

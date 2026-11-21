@@ -271,6 +271,7 @@ inline constexpr std::int64_t kVortexLogicMaxCyclesDefault = 10'000'000;
 // VQL shape ceilings (vql/shape_limits.hpp holds the defaults)
 inline constexpr std::string_view kVqlShapeMaxRules = "vql.shape.max_rules";
 inline constexpr std::string_view kVqlShapeMaxDepth = "vql.shape.max_depth";
+inline constexpr std::string_view kVqlPathMaxSteps  = "vql.path.max_steps";
 
 // Vagent actor-executor policy (design/vagent-actor-executor.md §4.1/§4.2)
 inline constexpr std::string_view kVagentReadyPerMessage =
