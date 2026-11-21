@@ -235,7 +235,12 @@ public:
     const CellRef done = compiler_.mintContractLabel("#CONTRACT_ELEMS_DONE");
     branchFalse(present, done);
     const auto repeat = [&] { goTo(loop); };
-    body(item, repeat, failure);
+    {
+      // A default in the element's pattern may make a shape value, and this
+      // body runs once per element.
+      const LoopScope inLoop{compiler_};
+      body(item, repeat, failure);
+    }
     compiler_.appendOpcode(done);
     resume(success);
   }

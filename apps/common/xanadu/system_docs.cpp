@@ -3,6 +3,7 @@
  * @brief Sovereign system xanadocs managing runtime parameters.
  */
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/vql/shape_limits.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -838,6 +839,18 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas =
              {{.expectedTypes = {"integer"},
                .defaultValues = {settings::kVortexLogicMaxCyclesDefault}}}},
+        {.name    = std::string(settings::kVqlShapeMaxRules),
+         .notes   = "Most rules one expanded VQL shape may hold, counting the "
+                    "rules of shapes it names; a larger shape is refused",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {static_cast<std::int64_t>(
+                          vql::defaultShapeMaxRules)}}}},
+        {.name    = std::string(settings::kVqlShapeMaxDepth),
+         .notes   = "Deepest nest of VQL shapes inside shapes; a deeper one is "
+                    "refused",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {static_cast<std::int64_t>(
+                          vql::defaultShapeMaxDepth)}}}},
         {.name    = std::string(settings::kVagentReadyPerMessage),
          .notes   = "Consecutive mailbox services before one local wake is "
                     "forced; bounds P4 wake starvation (actor-executor §4.1)",

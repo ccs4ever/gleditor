@@ -304,9 +304,12 @@ TEST_F(VQLShapePredicateVariableTest, FailedQueryLeavesNothingBehind) {
 
 TEST_F(VQLShapePredicateVariableTest,
        RepeatedVariableQueriesDoNotGrowTheArena) {
-  // A rebound variable leaves the cell it held behind, whatever it held; a
-  // shape predicate must cost no more than the same query over a scalar.
-  constexpr int rounds = 10;
+  // A rebound variable leaves the cell it held behind, whatever it held. A
+  // shape's rules are cells, so what it leaves is its handle, its witness and
+  // five cells for its one rule (text, kind, negation, bidirectionality,
+  // direction): a fixed footprint per round, never a growing table.
+  constexpr std::size_t cellsOfOneRuleShape = 1 + 1 + 5;
+  constexpr int rounds                      = 10;
   (void)run("let $n := 1 return ##/d.items[{ +d.tag }]");
   const auto scalarBefore = arena.cellCount();
   for (int round = 0; round < rounds; ++round)
@@ -317,7 +320,8 @@ TEST_F(VQLShapePredicateVariableTest,
   const auto shapeBefore = arena.cellCount();
   for (int round = 0; round < rounds; ++round)
     (void)run("let $s := { +d.tag } return ##/d.items[$s]");
-  EXPECT_LE(arena.cellCount() - shapeBefore, scalarGrowth);
+  EXPECT_LE(arena.cellCount() - shapeBefore,
+            scalarGrowth + rounds * cellsOfOneRuleShape);
 }
 
 // Review round: a shape handle is marked, so no path reads it as a value.
@@ -460,7 +464,7 @@ TEST_F(VQLShapePredicateVariableTest, ShapeConsumingFormsStillWork) {
 }
 
 TEST_F(VQLShapePredicateVariableTest, FirstShapeQueryKeepsNoProgram) {
-  // The marker dimension is named when the engine is made, so the first shape
+  // The shape dimensions are named when the engine is made, so the first shape
   // of a session costs what the next one does.
   const auto before = arena.cellCount();
   (void)run("let $s := { +d.tag } return ##/d.items[$s]");
@@ -610,7 +614,10 @@ TEST(VQLShapePredicateForeignTest, ProgramReleaseAfterAVariablePredicate) {
   for (int run = 0; run < rounds; ++run)
     EXPECT_TRUE(h.holds(h.oneProxy, "let $w := {*}; ", "?$w"));
   EXPECT_FALSE(h.executor.programRetainedBecause());
-  EXPECT_LE(h.arena.cellCount() - shapeBefore, scalarGrowth);
+  // The shape leaves its own cells: handle, witness, and five for its one rule.
+  constexpr std::size_t cellsOfOneRuleShape = 1 + 1 + 5;
+  EXPECT_LE(h.arena.cellCount() - shapeBefore,
+            scalarGrowth + rounds * cellsOfOneRuleShape);
   EXPECT_EQ(h.arena.outstandingMarks(), 0u);
 }
 

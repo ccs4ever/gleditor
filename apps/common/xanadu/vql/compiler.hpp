@@ -36,6 +36,8 @@
 #include "common/xanadu/vql/ast.hpp"
 #include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/query_error.hpp"
+#include "common/xanadu/vql/shape_cells.hpp"
+#include "common/xanadu/vql/shape_limits.hpp"
 #include "common/xanadu/vql/static_functor_program.hpp"
 #include "common/xanadu/vql/view_cells.hpp"
 
@@ -44,9 +46,6 @@ class MultiStoreCoordinator;
 }
 
 namespace xanadu::vql {
-
-inline constexpr std::size_t maxCompiledShapePredicateRules  = 4096;
-inline constexpr std::size_t maxCompiledShapeProjectionRules = 4096;
 
 struct CompilationOptions {
   struct Limits {
@@ -61,6 +60,9 @@ struct CompilationOptions {
     // Post-scope-analysis dependency expansion: callsites and callee/capture
     // name bytes. Initial AST/scope walks have their own traversal limits.
     std::size_t maxClosureCaptureWork{1'000'000};
+    /// Rule-count and nesting-depth ceilings of a shape; system://settings
+    /// holds the values a host passes (see shape_limits.hpp).
+    ShapeLimits shape{};
   };
 
   /// A dimension a session has mounted: a walk along it that finds nothing
@@ -632,7 +634,29 @@ private:
   /// (variables, shape-returning calls and nested literals concatenated, right
   /// most rule last) while compiling and handed to the static projection
   /// paths. `registerShape` gives an expanded shape a handle cell.
-  zigzag::CellRef registerShape(ShapeLiteral expanded);
+  /// A shape value is a handle that heads its rules as cells (shape_cells.hpp).
+  /// A Binding is the handle a shape function's parameter is bound to while the
+  /// body expands: it is made from a shape the caller already holds, so no
+  /// target is evaluated for it.
+  enum class ShapeMint : std::uint8_t { Value, Binding };
+  zigzag::CellRef registerShape(ShapeLiteral expanded,
+                                ShapeMint mint = ShapeMint::Value);
+  /// compile_shape_cells.cpp. Writes @p expanded's rules under @p shape as
+  /// cells; @p rulesLeft is the rule budget the whole tree shares.
+  void fillShapeCells(zigzag::CellRef shape, const ShapeLiteral &expanded,
+                      const ShapeDimensions &dims, ShapeMint mint,
+                      std::size_t depth, std::size_t &rulesLeft);
+  /// Captures one rule's target onto @p rule as the data its kind names; see
+  /// shape_cells.hpp for the four forms.
+  /// True when the target is a nested shape.
+  bool captureShapeTarget(zigzag::CellRef rule, const DimensionShapeRule &spec,
+                          const ShapeDimensions &dims, ShapeMint mint,
+                          std::size_t depth, std::size_t &rulesLeft);
+  /// Emits the graph that evaluates a computed target once and writes a fresh
+  /// scalar copy (or the void marker) onto @p rule.
+  void emitShapeTargetCapture(zigzag::CellRef rule,
+                              const DimensionShapeRule &spec,
+                              const ShapeDimensions &dims);
   void appendShapeRules(ShapeLiteral &result, const ShapeLiteral &from);
   ShapeLiteral shapeOfVariable(const std::string &name);
   /// The rules a marked handle stands for; refuses a handle with no record.
@@ -781,6 +805,25 @@ private:
   std::vector<FrameDefinitionKey> pendingFrameDefinitions_;
   std::unordered_set<zigzag::CellRef> frameMutableSlots_;
   bool compilingFrameDefinition_{false};
+  /// How many iterator or quantifier bodies the code being emitted is inside:
+  /// a cell the compiler mints once is written once per turn there.
+  std::size_t loopDepth_{0};
+  /// Shape handles this compile made with a rule marked d.vql.late, and
+  /// whether the one being filled has one. A late handle is read by the
+  /// consumers of this query only (shapeOfHandle).
+  std::unordered_set<zigzag::CellRef> lateHandles_;
+  bool lateTargetMade_{false};
+  struct LoopScope {
+    explicit LoopScope(VQLCompiler &compiler) : compiler_(compiler) {
+      ++compiler_.loopDepth_;
+    }
+    ~LoopScope() { --compiler_.loopDepth_; }
+    LoopScope(const LoopScope &)            = delete;
+    LoopScope &operator=(const LoopScope &) = delete;
+
+  private:
+    VQLCompiler &compiler_;
+  };
   std::string compilingFrameDefinitionName_;
   std::vector<std::string> activeCalls_;
   std::size_t maxNamedFrameVariants_{};
@@ -883,10 +926,10 @@ private:
 
   std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
   std::unordered_map<std::string, std::vector<PathStep>> functorBindings_;
-  std::size_t remainingShapeProjectionRules_{maxCompiledShapeProjectionRules};
-  std::size_t remainingShapePredicateRules_{maxCompiledShapePredicateRules};
-  std::size_t remainingShapePredicateValidationNodes_{
-      maxCompiledShapePredicateRules};
+  ShapeLimits shapeLimits_{};
+  std::size_t remainingShapeProjectionRules_{defaultShapeMaxRules};
+  std::size_t remainingShapePredicateRules_{defaultShapeMaxRules};
+  std::size_t remainingShapePredicateValidationNodes_{defaultShapeMaxRules};
   std::size_t remainingContractEmissions_{};
   std::size_t nextContractValidatorId_{};
   bool compilingGraphContract_{false};

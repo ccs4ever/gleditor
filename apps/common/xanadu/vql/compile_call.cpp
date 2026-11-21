@@ -1883,8 +1883,13 @@ void VQLCompiler::compileFrameDefinition(const DefDeclaration &definition,
             emitOp(OpcodeKind::BranchFalseCell, "#FRAME_GROUPS_EXHAUSTED");
         emitInput(exhausted, present);
         emitInput(exhausted, end);
-        if (parameter.type) emitRestMatch(*parameter.type, groupStream);
-        if (restShape) emitRestMatch(*restShape, groupStream);
+        {
+          // The rest type's patterns can carry a default that makes a shape
+          // value, and this body runs once per group.
+          const LoopScope inLoop{*this};
+          if (parameter.type) emitRestMatch(*parameter.type, groupStream);
+          if (restShape) emitRestMatch(*restShape, groupStream);
+        }
         emitAppendStream(slot, std::span{&groupStream, std::size_t{1}});
         const CellRef repeat =
             emitOp(OpcodeKind::BranchFalseCell, "#FRAME_GROUPS_REPEAT");

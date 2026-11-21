@@ -466,10 +466,12 @@ CompilationResult VQLCompiler::compileOnce(const QueryExpression &query,
   remainingFrameDescriptorRecords_ = options.limits.maxFrameDescriptorRecords;
   nextContractValidatorId_         = 0;
   compilingGraphContract_          = false;
-  remainingShapeProjectionRules_   = maxCompiledShapeProjectionRules;
-  remainingShapePredicateRules_    = maxCompiledShapePredicateRules;
-  remainingShapePredicateValidationNodes_ = maxCompiledShapePredicateRules;
+  shapeLimits_                     = options.limits.shape;
+  remainingShapeProjectionRules_   = shapeLimits_.maxRules;
+  remainingShapePredicateRules_    = shapeLimits_.maxRules;
+  remainingShapePredicateValidationNodes_ = shapeLimits_.maxRules;
   shapeTargetConstants_.clear();
+  lateHandles_.clear();
   expandedPredicateShapes_.clear();
   entryOp_.reset();
   currentOp_.reset();

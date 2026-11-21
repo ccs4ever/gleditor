@@ -2,10 +2,10 @@
 //
 // A shape is syntax, so it is resolved while the query is compiled and lands
 // on the static projection paths (`##{ ... }`, project, apply_shape). The
-// handle cell a shape value is given exists only so a variable, a result or a
-// host binding has something to hold; the VM never reads it. The table that
-// maps a handle to its rules is the compiler's and the session's, not the
-// graph's (decision D4).
+// handle cell a shape value is given holds the rules as cells too
+// (compile_shape_cells.cpp), but the VM does not read them yet: the static
+// paths read the table that maps a handle to its expanded rules, which is the
+// compiler's and the session's, not the graph's (decision D4).
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/invocation.hpp"
@@ -93,27 +93,14 @@ bool VQLCompiler::callReturnsShape(const FunctionInvocation &call) const {
   return returnsShapeGiven(found->second, flags, 0);
 }
 
-CellRef VQLCompiler::registerShape(ShapeLiteral expanded) {
-  const CellRef handle = core_.arena().makeCell();
-  // A one-cell closed rank on the marker dimension: a handle is told from a
-  // plain cell by the cell itself, at no cost in cells (a rank holds one
-  // neighbour a side, so handles could not share an anchor). The dimension is
-  // named when the first shape is made.
-  zigzag::expectWritten(core_.arena().link(
-      handle, core_.findOrMintDimension(shapeMarkerDimension),
-      zigzag::DimVector::POS, handle));
-  shapeHandles_.emplace(handle, std::move(expanded));
-  return handle;
-}
-
 void VQLCompiler::appendShapeRules(ShapeLiteral &result,
                                    const ShapeLiteral &from) {
   // Expansion concatenates, so a shape that names itself twice per level
   // doubles each time; the projection ceiling is the one size the compiler
   // already refuses beyond.
-  if (result.rules.size() + from.rules.size() > maxCompiledShapeProjectionRules)
+  if (result.rules.size() + from.rules.size() > shapeLimits_.maxRules)
     refuseShape(std::format("shape value exceeds maximum size {} rules",
-                            maxCompiledShapeProjectionRules));
+                            shapeLimits_.maxRules));
   result.rules.insert(result.rules.end(), from.rules.begin(), from.rules.end());
 }
 
@@ -160,6 +147,22 @@ const ShapeLiteral &VQLCompiler::shapeOfHandle(const CellRef cell,
                                                const std::string &name) {
   switch (handleKindOf(cell)) {
   case HandleKind::Shape:
+    // The table's key is a number, and a number can name another cell after a
+    // release: the handle's own witness says whether this is the cell the
+    // shape was made as.
+    if (const auto dims = findShapeDimensions(core_))
+      if (const auto stale = staleShapeReason(core_.arena(), *dims, cell))
+        refuseShape(*stale + " (shape value '$" + name + "')");
+    // A shape made in a loop or a function body keeps its computed targets as
+    // expressions, read where this query consumes it. A later query has no
+    // such scope: its free names would be read in whatever scope it has.
+    if (const auto dims = findShapeDimensions(core_);
+        dims && !lateHandles_.contains(cell) &&
+        hasLateRule(core_.arena(), *dims, cell))
+      refuseShape("shape value '$" + name +
+                  "' was made in a loop or a function body of another query, "
+                  "where its computed target is read at each use; make the "
+                  "shape in the query that uses it");
     return std::get<ShapeLiteral>(shapeHandles_.find(cell)->second);
   case HandleKind::UnrecordedShape:
     refuseShape(
@@ -206,9 +209,9 @@ ShapeLiteral VQLCompiler::expandShape(const ShapeLiteral &shape) {
                                 "' did not return a Shape value");
       appendShapeRules(result, staticShapeOfCall(**call));
     } else {
-      if (result.rules.size() >= maxCompiledShapeProjectionRules)
+      if (result.rules.size() >= shapeLimits_.maxRules)
         refuseShape(std::format("shape value exceeds maximum size {} rules",
-                                maxCompiledShapeProjectionRules));
+                                shapeLimits_.maxRules));
       result.rules.push_back(entry);
     }
   }
@@ -268,7 +271,7 @@ ShapeLiteral VQLCompiler::staticShapeOfCall(const FunctionInvocation &call) {
     shapeCallsActive_.pop_back();
   }};
   for (auto &[name, value] : arguments) {
-    const CellRef handle = registerShape(std::move(value));
+    const CellRef handle = registerShape(std::move(value), ShapeMint::Binding);
     functorBindings_.erase(name);
     streamBindings_[name] = {handle};
     varBindings_[name]    = handle;

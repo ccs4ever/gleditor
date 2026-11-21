@@ -16,6 +16,7 @@
 #include "common/xanadu/vql/ast.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/query_error.hpp"
+#include "common/xanadu/vql/shape_limits.hpp"
 
 namespace xanadu {
 class MultiStoreCoordinator;
@@ -33,6 +34,9 @@ using QueryExecutionError = QueryError;
 struct QueryExecutionOptions {
   QueryExecutionMode mode{QueryExecutionMode::Vortex};
   std::size_t maxCycles{100'000};
+  /// Used when the executor has no session; a session's own limits win, so a
+  /// host sets them in one place.
+  ShapeLimits shape{};
 };
 
 /// Compiles VQL to instructions and runs them on the Vortex VM.

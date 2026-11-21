@@ -19,6 +19,7 @@
 
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/vql/shape_cells.hpp"
 #include "common/xanadu/vql/view_cells.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include <gleditor/cpp26_concat.hpp>
@@ -27,25 +28,26 @@
 namespace xanadu::vql {
 using zigzag::DimVector;
 
-// The shape marker dimension is named here rather than by the first shape, so
-// the first shape query does not count as minting a dimension and keep its
-// whole program (a one-time cost of every cell that program made).
+// The shape dimensions (the marker and the ones a shape's rules are cells on)
+// are named here rather than by the first shape, so the first shape query does
+// not count as minting a dimension and keep its whole program (a one-time cost
+// of every cell that program made).
 VQLEngine::VQLEngine(MultiStoreCoordinator &coordinator)
     : coordinator_(coordinator), core_(&coordinator.core()) {
-  (void)core_->findOrMintDimension(shapeMarkerDimension);
+  (void)ensureShapeDimensions(*core_);
 }
 
 VQLEngine::VQLEngine(zigzag::vortex::VortexCore &core)
     : ownedCoordinator_(std::make_unique<MultiStoreCoordinator>(core)),
       coordinator_(*ownedCoordinator_), core_(&core) {
-  (void)core_->findOrMintDimension(shapeMarkerDimension);
+  (void)ensureShapeDimensions(*core_);
 }
 
 VQLEngine::VQLEngine(zigzag::ArenaManifold &arena)
     : ownedCore_(std::make_unique<zigzag::vortex::VortexCore>(arena)),
       ownedCoordinator_(std::make_unique<MultiStoreCoordinator>(*ownedCore_)),
       coordinator_(*ownedCoordinator_), core_(ownedCore_.get()) {
-  (void)core_->findOrMintDimension(shapeMarkerDimension);
+  (void)ensureShapeDimensions(*core_);
 }
 
 zigzag::DimRef VQLEngine::resolveDimension(std::string_view name) {
