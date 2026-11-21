@@ -237,29 +237,67 @@ TEST_F(VQLShapeVariableTest, ClearVariablesDropsTheTable) {
   EXPECT_THROW(engine.execute("##{ $s }"), TypeContractError);
 }
 
-TEST_F(VQLShapeVariableTest, RepeatedQueriesAreBoundedByTheShapesHeld) {
+TEST_F(VQLShapeVariableTest, RepeatedQueriesOverHeldShapesHaveAFixedFootprint) {
   constexpr int rounds = 25;
-  // A rebound variable leaves the cell it held behind, whatever it held. A
-  // shape's rules are cells, so what it leaves is its handle, its witness and
-  // five cells for its one rule (text, kind, negation, bidirectionality,
-  // direction): a fixed footprint per round, never a growing table.
-  constexpr std::size_t cellsOfOneRuleShape = 1 + 1 + 5;
+  // A rebound variable leaves the cell it held behind, whatever it held, and
+  // that is the baseline a shape must not add to: a shape written again that
+  // the session already holds is the handle it holds (RECLAIM R-E), so
+  // repeating the query leaves no cells of its own however many rounds run.
   (void)engine.execute("let $n := 1 return $n");
   const auto scalarBefore = arena.cellCount();
   for (int round = 0; round < rounds; ++round)
     (void)engine.execute("let $n := 1 return $n");
   const auto scalarGrowth = arena.cellCount() - scalarBefore;
 
-  (void)engine.execute("let $s := { +d.keep } return $s");
+  const std::string holdsBoth =
+      "let $s := { +d.keep }; let $t := { +d.tag: { +d.n: 7 } } return $s";
+  (void)engine.execute(holdsBoth);
+  ASSERT_EQ(engine.shapeCount(), 2u);
   const auto shapeBefore = arena.cellCount();
-  for (int round = 0; round < rounds; ++round)
-    (void)engine.execute("let $s := { +d.keep } return $s");
-  EXPECT_LE(arena.cellCount() - shapeBefore,
-            scalarGrowth + rounds * cellsOfOneRuleShape);
+  for (int round = 0; round < rounds; ++round) (void)engine.execute(holdsBoth);
+  const auto shapeGrowth = arena.cellCount() - shapeBefore;
+  EXPECT_LE(shapeGrowth, scalarGrowth);
+  // The footprint does not depend on the number of rounds.
+  for (int round = 0; round < 4 * rounds; ++round)
+    (void)engine.execute(holdsBoth);
+  EXPECT_LE(arena.cellCount() - shapeBefore, 5 * scalarGrowth);
   // The table is bounded by the shapes a variable or a result still names,
   // not by the queries run.
-  EXPECT_EQ(engine.shapeCount(), 1u);
+  EXPECT_EQ(engine.shapeCount(), 2u);
 
+  (void)engine.execute("let $s := 1; let $t := 2 return $s");
+  EXPECT_EQ(engine.shapeCount(), 0u);
+}
+
+TEST_F(VQLShapeVariableTest,
+       DistinctShapesPerQueryGrowByTheirCellsUntilReclaimLands) {
+  // Awaiting RECLAIM R-C. Each query here writes a shape the session has not
+  // held, so nothing is interned, and the one it rebinds away from leaves its
+  // cells in the middle of the arena where no mark spans them. Only a
+  // collection from the session's roots bounds this; until then the honest
+  // statement is a rate, not a footprint: a handle, its witness, five cells
+  // for its one rule and one for its literal target.
+  constexpr int rounds                              = 25;
+  constexpr std::size_t cellsOfOneTargetedRuleShape = 1 + 1 + 5 + 1;
+  (void)engine.execute("let $n := 1 return $n");
+  const auto scalarBefore = arena.cellCount();
+  for (int round = 0; round < rounds; ++round)
+    (void)engine.execute("let $n := 1 return $n");
+  const auto scalarGrowth = arena.cellCount() - scalarBefore;
+
+  (void)engine.execute("let $s := { +d.n: 0 } return $s");
+  const auto shapeBefore = arena.cellCount();
+  for (int round = 1; round <= rounds; ++round)
+    (void)engine.execute("let $s := { +d.n: " + std::to_string(round) +
+                         " } return $s");
+  EXPECT_LE(arena.cellCount() - shapeBefore,
+            scalarGrowth + rounds * cellsOfOneTargetedRuleShape);
+  EXPECT_EQ(engine.shapeCount(), 1u);
+}
+
+TEST_F(VQLShapeVariableTest, ShapeTableStillTracksTheShapesNamed) {
+  (void)engine.execute("let $s := { +d.keep } return $s");
+  EXPECT_EQ(engine.shapeCount(), 1u);
   (void)engine.execute("let $t := { +d.tag } return $t");
   EXPECT_EQ(engine.shapeCount(), 2u);
   (void)engine.execute("let $s := 1 return $s");

@@ -164,8 +164,9 @@ TEST_F(VQLShapeCellsTest, NestedThroughAShapeVariable) {
 TEST_F(VQLShapeCellsTest, LiteralTargetIsAFreshScalarPerShape) {
   const auto a =
       rulesOf(handleOf("let $s := { +d.tag: \"x\", +d.n: 3 } return $s"));
-  const auto b =
-      rulesOf(handleOf("let $s := { +d.tag: \"x\", +d.n: 3 } return $s"));
+  // A shape that is equal to a held one is that one (RECLAIM R-E); two shapes
+  // that merely hold the same value each hold a scalar of their own.
+  const auto b = rulesOf(handleOf("let $t := { +d.keep: \"x\" } return $t"));
   ASSERT_TRUE(a[0].target && a[1].target && b[0].target);
   EXPECT_EQ(arena.textOf(*a[0].target), "x");
   EXPECT_EQ(arena.asInt64(*a[1].target), 3);
@@ -354,21 +355,193 @@ TEST_F(VQLShapeCellsTest, ASubjectRelativeTargetStaysRefusedInALoop) {
               testing::HasSubstr("relative to the subject"));
 }
 
-TEST_F(VQLShapeCellsTest, ACyclicShapeIsWalkedOnceNotForever) {
+TEST_F(VQLShapeCellsTest, ACyclicRankEndsWhereItBegan) {
+  const auto d = dims();
+  // A rank that loops back on itself ends under the standard rank protection,
+  // with no nested edge to bound it: once on a self-link, once ringing back
+  // through its head.
+  const auto selfLinked = handleOf("let $s := { +d.keep } return $s");
+  ASSERT_TRUE(arena.link(*neighbour(selfLinked, d.rule), d.rule, DimVector::POS,
+                         *neighbour(selfLinked, d.rule)));
+  const auto ringed = handleOf("let $t := { +d.keep, +d.tag } return $t");
+  ASSERT_TRUE(arena.link(*neighbour(*neighbour(ringed, d.rule), d.rule), d.rule,
+                         DimVector::POS, ringed));
+  for (const auto handle : {selfLinked, ringed}) {
+    const auto late = xanadu::vql::hasLateRule(arena, d, handle);
+    ASSERT_TRUE(late.has_value());
+    EXPECT_FALSE(*late);
+    EXPECT_FALSE(xanadu::vql::staleShapeReason(arena, d, handle));
+  }
+}
+
+TEST_F(VQLShapeCellsTest, AShapeThatNestsItselfRefusesAtTheDepthCeiling) {
   const auto handle = handleOf("let $s := { +d.keep: { +d.tag } } return $s");
   const auto d      = dims();
-  // The rank of rules closes on itself, and the nested shape nests its parent.
-  const auto outerRule = *neighbour(handle, d.rule);
-  const auto inner     = *neighbour(outerRule, d.nested);
-  ASSERT_TRUE(arena.link(outerRule, d.rule, DimVector::POS, outerRule));
+  const auto inner  = *neighbour(*neighbour(handle, d.rule), d.nested);
+  // The nested shape nests its parent: an edge, not a rank, so no start is
+  // ever reached again and only the ceiling ends the walk.
   ASSERT_TRUE(
       arena.link(*neighbour(inner, d.rule), d.nested, DimVector::POS, handle));
-  EXPECT_FALSE(xanadu::vql::hasLateRule(arena, d, handle));
-  EXPECT_FALSE(xanadu::vql::staleShapeReason(arena, d, handle));
-  // A rank that rings back through the head ends there too.
-  ASSERT_TRUE(
-      arena.link(*neighbour(inner, d.rule), d.rule, DimVector::POS, inner));
-  EXPECT_FALSE(xanadu::vql::hasLateRule(arena, d, inner));
+  constexpr std::size_t ceiling = 8;
+  const auto late = xanadu::vql::hasLateRule(arena, d, handle, ceiling);
+  ASSERT_FALSE(late.has_value());
+  EXPECT_THAT(late.error(), testing::HasSubstr("maximum nesting depth 8"));
+  const auto stale = xanadu::vql::staleShapeReason(arena, d, handle, ceiling);
+  ASSERT_TRUE(stale.has_value());
+  EXPECT_THAT(*stale, testing::HasSubstr("maximum nesting depth 8"));
+  const std::vector<CellRef> handles{handle};
+  const auto refused =
+      xanadu::vql::refreshShapeWitnesses(arena, d, handles, ceiling);
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_THAT(*refused, testing::HasSubstr("maximum nesting depth 8"));
+  // A consumer in a query is refused by name, not hung.
+  engine.setShapeLimits({.maxRules = 64, .maxDepth = ceiling});
+  EXPECT_THAT(refusalOf("##{ $s }"),
+              testing::HasSubstr("maximum nesting depth 8"));
+}
+
+TEST_F(VQLShapeCellsTest, ANestedChainDeeperThanTheCeilingRefusesByName) {
+  const auto d = dims();
+  // A chain, not a cycle, built by hand: the compiler would refuse to write
+  // one deeper than its ceiling, so only a reader with a smaller ceiling
+  // meets it.
+  const auto chain = [&](const std::size_t levels) {
+    const CellRef head = arena.makeCell();
+    CellRef tail       = head;
+    for (std::size_t level = 0; level < levels; ++level) {
+      const CellRef rule = arena.makeCell("d.tag");
+      const CellRef next = arena.makeCell();
+      EXPECT_TRUE(arena.link(tail, d.rule, DimVector::POS, rule));
+      EXPECT_TRUE(arena.link(rule, d.nested, DimVector::POS, next));
+      tail = next;
+    }
+    return head;
+  };
+  constexpr std::size_t ceiling = 3;
+  // `ceiling` nested levels below the head is the deepest a reader admits.
+  const auto atCeiling =
+      xanadu::vql::hasLateRule(arena, d, chain(ceiling), ceiling);
+  ASSERT_TRUE(atCeiling.has_value());
+  EXPECT_FALSE(*atCeiling);
+  const auto past =
+      xanadu::vql::hasLateRule(arena, d, chain(ceiling + 1), ceiling);
+  ASSERT_FALSE(past.has_value());
+  EXPECT_THAT(past.error(), testing::HasSubstr("maximum nesting depth 3"));
+}
+
+// RECLAIM R-E: a plain shape written again is the handle the session holds.
+
+TEST_F(VQLShapeCellsTest, APlainShapeWrittenAgainIsTheHandleHeld) {
+  const auto first = handleOf("let $s := { +d.keep: 7, !d.tag, *, "
+                              "{ d.n <=> d.drop }, +d.drop: { +d.tag } } "
+                              "return $s");
+  const auto cells = arena.cellCount();
+  const auto again = handleOf("let $s := { +d.keep: 7, !d.tag, *, "
+                              "{ d.n <=> d.drop }, +d.drop: { +d.tag } } "
+                              "return $s");
+  EXPECT_EQ(again, first);
+  EXPECT_EQ(arena.cellCount(), cells);
+  // Held by a variable of another name, it is still the one handle.
+  EXPECT_EQ(handleOf("let $other := { +d.keep: 7, !d.tag, *, "
+                     "{ d.n <=> d.drop }, +d.drop: { +d.tag } } return $other"),
+            first);
+}
+
+TEST_F(VQLShapeCellsTest, ShapesThatDifferInAnyRuleFieldAreNotInterned) {
+  const auto base = handleOf("let $s := { +d.keep: 7 } return $s");
+  // Each under a name of its own, so the base stays held and a hit is possible.
+  int variable = 0;
+  for (const char *other :
+       {"{ +d.keep: 8 }", "{ +d.keep: 7.0 }", "{ +d.keep: \"7\" }",
+        "{ +d.keep: true }", "{ !d.keep: 7 }", "{ -d.keep: 7 }",
+        "{ ~d.keep: 7 }", "{ +d.tag: 7 }", "{ +d.keep }",
+        "{ +d.keep: 7, +d.keep: 7 }", "{ +d.keep: { +d.n: 7 } }"}) {
+    SCOPED_TRACE(other);
+    const auto name = "$v" + std::to_string(variable++);
+    EXPECT_NE(handleOf("let " + name + " := " + other + " return " + name),
+              base);
+  }
+  // Doubles are told by bits: zero and negative zero are two values.
+  const auto zero = handleOf("let $z := { +d.n: 0.0 } return $z");
+  EXPECT_NE(handleOf("let $m := { +d.n: -0.0 } return $m"), zero);
+}
+
+TEST_F(VQLShapeCellsTest, AnInternedShapeKeepsItsCapturedScalarByValue) {
+  const auto first = handleOf("let $s := { +d.n: 7 } return $s");
+  const auto again = handleOf("let $s := { +d.n: 7 } return $s");
+  ASSERT_EQ(again, first);
+  const auto rules = rulesOf(first);
+  ASSERT_EQ(rules.size(), 1u);
+  ASSERT_TRUE(rules.front().target.has_value());
+  EXPECT_EQ(arena.asInt64(*rules.front().target), 7);
+  // Nothing writes a shape's cells after it is made, so a query that applies
+  // it leaves them as they were.
+  (void)engine.execute("let $t := { +d.n: 7 } return ##{ $t }");
+  EXPECT_EQ(arena.asInt64(*rulesOf(first).front().target), 7);
+}
+
+TEST_F(VQLShapeCellsTest, ADroppedShapeIsNotResurrected) {
+  const auto first = handleOf("let $s := { +d.keep } return $s");
+  (void)engine.execute("let $s := 1 return $s");
+  ASSERT_EQ(engine.shapeCount(), 0u);
+  // The table no longer names it, so its compile-time record is gone and a
+  // hit would hand out a handle the compiler refuses as unrecorded.
+  const auto again = handleOf("let $s := { +d.keep } return $s");
+  EXPECT_NE(again, first);
+  EXPECT_NO_THROW((void)engine.execute("return ##{ $s }"));
+}
+
+TEST_F(VQLShapeCellsTest, AHeldShapeWithAStaleWitnessIsNotInterned) {
+  const auto first   = handleOf("let $s := { +d.keep } return $s");
+  const auto witness = *neighbour(first, dims().epoch);
+  ASSERT_TRUE(arena.setValueBits(witness, xanadu::ValueKind::Int64, 12345));
+  // Writing the shape again must not hand back a cell whose number may be
+  // another shape's now; it makes its own, with a witness that holds.
+  const auto again = handleOf("let $t := { +d.keep } return $t");
+  EXPECT_NE(again, first);
+  EXPECT_FALSE(xanadu::vql::staleShapeReason(arena, dims(), again));
+}
+
+TEST_F(VQLShapeCellsTest, AComputedTargetIsNeverInterned) {
+  // The program writes the target when it runs, so two shapes with the same
+  // text may hold different values and the text does not say which.
+  const auto first = handleOf("let $n := 1; let $s := { +d.n: $n + 1 } "
+                              "return $s");
+  const auto again = handleOf("let $n := 1; let $s := { +d.n: $n + 1 } "
+                              "return $s");
+  EXPECT_NE(again, first);
+  const auto other = handleOf("let $n := 5; let $s := { +d.n: $n + 1 } "
+                              "return $s");
+  EXPECT_EQ(arena.asInt64(*rulesOf(other).front().target), 6);
+  EXPECT_EQ(arena.asInt64(*rulesOf(first).front().target), 2);
+}
+
+TEST_F(VQLShapeCellsTest, ALateShapeIsNeverInterned) {
+  const std::string make = "def mk() := {+d.keep: $n + 1}; let $n := 1 ";
+  const auto first       = engine.execute(make + "return mk()");
+  const auto again       = engine.execute(make + "return mk()");
+  ASSERT_EQ(first.size(), 1u);
+  ASSERT_EQ(again.size(), 1u);
+  EXPECT_NE(again.front(), first.front());
+  engine.setVariable("items", std::vector<CellRef>{arena.makeCell("a")});
+  const auto looped =
+      engine.execute("for $i in $items let $s := { +d.tag: $i } return $s");
+  const auto loopedAgain =
+      engine.execute("for $i in $items let $s := { +d.tag: $i } return $s");
+  ASSERT_EQ(looped.size(), 1u);
+  ASSERT_EQ(loopedAgain.size(), 1u);
+  EXPECT_NE(looped.front(), loopedAgain.front());
+}
+
+TEST_F(VQLShapeCellsTest, AShapeNamingAnotherIsNotInterned) {
+  // A name is read from the scope the shape is made in, so equal text can
+  // stand for different rules.
+  (void)engine.execute("let $a := { +d.keep } return $a");
+  const auto first = handleOf("let $b := { $a, +d.tag } return $b");
+  (void)engine.execute("let $a := { +d.drop } return $a");
+  const auto again = handleOf("let $b := { $a, +d.tag } return $b");
+  EXPECT_NE(again, first);
+  EXPECT_EQ(rulesOf(again).front().dimension, "d.drop");
 }
 
 TEST_F(VQLShapeCellsTest, EveryHandleCarriesAnEpochWitness) {
