@@ -1,11 +1,9 @@
 ---
 name: bittorrent-expert
 description: >-
-  Guide to the BitTorrent layer of the xanalogical engine and xuzz as the code implements it: the
-  libtorrent session, the four BEP 10 wire extensions, BEP 46 mutable names and topic rendezvous,
-  the Merkle identity ledger with Hashcash and oracle votes, and transcopyright holes and key
-  delivery. Use when designing, debugging, or implementing swarm transport, publication and
-  discovery, peer authentication, identity consensus, or transcopyright.
+  BitTorrent layer: libtorrent session, BEP 10/46, Merkle identity ledger, Hashcash/oracle votes,
+  and transcopyright. Use when designing, debugging, or implementing swarm transport, publication
+  discovery, peer auth, or identity consensus.
 ---
 
 # BitTorrent in the xanalogical engine

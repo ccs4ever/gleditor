@@ -1,12 +1,9 @@
 ---
 name: ux-validation
 description: >-
-  Validate, from the user's seat, that xuzz, vquery, vpl and vprolog can be used for real work
-  through their interfaces: creating documents and slices, switching views, following links to
-  distant cells, transcluding content, querying stores, calculating over numeric cells, making
-  rule-based decisions, passing data between programs, and resuming work. Use to audit the user
-  experience or to verify a UX fix; use the xuzz-ui-design skill to design or
-  build those features.
+  User-seat validation of xuzz, vquery, vpl, and vprolog journeys through graphical and REPL
+  interfaces with captured evidence. Use when auditing end-to-end UX journeys or verifying a UX fix
+  against design/ux_workflow_real_work.md.
 ---
 
 # Real work UX validation
@@ -64,8 +61,9 @@ does; code that looks as if it should work is not a pass.
 
 - **Evidence or it did not happen.** Keep, per graphical step, a captured frame and relevant
   accessibility dump; per terminal step, the REPL transcript including input, output and errors;
-  and, after closing a store, `xudu-dump --section=ops --permascroll=<dir> <store>`. Inspect frames
-  rather than trusting exit codes; a program that draws nothing still exits 0.
+  and, after closing a store, `store-dump --section=ops --permascroll=<dir> <store>` (or `xudu-dump`
+  symlink). Inspect frames rather than trusting exit codes; a program that draws nothing still exits
+  0\.
 
 - **Validate, then fix.** A validation run changes no product code. Fixes are separate changes, each
   followed by rerunning the journeys it touches.
@@ -85,9 +83,9 @@ parent agent. Each subagent works in its own run directory and edits no product 
    pointer gesture or a REPL command. A step with nothing to map to is already a finding. Then run
    the journey headless, keeping evidence, and classify every step (Pass, Fail, No affordance,
    Missing, Harness gap).
-1. **Persistence auditor.** Owns J5 and the save half of every journey: `xudu-dump` before closing
-   and after reopening, the permascroll and system xanadocs, and whether caret, camera, slice focus,
-   pouch items, selected link, calculated views and asserted rules come back.
+1. **Persistence auditor.** Owns J5 and the save half of every journey: `store-dump` (`xudu-dump`)
+   before closing and after reopening, the permascroll and system xanadocs, and whether caret,
+   camera, slice focus, pouch items, selected link, calculated views and asserted rules come back.
 1. **Keyboard and accessibility reviewer.** Repeats each passing graphical journey with the keyboard
    and the accessibility tree alone: every step reachable without the pointer, every control named,
    focus never lost. For REPL journeys, checks that commands, errors and solutions are readable in

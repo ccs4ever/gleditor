@@ -9,6 +9,19 @@ uses C++23, GNU Make, and pkg-config; there is no CMake build.
 The project is under active development. The [design notes](design/) explain architectural
 decisions; [AGENTS.md](AGENTS.md) is the contributor runbook.
 
+## Table of contents
+
+- [Programs](#programs)
+- [Quick start](#quick-start)
+- [Library and rendering](#library-and-rendering) ([docs/rendering.md](docs/rendering.md))
+- [Xanadu store and application](#xanadu-store-and-application) ([docs/xanadu.md](docs/xanadu.md))
+- [ZigZag and Xuzz presentation](#zigzag-and-xuzz-presentation)
+- [Accessibility and SDL](#accessibility-and-sdl)
+- [Tests and diagnostics](#tests-and-diagnostics) ([docs/testing.md](docs/testing.md))
+- [Installing and project layout](#installing-and-project-layout)
+- [vagent user guide](docs/vagent-user-guide.md)
+- [License](#license)
+
 ## Programs
 
 | Program                         | Purpose                                                                        |
@@ -179,7 +192,7 @@ for its build scope.
 | `apps/gleditor/`, `apps/xuzz/`                              | The plain editor and the Xanadu/ZigZag application.                      |
 | `apps/common/ui/`                                           | Xanadoc and cell presentation components linked into `xuzz`.             |
 | `apps/vquery*`, `apps/vpl*`, `apps/vprolog/`                | Language and query front ends.                                           |
-| `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/zigzag/` | GoogleTest suites.                                                       |
+| `tests/lib/`, `tests/xuzz/`, `tests/zigzag/`, `tests/fuzz/` | GoogleTest suites and libFuzzer targets.                                 |
 | `assets/shaders/`, `tools/`                                 | Shader sources and build, fixture, and diagnostic tools.                 |
 | `design/`                                                   | Architecture, decisions, workflows, and interface prototypes.            |
 | `thirdparty/`                                               | Git submodules; do not edit their contents in place.                     |
