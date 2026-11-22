@@ -14,7 +14,8 @@ description: >-
   include spelling, `apps/common/xanadu/store.cpp` is the file to edit. Subdirectories: `enfilade/`
   (Spanfilade, Chronofilade + `EdlTransform`, Holefilade, Arrayfilade — all ephemeral replay
   products that mint no operations), `identity/` (BEP 10 plugins, Hashcash PoW, network controller),
-  `vortex/` (core, VM, host, stdlib), `vql/`, `vpl/`, `vprolog/`, `vlace/`, `vicon/`, `zigzag/`.
+  `vortex/` (core, VM, host, stdlib), `vql/`, `vpl/`, `vprolog/`, `vlace/`, `vicon/`, `vagent/`,
+  `zigzag/`.
 - **Engine purity**: `apps/common/xanadu/` must **never** include `apps/xuzz/`, `apps/common/ui/`,
   or a library header that needs a graphics device. Header-only, device-free library headers
   (`<gleditor/cpp26*.hpp>`, `<gleditor/spatial.hpp>`, `<gleditor/draw_budget.hpp>`) are allowed.
@@ -28,8 +29,8 @@ description: >-
 - `apps/common/ui/` — shared xanalogical UI (`hypertime_graph.cpp`, `quotation_builder_overlay.cpp`,
   `store_object_manager.cpp`, link-panel and page-break presentations).
 - `apps/xuzz/` — the program: `main.cpp`, `xuzz_app.cpp`, `cli.cpp`, and `view_coordinator.cpp`.
-- `apps/vquery`, `vqueryc`, `vpl`, `vplc`, `vprolog`, `vlace`, `vlacec`, `vicon`, `viconc` — query
-  and language front ends over the shared engine.
+- `apps/vquery`, `vqueryc`, `vpl`, `vplc`, `vprolog`, `vlace`, `vlacec`, `vicon`, `viconc`, `vagent`
+  — query and language front ends over the shared engine.
 - There is no `assets/zigzag/` any more: the YAML slice format is deleted and every slice is a
   store.
 - `tools/` — `compare-backends.sh`, `create-sample-xanadocs.sh`, `create-floating-image-sample.sh`,

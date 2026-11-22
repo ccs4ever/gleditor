@@ -22,9 +22,9 @@ Always `make -j$(nproc)`.
 
 ```sh
 make -j$(nproc)              # lib, every program, test binaries, shaders, compile_commands.json
-make -j$(nproc) lib|gleditor|xudu|xuzz|zigzag|store-dump|xudu-dump|vquery|vqueryc|vpl|vplc|vprolog|vlace|vlacec|vicon|viconc|xudu-swarm-peer
+make -j$(nproc) lib|gleditor|xudu|xuzz|zigzag|store-dump|xudu-dump|vquery|vqueryc|vpl|vplc|vprolog|vlace|vlacec|vicon|viconc|vagent|xudu-swarm-peer
 make -j$(nproc) shaders      # glslangValidator over every shader; SPIR-V when Vulkan is on
-make -j$(nproc) fuzz         # fuzz_binary_ops, fuzz_link_package, fuzz_identity_wire, fuzz_session_package, fuzz_x509_delegation
+make -j$(nproc) fuzz         # fuzz_binary_ops, fuzz_link_package, fuzz_identity_wire, fuzz_session_package, fuzz_x509_delegation, fuzz_vagent_frontend
 make profile                 # llvm-cov coverage report for gleditor_test
 make clean | dist | doc      # dist bundles repo + submodules into tarball; packaging/ holds distro recipes
 make format | format-check   # clang-format + shfmt + yamlfmt + mdformat; -check is what CI runs

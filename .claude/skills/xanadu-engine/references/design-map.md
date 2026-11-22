@@ -44,10 +44,11 @@ more than is built; check the code before relying on proposed behaviour.
   evaluation mints no operation, so referential transparency holds, and the append-only spool plus
   `d.clone` are its persistent data structures. Keeps new standard-library code in a `std:fun`
   package written in Vortex.
-- [`vagent-agent-language.md`](../../../../design/vagent-agent-language.md) — vagent: specification
-  only, unbuilt; an agent-oriented (SARL-shaped) sixth front end over `ArenaManifold` and Spool-Mesh
-  distributed actors (`vortex/mesh_*`), compiling to `link` and `value` and asking the C++ core for
-  nothing new.
+- [`vagent-agent-language.md`](../../../../design/vagent-agent-language.md) — vagent: an
+  agent-oriented (SARL-shaped) sixth front end over `ArenaManifold` and Spool-Mesh distributed
+  actors (`vortex/mesh_*`); checker and single-node runner (`build/vagent`) are built (see
+  [`docs/vagent-user-guide.md`](../../../../docs/vagent-user-guide.md) and
+  [`vagent-implementation.md`](../../../../design/vagent-implementation.md)).
 - [`enfilade/`](../../../../design/enfilade/) — `enfilade-discussion.md` (the survey and the 4.96 ns
   breakeven), `enfilade-rank-indexing.md` (the U1 proposal; §3 says why crums are not cells), and
   one note per built enfilade (spanfilade, chronofilade, holefilade, layoutfilade, arrayfilade).
