@@ -20,11 +20,14 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
@@ -50,6 +53,10 @@ using zigzag::isEphemeral;
 using zigzag::Manifold;
 using zigzag::noCell;
 using zigzag::Space;
+
+static_assert(!std::is_copy_constructible_v<ArenaManifold>);
+static_assert(!std::is_copy_assignable_v<ArenaManifold>);
+static_assert(std::is_nothrow_move_constructible_v<ArenaManifold>);
 
 /// An arena with two dimensions minted, since every link needs one and a
 /// dimension here is just a cell (R12).
@@ -302,6 +309,167 @@ TEST(ArenaManifoldTest, releaseTruncatesCellsMintedUnderTheMark) {
   EXPECT_EQ(arena.m.cellCount(), before);
   EXPECT_FALSE(arena.m.contains(a));
   EXPECT_EQ(arena.m.outstandingMarks(), 0U);
+}
+
+TEST(ArenaManifoldTest, incarnationDoesNotFollowAReusedReference) {
+  Arena arena;
+  const auto mark        = arena.m.mark();
+  const auto first       = arena.m.makeCell("first");
+  const auto incarnation = arena.m.incarnationOf(first);
+  ASSERT_TRUE(incarnation);
+  EXPECT_TRUE(arena.m.matches(first, *incarnation));
+
+  ASSERT_TRUE(arena.m.release(mark));
+  EXPECT_FALSE(arena.m.incarnationOf(first));
+
+  const auto second = arena.m.makeCell("second");
+  ASSERT_EQ(first, second);
+  const auto replacement = arena.m.incarnationOf(second);
+  ASSERT_TRUE(replacement);
+  EXPECT_NE(*incarnation, *replacement);
+  EXPECT_FALSE(arena.m.matches(second, *incarnation));
+  EXPECT_TRUE(arena.m.matches(second, *replacement));
+}
+
+TEST(ArenaManifoldTest, ownerLeaseFollowsAllocationAndRollbackRestoresIt) {
+  Arena arena;
+  auto cell              = arena.m.makeCell("leased");
+  const auto incarnation = arena.m.incarnationOf(cell);
+  ASSERT_TRUE(incarnation);
+  int released  = 0;
+  auto original = std::shared_ptr<void>(new int(1), [&](void *value) {
+    delete static_cast<int *>(value);
+    ++released;
+  });
+  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, original), &arena.m);
+  original.reset();
+
+  const auto mark  = arena.m.mark();
+  auto replacement = std::shared_ptr<void>(new int(2), [&](void *value) {
+    delete static_cast<int *>(value);
+    ++released;
+  });
+  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, replacement), &arena.m);
+  replacement.reset();
+  EXPECT_EQ(released, 0);
+  EXPECT_EQ(*static_cast<int *>(arena.m.ownerLeaseOf(cell, *incarnation).get()),
+            2);
+
+  ASSERT_TRUE(arena.m.release(mark));
+  ASSERT_TRUE(arena.m.ownerLeaseOf(cell, *incarnation));
+  EXPECT_EQ(*static_cast<int *>(arena.m.ownerLeaseOf(cell, *incarnation).get()),
+            1);
+  EXPECT_EQ(released, 1);
+}
+
+TEST(ArenaManifoldTest, ownerLeaseIsReleasedWhenItsCellIsRolledBack) {
+  Arena arena;
+  int released           = 0;
+  const auto mark        = arena.m.mark();
+  const auto cell        = arena.m.makeCell("temporary");
+  const auto incarnation = arena.m.incarnationOf(cell);
+  ASSERT_TRUE(incarnation);
+  auto owner = std::shared_ptr<void>(new int(1), [&](void *value) {
+    delete static_cast<int *>(value);
+    ++released;
+  });
+  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, owner), &arena.m);
+  owner.reset();
+  ASSERT_TRUE(arena.m.release(mark));
+  EXPECT_EQ(released, 1);
+  EXPECT_FALSE(arena.m.matches(cell, *incarnation));
+}
+
+TEST(ArenaManifoldTest, runtimeOnlyMarkerRollsBackAndBlocksPromotion) {
+  Store store;
+  const auto at = store.sliceGenesis(MicroversionId{});
+  Arena arena;
+  const auto root        = arena.m.makeCell("runtime only");
+  const auto incarnation = arena.m.incarnationOf(root);
+  ASSERT_TRUE(incarnation);
+
+  const auto mark = arena.m.mark();
+  ASSERT_TRUE(arena.m.markRuntimeOnly(root));
+  EXPECT_TRUE(arena.m.isRuntimeOnly(root, *incarnation));
+  const auto before = store.opCount();
+  EXPECT_FALSE(zigzag::promote(store, at, arena.m, root).has_value());
+  EXPECT_EQ(store.opCount(), before);
+
+  ASSERT_TRUE(arena.m.release(mark));
+  EXPECT_FALSE(arena.m.isRuntimeOnly(root, *incarnation));
+  EXPECT_TRUE(zigzag::promote(store, at, arena.m, root).has_value());
+}
+
+TEST(ArenaManifoldTest, runtimeTagIsIncarnationCheckedAndChoicePointTrailed) {
+  Arena arena;
+  const auto cell        = arena.m.makeCell("io request");
+  const auto incarnation = arena.m.incarnationOf(cell);
+  ASSERT_TRUE(incarnation);
+  const auto mark = arena.m.mark();
+  ASSERT_TRUE(arena.m.setRuntimeTag(cell, *incarnation, 17));
+  EXPECT_EQ(arena.m.runtimeTagOf(cell, *incarnation),
+            std::optional<std::uint32_t>{17});
+  EXPECT_FALSE(arena.m.runtimeTagOf(cell, *incarnation + 1));
+  ASSERT_TRUE(arena.m.release(mark));
+  EXPECT_FALSE(arena.m.runtimeTagOf(cell, *incarnation));
+}
+
+TEST(ArenaManifoldTest, ownerLeaseSurvivesMoveAndReleasesDuringUnwind) {
+  int released = 0;
+  std::optional<ArenaManifold::AllocationIncarnation> savedIncarnation;
+  CellRef savedCell = noCell;
+  try {
+    ArenaManifold source;
+    savedCell        = source.makeCell("leased");
+    savedIncarnation = source.incarnationOf(savedCell);
+    ASSERT_TRUE(savedIncarnation);
+    auto owner = std::shared_ptr<void>(new int(5), [&](void *value) {
+      delete static_cast<int *>(value);
+      ++released;
+    });
+    ASSERT_EQ(source.setOwnerLease(savedCell, *savedIncarnation, owner),
+              &source);
+    ArenaManifold moved = std::move(source);
+    EXPECT_TRUE(moved.matches(savedCell, *savedIncarnation));
+    EXPECT_TRUE(moved.ownerLeaseOf(savedCell, *savedIncarnation));
+    throw std::runtime_error("exercise RAII cleanup");
+  } catch (const std::runtime_error &) {
+  }
+  EXPECT_EQ(released, 1);
+}
+
+TEST(ArenaManifoldTest, contentReplacementDropsLeaseAndRollbackRestoresIt) {
+  Arena arena;
+  const auto cell        = arena.m.makeCell("before");
+  const auto incarnation = arena.m.incarnationOf(cell);
+  ASSERT_TRUE(incarnation);
+  auto lease = std::make_shared<int>(8);
+  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, lease), &arena.m);
+
+  const auto original = arena.m.contentOf(cell);
+  ASSERT_TRUE(arena.m.setContent(cell, original));
+  EXPECT_TRUE(arena.m.ownerLeaseOf(cell, *incarnation));
+
+  const auto mark        = arena.m.mark();
+  const auto replacement = arena.m.intern("after");
+  ASSERT_TRUE(
+      arena.m.setContent(cell, std::span<const PrimediaSpan>{&replacement, 1}));
+  EXPECT_FALSE(arena.m.ownerLeaseOf(cell, *incarnation));
+  ASSERT_TRUE(arena.m.release(mark));
+  EXPECT_TRUE(arena.m.ownerLeaseOf(cell, *incarnation));
+
+  const auto different = arena.m.intern("final");
+  ASSERT_TRUE(
+      arena.m.setContent(cell, std::span<const PrimediaSpan>{&different, 1}));
+  EXPECT_FALSE(arena.m.ownerLeaseOf(cell, *incarnation));
+
+  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, lease), &arena.m);
+  const std::array tooMany = [] {
+    std::array<PrimediaSpan, zigzag::maxCellContentSpanCount + 1> spans{};
+    return spans;
+  }();
+  EXPECT_FALSE(arena.m.setContent(cell, tooMany));
+  EXPECT_TRUE(arena.m.ownerLeaseOf(cell, *incarnation));
 }
 
 TEST(ArenaManifoldTest, theTrailStaysEmptyWhileOnlyYoungCellsAreWritten) {
@@ -1092,6 +1260,21 @@ TEST(ArenaManifoldTest, promotionRefusesAboveItsBudgetAndWritesNothing) {
   EXPECT_EQ(manifold.cellCount(), 2U); // home and d.dims, and no more
 
   EXPECT_FALSE(zigzag::promote(store, at, arena.m, noCell).has_value());
+}
+
+TEST(ArenaManifoldTest, promotionRefusesRuntimeLeaseWithoutWritingOperations) {
+  Store store;
+  const auto at = store.sliceGenesis(MicroversionId{});
+  Arena arena;
+  const auto root        = arena.m.makeCell("transient payload");
+  const auto incarnation = arena.m.incarnationOf(root);
+  ASSERT_TRUE(incarnation);
+  auto lease = std::make_shared<int>(7);
+  ASSERT_EQ(arena.m.setOwnerLease(root, *incarnation, lease), &arena.m);
+
+  const auto before = store.opCount();
+  EXPECT_FALSE(zigzag::promote(store, at, arena.m, root).has_value());
+  EXPECT_EQ(store.opCount(), before);
 }
 
 // -- the overlay ------------------------------------------------------------

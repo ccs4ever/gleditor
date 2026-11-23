@@ -51,6 +51,7 @@
 #include <cstdint>
 #include <expected>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <source_location>
@@ -206,6 +207,9 @@ struct Mark {
   std::uint32_t contentSize{0};
   std::uint32_t scratchSize{0};
   std::uint32_t trailSize{0};
+  std::uint32_t ownerLeaseTrailSize{0};
+  std::uint32_t runtimeOnlyTrailSize{0};
+  std::uint32_t runtimeTagTrailSize{0};
   std::uint32_t liveLinks{0};
   std::uint32_t liveContent{0};
   /// How many base cells had been shadowed. Release drops the shadows taken
@@ -393,7 +397,13 @@ struct Promoted {
  */
 class ArenaManifold {
 public:
-  ArenaManifold() = default;
+  using AllocationIncarnation = std::uint64_t;
+
+  ArenaManifold()                                     = default;
+  ArenaManifold(const ArenaManifold &)                = delete;
+  ArenaManifold &operator=(const ArenaManifold &)     = delete;
+  ArenaManifold(ArenaManifold &&) noexcept            = default;
+  ArenaManifold &operator=(ArenaManifold &&) noexcept = default;
 
   /// An arena over @p base: reads fall through, writes shadow. @p base must
   /// outlive this, and must not be mutated while it is being read through --
@@ -662,6 +672,35 @@ public:
   [[nodiscard]] bool contains(CellRef ref) const noexcept {
     return slot(ref).has_value();
   }
+
+  /// Identity of this live arena allocation. A ref can be reused after
+  /// rollback, so callers retaining owner-side metadata must retain this too.
+  [[nodiscard]] std::optional<AllocationIncarnation>
+  incarnationOf(CellRef ref) const noexcept;
+
+  /// Whether @p ref still names the allocation observed earlier.
+  [[nodiscard]] bool matches(CellRef ref,
+                             AllocationIncarnation incarnation) const noexcept;
+
+  /// Attach an opaque owner token to a live allocation. Its final release
+  /// follows the cell through arena lifetime and is dropped on rollback or
+  /// replacement. A resolver can use a shared_ptr custom deleter to release
+  /// its private lease without exposing native storage to the arena.
+  ArenaManifold *setOwnerLease(CellRef ref, AllocationIncarnation incarnation,
+                               std::shared_ptr<void> owner);
+
+  [[nodiscard]] std::shared_ptr<void>
+  ownerLeaseOf(CellRef ref, AllocationIncarnation incarnation) const noexcept;
+
+  /// Mark an allocation as carrying runtime-only state which Structure cannot
+  /// persist. The mark is tied to its allocation incarnation and choice point.
+  ArenaResult markRuntimeOnly(CellRef ref);
+  [[nodiscard]] bool
+  isRuntimeOnly(CellRef ref, AllocationIncarnation incarnation) const noexcept;
+  ArenaResult setRuntimeTag(CellRef ref, AllocationIncarnation incarnation,
+                            std::uint32_t tag);
+  [[nodiscard]] std::optional<std::uint32_t>
+  runtimeTagOf(CellRef ref, AllocationIncarnation incarnation) const noexcept;
 
   [[nodiscard]] std::size_t cellCount() const noexcept { return slots_.size(); }
 
@@ -958,11 +997,33 @@ private:
                    std::span<const xanadu::PrimediaSpan> content);
 
   std::vector<CellSlot> slots_;
+  /// Monotonic allocation identities, parallel to slots_. Values are never
+  /// reused when rollback truncates slots and a later allocation reuses a ref.
+  std::vector<AllocationIncarnation> incarnations_;
+  std::unordered_map<AllocationIncarnation, std::shared_ptr<void>> ownerLeases_;
   std::vector<DimLink> links_;
   std::vector<xanadu::PrimediaSpan> content_;
   /// Bytes constructed during evaluation, addressed by scratchScroll spans.
   std::string scratch_;
   std::vector<TrailEntry> trail_;
+  struct OwnerLeaseTrailEntry {
+    AllocationIncarnation incarnation{0};
+    std::shared_ptr<void> previous;
+    bool existed{false};
+  };
+  std::vector<OwnerLeaseTrailEntry> ownerLeaseTrail_;
+  std::unordered_set<AllocationIncarnation> runtimeOnly_;
+  struct RuntimeOnlyTrailEntry {
+    AllocationIncarnation incarnation{0};
+    bool wasMarked{false};
+  };
+  std::vector<RuntimeOnlyTrailEntry> runtimeOnlyTrail_;
+  std::unordered_map<AllocationIncarnation, std::uint32_t> runtimeTags_;
+  struct RuntimeTagTrailEntry {
+    AllocationIncarnation incarnation{0};
+    std::optional<std::uint32_t> previous;
+  };
+  std::vector<RuntimeTagTrailEntry> runtimeTagTrail_;
 
   /// The document being read through, or null for a standalone arena.
   const Manifold *base_{nullptr};

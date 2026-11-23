@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cstddef>
 #include <format>
@@ -23,11 +24,117 @@
 
 namespace zigzag {
 
+namespace {
+std::optional<ArenaManifold::AllocationIncarnation>
+nextAllocationIncarnation() noexcept {
+  static std::atomic<ArenaManifold::AllocationIncarnation> next{1};
+  auto current = next.load(std::memory_order_relaxed);
+  while (current !=
+         std::numeric_limits<ArenaManifold::AllocationIncarnation>::max()) {
+    if (next.compare_exchange_weak(current, current + 1,
+                                   std::memory_order_relaxed)) {
+      return current;
+    }
+  }
+  return std::nullopt;
+}
+} // namespace
+
 ArenaManifold::ArenaManifold(const Manifold *base, const xanadu::Store *store)
     : base_(base), store_(store) {
   if (store_ != nullptr) {
     projectProvenance(*store_);
   }
+}
+
+std::optional<ArenaManifold::AllocationIncarnation>
+ArenaManifold::incarnationOf(const CellRef ref) const noexcept {
+  const auto dense = denseOf(ref);
+  if (!dense || *dense >= incarnations_.size()) return std::nullopt;
+  return incarnations_[*dense];
+}
+
+bool ArenaManifold::matches(
+    const CellRef ref, const AllocationIncarnation incarnation) const noexcept {
+  const auto current = incarnationOf(ref);
+  return current && *current == incarnation;
+}
+
+ArenaManifold *
+ArenaManifold::setOwnerLease(const CellRef ref,
+                             const AllocationIncarnation incarnation,
+                             std::shared_ptr<void> owner) {
+  if (!matches(ref, incarnation)) {
+    throw std::invalid_argument("stale arena allocation incarnation");
+  }
+  const auto found = ownerLeases_.find(incarnation);
+  if (outstandingMarks_ != 0) {
+    ownerLeaseTrail_.push_back(OwnerLeaseTrailEntry{
+        .incarnation = incarnation,
+        .previous    = found == ownerLeases_.end() ? std::shared_ptr<void>{}
+                                                   : found->second,
+        .existed     = found != ownerLeases_.end()});
+  }
+  if (outstandingMarks_ != 0 || owner) {
+    ownerLeases_.insert_or_assign(incarnation, std::move(owner));
+  } else {
+    ownerLeases_.erase(incarnation);
+  }
+  return this;
+}
+
+std::shared_ptr<void> ArenaManifold::ownerLeaseOf(
+    const CellRef ref, const AllocationIncarnation incarnation) const noexcept {
+  if (!matches(ref, incarnation)) return {};
+  const auto found = ownerLeases_.find(incarnation);
+  return found == ownerLeases_.end() ? std::shared_ptr<void>{} : found->second;
+}
+
+ArenaResult ArenaManifold::markRuntimeOnly(const CellRef ref) {
+  const auto incarnation = incarnationOf(ref);
+  if (!incarnation) return std::unexpected{ArenaRefusal::UnknownCell};
+  if (runtimeOnly_.contains(*incarnation)) return this;
+  if (outstandingMarks_ != 0) {
+    runtimeOnlyTrail_.push_back(
+        RuntimeOnlyTrailEntry{.incarnation = *incarnation});
+  }
+  runtimeOnly_.insert(*incarnation);
+  return this;
+}
+
+bool ArenaManifold::isRuntimeOnly(
+    const CellRef ref, const AllocationIncarnation incarnation) const noexcept {
+  return matches(ref, incarnation) && runtimeOnly_.contains(incarnation);
+}
+
+ArenaResult
+ArenaManifold::setRuntimeTag(const CellRef ref,
+                             const AllocationIncarnation incarnation,
+                             const std::uint32_t tag) {
+  if (!matches(ref, incarnation)) {
+    return std::unexpected{ArenaRefusal::UnknownCell};
+  }
+  const auto found = runtimeTags_.find(incarnation);
+  if (found != runtimeTags_.end() && found->second == tag) return this;
+  if (outstandingMarks_ != 0) {
+    runtimeTagTrail_.push_back(RuntimeTagTrailEntry{
+        .incarnation = incarnation,
+        .previous    = found == runtimeTags_.end()
+                           ? std::nullopt
+                           : std::optional<std::uint32_t>{found->second}});
+  }
+  if (const auto marked = markRuntimeOnly(ref); !marked) return marked;
+  runtimeTags_.insert_or_assign(incarnation, tag);
+  return this;
+}
+
+std::optional<std::uint32_t> ArenaManifold::runtimeTagOf(
+    const CellRef ref, const AllocationIncarnation incarnation) const noexcept {
+  if (!matches(ref, incarnation)) return std::nullopt;
+  const auto found = runtimeTags_.find(incarnation);
+  return found == runtimeTags_.end()
+             ? std::nullopt
+             : std::optional<std::uint32_t>{found->second};
 }
 
 std::optional<CellRef> ArenaManifold::home() const noexcept {
@@ -1982,7 +2089,11 @@ ArenaManifold::mintSlot(const xanadu::ValueKind kind, const std::uint64_t bits,
         "ArenaManifold exhausted: cannot allocate beyond " +
         std::to_string(allocationLimit_));
   }
-  const auto dense = static_cast<std::uint32_t>(slots_.size());
+  const auto dense       = static_cast<std::uint32_t>(slots_.size());
+  const auto incarnation = nextAllocationIncarnation();
+  if (!incarnation) {
+    throw std::overflow_error("ArenaManifold allocation incarnation exhausted");
+  }
   slots_.push_back(CellSlot{
       .spanOffset  = static_cast<std::uint32_t>(content_.size()),
       .spanCount   = 0,
@@ -1998,6 +2109,12 @@ ArenaManifold::mintSlot(const xanadu::ValueKind kind, const std::uint64_t bits,
       .flags      = 0,
       .valueBits  = bits,
   });
+  try {
+    incarnations_.push_back(*incarnation);
+  } catch (...) {
+    slots_.pop_back();
+    throw;
+  }
   if (!content.empty()) {
     setContentAt(dense, content);
   }
@@ -2114,6 +2231,7 @@ ArenaManifold::setContent(const CellRef cell,
   if (spans.size() > maxCellContentSpanCount) {
     return std::unexpected{ArenaRefusal::ContentRunTooLong};
   }
+  if (std::ranges::equal(contentOf(cell), spans)) return this;
 
   const auto dense = shadow(cell);
   if (!dense.has_value()) {
@@ -2121,6 +2239,9 @@ ArenaManifold::setContent(const CellRef cell,
   }
   trail(*dense);
   setContentAt(*dense, spans);
+  if (const auto incarnation = incarnationOf(cell)) {
+    setOwnerLease(cell, *incarnation, {});
+  }
   return this;
 }
 
@@ -2424,6 +2545,12 @@ Mark ArenaManifold::mark() {
       .contentSize = static_cast<std::uint32_t>(content_.size()),
       .scratchSize = static_cast<std::uint32_t>(scratch_.size()),
       .trailSize   = static_cast<std::uint32_t>(trail_.size()),
+      .ownerLeaseTrailSize =
+          static_cast<std::uint32_t>(ownerLeaseTrail_.size()),
+      .runtimeOnlyTrailSize =
+          static_cast<std::uint32_t>(runtimeOnlyTrail_.size()),
+      .runtimeTagTrailSize =
+          static_cast<std::uint32_t>(runtimeTagTrail_.size()),
       .liveLinks   = static_cast<std::uint32_t>(liveLinks_),
       .liveContent = static_cast<std::uint32_t>(liveContent_),
       .shadowCount = static_cast<std::uint32_t>(shadowOrder_.size()),
@@ -2484,6 +2611,11 @@ MarkResult ArenaManifold::discard(const Mark &m) noexcept {
   // not retain an ever-growing trail.
   if (0 == outstandingMarks_) {
     trail_.clear();
+    ownerLeaseTrail_.clear();
+    std::erase_if(ownerLeases_,
+                  [](const auto &entry) { return !entry.second; });
+    runtimeOnlyTrail_.clear();
+    runtimeTagTrail_.clear();
     dimensionOrder_.clear();
   }
   return this;
@@ -2588,6 +2720,32 @@ MarkResult ArenaManifold::release(const Mark &m) noexcept {
     slots_[entry.dense] = entry.saved;
   }
   trail_.resize(m.trailSize);
+  for (std::size_t i = ownerLeaseTrail_.size(); i > m.ownerLeaseTrailSize;
+       i--) {
+    const auto &entry = ownerLeaseTrail_[i - 1];
+    const auto found  = ownerLeases_.find(entry.incarnation);
+    if (entry.existed && found != ownerLeases_.end()) {
+      found->second = entry.previous;
+    } else {
+      ownerLeases_.erase(entry.incarnation);
+    }
+  }
+  ownerLeaseTrail_.resize(m.ownerLeaseTrailSize);
+  for (std::size_t i = runtimeOnlyTrail_.size(); i > m.runtimeOnlyTrailSize;
+       i--) {
+    runtimeOnly_.erase(runtimeOnlyTrail_[i - 1].incarnation);
+  }
+  runtimeOnlyTrail_.resize(m.runtimeOnlyTrailSize);
+  for (std::size_t i = runtimeTagTrail_.size(); i > m.runtimeTagTrailSize;
+       i--) {
+    const auto &entry = runtimeTagTrail_[i - 1];
+    if (entry.previous) {
+      runtimeTags_.insert_or_assign(entry.incarnation, *entry.previous);
+    } else {
+      runtimeTags_.erase(entry.incarnation);
+    }
+  }
+  runtimeTagTrail_.resize(m.runtimeTagTrailSize);
 
   // Dropping a shadow is the undo, for an overlaid cell: the slot goes and the
   // reads fall through to the base again, which is where the cell's unmodified
@@ -2598,6 +2756,16 @@ MarkResult ArenaManifold::release(const Mark &m) noexcept {
   shadowOrder_.resize(m.shadowCount);
 
   slots_.resize(m.cellCount);
+  incarnations_.resize(m.cellCount);
+  std::erase_if(ownerLeases_, [&](const auto &entry) {
+    return std::ranges::find(incarnations_, entry.first) == incarnations_.end();
+  });
+  std::erase_if(runtimeOnly_, [&](const auto incarnation) {
+    return std::ranges::find(incarnations_, incarnation) == incarnations_.end();
+  });
+  std::erase_if(runtimeTags_, [&](const auto &entry) {
+    return std::ranges::find(incarnations_, entry.first) == incarnations_.end();
+  });
   links_.resize(m.linkSize);
   content_.resize(m.contentSize);
   scratch_.resize(m.scratchSize);
@@ -2788,6 +2956,17 @@ std::optional<Promoted> promote(xanadu::Store &store,
     return std::nullopt;
   const std::unordered_set<CellRef> delayed(cyclicHandles.begin(),
                                             cyclicHandles.end());
+
+  // Runtime-only owner roots (including transient payload leases) cannot be
+  // encoded by Structure operations. Refuse before Store mutation; exporting
+  // their display text would silently discard source identity and ownership.
+  for (const CellRef arena : mintOrder) {
+    const auto incarnation = from.incarnationOf(arena);
+    if (incarnation && (from.ownerLeaseOf(arena, *incarnation) ||
+                        from.isRuntimeOnly(arena, *incarnation))) {
+      return std::nullopt;
+    }
+  }
 
   // A quotation of another store's bytes is written as a transclusion of them,
   // so each of its spans must be nameable here; checked before anything is
@@ -3283,6 +3462,9 @@ ArenaManifold::exportPrefix(const Mark &m) const {
       hasUnsupportedUntrackedPrefixIdentity()) {
     return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
   }
+  if (!ownerLeases_.empty() || !runtimeOnly_.empty()) {
+    return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
+  }
 
   std::uint64_t dimensionNameBytes = 0;
   for (const auto &[name, dim] : arenaDims_) {
@@ -3408,6 +3590,22 @@ ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
                           .content = m.contentSize});
 
   slots_.swap(slots);
+  incarnations_.clear();
+  incarnations_.reserve(slots_.size());
+  for (std::size_t i = 0; i < slots_.size(); ++i) {
+    const auto incarnation = nextAllocationIncarnation();
+    if (!incarnation) {
+      throw std::overflow_error(
+          "ArenaManifold allocation incarnation exhausted");
+    }
+    incarnations_.push_back(*incarnation);
+  }
+  ownerLeases_.clear();
+  ownerLeaseTrail_.clear();
+  runtimeOnly_.clear();
+  runtimeOnlyTrail_.clear();
+  runtimeTags_.clear();
+  runtimeTagTrail_.clear();
   links_.swap(links);
   content_.swap(content);
   scratch_.swap(scratch);
