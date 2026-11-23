@@ -79,8 +79,9 @@ TEST(VQLConformanceTest, HomeAnchorPreservesIdentityInBothEngines) {
   VQLCompiler compiler(core, vm);
   const auto compiled = compiler.compile(example("home.vql"));
   ASSERT_TRUE(compiled.success) << compiled.errorMessage;
-  EXPECT_EQ(core.inputsOf(compiled.generatedOpcodes.back()),
-            std::vector<zigzag::CellRef>{core.home()});
+  const auto inputs = core.inputsOf(compiled.generatedOpcodes.back());
+  ASSERT_EQ(inputs.size(), 1U);
+  EXPECT_EQ(inputs.front(), core.home());
 }
 
 TEST(VQLConformanceTest, CompiledCreationPreservesExistingRankAtExecution) {

@@ -350,12 +350,12 @@ TEST(VortexCoreTest, DualWingCallingConventionAndSnapshotBeforeWrite) {
   // Bind outCell as output destination
   h.core.bindOutput(addOp, outCell);
 
-  std::vector<CellRef> ins = h.core.inputsOf(addOp);
+  auto ins = h.core.inputsOf(addOp);
   ASSERT_EQ(ins.size(), 2u);
   EXPECT_EQ(ins[0], outCell);
   EXPECT_EQ(ins[1], outCell);
 
-  std::vector<CellRef> outs = h.core.outputsOf(addOp);
+  auto outs = h.core.outputsOf(addOp);
   ASSERT_EQ(outs.size(), 1u);
   EXPECT_EQ(outs[0], outCell);
 
@@ -365,6 +365,23 @@ TEST(VortexCoreTest, DualWingCallingConventionAndSnapshotBeforeWrite) {
 
   // Snapshot-before-write ensures 10 + 10 = 20
   EXPECT_EQ(h.core.render(outCell), CellValue(static_cast<std::int64_t>(20)));
+}
+
+TEST(VortexCoreTest, OperandWingsPreserveOrderAcrossInlineAndSpillSizes) {
+  TestHarness h;
+  for (const std::size_t count : {0U, 8U, 9U, 128U}) {
+    const CellRef op = h.vm.mintOpcode(OpcodeKind::Nop);
+    std::vector<CellRef> expected;
+    expected.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+      const CellRef operand = h.arena.makeCell();
+      expected.push_back(operand);
+      h.core.bindInput(op, operand);
+    }
+    const auto actual = h.core.inputsOf(op);
+    ASSERT_EQ(actual.size(), expected.size());
+    for (std::size_t i = 0; i < count; ++i) EXPECT_EQ(actual[i], expected[i]);
+  }
 }
 
 TEST(VortexCoreTest, ParameterPipelinesAlongDSpin) {

@@ -1338,7 +1338,7 @@ std::string VPLCompiler::disassemble(std::optional<CellRef> entryOp,
     }
 
     // Inputs
-    std::vector<CellRef> inCells = core_.inputsOf(cur);
+    auto inCells = core_.inputsOf(cur);
     if (!inCells.empty()) {
       out << " in: [";
       for (std::size_t i = 0; i < inCells.size(); ++i) {
@@ -1358,7 +1358,7 @@ std::string VPLCompiler::disassemble(std::optional<CellRef> entryOp,
     }
 
     // Outputs
-    std::vector<CellRef> outCells = core_.outputsOf(cur);
+    auto outCells = core_.outputsOf(cur);
     if (!outCells.empty()) {
       out << " -> out: [";
       for (std::size_t i = 0; i < outCells.size(); ++i) {

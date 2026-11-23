@@ -915,7 +915,7 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
   }
 
   // Fallback: Bind directly to opcode input wings
-  std::vector<CellRef> inCells = core_.inputsOf(fnOp);
+  auto inCells = core_.inputsOf(fnOp);
   for (std::size_t i = 0; i < std::min(args.size(), inCells.size()); ++i) {
     core_.writeValue(inCells[i], 0, std::nullopt, args[i]);
   }
@@ -924,7 +924,7 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
   if (!execRes.success) {
     return {};
   }
-  std::vector<CellRef> outCells = core_.outputsOf(fnOp);
+  auto outCells = core_.outputsOf(fnOp);
   std::vector<CellValue> results;
   results.reserve(outCells.size());
   for (CellRef outCell : outCells) {

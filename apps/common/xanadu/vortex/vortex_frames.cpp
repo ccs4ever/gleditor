@@ -323,13 +323,13 @@ CellRef VortexVM::runtimeSlot(const CellRef slot) const {
                                                             : found->second;
 }
 
-std::vector<CellRef> VortexVM::inputsOf(const CellRef opcode) const {
+OperandList VortexVM::inputsOf(const CellRef opcode) const {
   auto slots = core_.inputsOf(opcode);
   for (auto &slot : slots) slot = runtimeSlot(slot);
   return slots;
 }
 
-std::vector<CellRef> VortexVM::outputsOf(const CellRef opcode) const {
+OperandList VortexVM::outputsOf(const CellRef opcode) const {
   auto slots = core_.outputsOf(opcode);
   for (auto &slot : slots) slot = runtimeSlot(slot);
   return slots;

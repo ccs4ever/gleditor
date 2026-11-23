@@ -145,8 +145,10 @@ TEST(VortexForeignMaskExportTest,
   ASSERT_EQ(secondMaskInputs.size(), 4U);
   const CellRef firstOwnerSlot  = firstMaskInputs.front();
   const CellRef secondOwnerSlot = secondMaskInputs.front();
-  ASSERT_EQ(core.outputsOf(*copy),
-            (std::vector<CellRef>{firstOwnerSlot, secondOwnerSlot}));
+  const auto copyOutputs        = core.outputsOf(*copy);
+  ASSERT_EQ(copyOutputs.size(), 2U);
+  EXPECT_EQ(copyOutputs[0], firstOwnerSlot);
+  EXPECT_EQ(copyOutputs[1], secondOwnerSlot);
   EXPECT_TRUE(core.inputsOf(*copy).empty());
 
   const auto axis = arena.dimensionNamed("d.foreign-axis");

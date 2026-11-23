@@ -789,8 +789,8 @@ private:
   [[nodiscard]] std::optional<std::uint64_t>
   currentActivationId(CellRef cursor) const;
   [[nodiscard]] CellRef runtimeSlot(CellRef slot) const;
-  [[nodiscard]] std::vector<CellRef> inputsOf(CellRef opcode) const;
-  [[nodiscard]] std::vector<CellRef> outputsOf(CellRef opcode) const;
+  [[nodiscard]] OperandList inputsOf(CellRef opcode) const;
+  [[nodiscard]] OperandList outputsOf(CellRef opcode) const;
   ExecutionResult prepareTypeContract(OpcodeKind kind, CellRef opcode);
   ExecutionResult executeResumeInit(CellRef opcode,
                                     const std::vector<CellValue> &inputs,

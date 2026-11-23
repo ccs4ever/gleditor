@@ -379,8 +379,8 @@ VortexCore::baseDimensionNamed(const std::string_view name) const {
                                   : arena_.base()->dimensionNamed(name);
 }
 
-std::vector<CellRef> VortexCore::wingOf(const CellRef opcode,
-                                        const DimVector side) const {
+OperandList VortexCore::wingOf(const CellRef opcode,
+                               const DimVector side) const {
   // A wing slot holds either an operand reference -- an Int64 naming a cell
   // the arena can reach -- or is itself the operand, read through its master.
   const auto operand = [this](const CellRef slot) {
@@ -393,15 +393,18 @@ std::vector<CellRef> VortexCore::wingOf(const CellRef opcode,
   };
   const auto first = arena_.linked(opcode, dims_.grab, side);
   if (!first) return {};
-  return zigzag::rank(arena_, *first, dims_.step) |
-         std::views::transform(operand) | std::ranges::to<std::vector>();
+  OperandList result;
+  for (const CellRef slot : zigzag::rank(arena_, *first, dims_.step) |
+                                std::views::transform(operand))
+    result.push_back(slot);
+  return result;
 }
 
-std::vector<CellRef> VortexCore::inputsOf(CellRef opcode) const {
+OperandList VortexCore::inputsOf(CellRef opcode) const {
   return wingOf(opcode, DimVector::POS);
 }
 
-std::vector<CellRef> VortexCore::outputsOf(CellRef opcode) const {
+OperandList VortexCore::outputsOf(CellRef opcode) const {
   return wingOf(opcode, DimVector::NEG);
 }
 

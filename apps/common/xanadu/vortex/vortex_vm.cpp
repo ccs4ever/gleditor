@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -210,7 +211,7 @@ std::optional<std::int64_t> checkedValueIndex(const CellValue &value) {
 }
 
 std::optional<CellRef> resolveCell(
-    const std::vector<CellRef> &inCells, const std::vector<CellValue> &inputs,
+    std::span<const CellRef> inCells, const std::vector<CellValue> &inputs,
     const std::unordered_map<CellRef, std::optional<CellRef>> &cellReferences,
     const std::size_t idx, const ArenaManifold &arena) {
   if (idx < inCells.size()) {
@@ -1742,7 +1743,7 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
           "stream and iterator registers cannot run in parameter pipelines");
     }
 
-    std::vector<CellRef> inCells = inputsOf(*pipeOp);
+    auto inCells = inputsOf(*pipeOp);
     std::vector<CellValue> inVals;
     if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
         kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
@@ -1804,7 +1805,7 @@ ExecutionResult VortexVM::runPipeline(CellRef paramCell) {
       }
     }
 
-    std::vector<CellRef> outCells = outputsOf(*pipeOp);
+    auto outCells = outputsOf(*pipeOp);
     if ((kind == OpcodeKind::Link || kind == OpcodeKind::Break ||
          kind == OpcodeKind::Value || kind == OpcodeKind::CopyCellRefs ||
          kind == OpcodeKind::ClearCellRefs || publishesLogicReference(kind)) &&
@@ -1889,7 +1890,7 @@ bool VortexVM::evaluateCondition(CellRef clause,
       kind == OpcodeKind::BeginMutationGroup ||
       kind == OpcodeKind::EndMutationGroup)
     throw std::invalid_argument("guard opcodes cannot run as conditions");
-  std::vector<CellRef> inCells = inputsOf(actualClause);
+  auto inCells = inputsOf(actualClause);
   std::vector<CellValue> inVals;
   if (kind == OpcodeKind::VqlCompare || kind == OpcodeKind::VqlString ||
       kind == OpcodeKind::VqlAdd || kind == OpcodeKind::VqlBoxScalar ||
@@ -2935,7 +2936,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Link: {
-    std::vector<CellRef> inCells = inputsOf(opcode);
+    auto inCells = inputsOf(opcode);
     if (inCells.size() >= 3 || inputs.size() >= 3) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -2960,7 +2961,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Break: {
-    std::vector<CellRef> inCells = inputsOf(opcode);
+    auto inCells = inputsOf(opcode);
     if (inCells.size() >= 3 || inputs.size() >= 3) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -2983,8 +2984,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     // subject, which is how a stored traversal result feeds a later step.
     // With a filter pair, a member must have its own link on filterDim to be
     // included.
-    std::vector<CellRef> inCells  = core_.inputsOf(opcode);
-    std::vector<CellRef> outCells = core_.outputsOf(opcode);
+    auto inCells  = core_.inputsOf(opcode);
+    auto outCells = core_.outputsOf(opcode);
     if (inCells.size() >= 3 || inputs.size() >= 3) {
       auto subject =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -3312,8 +3313,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::New: {
-    std::vector<CellRef> inCells  = inputsOf(opcode);
-    std::vector<CellRef> outCells = outputsOf(opcode);
+    auto inCells  = inputsOf(opcode);
+    auto outCells = outputsOf(opcode);
     if (inCells.size() >= 3 || inputs.size() >= 3) {
       auto c = resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
       DimRef d = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
@@ -3359,7 +3360,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Value: {
-    std::vector<CellRef> inCells = inputsOf(opcode);
+    auto inCells = inputsOf(opcode);
     if (!inCells.empty() || !inputs.empty()) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -3393,7 +3394,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Splice: {
-    std::vector<CellRef> inCells = inputsOf(opcode);
+    auto inCells = inputsOf(opcode);
     if (inCells.size() >= 4 || inputs.size() >= 4) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -3417,8 +3418,8 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Clone: {
-    std::vector<CellRef> inCells  = inputsOf(opcode);
-    std::vector<CellRef> outCells = outputsOf(opcode);
+    auto inCells  = inputsOf(opcode);
+    auto outCells = outputsOf(opcode);
     if (!inCells.empty() || !inputs.empty()) {
       const auto c =
           resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
@@ -3698,7 +3699,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Unify: {
-    std::vector<CellRef> inCells = inputsOf(opcode);
+    auto inCells = inputsOf(opcode);
     const auto a =
         resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
     const auto b =
@@ -3716,7 +3717,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::IsVar: {
-    std::vector<CellRef> inCells = inputsOf(opcode);
+    auto inCells = inputsOf(opcode);
     const auto c =
         resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
     if (c) {
@@ -3750,7 +3751,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
         functor = std::to_string(toInt(inputs[0]));
       }
     }
-    std::vector<CellRef> inCells = inputsOf(opcode);
+    auto inCells = inputsOf(opcode);
     std::vector<CellRef> args;
     std::size_t maxArgs = std::max(inCells.size(), inputs.size());
     for (std::size_t i = 1; i < maxArgs; ++i) {
@@ -3773,7 +3774,7 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     break;
   }
   case OpcodeKind::Deref: {
-    std::vector<CellRef> inCells = inputsOf(opcode);
+    auto inCells = inputsOf(opcode);
     const auto c =
         resolveCell(inCells, inputs, cellReferences_, 0, core_.arena());
     if (c) {

@@ -22,6 +22,7 @@
 #include <variant>
 #include <vector>
 
+#include "common/xanadu/vortex/operand_list.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace zigzag::vortex {
@@ -283,8 +284,8 @@ public:
   [[nodiscard]] std::function<CellRef()> cloneGenerator(CellRef source);
 
   // -- Dual-Wing Calling Convention -------------------------------------------
-  [[nodiscard]] std::vector<CellRef> inputsOf(CellRef opcode) const;
-  [[nodiscard]] std::vector<CellRef> outputsOf(CellRef opcode) const;
+  [[nodiscard]] OperandList inputsOf(CellRef opcode) const;
+  [[nodiscard]] OperandList outputsOf(CellRef opcode) const;
   void bindInput(CellRef opcode, CellRef operand);
   void bindOutput(CellRef opcode, CellRef target);
 
@@ -322,8 +323,7 @@ private:
   [[nodiscard]] std::optional<DimRef>
   baseDimensionNamed(std::string_view name) const;
   /// The operands on @p opcode's input (POS) or output (NEG) wing.
-  [[nodiscard]] std::vector<CellRef> wingOf(CellRef opcode,
-                                            DimVector side) const;
+  [[nodiscard]] OperandList wingOf(CellRef opcode, DimVector side) const;
   /// The conditions on @p opcode's pre (NEG) or post (POS) contract rank.
   [[nodiscard]] std::vector<CellRef> contractOf(CellRef opcode,
                                                 DimVector side) const;
