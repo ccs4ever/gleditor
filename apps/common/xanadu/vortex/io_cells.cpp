@@ -514,4 +514,20 @@ std::optional<PayloadRange> payloadRangeOf(const ArenaManifold &arena,
   return owner->range;
 }
 
+std::optional<PayloadRange> outcomeCellPayloadRange(const ArenaManifold &arena,
+                                                    const IoCellSchema &schema,
+                                                    const OutcomeCell outcome) {
+  // addPayload links outcome -d.io.payload-> occurrence -d.io.payload->
+  // payload cell; the payload cell's owner lease names the retained range.
+  const auto dim        = schema.dim(IoDimension::Payload);
+  const auto occurrence = arena.linked(outcome.cell, dim, DimVector::POS);
+  if (!occurrence) return std::nullopt;
+  const auto payloadCell = arena.linked(*occurrence, dim, DimVector::POS);
+  if (!payloadCell) return std::nullopt;
+  const auto incarnation = arena.incarnationOf(*payloadCell);
+  if (!incarnation) return std::nullopt;
+  return payloadRangeOf(
+      arena, PayloadCell{.cell = *payloadCell, .incarnation = *incarnation});
+}
+
 } // namespace xanadu::vortex

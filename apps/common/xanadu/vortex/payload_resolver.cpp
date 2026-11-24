@@ -1,6 +1,7 @@
 #include "common/xanadu/vortex/payload_resolver.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -361,6 +362,23 @@ void PayloadResolver::release(const LeaseId lease) noexcept {
     // std::mutex::lock throws only on a broken system; release is noexcept so
     // rollback paths can call it.
   }
+}
+
+auto publishTransientBytes(PayloadResolver &resolver,
+                           const std::span<const std::byte> bytes)
+    -> std::expected<PayloadLease, IoError> {
+  static std::atomic<std::uint64_t> nextSource{1};
+  const PayloadRef origin{
+      .kind       = PayloadSourceKind::Transient,
+      .source     = nextSource.fetch_add(1, std::memory_order_relaxed),
+      .generation = 0,
+      .occurrence = 0};
+  auto registered = resolver.registerSource(origin, bytes);
+  if (!registered) {
+    return std::unexpected{registered.error()};
+  }
+  return resolver.retain(
+      PayloadRange{.origin = origin, .offset = 0, .length = bytes.size()});
 }
 
 } // namespace xanadu::vortex

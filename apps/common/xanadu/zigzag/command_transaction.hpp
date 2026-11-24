@@ -107,9 +107,16 @@ public:
  */
 class CommandMailboxAdapter final : public xanadu::vortex::IoAdapter {
 public:
+  /// Owner-thread: stage one verb+handler pair. Returns 0 when the staging
+  /// table is full (bounded at 4096 live entries); a request staged under
+  /// key 0 then fails `prepare` as InvalidRequest.
   [[nodiscard]] std::uint32_t
   stage(std::string verb,
         std::function<CommandResult(std::string_view)> handler);
+
+  /// Owner-thread: drop a staged entry that will never reach `execute`
+  /// (the submission was refused, or the caller abandoned it).
+  void abandon(std::uint32_t key);
 
   auto prepare(const xanadu::vortex::CellRequest &request,
                xanadu::vortex::OwnerContext &)
@@ -124,11 +131,21 @@ public:
                        xanadu::vortex::IoErrorInfo> override;
 
   /// Decode a terminal `Complete` outcome from this adapter back into a
-  /// `CommandResult`, for `CommandMailbox::publishResult`. Any other
+  /// `CommandResult`, for `CommandMailbox::publishResult`. The reply text
+  /// travels as the outcome's payload range, resolved through @p payloads
+  /// (the same PayloadResolver the service and adapter share). Any other
   /// outcome (Failed/Cancelled/...) decodes to a failed CommandResult
   /// naming the outcome, never a thrown exception or logical failure.
   [[nodiscard]] static CommandResult
-  resultOf(const xanadu::vortex::IoOutcome &outcome);
+  resultOf(const xanadu::vortex::IoOutcome &outcome,
+           xanadu::vortex::PayloadResolver &payloads);
+
+  /// Parse the "OK: "/"ERROR: " reply text both paths write into the
+  /// promise cell. Callers that recovered the reply bytes themselves --
+  /// e.g. by resolving the outcome cell's payload range through
+  /// `outcomeCellPayloadRange` + `PayloadResolver::resolveTransient` -- feed
+  /// the text here before `CommandMailbox::publishResult`.
+  [[nodiscard]] static CommandResult resultFromReply(std::string_view text);
 
 private:
   struct Staged {

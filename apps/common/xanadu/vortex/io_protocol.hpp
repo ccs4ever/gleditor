@@ -62,8 +62,11 @@ struct OpenedEndpoint {
   EndpointCell endpoint;
   CapabilityCell initialCapability;
 };
-using IoResultValue =
-    std::variant<std::monostate, OpenedEndpoint, std::vector<std::byte>>;
+/// Terminal result details that travel inside the outcome itself.
+/// Byte payloads never live here: adapters route produced bytes through
+/// PayloadResolver (publishTransientBytes) and name the retained range in
+/// the outcome's `payload` field instead (plan §3.2, §4).
+using IoResultValue = std::variant<std::monostate, OpenedEndpoint>;
 struct Complete {
   std::optional<PayloadRange> payload;
   IoResultValue value;
@@ -213,7 +216,9 @@ struct BackendReleaseAck {
   PrivateReleaseToken token;
 };
 struct BackendResult {
-  IoOutcome outcome{Failed{{IoErrorCode::BackendFailure, 0}, {}, {}}};
+  IoOutcome outcome{Failed{{IoErrorCode::BackendFailure, 0},
+                           {},
+                           IoProgress{.phase = IoPhase::Terminal}}};
   std::vector<std::byte> staged;
 };
 struct NativeCompletion {

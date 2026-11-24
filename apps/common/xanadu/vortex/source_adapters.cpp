@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <poll.h>
@@ -11,11 +12,20 @@ namespace xanadu::vortex {
 
 namespace {
 
+/// Live staged specs per adapter; a full table refuses new stages (key 0)
+/// rather than evicting an entry an in-flight request still names.
+constexpr std::size_t maxStagedSpecs = 4096;
+
 IoProgress terminalProgress(std::uint64_t transferred) {
   return IoProgress{.acceptedBytes    = transferred,
                     .transferredBytes = transferred,
                     .consumedBytes    = transferred,
                     .phase            = IoPhase::Terminal};
+}
+
+BackendResult failedResult(IoErrorInfo reason, IoProgress progress = {}) {
+  if (progress.phase == IoPhase::Preparing) progress.phase = IoPhase::Terminal;
+  return BackendResult{Failed{reason, {}, progress}, {}};
 }
 
 BackendResult conflictResult(std::uint64_t expected, std::uint64_t observed,
@@ -24,13 +34,33 @@ BackendResult conflictResult(std::uint64_t expected, std::uint64_t observed,
       Conflict{Generation{expected}, Generation{observed}, progress}, {}};
 }
 
+/// Publish @p bytes through the payload channel: the retained range goes
+/// into the outcome the @p makeOutcome lambda builds, and the lease comes
+/// back through @p payload for terminalCandidate. A resolver refusal
+/// becomes a typed Failed outcome instead of silent byte loss.
+inline auto payloadOutcome(PayloadResolver &payloads,
+                           std::vector<std::byte> bytes, IoProgress progress,
+                           std::optional<PayloadLease> &payload,
+                           auto makeOutcome) -> BackendResult {
+  auto lease = publishTransientBytes(payloads, bytes);
+  if (!lease) return failedResult({IoErrorCode::BackendFailure, 0});
+  payload = *lease;
+  return BackendResult{makeOutcome(lease->range, progress), {}};
+}
+
 } // namespace
 
 std::uint32_t StagedByteSourceAdapter::stage(StreamOpSpec spec) {
   const std::lock_guard lock(mutex_);
+  if (staged_.size() >= maxStagedSpecs) return 0;
   const auto key = nextKey_++;
   staged_[key]   = std::move(spec);
   return key;
+}
+
+void StagedByteSourceAdapter::abandon(const std::uint32_t key) {
+  const std::lock_guard lock(mutex_);
+  staged_.erase(key);
 }
 
 auto StagedByteSourceAdapter::prepare(const CellRequest &request,
@@ -46,9 +76,15 @@ auto StagedByteSourceAdapter::prepare(const CellRequest &request,
     spec = it->second;
   }
   const auto current = currentGeneration();
-  if (spec.expectedGeneration != 0 && current != 0 &&
-      spec.expectedGeneration != current)
-    return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
+  if (spec.expectedGeneration != 0) {
+    if (current == 0)
+      // This adapter tracks no generation, so it cannot honour a nonzero
+      // expectation; refuse rather than silently accept it.
+      return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
+    if (spec.expectedGeneration != current)
+      return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
+  }
+  if (const auto refused = validateSpec(spec)) return std::unexpected(*refused);
 
   std::vector<std::byte> bytes(sizeof(key));
   std::memcpy(bytes.data(), &key, sizeof(key));
@@ -62,29 +98,31 @@ void StagedByteSourceAdapter::execute(const BackendCommand &command,
   if (command.operation.bytes.size() >= sizeof(key))
     std::memcpy(&key, command.operation.bytes.data(), sizeof(key));
 
-  std::optional<StreamOpSpec> spec;
-  {
-    const std::lock_guard lock(mutex_);
-    const auto it = staged_.find(key);
-    if (it != staged_.end()) {
-      spec = it->second;
-      staged_.erase(it);
-    }
-  }
-
+  // Everything that can throw -- the spec copy, perform, and the payload
+  // registration inside it -- stays inside this try: execute is noexcept,
+  // so an escaped exception would terminate the worker.
   BackendResult result;
-  if (!spec) {
-    result =
-        BackendResult{Failed{{IoErrorCode::InvalidRequest, 0}, {}, {}}, {}};
-  } else {
-    try {
-      result = perform(*spec, context);
-    } catch (...) {
-      result =
-          BackendResult{Failed{{IoErrorCode::BackendFailure, 0}, {}, {}}, {}};
+  std::optional<PayloadLease> payload;
+  try {
+    std::optional<StreamOpSpec> spec;
+    {
+      const std::lock_guard lock(mutex_);
+      const auto it = staged_.find(key);
+      if (it != staged_.end()) {
+        spec = it->second;
+        staged_.erase(it);
+      }
     }
+    if (!spec) {
+      result = failedResult({IoErrorCode::InvalidRequest, 0});
+    } else {
+      result = perform(*spec, context, payload);
+    }
+  } catch (...) {
+    result = failedResult({IoErrorCode::BackendFailure, 0});
+    payload.reset();
   }
-  sink.terminalCandidate(command.token, std::move(result), {});
+  sink.terminalCandidate(command.token, std::move(result), payload);
   sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
 }
 
@@ -117,7 +155,9 @@ std::uint64_t InMemoryStreamAdapter::currentGeneration() const noexcept {
   return generation_;
 }
 
-auto InMemoryStreamAdapter::perform(const StreamOpSpec &spec, BackendContext &)
+auto InMemoryStreamAdapter::perform(const StreamOpSpec &spec,
+                                    BackendContext &context,
+                                    std::optional<PayloadLease> &payload)
     -> BackendResult {
   const std::lock_guard lock(stateMutex_);
 
@@ -126,7 +166,24 @@ auto InMemoryStreamAdapter::perform(const StreamOpSpec &spec, BackendContext &)
                           IoProgress{.phase = IoPhase::Terminal});
 
   if (spec.kind == StreamOpKind::Write) {
+    // Checked arithmetic and bounded extension: a sparse write must not
+    // resize the buffer to an attacker-chosen offset, and the declared
+    // completion/payload budget bounds the write itself.
+    if (spec.writeBytes.size() > context.budget.maxBytes &&
+        context.budget.maxBytes != 0) {
+      return failedResult({IoErrorCode::BudgetExceeded, 0},
+                          terminalProgress(0));
+    }
+    if (spec.offset > content_.size() &&
+        spec.offset - content_.size() > context.budget.maxBytes &&
+        context.budget.maxBytes != 0) {
+      return failedResult({IoErrorCode::InvalidRequest, 0},
+                          terminalProgress(0));
+    }
     const auto end = spec.offset + spec.writeBytes.size();
+    if (end < spec.offset) // wrapped
+      return failedResult({IoErrorCode::InvalidRequest, 0},
+                          terminalProgress(0));
     if (end > content_.size()) content_.resize(end);
     std::ranges::copy(
         spec.writeBytes,
@@ -144,14 +201,20 @@ auto InMemoryStreamAdapter::perform(const StreamOpSpec &spec, BackendContext &)
 
   const auto available =
       static_cast<std::uint64_t>(content_.size()) - spec.offset;
-  const auto toRead = std::min(spec.length, available);
+  auto toRead = std::min(spec.length, available);
+  if (context.budget.maxBytes != 0)
+    toRead = std::min<std::uint64_t>(toRead, context.budget.maxBytes);
+  if (toRead == 0) return BackendResult{EndOfStream{terminalProgress(0)}, {}};
   std::vector<std::byte> out(
       content_.begin() +
           static_cast<std::vector<std::byte>::difference_type>(spec.offset),
       content_.begin() + static_cast<std::vector<std::byte>::difference_type>(
                              spec.offset + toRead));
-  return BackendResult{Complete{{}, std::move(out), terminalProgress(toRead)},
-                       {}};
+  const auto progress = terminalProgress(toRead);
+  return payloadOutcome(context.payloads, std::move(out), progress, payload,
+                        [progress](const PayloadRange &range, IoProgress) {
+                          return Complete{range, std::monostate{}, progress};
+                        });
 }
 
 // -- ProcessIoAdapter ---------------------------------------------------------
@@ -159,20 +222,40 @@ auto InMemoryStreamAdapter::perform(const StreamOpSpec &spec, BackendContext &)
 ProcessIoAdapter::ProcessIoAdapter(std::string command)
     : command_(std::move(command)) {}
 
-auto ProcessIoAdapter::perform(const StreamOpSpec &spec, BackendContext &)
+auto ProcessIoAdapter::validateSpec(const StreamOpSpec &spec) const
+    -> std::optional<IoErrorInfo> {
+  // A spawned process has no seekable offset; refuse before admission
+  // rather than silently ignoring it.
+  if (spec.offset != 0) return IoErrorInfo{IoErrorCode::InvalidRequest, 0};
+  return std::nullopt;
+}
+
+auto ProcessIoAdapter::perform(const StreamOpSpec &spec,
+                               BackendContext &context,
+                               std::optional<PayloadLease> &payload)
     -> BackendResult {
   if (spec.kind != StreamOpKind::Read)
-    return BackendResult{Failed{{IoErrorCode::Unsupported, 0}, {}, {}}, {}};
+    return failedResult({IoErrorCode::Unsupported, 0});
+  if (spec.offset != 0) return failedResult({IoErrorCode::InvalidRequest, 0});
 
   FILE *pipe = ::popen(command_.c_str(), "r");
-  if (pipe == nullptr)
-    return BackendResult{Failed{{IoErrorCode::BackendFailure, 0}, {}, {}}, {}};
+  if (pipe == nullptr) return failedResult({IoErrorCode::BackendFailure, 0});
 
   std::vector<std::byte> out;
-  const auto limit =
+  auto limit =
       spec.length > 0 ? spec.length : static_cast<std::uint64_t>(1 << 20);
+  if (context.budget.maxBytes != 0)
+    limit = std::min<std::uint64_t>(limit, context.budget.maxBytes);
   std::array<char, 4096> buffer{};
+  bool cancelled = false;
   while (out.size() < limit) {
+    // popen cannot be killed mid-read (see the header note), so stop is
+    // honored between chunks: the child may run to completion, but the
+    // captured prefix still publishes as retained bytes.
+    if (context.stop.stop_requested()) {
+      cancelled = true;
+      break;
+    }
     const auto toRead =
         std::min<std::size_t>(buffer.size(), limit - out.size());
     const auto read = std::fread(buffer.data(), 1, toRead, pipe);
@@ -181,31 +264,86 @@ auto ProcessIoAdapter::perform(const StreamOpSpec &spec, BackendContext &)
     out.insert(out.end(), bytes, bytes + read);
   }
   const auto exitStatus = ::pclose(pipe);
-  if (exitStatus != 0 && out.empty())
-    return BackendResult{Failed{{IoErrorCode::BackendFailure,
-                                 static_cast<std::uint32_t>(exitStatus)},
-                                {},
-                                {}},
-                         {}};
-  return BackendResult{
-      Complete{{}, std::move(out), terminalProgress(out.size())}, {}};
+  const auto progress   = terminalProgress(out.size());
+  if (cancelled) {
+    if (out.empty()) return BackendResult{Cancelled{{}, progress, false}, {}};
+    return payloadOutcome(context.payloads, std::move(out), progress, payload,
+                          [progress](const PayloadRange &range, IoProgress) {
+                            return Cancelled{range, progress, false};
+                          });
+  }
+  if (exitStatus != 0) {
+    // A nonzero exit is a backend failure; retained output still publishes
+    // so the caller sees how much the child produced before failing.
+    if (out.empty())
+      return failedResult(
+          {IoErrorCode::BackendFailure, static_cast<std::uint32_t>(exitStatus)},
+          progress);
+    return payloadOutcome(context.payloads, std::move(out), progress, payload,
+                          [progress](const PayloadRange &range, IoProgress) {
+                            return Partial{range, PartialCause::BackendFailure,
+                                           progress};
+                          });
+  }
+  if (out.empty()) return BackendResult{EndOfStream{progress}, {}};
+  return payloadOutcome(context.payloads, std::move(out), progress, payload,
+                        [progress](const PayloadRange &range, IoProgress) {
+                          return Complete{range, std::monostate{}, progress};
+                        });
 }
 
 // -- NetIoAdapter
 // --------------------------------------------------------------
 
-auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context)
+auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context,
+                           std::optional<PayloadLease> &payload)
     -> BackendResult {
+  // One descriptor, one flight: concurrent ops on this adapter would
+  // interleave reads and writes on the same stream, so they serialize.
+  const std::lock_guard ioLock(ioMutex_);
+
   if (spec.kind == StreamOpKind::Write) {
     std::size_t sent{};
     while (sent < spec.writeBytes.size()) {
       if (context.stop.stop_requested())
-        return BackendResult{Cancelled{{}, {}, true}, {}};
+        return BackendResult{Cancelled{{},
+                                       IoProgress{.transferredBytes = sent,
+                                                  .phase = IoPhase::Terminal},
+                                       true},
+                             {}};
+      // Poll for writability first: a blocking ::write on a full socket
+      // would ignore context.stop and the request's deadline entirely.
+      pollfd pfd{fd_, POLLOUT, 0};
+      const auto ready = ::poll(&pfd, 1, 200);
+      if (ready < 0) {
+        if (errno == EINTR) continue;
+        return failedResult(
+            {IoErrorCode::BackendFailure, static_cast<std::uint32_t>(errno)},
+            terminalProgress(sent));
+      }
+      if (ready == 0) {
+        // Write window expired; bytes already sent may have landed, so the
+        // partial transfer is uncertain.
+        return BackendResult{TimedOut{{},
+                                      IoProgress{.transferredBytes = sent,
+                                                 .phase = IoPhase::Terminal},
+                                      sent != 0},
+                             {}};
+      }
+      if (pfd.revents & (POLLERR | POLLNVAL))
+        return failedResult({IoErrorCode::BackendFailure, 0},
+                            terminalProgress(sent));
       const auto result = ::write(fd_, spec.writeBytes.data() + sent,
                                   spec.writeBytes.size() - sent);
-      if (result <= 0)
-        return BackendResult{Failed{{IoErrorCode::BackendFailure, 0}, {}, {}},
-                             {}};
+      if (result < 0) {
+        if (errno == EINTR) continue;
+        return failedResult(
+            {IoErrorCode::BackendFailure, static_cast<std::uint32_t>(errno)},
+            terminalProgress(sent));
+      }
+      if (result == 0)
+        return failedResult({IoErrorCode::BackendFailure, 0},
+                            terminalProgress(sent));
       sent += static_cast<std::size_t>(result);
     }
     return BackendResult{Complete{{}, std::monostate{}, terminalProgress(sent)},
@@ -213,23 +351,69 @@ auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context)
   }
 
   std::vector<std::byte> out;
-  const auto limit =
+  auto limit =
       spec.length > 0 ? spec.length : static_cast<std::uint64_t>(65536);
+  if (context.budget.maxBytes != 0)
+    limit = std::min<std::uint64_t>(limit, context.budget.maxBytes);
   std::array<char, 4096> buffer{};
+  bool timedOut = false;
   while (out.size() < limit) {
+    if (context.stop.stop_requested()) break;
     pollfd pfd{fd_, POLLIN, 0};
     const auto ready = ::poll(&pfd, 1, 200);
-    if (ready <= 0 || context.stop.stop_requested()) break;
+    if (ready < 0) {
+      if (errno == EINTR) continue;
+      return failedResult(
+          {IoErrorCode::BackendFailure, static_cast<std::uint32_t>(errno)},
+          terminalProgress(out.size()));
+    }
+    if (ready == 0) {
+      // Poll timeout is not EOF: the peer may simply be idle. Retained
+      // bytes still publish; an empty read reports TimedOut, not
+      // EndOfStream.
+      timedOut = true;
+      break;
+    }
+    if (pfd.revents & (POLLERR | POLLNVAL))
+      return failedResult({IoErrorCode::BackendFailure, 0},
+                          terminalProgress(out.size()));
+    // POLLHUP still reaches read() (which then reports EOF); POLLPRI alone
+    // would leave a blocking read waiting, so re-poll instead.
+    if ((pfd.revents & (POLLIN | POLLHUP)) == 0) continue;
     const auto toRead =
         std::min<std::size_t>(buffer.size(), limit - out.size());
     const auto received = ::read(fd_, buffer.data(), toRead);
-    if (received <= 0) break;
+    if (received < 0) {
+      if (errno == EINTR) continue;
+      return failedResult(
+          {IoErrorCode::BackendFailure, static_cast<std::uint32_t>(errno)},
+          terminalProgress(out.size()));
+    }
+    if (received == 0) break; // orderly EOF
     const auto *bytes = reinterpret_cast<const std::byte *>(buffer.data());
     out.insert(out.end(), bytes, bytes + received);
   }
-  if (out.empty()) return BackendResult{EndOfStream{terminalProgress(0)}, {}};
-  return BackendResult{
-      Complete{{}, std::move(out), terminalProgress(out.size())}, {}};
+
+  const auto progress = terminalProgress(out.size());
+  if (context.stop.stop_requested()) {
+    if (out.empty()) return BackendResult{Cancelled{{}, progress, false}, {}};
+    return payloadOutcome(context.payloads, std::move(out), progress, payload,
+                          [progress](const PayloadRange &range, IoProgress) {
+                            return Cancelled{range, progress, false};
+                          });
+  }
+  if (timedOut) {
+    if (out.empty()) return BackendResult{TimedOut{{}, progress, false}, {}};
+    return payloadOutcome(context.payloads, std::move(out), progress, payload,
+                          [progress](const PayloadRange &range, IoProgress) {
+                            return TimedOut{range, progress, false};
+                          });
+  }
+  if (out.empty()) return BackendResult{EndOfStream{progress}, {}};
+  return payloadOutcome(context.payloads, std::move(out), progress, payload,
+                        [progress](const PayloadRange &range, IoProgress) {
+                          return Complete{range, std::monostate{}, progress};
+                        });
 }
 
 // -- UnionSourceAdapter -------------------------------------------------------
@@ -237,7 +421,14 @@ auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context)
 auto UnionSourceAdapter::prepare(const CellRequest &request,
                                  OwnerContext &context)
     -> std::expected<PreparedOperation, IoErrorInfo> {
-  const auto index = select_ ? select_(request) : 0;
+  std::size_t index = 0;
+  try {
+    index = select_ ? select_(request) : 0;
+  } catch (...) {
+    // A throwing selector must not escape prepare() into IoService::admit;
+    // convert it to the same typed refusal an out-of-range index gets.
+    return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+  }
   if (index >= members_.size() || members_[index] == nullptr)
     return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
 
@@ -267,7 +458,10 @@ void UnionSourceAdapter::execute(const BackendCommand &command,
   if (index >= members_.size() || members_[index] == nullptr) {
     sink.terminalCandidate(
         command.token,
-        BackendResult{Failed{{IoErrorCode::InvalidRequest, 0}, {}, {}}, {}},
+        BackendResult{Failed{{IoErrorCode::InvalidRequest, 0},
+                             {},
+                             IoProgress{.phase = IoPhase::Terminal}},
+                      {}},
         {});
     // The request was already admitted, so the reserved terminal slot
     // needs its release acknowledgement or the completion never
@@ -291,13 +485,18 @@ auto UnionSourceAdapter::publish(const NativeCompletion &completion,
   {
     const std::lock_guard lock(routeMutex_);
     const auto it = route_.find(completion.token.value);
-    if (it == route_.end())
-      return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+    if (it == route_.end()) {
+      // No route means execute() never ran for this token -- the scheduler
+      // cancelled it before dispatch. The completion already carries the
+      // correct terminal outcome (e.g. Cancelled); forwarding it unchanged
+      // keeps a pre-start cancel from being rewritten to Failed.
+      return OwnerPublication{completion.result.outcome};
+    }
     index = it->second;
     route_.erase(it);
   }
   if (index >= members_.size() || members_[index] == nullptr)
-    return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+    return OwnerPublication{completion.result.outcome};
   return members_[index]->publish(completion, context);
 }
 

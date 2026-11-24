@@ -170,9 +170,10 @@ public:
         [token](const auto &entry) { return entry.command.token == token; });
     return it == entries.end() ? nullptr : &*it;
   }
-  void candidate(PrivateRequestToken token, IoOutcome outcome) {
+  void candidate(PrivateRequestToken token, IoOutcome outcome,
+                 std::vector<std::byte> staged = {}) {
     find(token)->sink->terminalCandidate(
-        token, BackendResult{std::move(outcome), {}}, {});
+        token, BackendResult{std::move(outcome), std::move(staged)}, {});
   }
   void acknowledge(PrivateRequestToken token) {
     find(token)->sink->releaseAcknowledged({PrivateReleaseToken{token}});
@@ -709,8 +710,10 @@ TEST(IoServiceTest, OversizedCompletionBecomesTypedBudgetFailure) {
   const auto request                 = harness.submit();
   const auto token                   = tokenOf(*harness.scheduler);
 
-  harness.scheduler->candidate(token,
-                               Complete{{}, std::vector<std::byte>(3), {}});
+  // The completion bound sees the worker->owner `staged` channel; outcome
+  // payload bytes are bounded separately by payloadBoundBytes.
+  harness.scheduler->candidate(token, Complete{{}, {}, {}},
+                               std::vector<std::byte>(3));
   harness.scheduler->acknowledge(token);
   static_cast<void>(harness.service.pump(8));
 

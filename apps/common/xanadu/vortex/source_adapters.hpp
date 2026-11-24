@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -57,8 +58,17 @@ public:
 
   /// Owner-thread: stage one operation's bounded arguments and return the
   /// key to place in the request's `specification` cell/value before
-  /// calling `IoService::submit`.
+  /// calling `IoService::submit`. Returns 0 when the staging table is full
+  /// (bounded at 4096 live specs); a request staged under key 0 then fails
+  /// `prepare` as InvalidRequest. Keys are never recycled within the
+  /// adapter's lifetime; the 32-bit wrap is a documented M4 limit.
   [[nodiscard]] std::uint32_t stage(StreamOpSpec spec);
+
+  /// Owner-thread: drop a staged spec that will never reach `execute`
+  /// (the submission was refused, or the caller abandoned it). Bounds the
+  /// staging table against stage-without-submit leaks; a no-op for unknown
+  /// or already-consumed keys.
+  void abandon(std::uint32_t key);
 
   auto prepare(const CellRequest &request, OwnerContext &context)
       -> std::expected<PreparedOperation, IoErrorInfo> final;
@@ -68,12 +78,28 @@ public:
 protected:
   /// Off-owner transfer. Implementations must not block unboundedly; honor
   /// `context.stop`. Never touches cells or `OwnerContext`.
-  virtual auto perform(const StreamOpSpec &spec, BackendContext &context)
+  ///
+  /// Byte output goes through the payload channel, not `IoResultValue`:
+  /// publish produced bytes with `publishTransientBytes(context.payloads,
+  /// ...)`, put `lease->range` in the outcome's payload field, and assign
+  /// the lease to @p payload so `execute` can hand it to
+  /// `CompletionSink::terminalCandidate`. Leave @p payload disengaged for
+  /// outcomes that carry no bytes.
+  virtual auto perform(const StreamOpSpec &spec, BackendContext &context,
+                       std::optional<PayloadLease> &payload)
       -> BackendResult = 0;
-  /// 0 means "no generation tracked"; the base class then skips both the
-  /// prepare-time Stale check and leaves Conflict detection to `perform`.
+  /// 0 means "no generation tracked"; the base class then refuses a
+  /// nonzero `expectedGeneration` at prepare (it cannot verify one) and
+  /// leaves Conflict detection to `perform`.
   [[nodiscard]] virtual std::uint64_t currentGeneration() const noexcept {
     return 0;
+  }
+  /// Optional owner-thread pre-admission check on the staged spec, run by
+  /// `prepare` after the generation gate. Return an IoErrorInfo to refuse
+  /// the request before admission; nullopt accepts.
+  [[nodiscard]] virtual std::optional<IoErrorInfo>
+  validateSpec(const StreamOpSpec &) const {
+    return std::nullopt;
   }
 
 private:
@@ -99,8 +125,8 @@ public:
   [[nodiscard]] std::vector<std::byte> content() const;
 
 protected:
-  auto perform(const StreamOpSpec &spec, BackendContext &context)
-      -> BackendResult override;
+  auto perform(const StreamOpSpec &spec, BackendContext &context,
+               std::optional<PayloadLease> &payload) -> BackendResult override;
   [[nodiscard]] std::uint64_t currentGeneration() const noexcept override;
 
 private:
@@ -112,7 +138,10 @@ private:
 /// Runs one external process per staged read and captures bounded stdout
 /// bytes. `d.io.kind` "process". There is no stable content generation for
 /// a spawned process, so generation checks are disabled (every staged
-/// operation spawns its own process instance).
+/// operation spawns its own process instance) and nonzero offsets are
+/// refused at prepare. Known M4 limit: `popen` output cannot be killed
+/// mid-read, so `context.stop` is honored only between `fread` chunks and
+/// a cancelled read may still run the child to completion.
 class ProcessIoAdapter final : public StagedByteSourceAdapter {
 public:
   /// `command` is passed to the shell (`popen`), matching the host-I/O
@@ -122,8 +151,10 @@ public:
   explicit ProcessIoAdapter(std::string command);
 
 protected:
-  auto perform(const StreamOpSpec &spec, BackendContext &context)
-      -> BackendResult override;
+  auto perform(const StreamOpSpec &spec, BackendContext &context,
+               std::optional<PayloadLease> &payload) -> BackendResult override;
+  [[nodiscard]] std::optional<IoErrorInfo>
+  validateSpec(const StreamOpSpec &spec) const override;
 
 private:
   std::string command_;
@@ -131,18 +162,22 @@ private:
 
 /// A loopback network source over a caller-provided, already-connected
 /// socket file descriptor (e.g. one end of `socketpair(2)`). `d.io.kind`
-/// "net". The adapter does not own connection setup; it performs bounded
-/// `read`/`write` against the descriptor it is given.
+/// "net". The adapter does not own connection setup or the descriptor's
+/// lifetime -- the caller keeps the fd open until every staged operation
+/// has terminated. All operations on one adapter instance serialize on a
+/// single-flight mutex because they share that one descriptor; run
+/// concurrent streams on separate adapter instances (one fd each).
 class NetIoAdapter final : public StagedByteSourceAdapter {
 public:
   explicit NetIoAdapter(int fd) noexcept : fd_(fd) {}
 
 protected:
-  auto perform(const StreamOpSpec &spec, BackendContext &context)
-      -> BackendResult override;
+  auto perform(const StreamOpSpec &spec, BackendContext &context,
+               std::optional<PayloadLease> &payload) -> BackendResult override;
 
 private:
   int fd_;
+  std::mutex ioMutex_;
 };
 
 /// Delegates every call to an underlying adapter unchanged, preserving the

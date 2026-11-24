@@ -244,10 +244,10 @@ auto addOutcomeDetails(ArenaManifold &arena, const IoCellSchema &schema,
         using T = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<T, Complete>) {
           const auto *opened = std::get_if<OpenedEndpoint>(&value.value);
+          // monostate carries no inline details; byte output travels only
+          // through the outcome's payload range, never IoResultValue.
           if (opened == nullptr) {
-            const auto *bytes =
-                std::get_if<std::vector<std::byte>>(&value.value);
-            return bytes == nullptr || bytes->empty();
+            return true;
           }
           const auto endpointTag = ioCellTag(arena, opened->endpoint.cell,
                                              opened->endpoint.incarnation);

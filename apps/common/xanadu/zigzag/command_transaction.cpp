@@ -80,27 +80,39 @@ CellRef CommandMailbox::submitTransaction(
 CellRef CommandMailbox::beginTransaction(ArenaManifold &manifold,
                                          const CellRef targetCell,
                                          const std::string_view verb) {
-  // Ensure dimensions exist
-  const DimRef dTarget = manifold.ensureDimension("d.target");
-  const DimRef dAction = manifold.ensureDimension("d.action");
-  const DimRef dReply  = manifold.ensureDimension("d.reply");
+  // The three mints and three links are one logical step: a mid-sequence
+  // failure (expectWritten throws, or the arena refuses) must roll the
+  // whole mint back rather than leak a partial transaction graph.
+  const auto mark = manifold.mark();
+  try {
+    // Ensure dimensions exist
+    const DimRef dTarget = manifold.ensureDimension("d.target");
+    const DimRef dAction = manifold.ensureDimension("d.action");
+    const DimRef dReply  = manifold.ensureDimension("d.reply");
 
-  // Mint transaction cell
-  const CellRef txCell = manifold.makeCell("tx");
+    // Mint transaction cell
+    const CellRef txCell = manifold.makeCell("tx");
 
-  // Mint action cell holding the command string
-  const CellRef actionCell = manifold.makeCell(verb);
+    // Mint action cell holding the command string
+    const CellRef actionCell = manifold.makeCell(verb);
 
-  // Mint promise cell; "pending" is what queryPromise reports until
-  // publishResult (sync path or staged IoService publication) fills it.
-  const CellRef promiseCell = manifold.makeCell("pending");
+    // Mint promise cell; "pending" is what queryPromise reports until
+    // publishResult (sync path or staged IoService publication) fills it.
+    const CellRef promiseCell = manifold.makeCell("pending");
 
-  // Link transaction edges
-  expectWritten(manifold.link(txCell, dTarget, DimVector::POS, targetCell));
-  expectWritten(manifold.link(txCell, dAction, DimVector::POS, actionCell));
-  expectWritten(manifold.link(txCell, dReply, DimVector::POS, promiseCell));
+    // Link transaction edges
+    expectWritten(manifold.link(txCell, dTarget, DimVector::POS, targetCell));
+    expectWritten(manifold.link(txCell, dAction, DimVector::POS, actionCell));
+    expectWritten(manifold.link(txCell, dReply, DimVector::POS, promiseCell));
 
-  return promiseCell;
+    if (!manifold.discard(mark)) {
+      throw std::runtime_error("beginTransaction: arena refused mark discard");
+    }
+    return promiseCell;
+  } catch (...) {
+    static_cast<void>(manifold.release(mark));
+    throw;
+  }
 }
 
 void CommandMailbox::publishResult(ArenaManifold &manifold,
@@ -135,12 +147,36 @@ CommandMailbox::queryPromise(const ArenaManifold &manifold,
 
 // -- CommandMailboxAdapter ----------------------------------------------------
 
+namespace {
+
+/// Live staged commands per adapter; a full table refuses new stages
+/// (key 0) rather than evicting an entry an in-flight request still names.
+constexpr std::size_t maxStagedCommands = 4096;
+
+xanadu::vortex::BackendResult
+mailboxFailed(xanadu::vortex::IoErrorInfo reason) {
+  return xanadu::vortex::BackendResult{
+      xanadu::vortex::Failed{reason,
+                             {},
+                             xanadu::vortex::IoProgress{
+                                 .phase = xanadu::vortex::IoPhase::Terminal}},
+      {}};
+}
+
+} // namespace
+
 std::uint32_t CommandMailboxAdapter::stage(
     std::string verb, std::function<CommandResult(std::string_view)> handler) {
   const std::lock_guard lock(mutex_);
+  if (staged_.size() >= maxStagedCommands) return 0;
   const auto key = nextKey_++;
   staged_[key]   = Staged{std::move(verb), std::move(handler)};
   return key;
+}
+
+void CommandMailboxAdapter::abandon(const std::uint32_t key) {
+  const std::lock_guard lock(mutex_);
+  staged_.erase(key);
 }
 
 auto CommandMailboxAdapter::prepare(const xanadu::vortex::CellRequest &request,
@@ -164,7 +200,7 @@ auto CommandMailboxAdapter::prepare(const xanadu::vortex::CellRequest &request,
 
 void CommandMailboxAdapter::execute(
     const xanadu::vortex::BackendCommand &command,
-    xanadu::vortex::BackendContext &,
+    xanadu::vortex::BackendContext &context,
     xanadu::vortex::CompletionSink &sink) noexcept {
   std::uint32_t key{};
   if (command.operation.bytes.size() >= sizeof(key))
@@ -184,45 +220,54 @@ void CommandMailboxAdapter::execute(
     }
   }
 
-  if (!found) {
-    sink.terminalCandidate(
-        command.token,
-        xanadu::vortex::BackendResult{
-            xanadu::vortex::Failed{
-                {xanadu::vortex::IoErrorCode::InvalidRequest, 0}, {}, {}},
-            {}},
-        {});
-    sink.releaseAcknowledged(
-        {xanadu::vortex::PrivateReleaseToken{command.token}});
-    return;
-  }
-
-  // The handler runs off-owner and must not touch ArenaManifold; its
-  // CommandResult is frozen into the Complete payload the owner later
-  // decodes with resultOf and publishes through publishResult.
-  CommandResult result{.success = false, .response = "Unhandled action"};
+  // Everything that can throw -- the handler, payload registration --
+  // stays inside this try: execute is noexcept, so an escaped exception
+  // would terminate the worker.
+  xanadu::vortex::BackendResult backend;
+  std::optional<xanadu::vortex::PayloadLease> payloadLease;
   try {
-    if (staged.handler) {
-      result = staged.handler(staged.verb);
+    if (!found) {
+      backend = mailboxFailed({xanadu::vortex::IoErrorCode::InvalidRequest, 0});
+    } else {
+      // The handler runs off-owner and must not touch ArenaManifold; its
+      // CommandResult freezes into reply bytes that publish through the
+      // payload channel -- the outcome names the retained range and the
+      // lease reaches terminalCandidate, so publishTerminal can bind it.
+      CommandResult result{.success = false, .response = "Unhandled action"};
+      try {
+        if (staged.handler) {
+          result = staged.handler(staged.verb);
+        }
+      } catch (const std::exception &e) {
+        result = CommandResult{.success = false,
+                               .response =
+                                   std::string("handler threw: ") + e.what()};
+      } catch (...) {
+        result = CommandResult{.success = false, .response = "handler threw"};
+      }
+
+      const auto reply = bytesOf(replyTextOf(result));
+      const auto lease =
+          xanadu::vortex::publishTransientBytes(context.payloads, reply);
+      if (!lease) {
+        backend =
+            mailboxFailed({xanadu::vortex::IoErrorCode::BackendFailure, 0});
+      } else {
+        payloadLease = *lease;
+        backend      = xanadu::vortex::BackendResult{
+            xanadu::vortex::Complete{
+                lease->range, std::monostate{},
+                xanadu::vortex::IoProgress{
+                         .phase = xanadu::vortex::IoPhase::Terminal}},
+                 {}};
+      }
     }
-  } catch (const std::exception &e) {
-    result =
-        CommandResult{.success  = false,
-                      .response = std::string("handler threw: ") + e.what()};
   } catch (...) {
-    result = CommandResult{.success = false, .response = "handler threw"};
+    backend = mailboxFailed({xanadu::vortex::IoErrorCode::BackendFailure, 0});
+    payloadLease.reset();
   }
 
-  sink.terminalCandidate(
-      command.token,
-      xanadu::vortex::BackendResult{
-          xanadu::vortex::Complete{
-              {},
-              bytesOf(replyTextOf(result)),
-              xanadu::vortex::IoProgress{
-                  .phase = xanadu::vortex::IoPhase::Terminal}},
-          {}},
-      {});
+  sink.terminalCandidate(command.token, std::move(backend), payloadLease);
   sink.releaseAcknowledged(
       {xanadu::vortex::PrivateReleaseToken{command.token}});
 }
@@ -236,7 +281,21 @@ auto CommandMailboxAdapter::publish(
 }
 
 CommandResult
-CommandMailboxAdapter::resultOf(const xanadu::vortex::IoOutcome &outcome) {
+CommandMailboxAdapter::resultFromReply(const std::string_view text) {
+  if (text.starts_with("OK: ")) {
+    return CommandResult{.success  = true,
+                         .response = std::string(text.substr(4))};
+  }
+  if (text.starts_with("ERROR: ")) {
+    return CommandResult{.success  = false,
+                         .response = std::string(text.substr(7))};
+  }
+  return CommandResult{.success = false, .response = std::string(text)};
+}
+
+CommandResult
+CommandMailboxAdapter::resultOf(const xanadu::vortex::IoOutcome &outcome,
+                                xanadu::vortex::PayloadResolver &payloads) {
   const auto *complete = std::get_if<xanadu::vortex::Complete>(&outcome);
   if (complete == nullptr) {
     // A non-Complete terminal outcome is a failed command, never a
@@ -245,22 +304,29 @@ CommandMailboxAdapter::resultOf(const xanadu::vortex::IoOutcome &outcome) {
                          .response = std::string("io outcome ") +
                                      std::string(outcomeName(outcome))};
   }
-  const auto *bytes = std::get_if<std::vector<std::byte>>(&complete->value);
-  if (bytes == nullptr) {
+  if (!complete->payload) {
     return CommandResult{.success = false, .response = "empty command result"};
+  }
+  // The reply text is the retained payload range; resolve it through the
+  // shared resolver (the source stays registered for exactly this read).
+  auto lease = payloads.resolveTransient(*complete->payload);
+  if (!lease) {
+    return CommandResult{.success  = false,
+                         .response = "unresolved command payload"};
+  }
+  const auto bytes =
+      payloads.read(*lease, 0, static_cast<std::size_t>(lease->range.length));
+  payloads.release(lease->lease);
+  if (!bytes) {
+    return CommandResult{.success  = false,
+                         .response = "unreadable command payload"};
   }
   std::string text;
   text.reserve(bytes->size());
   for (const auto b : *bytes) {
     text.push_back(static_cast<char>(b));
   }
-  if (text.starts_with("OK: ")) {
-    return CommandResult{.success = true, .response = text.substr(4)};
-  }
-  if (text.starts_with("ERROR: ")) {
-    return CommandResult{.success = false, .response = text.substr(7)};
-  }
-  return CommandResult{.success = false, .response = text};
+  return resultFromReply(text);
 }
 
 } // namespace zigzag

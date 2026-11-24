@@ -144,6 +144,12 @@ public:
   /// callers.
   [[nodiscard]] std::uint32_t stageStableRead(MediaRange range);
 
+  /// Owner-thread: drop a staged op that will never reach `execute` (the
+  /// submission was refused, or the caller abandoned it). The staging
+  /// table is bounded at 4096 live ops; `stage*` returns 0 when full and a
+  /// request staged under key 0 then fails `prepare` as InvalidRequest.
+  void abandon(std::uint32_t key);
+
   auto prepare(const CellRequest &request, OwnerContext &context)
       -> std::expected<PreparedOperation, IoErrorInfo> override;
   void execute(const BackendCommand &command, BackendContext &context,

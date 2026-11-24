@@ -32,19 +32,29 @@ std::string textOf(const std::vector<std::byte> &bytes) {
 
 struct CapturingSink final : CompletionSink {
   void progress(PrivateRequestToken, IoProgress) noexcept override {}
-  void terminalCandidate(PrivateRequestToken, BackendResult result,
-                         std::optional<PayloadLease>) noexcept override {
-    candidate = std::move(result);
+  void
+  terminalCandidate(PrivateRequestToken, BackendResult result,
+                    std::optional<PayloadLease> payload) noexcept override {
+    candidate    = std::move(result);
+    payloadLease = std::move(payload);
   }
   void releaseAcknowledged(BackendReleaseAck ack) noexcept override {
     released = ack;
   }
   std::optional<BackendResult> candidate;
+  std::optional<PayloadLease> payloadLease;
   std::optional<BackendReleaseAck> released;
 };
 
 BackendContext makeContext(PayloadResolver &payloads) {
   return BackendContext{.stop = {}, .payloads = payloads, .budget = {1 << 20}};
+}
+
+/// Read every byte a terminal outcome's payload lease retains. Byte output
+/// travels the payload channel (design §3.2), never IoResultValue.
+std::expected<std::vector<std::byte>, IoError>
+readPayload(PayloadResolver &payloads, const PayloadLease &lease) {
+  return payloads.read(lease, 0, static_cast<std::size_t>(lease.range.length));
 }
 
 constexpr AdapterKey streamKey{1, 1};
@@ -79,8 +89,9 @@ TEST(StreamSourceAdapterTest, ReadSucceedsAndMatchesStagedGeneration) {
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
   ASSERT_NE(complete, nullptr);
-  const auto *bytes = std::get_if<std::vector<std::byte>>(&complete->value);
-  ASSERT_NE(bytes, nullptr);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "hello");
   ASSERT_TRUE(sink.released);
 
@@ -174,18 +185,29 @@ TEST(ProcessIoAdapterTest, CapturesBoundedChildStdout) {
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
   ASSERT_NE(complete, nullptr);
-  const auto *bytes = std::get_if<std::vector<std::byte>>(&complete->value);
-  ASSERT_NE(bytes, nullptr);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "hello");
 }
 
 // -- net adapter (loopback socketpair; real syscalls, off the owner thread) --
 
+/// socketpair(2) ends closed on every exit path, including ASSERT aborts.
+struct SocketPair {
+  int fds[2]{-1, -1};
+  ~SocketPair() {
+    for (const int fd : fds) {
+      if (fd >= 0) ::close(fd);
+    }
+  }
+};
+
 TEST(NetIoAdapterTest, RoundTripsBytesOverAConnectedSocketPair) {
-  int fds[2]{};
-  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
-  NetIoAdapter writer(fds[0]);
-  NetIoAdapter reader(fds[1]);
+  SocketPair pair;
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair.fds), 0);
+  NetIoAdapter writer(pair.fds[0]);
+  NetIoAdapter reader(pair.fds[1]);
   OwnerContext owner;
   PayloadResolver payloads;
   auto context = makeContext(payloads);
@@ -212,12 +234,10 @@ TEST(NetIoAdapterTest, RoundTripsBytesOverAConnectedSocketPair) {
   ASSERT_TRUE(readSink.candidate);
   const auto *complete = std::get_if<Complete>(&readSink.candidate->outcome);
   ASSERT_NE(complete, nullptr);
-  const auto *bytes = std::get_if<std::vector<std::byte>>(&complete->value);
-  ASSERT_NE(bytes, nullptr);
+  ASSERT_TRUE(readSink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *readSink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "ping");
-
-  ::close(fds[0]);
-  ::close(fds[1]);
 }
 
 // -- Router/Union composition does not resubmit -----------------------------
@@ -298,9 +318,8 @@ TEST(UnionSourceAdapterTest, SelectsOneMemberAndDoesNotSubmitToTheOther) {
 
 TEST(UnionSourceAdapterTest, UnknownMemberIndexRefusesBeforeAdmission) {
   CountingAdapter only;
-  UnionSourceAdapter adapterUnion({&only}, [](const CellRequest &) {
-    return static_cast<std::size_t>(5);
-  });
+  UnionSourceAdapter adapterUnion(
+      {&only}, [](const CellRequest &) { return static_cast<std::size_t>(5); });
   OwnerContext owner;
   const auto prepared = adapterUnion.prepare(requestFor(streamKey, 0), owner);
   ASSERT_FALSE(prepared);

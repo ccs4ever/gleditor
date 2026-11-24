@@ -11,11 +11,20 @@ namespace xanadu::vortex {
 
 namespace {
 
+/// Live staged ops per adapter; a full table refuses new stages (key 0)
+/// rather than evicting an entry an in-flight request still names.
+constexpr std::size_t maxStagedOps = 4096;
+
 IoProgress terminalProgress(std::uint64_t transferred) {
   return IoProgress{.acceptedBytes    = transferred,
                     .transferredBytes = transferred,
                     .consumedBytes    = transferred,
                     .phase            = IoPhase::Terminal};
+}
+
+BackendResult failedResult(IoErrorInfo reason, IoProgress progress = {}) {
+  if (progress.phase == IoPhase::Preparing) progress.phase = IoPhase::Terminal;
+  return BackendResult{Failed{reason, {}, progress}, {}};
 }
 
 /// `stat` combines size and mtime into one opaque generation value. This
@@ -69,6 +78,7 @@ auto FileSourceAdapter::probeCapabilities() const
 std::uint32_t FileSourceAdapter::stageRead(MediaRange range,
                                            std::uint64_t expectedGeneration) {
   const std::lock_guard lock(mutex_);
+  if (staged_.size() >= maxStagedOps) return 0;
   const auto key = nextStageKey_++;
   staged_[key] =
       StagedFileOp{StagedFileOp::Kind::Read, range, {}, expectedGeneration};
@@ -79,6 +89,7 @@ std::uint32_t FileSourceAdapter::stageWrite(std::uint64_t offset,
                                             std::vector<std::byte> bytes,
                                             std::uint64_t expectedGeneration) {
   const std::lock_guard lock(mutex_);
+  if (staged_.size() >= maxStagedOps) return 0;
   const auto key = nextStageKey_++;
   staged_[key] =
       StagedFileOp{StagedFileOp::Kind::Write,
@@ -89,9 +100,15 @@ std::uint32_t FileSourceAdapter::stageWrite(std::uint64_t offset,
 
 std::uint32_t FileSourceAdapter::stageStableRead(MediaRange range) {
   const std::lock_guard lock(mutex_);
+  if (staged_.size() >= maxStagedOps) return 0;
   const auto key = nextStageKey_++;
   staged_[key]   = StagedFileOp{StagedFileOp::Kind::StableRead, range, {}, 0};
   return key;
+}
+
+void FileSourceAdapter::abandon(const std::uint32_t key) {
+  const std::lock_guard lock(mutex_);
+  staged_.erase(key);
 }
 
 auto FileSourceAdapter::prepare(const CellRequest &request, OwnerContext &)
@@ -119,9 +136,14 @@ auto FileSourceAdapter::prepare(const CellRequest &request, OwnerContext &)
     return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
 
   const auto current = statGeneration();
-  if (op.expectedGeneration != 0 && current != 0 &&
-      op.expectedGeneration != current)
-    return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
+  if (op.expectedGeneration != 0) {
+    if (current == 0)
+      // stat failed, so no generation can be verified; refuse rather than
+      // silently accept the staged expectation.
+      return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
+    if (op.expectedGeneration != current)
+      return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
+  }
 
   std::vector<std::byte> bytes(sizeof(key));
   std::memcpy(bytes.data(), &key, sizeof(key));
@@ -135,120 +157,159 @@ void FileSourceAdapter::execute(const BackendCommand &command,
   if (command.operation.bytes.size() >= sizeof(key))
     std::memcpy(&key, command.operation.bytes.data(), sizeof(key));
 
-  std::optional<StagedFileOp> op;
-  {
-    const std::lock_guard lock(mutex_);
-    const auto it = staged_.find(key);
-    if (it != staged_.end()) {
-      op = it->second;
-      staged_.erase(it);
-    }
-  }
-
-  if (!op) {
-    sink.terminalCandidate(
-        command.token,
-        BackendResult{Failed{{IoErrorCode::InvalidRequest, 0}, {}, {}}, {}},
-        {});
-    sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
-    return;
-  }
-
-  // Re-check the generation at transfer time: the file may have moved
-  // between a successful `prepare` and this worker turn (plan §7.2's
-  // Conflict path, mirrored from `StagedByteSourceAdapter`).
-  const auto observedBefore = statGeneration();
-  if (op->expectedGeneration != 0 && observedBefore != 0 &&
-      op->expectedGeneration != observedBefore) {
-    sink.terminalCandidate(
-        command.token,
-        BackendResult{Conflict{Generation{op->expectedGeneration},
-                               Generation{observedBefore},
-                               IoProgress{.phase = IoPhase::Terminal}},
-                      {}},
-        {});
-    sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
-    return;
-  }
-
+  // Everything that can throw -- the staged-op copy, payload registration --
+  // stays inside this try: execute is noexcept, so an escaped exception
+  // would terminate the worker.
   BackendResult result;
-  if (op->kind == StagedFileOp::Kind::Write) {
-    if (context.stop.stop_requested()) {
-      result = BackendResult{Cancelled{{}, {}, true}, {}};
+  std::optional<PayloadLease> payload;
+  try {
+    std::optional<StagedFileOp> op;
+    {
+      const std::lock_guard lock(mutex_);
+      const auto it = staged_.find(key);
+      if (it != staged_.end()) {
+        op = std::move(it->second);
+        staged_.erase(it);
+      }
+    }
+
+    if (!op) {
+      result = failedResult({IoErrorCode::InvalidRequest, 0});
     } else {
-      const auto offset = static_cast<off_t>(op->range.offset);
-      if (offset < 0 ||
-          static_cast<std::uint64_t>(offset) != op->range.offset) {
-        result =
-            BackendResult{Failed{{IoErrorCode::InvalidRequest, 0}, {}, {}}, {}};
+      // Re-check the generation at transfer time: the file may have moved
+      // between a successful `prepare` and this worker turn (plan §7.2's
+      // Conflict path, mirrored from `StagedByteSourceAdapter`).
+      const auto observedBefore = statGeneration();
+      if (op->expectedGeneration != 0 && observedBefore != 0 &&
+          op->expectedGeneration != observedBefore) {
+        result = BackendResult{Conflict{Generation{op->expectedGeneration},
+                                        Generation{observedBefore},
+                                        IoProgress{.phase = IoPhase::Terminal}},
+                               {}};
       } else {
-        std::size_t written{};
-        while (written < op->writeBytes.size()) {
-          const auto rc = ::pwrite(fd_, op->writeBytes.data() + written,
-                                   op->writeBytes.size() - written,
-                                   offset + static_cast<off_t>(written));
-          if (rc <= 0) break;
-          written += static_cast<std::size_t>(rc);
-        }
-        if (written != op->writeBytes.size() && errno != 0) {
+        result = BackendResult{};
+        if (op->kind == StagedFileOp::Kind::Write) {
+          if (context.stop.stop_requested()) {
+            result = BackendResult{
+                Cancelled{{}, IoProgress{.phase = IoPhase::Terminal}, false},
+                {}};
+          } else if (context.budget.maxBytes != 0 &&
+                     op->writeBytes.size() > context.budget.maxBytes) {
+            result = failedResult({IoErrorCode::BudgetExceeded, 0},
+                                  terminalProgress(0));
+          } else {
+            const auto offset = static_cast<off_t>(op->range.offset);
+            if (offset < 0 ||
+                static_cast<std::uint64_t>(offset) != op->range.offset) {
+              result = failedResult({IoErrorCode::InvalidRequest, 0});
+            } else {
+              std::size_t written{};
+              bool stopped = false;
+              while (written < op->writeBytes.size()) {
+                if (context.stop.stop_requested()) {
+                  stopped = true;
+                  break;
+                }
+                const auto rc = ::pwrite(fd_, op->writeBytes.data() + written,
+                                         op->writeBytes.size() - written,
+                                         offset + static_cast<off_t>(written));
+                if (rc <= 0) break;
+                written += static_cast<std::size_t>(rc);
+              }
+              if (stopped) {
+                // A partial pwrite may have landed bytes; report the
+                // transfer as uncertain rather than claiming completion.
+                result = BackendResult{
+                    Cancelled{{},
+                              IoProgress{.transferredBytes = written,
+                                         .phase            = IoPhase::Terminal},
+                              true},
+                    {}};
+              } else if (written != op->writeBytes.size()) {
+                result = failedResult({IoErrorCode::BackendFailure,
+                                       static_cast<std::uint32_t>(errno)},
+                                      terminalProgress(written));
+              } else {
+                result = BackendResult{
+                    Complete{{}, std::monostate{}, terminalProgress(written)},
+                    {}};
+              }
+            }
+          }
+        } else if (context.stop.stop_requested()) {
           result = BackendResult{
-              Failed{{IoErrorCode::BackendFailure, 0}, {}, {}}, {}};
+              Cancelled{{}, IoProgress{.phase = IoPhase::Terminal}, false}, {}};
         } else {
-          result = BackendResult{
-              Complete{{}, std::monostate{}, terminalProgress(written)}, {}};
+          // Read, 64-bit range (plan §7.3).
+          const auto offset = static_cast<off_t>(op->range.offset);
+          if (offset < 0 ||
+              static_cast<std::uint64_t>(offset) != op->range.offset) {
+            result = failedResult({IoErrorCode::InvalidRequest, 0});
+          } else {
+            struct stat st{};
+            const bool statOk = ::fstat(fd_, &st) == 0;
+            const auto size =
+                statOk ? static_cast<std::uint64_t>(st.st_size) : 0;
+            if (statOk && op->range.offset >= size) {
+              result = BackendResult{EndOfStream{terminalProgress(0)}, {}};
+            } else {
+              const auto maxBytes = static_cast<std::uint64_t>(
+                  context.budget.maxBytes > 0 ? context.budget.maxBytes
+                                              : op->range.length);
+              const auto toRead = op->range.length == 0
+                                      ? 0
+                                      : std::min(op->range.length, maxBytes);
+              std::vector<std::byte> out(toRead);
+              std::size_t got{};
+              while (got < out.size()) {
+                const auto rc = ::pread(fd_, out.data() + got, out.size() - got,
+                                        offset + static_cast<off_t>(got));
+                if (rc <= 0) break;
+                got += static_cast<std::size_t>(rc);
+              }
+              out.resize(got);
+              if (out.empty() && op->range.length != 0) {
+                result = BackendResult{EndOfStream{terminalProgress(0)}, {}};
+              } else {
+                const auto progress = terminalProgress(got);
+                if (out.empty()) {
+                  result = BackendResult{
+                      Complete{{}, std::monostate{}, progress}, {}};
+                } else {
+                  // Read bytes publish through the payload channel: the
+                  // outcome names the retained range and the lease reaches
+                  // terminalCandidate below.
+                  auto lease = publishTransientBytes(context.payloads, out);
+                  if (!lease) {
+                    result = failedResult({IoErrorCode::BackendFailure, 0});
+                  } else {
+                    payload = *lease;
+                    result  = BackendResult{
+                        Complete{lease->range, std::monostate{}, progress}, {}};
+                  }
+                }
+                // Record a distinct observation for every successful live
+                // read (plan §7.2). Keyed by the generation observed around
+                // this transfer, not the (possibly stale) one requested.
+                const std::lock_guard lock(mutex_);
+                const auto observationId = nextObservationId_++;
+                if (observations_.size() >= maxRetainedObservations_)
+                  observations_.erase(observations_.begin());
+                observations_[observationId] =
+                    ReadObservation{observationId, statGeneration(), op->range,
+                                    SourceConsistency::Live};
+              }
+            }
+          }
         }
       }
     }
-  } else if (context.stop.stop_requested()) {
-    result = BackendResult{Cancelled{{}, {}, false}, {}};
-  } else {
-    // Read, 64-bit range (plan §7.3).
-    const auto offset = static_cast<off_t>(op->range.offset);
-    if (offset < 0 || static_cast<std::uint64_t>(offset) != op->range.offset) {
-      result =
-          BackendResult{Failed{{IoErrorCode::InvalidRequest, 0}, {}, {}}, {}};
-    } else {
-      struct stat st{};
-      const bool statOk = ::fstat(fd_, &st) == 0;
-      const auto size   = statOk ? static_cast<std::uint64_t>(st.st_size) : 0;
-      if (statOk && op->range.offset >= size) {
-        result = BackendResult{EndOfStream{terminalProgress(0)}, {}};
-      } else {
-        const auto maxBytes = static_cast<std::uint64_t>(
-            context.budget.maxBytes > 0 ? context.budget.maxBytes
-                                        : op->range.length);
-        const auto toRead =
-            op->range.length == 0 ? 0 : std::min(op->range.length, maxBytes);
-        std::vector<std::byte> out(toRead);
-        std::size_t got{};
-        while (got < out.size()) {
-          const auto rc = ::pread(fd_, out.data() + got, out.size() - got,
-                                  offset + static_cast<off_t>(got));
-          if (rc <= 0) break;
-          got += static_cast<std::size_t>(rc);
-        }
-        out.resize(got);
-        if (out.empty() && op->range.length != 0) {
-          result = BackendResult{EndOfStream{terminalProgress(0)}, {}};
-        } else {
-          result = BackendResult{
-              Complete{{}, std::move(out), terminalProgress(got)}, {}};
-          // Record a distinct observation for every successful live read
-          // (plan §7.2). Keyed by the generation observed around this
-          // transfer, not the (possibly stale) one requested.
-          const std::lock_guard lock(mutex_);
-          const auto observationId = nextObservationId_++;
-          if (observations_.size() >= maxRetainedObservations_)
-            observations_.erase(observations_.begin());
-          observations_[observationId] =
-              ReadObservation{observationId, statGeneration(), op->range,
-                              SourceConsistency::Live};
-        }
-      }
-    }
+  } catch (...) {
+    result = failedResult({IoErrorCode::BackendFailure, 0});
+    payload.reset();
   }
 
-  sink.terminalCandidate(command.token, std::move(result), {});
+  sink.terminalCandidate(command.token, std::move(result), payload);
   sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
 }
 

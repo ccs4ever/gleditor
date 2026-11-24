@@ -131,6 +131,20 @@ private:
   std::shared_ptr<State> state_;
 };
 
+/**
+ * @brief Admit @p bytes as a fresh transient source and retain all of it:
+ *        the designed channel for adapter-produced output bytes (plan §3.2,
+ *        §4). The caller places `lease->range` in the terminal outcome's
+ *        payload field and hands the lease to
+ *        CompletionSink::terminalCandidate; the source stays registered so
+ *        owner-side consumers can resolve the range through the same
+ *        resolver. A process-wide counter mints each source id, so equal
+ *        bytes never merge identity.
+ */
+auto publishTransientBytes(PayloadResolver &resolver,
+                           std::span<const std::byte> bytes)
+    -> std::expected<PayloadLease, IoError>;
+
 } // namespace xanadu::vortex
 
 #endif

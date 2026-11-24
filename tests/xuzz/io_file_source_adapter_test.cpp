@@ -32,14 +32,17 @@ std::string textOf(const std::vector<std::byte> &bytes) {
 
 struct CapturingSink final : CompletionSink {
   void progress(PrivateRequestToken, IoProgress) noexcept override {}
-  void terminalCandidate(PrivateRequestToken, BackendResult result,
-                         std::optional<PayloadLease>) noexcept override {
-    candidate = std::move(result);
+  void
+  terminalCandidate(PrivateRequestToken, BackendResult result,
+                    std::optional<PayloadLease> payload) noexcept override {
+    candidate    = std::move(result);
+    payloadLease = std::move(payload);
   }
   void releaseAcknowledged(BackendReleaseAck ack) noexcept override {
     released = ack;
   }
   std::optional<BackendResult> candidate;
+  std::optional<PayloadLease> payloadLease;
   std::optional<BackendReleaseAck> released;
 };
 
@@ -47,6 +50,13 @@ BackendContext makeContext(PayloadResolver &payloads,
                            std::stop_token stop = {}) {
   return BackendContext{
       .stop = stop, .payloads = payloads, .budget = {1 << 20}};
+}
+
+/// Read every byte a terminal outcome's payload lease retains. Byte output
+/// travels the payload channel (design §3.2), never IoResultValue.
+std::expected<std::vector<std::byte>, IoError>
+readPayload(PayloadResolver &payloads, const PayloadLease &lease) {
+  return payloads.read(lease, 0, static_cast<std::size_t>(lease.range.length));
 }
 
 CellRequest requestFor(std::uint32_t specification) {
@@ -108,8 +118,9 @@ TEST_F(FileSourceAdapterTest, ReadSucceedsAndRecordsDistinctObservation) {
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
   ASSERT_NE(complete, nullptr);
-  const auto *bytes = std::get_if<std::vector<std::byte>>(&complete->value);
-  ASSERT_NE(bytes, nullptr);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "hello");
   ASSERT_TRUE(sink.released);
 
@@ -163,8 +174,9 @@ TEST_F(FileSourceAdapterTest, ReadBeyondBudgetIsBounded) {
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
   ASSERT_NE(complete, nullptr);
-  const auto *bytes = std::get_if<std::vector<std::byte>>(&complete->value);
-  ASSERT_NE(bytes, nullptr);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
   // The adapter must not allocate an unbounded staging buffer ahead of the
   // declared budget (io_protocol.hpp's IoAdapter contract).
   EXPECT_LE(bytes->size(), 16U);
@@ -248,8 +260,9 @@ TEST_F(FileSourceAdapterTest, TruncationBumpsGenerationAndShortensReads) {
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
   ASSERT_NE(complete, nullptr);
-  const auto *bytes = std::get_if<std::vector<std::byte>>(&complete->value);
-  ASSERT_NE(bytes, nullptr);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "012");
 }
 
@@ -281,8 +294,9 @@ TEST_F(FileSourceAdapterTest, HeldFdKeepsReadingUnlinkedOriginalAfterReplace) {
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
   ASSERT_NE(complete, nullptr);
-  const auto *bytes = std::get_if<std::vector<std::byte>>(&complete->value);
-  ASSERT_NE(bytes, nullptr);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "original");
 }
 
@@ -321,8 +335,9 @@ TEST_F(FileSourceAdapterTest, ReadsPast4GiBOffsetOnASparseFile) {
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
   ASSERT_NE(complete, nullptr);
-  const auto *bytes = std::get_if<std::vector<std::byte>>(&complete->value);
-  ASSERT_NE(bytes, nullptr);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "past-4gib-marker");
 }
 
@@ -436,8 +451,9 @@ TEST_F(FileSourceAdapterTest, WritableAdapterWritesAndBumpsGeneration) {
   adapter.execute(BackendCommand{{2}, *readPrepared}, context, readSink);
   const auto *complete = std::get_if<Complete>(&readSink.candidate->outcome);
   ASSERT_NE(complete, nullptr);
-  const auto *bytes = std::get_if<std::vector<std::byte>>(&complete->value);
-  ASSERT_NE(bytes, nullptr);
+  ASSERT_TRUE(readSink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *readSink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "01XY456789");
 }
 

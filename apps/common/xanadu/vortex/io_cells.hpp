@@ -201,6 +201,14 @@ makePayloadCell(zigzag::ArenaManifold &arena, PayloadResolver &resolver,
 [[nodiscard]] std::optional<PayloadRange>
 payloadRangeOf(const zigzag::ArenaManifold &arena, PayloadCell payload);
 
+/// The payload range an outcome cell carries, if any: walks the outcome's
+/// d.io.payload occurrence to its payload cell and reads the owner lease's
+/// range. This is the owner-side read path for consumers decoding retained
+/// bytes (resolve the range through PayloadResolver afterwards).
+[[nodiscard]] std::optional<PayloadRange>
+outcomeCellPayloadRange(const zigzag::ArenaManifold &arena,
+                        const IoCellSchema &schema, OutcomeCell outcome);
+
 } // namespace xanadu::vortex
 
 #endif

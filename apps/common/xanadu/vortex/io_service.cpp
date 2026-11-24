@@ -19,13 +19,10 @@ auto errorOutcome(const IoErrorInfo error) -> IoOutcome {
 }
 
 auto resultBytes(const BackendResult &result) noexcept -> std::size_t {
-  std::size_t valueBytes = 0;
-  if (const auto *complete = std::get_if<Complete>(&result.outcome)) {
-    if (const auto *bytes =
-            std::get_if<std::vector<std::byte>>(&complete->value))
-      valueBytes = bytes->size();
-  }
-  return std::max(valueBytes, result.staged.size());
+  // Outcome payloads are PayloadRanges (leased chunks), not inline bytes, so
+  // the completion-byte bound sees only the worker->owner `staged` channel;
+  // the payload bound is enforced separately in terminalCandidate.
+  return result.staged.size();
 }
 
 auto outcomePayloadLength(const IoOutcome &outcome) noexcept
@@ -219,8 +216,14 @@ void IoService::startLaneHead(const LaneKey &lane) {
   const auto active = activeLanes_.find(lane);
   if (active == activeLanes_.end()) return;
   const auto found = requests_.find(active->second);
+  // A head that already carries a terminal candidate -- synthetic from
+  // cancelRequest or the enqueue-invariant failure -- must never be
+  // enqueued: the scheduler would run real side effects for work the owner
+  // already cancelled. Its terminal is already (or will be) queued.
   if (found == requests_.end() || found->second.enqueued ||
-      !found->second.reservation || !found->second.prepared) {
+      found->second.candidate || found->second.outcome ||
+      found->second.cancelRequested || !found->second.reservation ||
+      !found->second.prepared) {
     return;
   }
   if (lane.endpoint != 0) {
@@ -287,6 +290,10 @@ auto IoService::ensureTerminalOutcome(RequestState &state)
   if (materialized) {
     state.outcome = *materialized;
   } else {
+    // Known M1 gap: a persistent publishTerminal refusal re-mints a refusal
+    // cell on every poll/await instead of caching one. Caching it in
+    // state.outcome would suppress the real terminal in pump(), so the
+    // re-mint stays until request retirement bounds the growth.
     return cells_.mintRefusal(materialized.error());
   }
   return state.outcome;
@@ -330,6 +337,11 @@ auto IoService::await(const RequestCell request,
     return {Pending{registration.continuation, duplicate->first}};
   }
   const auto waiter = cells_.mintWaiter(request, registration);
+  if (waiter.incarnation == AllocationIncarnation{}) {
+    // mintWaiter refuses by returning an empty handle (arena exhaustion);
+    // registering it would pin a bogus waiterToToken_ entry forever.
+    return {Ready{cells_.mintRefusal({IoErrorCode::BackendFailure, 0})}};
+  }
   state->second.waiters.emplace_back(waiter, registration);
   waiterToToken_.insert_or_assign(waiter.cell, found->second);
   return {Pending{registration.continuation, waiter}};
@@ -400,6 +412,9 @@ auto IoService::cancelRequest(const RequestCell request)
 }
 
 void IoService::retireRequest(const RequestCell request) {
+  // M1 gap, documented not redesigned: requests_ entries leave only through
+  // here (or shutdown), so production callers must retire each request once
+  // its outcome cell is consumed or the map grows monotonically.
   const auto indexed = requestByCell_.find(request.cell);
   if (indexed == requestByCell_.end()) return;
   const auto found = requests_.find(indexed->second);

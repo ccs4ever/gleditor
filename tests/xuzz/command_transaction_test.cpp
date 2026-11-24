@@ -172,7 +172,8 @@ TEST(CommandMailboxAdapterTest,
       NativeCompletion{{1}, *sink.candidate, {}, *sink.released}, owner);
   ASSERT_TRUE(published.has_value());
 
-  const auto result = CommandMailboxAdapter::resultOf(published->outcome);
+  const auto result =
+      CommandMailboxAdapter::resultOf(published->outcome, payloads);
   EXPECT_TRUE(result.success);
   EXPECT_EQ(result.response, "pong:ping");
 
@@ -220,15 +221,18 @@ TEST(CommandMailboxAdapterTest, StagedEntriesAreOneShot) {
 }
 
 TEST(CommandMailboxAdapterTest, ResultOfDecodesFailuresWithoutThrowing) {
+  PayloadResolver payloads;
   const auto failedOutcome =
       IoOutcome{Failed{{IoErrorCode::BackendFailure, 3}, {}, {}}};
-  const auto result = CommandMailboxAdapter::resultOf(failedOutcome);
+  const auto result = CommandMailboxAdapter::resultOf(failedOutcome, payloads);
   EXPECT_FALSE(result.success);
   EXPECT_NE(result.response.find("Failed"), std::string::npos);
 
-  const auto complete = IoOutcome{Complete{
-      {}, std::vector<std::byte>{}, IoProgress{.phase = IoPhase::Terminal}}};
-  const auto empty    = CommandMailboxAdapter::resultOf(complete);
+  // A Complete carrying no resolvable payload range decodes to a failed
+  // CommandResult, never a throw or a phantom success.
+  const auto complete = IoOutcome{
+      Complete{{}, std::monostate{}, IoProgress{.phase = IoPhase::Terminal}}};
+  const auto empty = CommandMailboxAdapter::resultOf(complete, payloads);
   EXPECT_FALSE(empty.success);
 }
 
