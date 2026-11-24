@@ -260,6 +260,7 @@ enum class ArenaRefusal : std::uint8_t {
   MalformedPrefix,   ///< a prefix snapshot has inconsistent floors or ranges
   UnsupportedPrefixState, ///< the prefix would omit foreign identity state
   PrefixLimitExceeded,    ///< the prefix exceeds the APF2 decoder's size limits
+  RuntimeOnlyState, ///< owner leases or runtime-only cells cannot be exported
 };
 
 class ArenaManifold;
@@ -290,6 +291,8 @@ toString(const ArenaRefusal refusal) noexcept {
     return "unsupported arena prefix state";
   case ArenaRefusal::PrefixLimitExceeded:
     return "arena prefix exceeds codec limits";
+  case ArenaRefusal::RuntimeOnlyState:
+    return "runtime-only arena state";
   }
   return "unknown refusal";
 }
@@ -686,8 +689,10 @@ public:
   /// follows the cell through arena lifetime and is dropped on rollback or
   /// replacement. A resolver can use a shared_ptr custom deleter to release
   /// its private lease without exposing native storage to the arena.
-  ArenaManifold *setOwnerLease(CellRef ref, AllocationIncarnation incarnation,
-                               std::shared_ptr<void> owner);
+  /// Refuses UnknownCell when @p incarnation no longer names @p ref's
+  /// allocation.
+  ArenaResult setOwnerLease(CellRef ref, AllocationIncarnation incarnation,
+                            std::shared_ptr<void> owner);
 
   [[nodiscard]] std::shared_ptr<void>
   ownerLeaseOf(CellRef ref, AllocationIncarnation incarnation) const noexcept;
@@ -1150,6 +1155,43 @@ private:
 promote(xanadu::Store &store, const xanadu::MicroversionId &parent,
         const ArenaManifold &from, CellRef root, PromotionBudget budget = {},
         std::span<const CellRef> extraRoots = {});
+
+/// Why promoteOrRefuse() wrote nothing.
+enum class PromotionRefusal : std::uint8_t {
+  UnknownRoot,       ///< the root is not a promotable cell of the arena
+  DanglingHandle,    ///< an operation handle names nothing the store holds
+  BudgetExceeded,    ///< the reachable subgraph exceeds the promotion budget
+  RuntimeOnlyState,  ///< a reachable cell holds an owner lease or I/O state
+  UnnameableContent, ///< quoted or foreign content the store cannot name
+  CrossStore,        ///< shadowed diffs aimed at a store other than the base
+};
+
+[[nodiscard]] constexpr std::string_view
+toString(const PromotionRefusal refusal) noexcept {
+  switch (refusal) {
+  case PromotionRefusal::UnknownRoot:
+    return "unknown promotion root";
+  case PromotionRefusal::DanglingHandle:
+    return "dangling operation handle";
+  case PromotionRefusal::BudgetExceeded:
+    return "promotion budget exceeded";
+  case PromotionRefusal::RuntimeOnlyState:
+    return "runtime-only state is not persistable";
+  case PromotionRefusal::UnnameableContent:
+    return "content not nameable in the destination store";
+  case PromotionRefusal::CrossStore:
+    return "cross-store shadow promotion";
+  }
+  return "unknown promotion refusal";
+}
+
+/// promote() with the reason for a refusal, so transient I/O state is refused
+/// by name rather than as an anonymous empty result.
+[[nodiscard]] std::expected<Promoted, PromotionRefusal>
+promoteOrRefuse(xanadu::Store &store, const xanadu::MicroversionId &parent,
+                const ArenaManifold &from, CellRef root,
+                PromotionBudget budget              = {},
+                std::span<const CellRef> extraRoots = {});
 
 [[nodiscard]] std::string
 encodeArenaPrefix(const ArenaManifold::PrefixSnapshot &snapshot);

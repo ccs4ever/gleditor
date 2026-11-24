@@ -341,7 +341,9 @@ TEST(ArenaManifoldTest, ownerLeaseFollowsAllocationAndRollbackRestoresIt) {
     delete static_cast<int *>(value);
     ++released;
   });
-  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, original), &arena.m);
+  ASSERT_EQ(
+      arena.m.setOwnerLease(cell, *incarnation, original).value_or(nullptr),
+      &arena.m);
   original.reset();
 
   const auto mark  = arena.m.mark();
@@ -349,7 +351,9 @@ TEST(ArenaManifoldTest, ownerLeaseFollowsAllocationAndRollbackRestoresIt) {
     delete static_cast<int *>(value);
     ++released;
   });
-  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, replacement), &arena.m);
+  ASSERT_EQ(
+      arena.m.setOwnerLease(cell, *incarnation, replacement).value_or(nullptr),
+      &arena.m);
   replacement.reset();
   EXPECT_EQ(released, 0);
   EXPECT_EQ(*static_cast<int *>(arena.m.ownerLeaseOf(cell, *incarnation).get()),
@@ -373,7 +377,8 @@ TEST(ArenaManifoldTest, ownerLeaseIsReleasedWhenItsCellIsRolledBack) {
     delete static_cast<int *>(value);
     ++released;
   });
-  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, owner), &arena.m);
+  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, owner).value_or(nullptr),
+            &arena.m);
   owner.reset();
   ASSERT_TRUE(arena.m.release(mark));
   EXPECT_EQ(released, 1);
@@ -391,9 +396,13 @@ TEST(ArenaManifoldTest, runtimeOnlyMarkerRollsBackAndBlocksPromotion) {
   const auto mark = arena.m.mark();
   ASSERT_TRUE(arena.m.markRuntimeOnly(root));
   EXPECT_TRUE(arena.m.isRuntimeOnly(root, *incarnation));
-  const auto before = store.opCount();
-  EXPECT_FALSE(zigzag::promote(store, at, arena.m, root).has_value());
+  const auto before  = store.opCount();
+  const auto refused = zigzag::promoteOrRefuse(store, at, arena.m, root);
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error(), zigzag::PromotionRefusal::RuntimeOnlyState);
   EXPECT_EQ(store.opCount(), before);
+  EXPECT_EQ(arena.m.exportPrefix(mark).error(),
+            zigzag::ArenaRefusal::RuntimeOnlyState);
 
   ASSERT_TRUE(arena.m.release(mark));
   EXPECT_FALSE(arena.m.isRuntimeOnly(root, *incarnation));
@@ -427,7 +436,8 @@ TEST(ArenaManifoldTest, ownerLeaseSurvivesMoveAndReleasesDuringUnwind) {
       delete static_cast<int *>(value);
       ++released;
     });
-    ASSERT_EQ(source.setOwnerLease(savedCell, *savedIncarnation, owner),
+    ASSERT_EQ(source.setOwnerLease(savedCell, *savedIncarnation, owner)
+                  .value_or(nullptr),
               &source);
     ArenaManifold moved = std::move(source);
     EXPECT_TRUE(moved.matches(savedCell, *savedIncarnation));
@@ -444,7 +454,8 @@ TEST(ArenaManifoldTest, contentReplacementDropsLeaseAndRollbackRestoresIt) {
   const auto incarnation = arena.m.incarnationOf(cell);
   ASSERT_TRUE(incarnation);
   auto lease = std::make_shared<int>(8);
-  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, lease), &arena.m);
+  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, lease).value_or(nullptr),
+            &arena.m);
 
   const auto original = arena.m.contentOf(cell);
   ASSERT_TRUE(arena.m.setContent(cell, original));
@@ -463,7 +474,8 @@ TEST(ArenaManifoldTest, contentReplacementDropsLeaseAndRollbackRestoresIt) {
       arena.m.setContent(cell, std::span<const PrimediaSpan>{&different, 1}));
   EXPECT_FALSE(arena.m.ownerLeaseOf(cell, *incarnation));
 
-  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, lease), &arena.m);
+  ASSERT_EQ(arena.m.setOwnerLease(cell, *incarnation, lease).value_or(nullptr),
+            &arena.m);
   const std::array tooMany = [] {
     std::array<PrimediaSpan, zigzag::maxCellContentSpanCount + 1> spans{};
     return spans;
@@ -1270,11 +1282,39 @@ TEST(ArenaManifoldTest, promotionRefusesRuntimeLeaseWithoutWritingOperations) {
   const auto incarnation = arena.m.incarnationOf(root);
   ASSERT_TRUE(incarnation);
   auto lease = std::make_shared<int>(7);
-  ASSERT_EQ(arena.m.setOwnerLease(root, *incarnation, lease), &arena.m);
+  ASSERT_EQ(arena.m.setOwnerLease(root, *incarnation, lease).value_or(nullptr),
+            &arena.m);
 
-  const auto before = store.opCount();
-  EXPECT_FALSE(zigzag::promote(store, at, arena.m, root).has_value());
+  const auto before  = store.opCount();
+  const auto refused = zigzag::promoteOrRefuse(store, at, arena.m, root);
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error(), zigzag::PromotionRefusal::RuntimeOnlyState);
   EXPECT_EQ(store.opCount(), before);
+}
+
+TEST(ArenaManifoldTest, ownerLeaseOnAStaleIncarnationIsRefusedByName) {
+  Arena arena;
+  const auto mark  = arena.m.mark();
+  const auto stale = arena.m.makeCell("first");
+  const auto old   = arena.m.incarnationOf(stale);
+  ASSERT_TRUE(old);
+  ASSERT_TRUE(arena.m.release(mark));
+  const auto reused = arena.m.makeCell("second");
+  ASSERT_EQ(reused, stale);
+
+  int released       = 0;
+  auto owner         = std::shared_ptr<void>(new int(3), [&](void *value) {
+    delete static_cast<int *>(value);
+    ++released;
+  });
+  const auto refused = arena.m.setOwnerLease(stale, *old, owner);
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error(), zigzag::ArenaRefusal::UnknownCell);
+  const auto current = arena.m.incarnationOf(reused);
+  ASSERT_TRUE(current);
+  EXPECT_FALSE(arena.m.ownerLeaseOf(reused, *current));
+  owner.reset();
+  EXPECT_EQ(released, 1);
 }
 
 // -- the overlay ------------------------------------------------------------

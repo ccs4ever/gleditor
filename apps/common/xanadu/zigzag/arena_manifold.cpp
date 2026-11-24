@@ -60,12 +60,12 @@ bool ArenaManifold::matches(
   return current && *current == incarnation;
 }
 
-ArenaManifold *
+ArenaResult
 ArenaManifold::setOwnerLease(const CellRef ref,
                              const AllocationIncarnation incarnation,
                              std::shared_ptr<void> owner) {
   if (!matches(ref, incarnation)) {
-    throw std::invalid_argument("stale arena allocation incarnation");
+    return std::unexpected{ArenaRefusal::UnknownCell};
   }
   const auto found = ownerLeases_.find(incarnation);
   if (outstandingMarks_ != 0) {
@@ -2240,7 +2240,7 @@ ArenaManifold::setContent(const CellRef cell,
   trail(*dense);
   setContentAt(*dense, spans);
   if (const auto incarnation = incarnationOf(cell)) {
-    setOwnerLease(cell, *incarnation, {});
+    static_cast<void>(setOwnerLease(cell, *incarnation, {}));
   }
   return this;
 }
@@ -2757,15 +2757,20 @@ MarkResult ArenaManifold::release(const Mark &m) noexcept {
 
   slots_.resize(m.cellCount);
   incarnations_.resize(m.cellCount);
-  std::erase_if(ownerLeases_, [&](const auto &entry) {
-    return std::ranges::find(incarnations_, entry.first) == incarnations_.end();
-  });
-  std::erase_if(runtimeOnly_, [&](const auto incarnation) {
-    return std::ranges::find(incarnations_, incarnation) == incarnations_.end();
-  });
-  std::erase_if(runtimeTags_, [&](const auto &entry) {
-    return std::ranges::find(incarnations_, entry.first) == incarnations_.end();
-  });
+  // Incarnations are handed out in ascending order and slots only grow at the
+  // tail, so everything truncated here is newer than the last survivor; a
+  // search of incarnations_ per entry would make each backtrack quadratic.
+  const auto truncated = [newest = incarnations_.empty()
+                                       ? std::optional<AllocationIncarnation>{}
+                                       : std::optional{incarnations_.back()}](
+                             const AllocationIncarnation incarnation) {
+    return !newest || incarnation > *newest;
+  };
+  std::erase_if(ownerLeases_,
+                [&](const auto &entry) { return truncated(entry.first); });
+  std::erase_if(runtimeOnly_, truncated);
+  std::erase_if(runtimeTags_,
+                [&](const auto &entry) { return truncated(entry.first); });
   links_.resize(m.linkSize);
   content_.resize(m.contentSize);
   scratch_.resize(m.scratchSize);
@@ -2842,13 +2847,13 @@ ArenaResult ArenaManifold::compact() {
   return this;
 }
 
-std::optional<Promoted> promote(xanadu::Store &store,
-                                const xanadu::MicroversionId &parent,
-                                const ArenaManifold &from, const CellRef root,
-                                const PromotionBudget budget,
-                                const std::span<const CellRef> extraRoots) {
+std::expected<Promoted, PromotionRefusal>
+promoteOrRefuse(xanadu::Store &store, const xanadu::MicroversionId &parent,
+                const ArenaManifold &from, const CellRef root,
+                const PromotionBudget budget,
+                const std::span<const CellRef> extraRoots) {
   if (!from.contains(root) || from.isProvenanceCell(root)) {
-    return std::nullopt;
+    return std::unexpected{PromotionRefusal::UnknownRoot};
   }
 
   // The reachable subgraph, in discovery order. Reachability from the answer is
@@ -2883,7 +2888,8 @@ std::optional<Promoted> promote(xanadu::Store &store,
     }
     if (xanadu::isCellRelocationHandle(from, current)) {
       const auto target = from.handleTarget(current);
-      if (!target || !from.contains(*target)) return std::nullopt;
+      if (!target || !from.contains(*target))
+        return std::unexpected{PromotionRefusal::DanglingHandle};
       if (seen.insert(*target).second) order.push_back(*target);
       if (queued.insert(*target).second) frontier.push_back(*target);
     }
@@ -2908,7 +2914,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
       discover(edge.neg, true);
     }
     if (order.size() > budget.maxOps) {
-      return std::nullopt;
+      return std::unexpected{PromotionRefusal::BudgetExceeded};
     }
   }
 
@@ -2923,15 +2929,16 @@ std::optional<Promoted> promote(xanadu::Store &store,
     if (from.valueKindOf(cell) == xanadu::ValueKind::OpHandle &&
         isEphemeral(cell) && !from.isProxy(cell)) {
       const auto target = from.handleTarget(cell);
-      if (!target) return std::nullopt;
+      if (!target) return std::unexpected{PromotionRefusal::DanglingHandle};
       if (isEphemeral(*target)) {
         if (!xanadu::isCellRelocationHandle(from, cell) ||
             !seen.contains(*target))
-          return std::nullopt;
+          return std::unexpected{PromotionRefusal::DanglingHandle};
         deferred.push_back(cell);
         continue;
       }
-      if (!store.getCompactOp(*target)) return std::nullopt;
+      if (!store.getCompactOp(*target))
+        return std::unexpected{PromotionRefusal::DanglingHandle};
     }
     mintOrder.push_back(cell);
     ready.insert(cell);
@@ -2953,7 +2960,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
   }
   if (order.size() > budget.maxOps ||
       cyclicHandles.size() > budget.maxOps - order.size())
-    return std::nullopt;
+    return std::unexpected{PromotionRefusal::BudgetExceeded};
   const std::unordered_set<CellRef> delayed(cyclicHandles.begin(),
                                             cyclicHandles.end());
 
@@ -2964,7 +2971,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
     const auto incarnation = from.incarnationOf(arena);
     if (incarnation && (from.ownerLeaseOf(arena, *incarnation) ||
                         from.isRuntimeOnly(arena, *incarnation))) {
-      return std::nullopt;
+      return std::unexpected{PromotionRefusal::RuntimeOnlyState};
     }
   }
 
@@ -2974,7 +2981,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
   for (const CellRef arena : mintOrder) {
     if (from.valueKindOf(arena) == xanadu::ValueKind::ForeignOpHandle &&
         !xanadu::foreignOpTarget(from, arena)) {
-      return std::nullopt;
+      return std::unexpected{PromotionRefusal::UnnameableContent};
     }
     if (!isEphemeral(arena) || from.isProxy(arena)) {
       continue;
@@ -2985,7 +2992,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
             quoted->spans, [&](const xanadu::PrimediaSpan &span) {
               return xanadu::canCarry(*quoted->store, store, span);
             })) {
-      return std::nullopt;
+      return std::unexpected{PromotionRefusal::UnnameableContent};
     }
   }
 
@@ -3003,7 +3010,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
       GLEDITOR_LOG_WARN("zigzag.arena",
                         "promote: refusing -- base manifold's store differs "
                         "from the destination store");
-      return std::nullopt;
+      return std::unexpected{PromotionRefusal::CrossStore};
     }
     GLEDITOR_LOG_WARN("zigzag.arena",
                       "promote: base store != destination (latent wrong-cell "
@@ -3242,6 +3249,17 @@ std::optional<Promoted> promote(xanadu::Store &store,
   return out;
 }
 
+std::optional<Promoted> promote(xanadu::Store &store,
+                                const xanadu::MicroversionId &parent,
+                                const ArenaManifold &from, const CellRef root,
+                                const PromotionBudget budget,
+                                const std::span<const CellRef> extraRoots) {
+  auto promoted =
+      promoteOrRefuse(store, parent, from, root, budget, extraRoots);
+  if (!promoted) return std::nullopt;
+  return std::move(*promoted);
+}
+
 namespace {
 
 struct PrefixRunRange {
@@ -3463,7 +3481,7 @@ ArenaManifold::exportPrefix(const Mark &m) const {
     return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
   }
   if (!ownerLeases_.empty() || !runtimeOnly_.empty()) {
-    return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
+    return std::unexpected{ArenaRefusal::RuntimeOnlyState};
   }
 
   std::uint64_t dimensionNameBytes = 0;
