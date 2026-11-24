@@ -231,6 +231,29 @@ public:
   }
 };
 
+/// One frozen edit of an async lens commit
+/// (design/vortex-io-implementation-plan.md §6.4: "a declarative lens
+/// commit snapshots an edit batch ... its backend I/O runs off-thread;
+/// owner publication consumes its staged result"). The owner snapshots
+/// key+text before submission; the I/O worker records the apply outcome
+/// into the same shared batch; the owner reads it back at publication.
+/// `cell`/`key`/`text` are owner-frozen; `applied`/`relocated`/`error`
+/// are worker-written and owner-read -- the arena never touches them.
+struct CommitEdit {
+  ExternalKey key;
+  std::optional<CellRef> cell; ///< the projected cell holding `text`
+  std::string text;
+  bool applied{false};
+  ExternalKey relocated; ///< the key applyContentChange returned
+  std::string error;     ///< the refusal's message when !applied
+};
+
+/// The shared batch a staged commit carries to the worker and back. One
+/// submission per batch: two workers writing the same edits would race.
+struct CommitEditBatch {
+  std::vector<CommitEdit> edits;
+};
+
 } // namespace zigzag
 
 #endif // ZIGZAG_PROJECTION_LENS_HPP
