@@ -306,6 +306,153 @@ bool ProjectionSession::refreshIfChanged() {
   return true;
 }
 
+// -- staged publication -------------------------------------------------------
+
+std::expected<std::uint32_t, std::string> ProjectionSession::prepareRefresh(
+    xanadu::vortex::StagedLensSourceAdapter &adapter) {
+  if (stagedKind_ != StagedKind::None) {
+    return std::unexpected("a staged source operation is already in flight");
+  }
+  // Probe is the one op every lens supports: pollChanged is the admitted
+  // source-moved check (§6: "probe I/O is an admitted service operation");
+  // the projection itself is publishRefresh's refresh(), which each
+  // lens's forEachNode makes self-sufficient.
+  //
+  // The specification a request cell carries must be a live arena cell:
+  // ArenaIoCellStore::freezeRequest refuses any OwnerCell whose ref has
+  // no incarnation, so a small auto key would be refused before the
+  // adapter ever saw it. Mint a runtime-only spec cell and stage under
+  // its ref -- the store checks the ref names a live cell, the adapter
+  // owns what the key means (the io_cells_test spec-cell pattern).
+  auto &arena     = core_.arena();
+  const auto spec = arena.makeCell("io.lens.refresh");
+  zigzag::expectWritten(arena.markRuntimeOnly(spec));
+  const auto key = adapter.stageAt(
+      static_cast<std::uint32_t>(spec),
+      xanadu::vortex::LensOpSpec{.kind = xanadu::vortex::LensOpKind::Probe,
+                                 .expectedGeneration = adapter.generation()});
+  stagedKind_ = StagedKind::Refresh;
+  return key;
+}
+
+std::expected<std::uint32_t, std::string> ProjectionSession::prepareCommit(
+    xanadu::vortex::StagedLensSourceAdapter &adapter) {
+  if (stagedKind_ != StagedKind::None) {
+    return std::unexpected("a staged source operation is already in flight");
+  }
+  if (dirty_.empty()) {
+    return std::unexpected("no dirty edits to commit");
+  }
+  auto &arena = core_.arena();
+  auto batch  = std::make_shared<CommitEditBatch>();
+  // Mirror commit(): a key whose cell is gone is unwound -- drop it
+  // rather than freeze an edit with nothing to send.
+  for (auto it = dirty_.begin(); it != dirty_.end();) {
+    const auto cell = cellFor(*it);
+    if (!cell) {
+      it = dirty_.erase(it);
+      continue;
+    }
+    CommitEdit edit;
+    edit.key  = *it;
+    edit.cell = *cell;
+    edit.text = arena.textOf(*cell);
+    batch->edits.push_back(std::move(edit));
+    ++it;
+  }
+  if (batch->edits.empty()) {
+    return std::unexpected("no dirty edits with live cells");
+  }
+  // Same spec-cell rule as prepareRefresh: the request's specification
+  // must be a live arena cell for freezeRequest to admit it.
+  const auto spec = arena.makeCell("io.lens.commit");
+  zigzag::expectWritten(arena.markRuntimeOnly(spec));
+  const auto key = adapter.stageAt(
+      static_cast<std::uint32_t>(spec),
+      xanadu::vortex::LensOpSpec{.kind = xanadu::vortex::LensOpKind::Commit,
+                                 .expectedGeneration = adapter.generation(),
+                                 .commit             = batch});
+  stagedKind_   = StagedKind::Commit;
+  stagedCommit_ = std::move(batch);
+  return key;
+}
+
+std::expected<std::size_t, std::string>
+ProjectionSession::publishRefresh(const xanadu::vortex::OutcomeCell outcome) {
+  if (stagedKind_ != StagedKind::Refresh) {
+    return std::unexpected("no staged refresh in flight");
+  }
+  // Whatever the terminal tag, the staged slot is done: the probe ran
+  // (or was refused) and nothing else may publish against it.
+  stagedKind_    = StagedKind::None;
+  const auto tag = xanadu::vortex::ioOutcomeTag(core_.arena(), outcome);
+  if (!tag) {
+    return std::unexpected("outcome cell is not a live outcome");
+  }
+  if (*tag != xanadu::vortex::IoOutcomeTag::Complete) {
+    return std::unexpected(std::string("refresh outcome ") +
+                           std::string(xanadu::vortex::toString(*tag)));
+  }
+  // The probe's changed-hint is a payload detail the outcome tag does
+  // not carry; refresh() is idempotent, so an unchanged source re-emits
+  // identically and restate-dedup absorbs it.
+  return refresh();
+}
+
+std::expected<int, std::string>
+ProjectionSession::publishCommit(const xanadu::vortex::OutcomeCell outcome) {
+  if (stagedKind_ != StagedKind::Commit || !stagedCommit_) {
+    return std::unexpected("no staged commit in flight");
+  }
+  auto batch     = std::move(stagedCommit_);
+  stagedKind_    = StagedKind::None;
+  const auto tag = xanadu::vortex::ioOutcomeTag(core_.arena(), outcome);
+  if (!tag) {
+    return std::unexpected("outcome cell is not a live outcome");
+  }
+  if (*tag != xanadu::vortex::IoOutcomeTag::Complete) {
+    // Every edit stays dirty: nothing the worker refused or never
+    // attempted leaves pending, exactly commit()'s refusal rule.
+    return std::unexpected(std::string("commit outcome ") +
+                           std::string(xanadu::vortex::toString(*tag)));
+  }
+
+  auto &arena = core_.arena();
+  int applied = 0;
+  for (const auto &edit : batch->edits) {
+    if (!edit.applied) {
+      continue; // refused or un-attempted tail: stays dirty
+    }
+    ++applied;
+    if (!dirty_.contains(edit.key)) {
+      // revertKey ran while the commit was in flight: the staged text
+      // still reached the source, and refresh() below restates the cell
+      // because the key is no longer dirty.
+      continue;
+    }
+    const auto cell = cellFor(edit.key);
+    if (cell && arena.textOf(*cell) != edit.text) {
+      // Re-edited while in flight: the staged text landed but the newer
+      // text is still pending -- keep the key dirty for the next commit.
+      continue;
+    }
+    dirty_.erase(edit.key);
+    if (cell && edit.relocated != edit.key) {
+      // Same rebind commit() performs: union identity keeps the cell,
+      // the source item's new name points at it.
+      const auto kit = keyToCell_.find(edit.key);
+      if (kit != keyToCell_.end()) {
+        keyToCell_.erase(kit);
+        keyToCell_.emplace(edit.relocated, *cell);
+        cellToKey_.erase(*cell);
+        cellToKey_.emplace(*cell, edit.relocated);
+      }
+    }
+  }
+  (void)refresh();
+  return applied;
+}
+
 std::expected<void, std::string>
 ProjectionSession::editContent(const ExternalKey &key,
                                const std::string_view text) {

@@ -15,6 +15,7 @@
 #ifndef ZIGZAG_PROJECTION_SESSION_HPP
 #define ZIGZAG_PROJECTION_SESSION_HPP
 
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
@@ -23,6 +24,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "common/xanadu/vortex/io_cells.hpp"
+#include "common/xanadu/vortex/lens_adapters.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
 #include "common/xanadu/zigzag/projection_lens.hpp"
@@ -103,6 +106,55 @@ public:
   /// ran. This is where an app's pull loop funnels -- the event flows
   /// lens -> app -> session, and this is the app's side of the seam.
   [[nodiscard]] bool refreshIfChanged();
+
+  // -- staged publication (design/vortex-io-implementation-plan.md §6)
+  // ------------------------------------------------------------------
+  //
+  // The async twin of refresh()/commit(): prepare* stages a bounded op on
+  // the lens's IoAdapter (owner thread), the service submits and runs it
+  // off-owner, and publish* consumes the request's terminal OutcomeCell
+  // on the owner. One staged op may be in flight per session; a second
+  // prepare* refuses until publish* has consumed the first's outcome --
+  // the in-flight slot IS the session's half of "transaction semantics
+  // retained". A staged entry whose request is never submitted leaves
+  // the slot held; publish* must still be called with whatever terminal
+  // cell the request produces (Rejected included).
+
+  /// Stage a source probe on @p adapter and return the staging key for
+  /// the request's `specification` field (the OwnerCell the service's
+  /// freezeRequest receives). Probe is the one op every lens supports:
+  /// pollChanged is the admitted source-moved check (§6: "probe I/O is
+  /// an admitted service operation"); the projection itself is
+  /// publishRefresh's refresh(), which each lens's forEachNode makes
+  /// self-sufficient.
+  [[nodiscard]] std::expected<std::uint32_t, std::string>
+  prepareRefresh(xanadu::vortex::StagedLensSourceAdapter &adapter);
+
+  /// Stage the dirty-edit batch as a Commit op on @p adapter: each edit's
+  /// key and the cell's current text are frozen owner-side into a shared
+  /// CommitEditBatch the worker applies through the lens's unproject
+  /// half. dirty_ is NOT cleared here -- publishCommit erases exactly
+  /// the edits that reached the source, so a refused or cancelled commit
+  /// leaves every edit pending, commit()'s rule.
+  [[nodiscard]] std::expected<std::uint32_t, std::string>
+  prepareCommit(xanadu::vortex::StagedLensSourceAdapter &adapter);
+
+  /// Consume the terminal OutcomeCell of a staged refresh. Complete runs
+  /// refresh() and returns its minted count; every other tag -- Failed,
+  /// Cancelled, TimedOut, Stale, Conflict, Rejected (the pre-admission
+  /// refusal) -- is a typed refusal that changes nothing. Any terminal
+  /// outcome ends the in-flight slot.
+  [[nodiscard]] std::expected<std::size_t, std::string>
+  publishRefresh(const xanadu::vortex::OutcomeCell outcome);
+
+  /// Consume the terminal OutcomeCell of a staged commit. Complete reads
+  /// the shared batch's per-edit results: applied edits leave dirty_
+  /// (a key re-edited while in flight stays dirty with its newer text),
+  /// relocated keys rebind like commit()'s, then refresh() restates what
+  /// the source reports back. Any other tag leaves every edit dirty.
+  /// Returns the count of edits the worker applied.
+  [[nodiscard]] std::expected<int, std::string>
+  publishCommit(const xanadu::vortex::OutcomeCell outcome);
 
   // -- the write path: dirty set + commit
   // ------------------------------------------
@@ -206,6 +258,12 @@ private:
   /// Keys whose arena cells the app edited since the last commit() --
   /// the write path's diff set.
   std::unordered_set<ExternalKey> dirty_;
+  /// Which staged op holds the in-flight slot; None = free.
+  enum class StagedKind : std::uint8_t { None, Refresh, Commit };
+  StagedKind stagedKind_{StagedKind::None};
+  /// The frozen edit batch a staged Commit carries to the worker and
+  /// back; publishCommit reads the per-edit results out of it.
+  std::shared_ptr<CommitEditBatch> stagedCommit_;
   /// The keys the last refresh() enumeration emitted. revertKey reads
   /// it to tell "source no longer emits the key" (nothing to restate)
   /// from "present and restatable".
