@@ -1,0 +1,295 @@
+#include "common/xanadu/vortex/file_source_adapter.hpp"
+
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+namespace xanadu::vortex {
+
+namespace {
+
+IoProgress terminalProgress(std::uint64_t transferred) {
+  return IoProgress{.acceptedBytes    = transferred,
+                    .transferredBytes = transferred,
+                    .consumedBytes    = transferred,
+                    .phase            = IoPhase::Terminal};
+}
+
+/// `stat` combines size and mtime into one opaque generation value. This
+/// detects an *uncertain* write (plan §7.2); it is not proof that no write
+/// happened (a same-size, same-timestamp in-place rewrite is invisible to
+/// it), which is exactly why a `Stable`/CAS request is refused rather than
+/// synthesized from this value.
+std::uint64_t generationFromStat(const struct stat &st) noexcept {
+  std::uint64_t mix = static_cast<std::uint64_t>(st.st_size);
+  mix ^= static_cast<std::uint64_t>(st.st_mtim.tv_sec) * 1000000007ULL;
+  mix ^= static_cast<std::uint64_t>(st.st_mtim.tv_nsec) * 1000000009ULL;
+  mix ^= static_cast<std::uint64_t>(st.st_ino) * 2654435761ULL;
+  return mix == 0 ? 1 : mix;
+}
+
+} // namespace
+
+FileSourceAdapter::FileSourceAdapter(std::string path, bool writable)
+    : path_(std::move(path)), writable_(writable) {
+  const int flags = writable_ ? O_RDWR : O_RDONLY;
+  fd_             = ::open(path_.c_str(), flags);
+}
+
+FileSourceAdapter::~FileSourceAdapter() {
+  if (fd_ >= 0) ::close(fd_);
+}
+
+std::uint64_t FileSourceAdapter::statGeneration() const noexcept {
+  if (fd_ < 0) return 0;
+  struct stat st{};
+  if (::fstat(fd_, &st) != 0) return 0;
+  return generationFromStat(st);
+}
+
+std::uint64_t FileSourceAdapter::currentGeneration() const noexcept {
+  return statGeneration();
+}
+
+auto FileSourceAdapter::probeCapabilities() const
+    -> std::optional<FileOpenCapabilities> {
+  if (fd_ < 0) return std::nullopt;
+  struct stat st{};
+  if (::fstat(fd_, &st) != 0) return std::nullopt;
+  return FileOpenCapabilities{.locator           = path_,
+                              .consistency       = SourceConsistency::Live,
+                              .initialGeneration = generationFromStat(st),
+                              .sizeAtOpen =
+                                  static_cast<std::uint64_t>(st.st_size)};
+}
+
+std::uint32_t FileSourceAdapter::stageRead(MediaRange range,
+                                           std::uint64_t expectedGeneration) {
+  const std::lock_guard lock(mutex_);
+  const auto key = nextStageKey_++;
+  staged_[key] =
+      StagedFileOp{StagedFileOp::Kind::Read, range, {}, expectedGeneration};
+  return key;
+}
+
+std::uint32_t FileSourceAdapter::stageWrite(std::uint64_t offset,
+                                            std::vector<std::byte> bytes,
+                                            std::uint64_t expectedGeneration) {
+  const std::lock_guard lock(mutex_);
+  const auto key = nextStageKey_++;
+  staged_[key] =
+      StagedFileOp{StagedFileOp::Kind::Write,
+                   MediaRange{offset, static_cast<std::uint64_t>(bytes.size())},
+                   std::move(bytes), expectedGeneration};
+  return key;
+}
+
+std::uint32_t FileSourceAdapter::stageStableRead(MediaRange range) {
+  const std::lock_guard lock(mutex_);
+  const auto key = nextStageKey_++;
+  staged_[key]   = StagedFileOp{StagedFileOp::Kind::StableRead, range, {}, 0};
+  return key;
+}
+
+auto FileSourceAdapter::prepare(const CellRequest &request, OwnerContext &)
+    -> std::expected<PreparedOperation, IoErrorInfo> {
+  if (fd_ < 0) return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
+
+  const auto key = static_cast<std::uint32_t>(request.specification);
+  StagedFileOp op;
+  {
+    const std::lock_guard lock(mutex_);
+    const auto it = staged_.find(key);
+    if (it == staged_.end())
+      return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+    op = it->second;
+  }
+
+  // Plan §7.2: "A strict snapshot/CAS request is refused if backend cannot
+  // meet it." A plain POSIX regular file never proves atomicity via `stat`
+  // or watches, so every stable-read request is refused here, before
+  // admission, regardless of content.
+  if (op.kind == StagedFileOp::Kind::StableRead)
+    return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
+
+  if (op.kind == StagedFileOp::Kind::Write && !writable_)
+    return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
+
+  const auto current = statGeneration();
+  if (op.expectedGeneration != 0 && current != 0 &&
+      op.expectedGeneration != current)
+    return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
+
+  std::vector<std::byte> bytes(sizeof(key));
+  std::memcpy(bytes.data(), &key, sizeof(key));
+  return PreparedOperation{request.key, std::move(bytes)};
+}
+
+void FileSourceAdapter::execute(const BackendCommand &command,
+                                BackendContext &context,
+                                CompletionSink &sink) noexcept {
+  std::uint32_t key{};
+  if (command.operation.bytes.size() >= sizeof(key))
+    std::memcpy(&key, command.operation.bytes.data(), sizeof(key));
+
+  std::optional<StagedFileOp> op;
+  {
+    const std::lock_guard lock(mutex_);
+    const auto it = staged_.find(key);
+    if (it != staged_.end()) {
+      op = it->second;
+      staged_.erase(it);
+    }
+  }
+
+  if (!op) {
+    sink.terminalCandidate(
+        command.token,
+        BackendResult{Failed{{IoErrorCode::InvalidRequest, 0}, {}, {}}, {}},
+        {});
+    sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
+    return;
+  }
+
+  // Re-check the generation at transfer time: the file may have moved
+  // between a successful `prepare` and this worker turn (plan §7.2's
+  // Conflict path, mirrored from `StagedByteSourceAdapter`).
+  const auto observedBefore = statGeneration();
+  if (op->expectedGeneration != 0 && observedBefore != 0 &&
+      op->expectedGeneration != observedBefore) {
+    sink.terminalCandidate(
+        command.token,
+        BackendResult{Conflict{Generation{op->expectedGeneration},
+                               Generation{observedBefore},
+                               IoProgress{.phase = IoPhase::Terminal}},
+                      {}},
+        {});
+    sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
+    return;
+  }
+
+  BackendResult result;
+  if (op->kind == StagedFileOp::Kind::Write) {
+    if (context.stop.stop_requested()) {
+      result = BackendResult{Cancelled{{}, {}, true}, {}};
+    } else {
+      const auto offset = static_cast<off_t>(op->range.offset);
+      if (offset < 0 ||
+          static_cast<std::uint64_t>(offset) != op->range.offset) {
+        result =
+            BackendResult{Failed{{IoErrorCode::InvalidRequest, 0}, {}, {}}, {}};
+      } else {
+        std::size_t written{};
+        while (written < op->writeBytes.size()) {
+          const auto rc = ::pwrite(fd_, op->writeBytes.data() + written,
+                                   op->writeBytes.size() - written,
+                                   offset + static_cast<off_t>(written));
+          if (rc <= 0) break;
+          written += static_cast<std::size_t>(rc);
+        }
+        if (written != op->writeBytes.size() && errno != 0) {
+          result = BackendResult{
+              Failed{{IoErrorCode::BackendFailure, 0}, {}, {}}, {}};
+        } else {
+          result = BackendResult{
+              Complete{{}, std::monostate{}, terminalProgress(written)}, {}};
+        }
+      }
+    }
+  } else if (context.stop.stop_requested()) {
+    result = BackendResult{Cancelled{{}, {}, false}, {}};
+  } else {
+    // Read, 64-bit range (plan §7.3).
+    const auto offset = static_cast<off_t>(op->range.offset);
+    if (offset < 0 || static_cast<std::uint64_t>(offset) != op->range.offset) {
+      result =
+          BackendResult{Failed{{IoErrorCode::InvalidRequest, 0}, {}, {}}, {}};
+    } else {
+      struct stat st{};
+      const bool statOk = ::fstat(fd_, &st) == 0;
+      const auto size   = statOk ? static_cast<std::uint64_t>(st.st_size) : 0;
+      if (statOk && op->range.offset >= size) {
+        result = BackendResult{EndOfStream{terminalProgress(0)}, {}};
+      } else {
+        const auto maxBytes = static_cast<std::uint64_t>(
+            context.budget.maxBytes > 0 ? context.budget.maxBytes
+                                        : op->range.length);
+        const auto toRead =
+            op->range.length == 0 ? 0 : std::min(op->range.length, maxBytes);
+        std::vector<std::byte> out(toRead);
+        std::size_t got{};
+        while (got < out.size()) {
+          const auto rc = ::pread(fd_, out.data() + got, out.size() - got,
+                                  offset + static_cast<off_t>(got));
+          if (rc <= 0) break;
+          got += static_cast<std::size_t>(rc);
+        }
+        out.resize(got);
+        if (out.empty() && op->range.length != 0) {
+          result = BackendResult{EndOfStream{terminalProgress(0)}, {}};
+        } else {
+          result = BackendResult{
+              Complete{{}, std::move(out), terminalProgress(got)}, {}};
+          // Record a distinct observation for every successful live read
+          // (plan §7.2). Keyed by the generation observed around this
+          // transfer, not the (possibly stale) one requested.
+          const std::lock_guard lock(mutex_);
+          const auto observationId = nextObservationId_++;
+          if (observations_.size() >= maxRetainedObservations_)
+            observations_.erase(observations_.begin());
+          observations_[observationId] =
+              ReadObservation{observationId, statGeneration(), op->range,
+                              SourceConsistency::Live};
+        }
+      }
+    }
+  }
+
+  sink.terminalCandidate(command.token, std::move(result), {});
+  sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
+}
+
+auto FileSourceAdapter::publish(const NativeCompletion &completion,
+                                OwnerContext &)
+    -> std::expected<OwnerPublication, IoErrorInfo> {
+  return OwnerPublication{completion.result.outcome};
+}
+
+auto FileSourceAdapter::observation(std::uint64_t observationId) const
+    -> std::optional<ReadObservation> {
+  const std::lock_guard lock(mutex_);
+  const auto it = observations_.find(observationId);
+  if (it == observations_.end()) return std::nullopt;
+  return it->second;
+}
+
+auto FileSourceAdapter::acquireDecodeLease(MediaRange range)
+    -> std::expected<DecodeLease, IoErrorInfo> {
+  const std::lock_guard lock(mutex_);
+  if (decodeLeases_.size() >= maxDecodeLeases_)
+    return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded});
+  const auto id = nextDecodeLease_++;
+  DecodeLease lease{id, range, statGeneration()};
+  decodeLeases_[id] = lease;
+  return lease;
+}
+
+void FileSourceAdapter::releaseDecodeLease(LeaseId lease) noexcept {
+  const std::lock_guard lock(mutex_);
+  decodeLeases_.erase(lease);
+}
+
+std::size_t FileSourceAdapter::liveDecodeLeases() const noexcept {
+  const std::lock_guard lock(mutex_);
+  return decodeLeases_.size();
+}
+
+void FileSourceAdapter::setMaxDecodeLeases(std::size_t value) noexcept {
+  const std::lock_guard lock(mutex_);
+  maxDecodeLeases_ = value;
+}
+
+} // namespace xanadu::vortex
