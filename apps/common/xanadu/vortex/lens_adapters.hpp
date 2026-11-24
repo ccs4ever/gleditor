@@ -36,8 +36,10 @@
  * rather than to the underlying file/db's own mtime or generation.
  */
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -74,9 +76,13 @@ struct LensOpSpec {
 /// Probe; `detail` carries an error or diagnostic string for Browse/
 /// Materialize/Commit when @ref ok is false; `error` is the typed refusal
 /// the worker reports (Unsupported for ops a lens does not have).
+/// `advancesGeneration=false` marks an operation that provably moved
+/// nothing (a no-op fetch), so a successful one does not bump the
+/// adapter's fetch watermark and stale staged peers.
 struct LensOpOutcome {
   bool ok{true};
   bool changed{false};
+  bool advancesGeneration{true};
   std::string detail;
   IoErrorInfo error{IoErrorCode::BackendFailure, 0};
 };
@@ -90,7 +96,9 @@ public:
 
   /// Owner-thread: stage one operation's bounded arguments and return the
   /// key to place in the request's `specification` field before calling
-  /// `IoService::submit`.
+  /// `IoService::submit`. Returns 0 when the staging table is full
+  /// (bounded at 4096 live specs); a request staged under key 0 then fails
+  /// `prepare` as InvalidRequest.
   [[nodiscard]] std::uint32_t stage(LensOpSpec spec);
 
   /// Stage under a caller-chosen @p key instead of the auto-increment
@@ -99,8 +107,17 @@ public:
   /// OwnerCell with no incarnation, so the key IS the minted spec
   /// cell's ref and the adapter owns what it means. Auto keys are small
   /// integers no real cell store can admit -- they exist for
-  /// adapter-level tests that never cross an `IoCellStore`.
-  [[nodiscard]] std::uint32_t stageAt(std::uint32_t key, LensOpSpec spec);
+  /// adapter-level tests that never cross an `IoCellStore`. Refuses an
+  /// occupied key: silently overwriting one would redirect an in-flight
+  /// request's worker turn onto the new spec.
+  [[nodiscard]] std::expected<std::uint32_t, std::string>
+  stageAt(std::uint32_t key, LensOpSpec spec);
+
+  /// Owner-thread: drop a staged spec that will never reach `execute`
+  /// (the submission was refused, or the caller abandoned it). Bounds the
+  /// staging table against stage-without-submit leaks; a no-op for
+  /// unknown or already-consumed keys.
+  void abandon(std::uint32_t key);
 
   /// This adapter's own fetch generation (see file comment); exposed for
   /// tests exercising the Stale/Conflict split without a full `IoService`.
@@ -132,10 +149,11 @@ private:
   void execute(const BackendCommand &command, BackendContext &context,
                CompletionSink &sink) noexcept final;
 
-  mutable std::mutex mutex_;
+  mutable std::mutex mutex_; ///< staged_ table only
+  std::mutex performMutex_;  ///< serializes check+perform+bump per adapter
   std::unordered_map<std::uint32_t, LensOpSpec> staged_;
   std::uint32_t nextKey_{1};
-  std::uint64_t generation_{1};
+  std::atomic<std::uint64_t> generation_{1};
 };
 
 /// `d.io.kind` "lens.sql". Wraps a `SqlLens` the adapter does not own;

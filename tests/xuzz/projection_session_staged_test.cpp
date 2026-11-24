@@ -142,17 +142,19 @@ std::optional<OutcomeCell> submitAndAwait(IoService &service,
 }
 
 /// Mint a tagged outcome cell directly, for publish* paths that do not
-/// need the worker round-trip (refusals, guards, kind mismatches).
+/// need the worker round-trip (refusals, guards, kind mismatches). A mint
+/// failure yields an empty handle the publish* then refuses as "not a
+/// live outcome" -- the EXPECT still flags the real cause.
 OutcomeCell mintTaggedOutcome(StagedFixture &fixture, IoOutcomeTag tag) {
   std::optional<RequestCell> request;
   if (tag != IoOutcomeTag::Rejected) {
     auto minted = makeOpenRequestCell(fixture.arena);
     EXPECT_TRUE(minted.has_value());
-    request = *minted;
+    request = minted.value_or(RequestCell{});
   }
   auto cell = makeOutcomeCell(fixture.arena, fixture.schema, request, tag);
   EXPECT_TRUE(cell.has_value());
-  return cell.value();
+  return cell.value_or(OutcomeCell{});
 }
 
 // -- the full §6 path: stage -> submit -> worker -> publish ---------------
@@ -324,6 +326,62 @@ TEST(ProjectionSessionStagedTest, PublishWithoutStagedOpRefuses) {
 TEST(ProjectionSessionStagedTest, PrepareCommitWithNoDirtyEditsRefuses) {
   SessionStack stack("{\"name\":\"old\"}\n");
   EXPECT_FALSE(stack.session->prepareCommit(*stack.adapter).has_value());
+}
+
+TEST(ProjectionSessionStagedTest,
+     FailedCommitOutcomeStillConsumesTheAppliedPrefix) {
+  // The worker's performCommit stops at the first refusal and reports a
+  // Failed outcome -- but edits sorted before the refusal DID reach the
+  // source. publishCommit must consume their applied flags on the Failed
+  // tag exactly as it does on Complete, or the next commit() re-sends
+  // text the source already holds.
+  SessionStack stack("{\"aaa\":1,\"zzz\":1}\n");
+  auto &session     = *stack.session;
+  const auto aaaKey = "cfg:" + stack.path.string() + ":/aaa";
+  const auto zzzKey = "cfg:" + stack.path.string() + ":/zzz";
+  ASSERT_TRUE(session.cellFor(aaaKey).has_value());
+  ASSERT_TRUE(session.cellFor(zzzKey).has_value());
+
+  // Sorted order puts /aaa first: it applies, then /zzz's non-numeric
+  // text fails the lens's integer coercion.
+  ASSERT_TRUE(session.editContent(aaaKey, "10"));
+  ASSERT_TRUE(session.editContent(zzzKey, "junk"));
+
+  const auto staged = session.prepareCommit(*stack.adapter);
+  ASSERT_TRUE(staged.has_value()) << staged.error();
+  const auto outcome =
+      submitAndAwait(*stack.service, stack.fixture.capability, *staged);
+  ASSERT_TRUE(outcome.has_value());
+
+  const auto published = session.publishCommit(*outcome);
+  EXPECT_FALSE(published.has_value()); // Failed outcome: typed refusal
+  // /aaa reached the source and left the dirty set; only /zzz stays.
+  EXPECT_EQ(session.dirtyCount(), 1U);
+  EXPECT_NE(readFile(stack.path).find("\"aaa\": 10"), std::string::npos);
+}
+
+TEST(ProjectionSessionStagedTest, SyncMutatorsRefuseWhileAStagedOpIsInFlight) {
+  SessionStack stack("{\"name\":\"old\"}\n");
+  auto &session      = *stack.session;
+  const auto nameKey = "cfg:" + stack.path.string() + ":/name";
+  ASSERT_TRUE(session.editContent(nameKey, "pending"));
+
+  const auto staged = session.prepareRefresh(*stack.adapter);
+  ASSERT_TRUE(staged.has_value());
+
+  // Every owner-side path that would touch the lens refuses: the worker
+  // may be inside applyContentChange/pollChanged right now.
+  EXPECT_FALSE(session.editContent(nameKey, "x").has_value());
+  EXPECT_FALSE(session.commit().has_value());
+  EXPECT_FALSE(session.revertKey(nameKey).has_value());
+  EXPECT_FALSE(session.refresh().has_value());
+  EXPECT_FALSE(session.refreshIfChanged());
+  EXPECT_EQ(session.dirtyCount(), 1U); // the pending edit survived
+
+  // Consuming the terminal outcome frees the slot.
+  const auto cell = mintTaggedOutcome(stack.fixture, IoOutcomeTag::Complete);
+  ASSERT_TRUE(session.publishRefresh(cell).has_value());
+  EXPECT_TRUE(session.editContent(nameKey, "x").has_value());
 }
 
 } // namespace

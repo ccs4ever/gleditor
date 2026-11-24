@@ -11,6 +11,10 @@ namespace xanadu::vortex {
 
 namespace {
 
+/// Live staged specs per adapter; a full table refuses new stages rather
+/// than evicting an entry an in-flight request still names.
+constexpr std::size_t maxStagedSpecs = 4096;
+
 std::vector<std::byte> bytesOf(std::string_view text) {
   std::vector<std::byte> out(text.size());
   std::memcpy(out.data(), text.data(), text.size());
@@ -52,21 +56,30 @@ LensOpOutcome opRefused(std::string_view detail) {
 
 std::uint32_t StagedLensSourceAdapter::stage(LensOpSpec spec) {
   const std::lock_guard lock(mutex_);
+  if (staged_.size() >= maxStagedSpecs) return 0;
   const auto key = nextKey_++;
   staged_[key]   = std::move(spec);
   return key;
 }
 
-std::uint32_t StagedLensSourceAdapter::stageAt(std::uint32_t key,
-                                               LensOpSpec spec) {
+std::expected<std::uint32_t, std::string>
+StagedLensSourceAdapter::stageAt(std::uint32_t key, LensOpSpec spec) {
   const std::lock_guard lock(mutex_);
+  if (staged_.contains(key))
+    return std::unexpected("staging key already in use");
+  if (staged_.size() >= maxStagedSpecs)
+    return std::unexpected("staging table full");
   staged_[key] = std::move(spec);
   return key;
 }
 
-std::uint64_t StagedLensSourceAdapter::generation() const noexcept {
+void StagedLensSourceAdapter::abandon(const std::uint32_t key) {
   const std::lock_guard lock(mutex_);
-  return generation_;
+  staged_.erase(key);
+}
+
+std::uint64_t StagedLensSourceAdapter::generation() const noexcept {
+  return generation_.load(std::memory_order_acquire);
 }
 
 auto StagedLensSourceAdapter::prepare(const CellRequest &request,
@@ -74,15 +87,14 @@ auto StagedLensSourceAdapter::prepare(const CellRequest &request,
     -> std::expected<PreparedOperation, IoErrorInfo> {
   const auto key = static_cast<std::uint32_t>(request.specification);
   LensOpSpec spec;
-  std::uint64_t current{};
   {
     const std::lock_guard lock(mutex_);
     const auto it = staged_.find(key);
     if (it == staged_.end())
       return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
-    spec    = it->second;
-    current = generation_;
+    spec = it->second;
   }
+  const auto current = generation_.load(std::memory_order_acquire);
   if (spec.expectedGeneration != 0 && spec.expectedGeneration != current)
     return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
 
@@ -99,56 +111,73 @@ void StagedLensSourceAdapter::execute(const BackendCommand &command,
     std::memcpy(&key, command.operation.bytes.data(), sizeof(key));
 
   std::optional<LensOpSpec> spec;
-  std::uint64_t current{};
   {
     const std::lock_guard lock(mutex_);
     const auto it = staged_.find(key);
     if (it != staged_.end()) {
-      spec = it->second;
+      spec = std::move(it->second);
       staged_.erase(it);
     }
-    current = generation_;
   }
 
-  if (!spec) {
-    sink.terminalCandidate(
-        command.token,
-        BackendResult{Failed{{IoErrorCode::InvalidRequest, 0}, {}, {}}, {}},
-        {});
-    sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
-    return;
-  }
-
-  // A second, already-admitted operation landed on this adapter between
-  // this request's admission and its worker turn (the StagedByteSourceAdapter
-  // Conflict pattern, scoped to this adapter's own fetch generation).
-  if (spec->expectedGeneration != 0 && spec->expectedGeneration != current) {
-    sink.terminalCandidate(
-        command.token,
-        BackendResult{Conflict{Generation{spec->expectedGeneration},
-                               Generation{current}, terminalProgress()},
-                      {}},
-        {});
-    sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
-    return;
-  }
-
-  LensOpOutcome outcome;
+  // Everything past the table lookup can throw (spec access, perform,
+  // generation bump, diagnostic bytes): execute is noexcept, so an escaped
+  // exception would terminate the worker.
+  BackendResult result;
   try {
-    outcome = perform(*spec);
+    if (!spec) {
+      result = BackendResult{Failed{{IoErrorCode::InvalidRequest, 0},
+                                    {},
+                                    IoProgress{.phase = IoPhase::Terminal}},
+                             {}};
+    } else {
+      // performMutex_ serializes the generation check, the fetch, and the
+      // bump as one critical section: the wrapped lens is shared and
+      // unsynchronized, and a check-then-bump split would let two worker
+      // turns both pass the expectedGeneration gate (TOCTOU). perform()
+      // never calls back into this adapter, so holding it across the fetch
+      // cannot deadlock.
+      const std::lock_guard performLock(performMutex_);
+      const auto current = generation_.load(std::memory_order_acquire);
+
+      // A second, already-admitted operation landed on this adapter between
+      // this request's admission and its worker turn (the
+      // StagedByteSourceAdapter Conflict pattern, scoped to this adapter's
+      // own fetch generation).
+      if (spec->expectedGeneration != 0 &&
+          spec->expectedGeneration != current) {
+        result =
+            BackendResult{Conflict{Generation{spec->expectedGeneration},
+                                   Generation{current}, terminalProgress()},
+                          {}};
+      } else {
+        LensOpOutcome outcome;
+        try {
+          outcome = perform(*spec);
+        } catch (...) {
+          outcome = LensOpOutcome{.ok = false, .detail = "exception"};
+        }
+        // A successful fetch moves this adapter's generation. A commit that
+        // applied edits moved the *source* the fetches read, which is the
+        // same watermark's reason to move: a fetch staged against the
+        // pre-commit view must Conflict rather than silently publish
+        // post-commit data. A fully-refused commit changed nothing and
+        // leaves the watermark; a no-op fetch (advancesGeneration=false)
+        // leaves it too.
+        if (spec->kind != LensOpKind::Probe && outcome.advancesGeneration &&
+            (outcome.ok || outcome.changed)) {
+          generation_.fetch_add(1, std::memory_order_acq_rel);
+        }
+        result = toBackendResult(outcome);
+      }
+    }
   } catch (...) {
-    outcome = LensOpOutcome{.ok = false, .detail = "exception"};
+    result = BackendResult{Failed{{IoErrorCode::BackendFailure, 0},
+                                  {},
+                                  IoProgress{.phase = IoPhase::Terminal}},
+                           {}};
   }
-  // A successful fetch moves this adapter's generation. A commit that
-  // applied edits moved the *source* the fetches read, which is the same
-  // watermark's reason to move: a fetch staged against the pre-commit
-  // view must Conflict rather than silently publish post-commit data.
-  // A fully-refused commit changed nothing and leaves the watermark.
-  if (spec->kind != LensOpKind::Probe && (outcome.ok || outcome.changed)) {
-    const std::lock_guard lock(mutex_);
-    ++generation_;
-  }
-  sink.terminalCandidate(command.token, toBackendResult(outcome), {});
+  sink.terminalCandidate(command.token, std::move(result), {});
   sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
 }
 
@@ -229,8 +258,13 @@ LensOpOutcome ConfigLensSourceAdapter::perform(const LensOpSpec &spec) {
   case LensOpKind::Browse:
     // No separable fetch ahead of ProjectionSession::refresh(); see the
     // header comment. Accepted so a generic staged plan needs no
-    // per-lens-kind branch at the caller.
-    return LensOpOutcome{.ok = true, .changed = true};
+    // per-lens-kind branch at the caller. It is a pure no-op, so it must
+    // not move the adapter's fetch watermark: doing so would Conflict a
+    // concurrent staged fetch that shared the same generation.
+    return LensOpOutcome{.ok                 = true,
+                         .changed            = false,
+                         .advancesGeneration = false,
+                         .detail             = "no-op"};
   case LensOpKind::Materialize:
     return opUnsupported("unsupported");
   case LensOpKind::Commit:

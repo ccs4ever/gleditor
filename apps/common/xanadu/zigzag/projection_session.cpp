@@ -5,6 +5,7 @@
 #include "common/xanadu/zigzag/projection_session.hpp"
 
 #include "common/xanadu/scalar.hpp"
+#include "common/xanadu/zigzag/arena_savepoint.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -214,11 +215,18 @@ void ProjectionSession::project() {
   (void)refresh();
 }
 
-std::size_t ProjectionSession::refresh() {
+std::expected<std::size_t, std::string> ProjectionSession::refresh() {
+  if (stagedKind_ != StagedKind::None) {
+    // The staged op's worker may be inside the lens's unproject half
+    // (applyContentChange) right now; forEachNode below would race it.
+    // The owner must wait for publish* to consume the terminal outcome.
+    return std::unexpected("a staged source operation is in flight");
+  }
   auto &arena = core_.arena();
-  // Internal mark: innermost, legal under outstanding scroll checkpoints --
-  // a fault inside the loop releases cleanly rather than half-applying.
-  const auto guard = arena.mark();
+  // ArenaSavepoint: innermost, legal under outstanding scroll
+  // checkpoints -- a fault inside the loop rolls the whole projection
+  // back rather than half-applying.
+  ArenaSavepoint guard(arena);
 
   std::unordered_set<ExternalKey> present;
   // keepPos[cell] = managed dims this enumeration re-emitted a POS-side link
@@ -294,16 +302,20 @@ std::size_t ProjectionSession::refresh() {
   recomputeRoots(present, containedTargets);
   presentKeys_ = present; // revertKey's source-vanished signal
 
-  zigzag::expectMarkOrder(arena.discard(guard));
+  guard.commit();
   return minted;
 }
 
 bool ProjectionSession::refreshIfChanged() {
+  // pollChanged reads the lens too -- same race the refresh() guard
+  // names, so the staged check comes first.
+  if (stagedKind_ != StagedKind::None) {
+    return false;
+  }
   if (!lens_->pollChanged()) {
     return false;
   }
-  (void)refresh();
-  return true;
+  return refresh().has_value();
 }
 
 // -- staged publication -------------------------------------------------------
@@ -327,12 +339,18 @@ std::expected<std::uint32_t, std::string> ProjectionSession::prepareRefresh(
   auto &arena     = core_.arena();
   const auto spec = arena.makeCell("io.lens.refresh");
   zigzag::expectWritten(arena.markRuntimeOnly(spec));
-  const auto key = adapter.stageAt(
+  ++mintCount_; // the spec cell is a session mint rewind() must account for
+  auto key = adapter.stageAt(
       static_cast<std::uint32_t>(spec),
       xanadu::vortex::LensOpSpec{.kind = xanadu::vortex::LensOpKind::Probe,
                                  .expectedGeneration = adapter.generation()});
+  if (!key) {
+    // The spec cell stays as unreferenced runtime-only garbage; the slot
+    // was never claimed, so a retry stages cleanly.
+    return std::unexpected(key.error());
+  }
   stagedKind_ = StagedKind::Refresh;
-  return key;
+  return *key;
 }
 
 std::expected<std::uint32_t, std::string> ProjectionSession::prepareCommit(
@@ -363,18 +381,25 @@ std::expected<std::uint32_t, std::string> ProjectionSession::prepareCommit(
   if (batch->edits.empty()) {
     return std::unexpected("no dirty edits with live cells");
   }
+  // Deterministic apply order: the worker walks this vector and stops at
+  // the first refusal, so which edits land must not depend on hash order.
+  std::ranges::sort(batch->edits, {}, &CommitEdit::key);
   // Same spec-cell rule as prepareRefresh: the request's specification
   // must be a live arena cell for freezeRequest to admit it.
   const auto spec = arena.makeCell("io.lens.commit");
   zigzag::expectWritten(arena.markRuntimeOnly(spec));
-  const auto key = adapter.stageAt(
+  ++mintCount_; // the spec cell is a session mint rewind() must account for
+  auto key = adapter.stageAt(
       static_cast<std::uint32_t>(spec),
       xanadu::vortex::LensOpSpec{.kind = xanadu::vortex::LensOpKind::Commit,
                                  .expectedGeneration = adapter.generation(),
                                  .commit             = batch});
+  if (!key) {
+    return std::unexpected(key.error());
+  }
   stagedKind_   = StagedKind::Commit;
   stagedCommit_ = std::move(batch);
-  return key;
+  return *key;
 }
 
 std::expected<std::size_t, std::string>
@@ -410,24 +435,26 @@ ProjectionSession::publishCommit(const xanadu::vortex::OutcomeCell outcome) {
   if (!tag) {
     return std::unexpected("outcome cell is not a live outcome");
   }
-  if (*tag != xanadu::vortex::IoOutcomeTag::Complete) {
-    // Every edit stays dirty: nothing the worker refused or never
-    // attempted leaves pending, exactly commit()'s refusal rule.
-    return std::unexpected(std::string("commit outcome ") +
-                           std::string(xanadu::vortex::toString(*tag)));
-  }
 
   auto &arena = core_.arena();
   int applied = 0;
+  // Consume the batch's per-edit results on ANY terminal tag: the
+  // worker's performCommit stops at the first refusal and reports
+  // Failed{InvalidRequest}, so a non-Complete outcome can still carry a
+  // real applied prefix (Failed/Partial/Cancelled after a partial run;
+  // Rejected/Stale/Conflict carry none because execute never ran, so
+  // the loop is a no-op for them). An applied edit left dirty would be
+  // re-sent by the next commit() as if it never landed.
   for (const auto &edit : batch->edits) {
     if (!edit.applied) {
       continue; // refused or un-attempted tail: stays dirty
     }
     ++applied;
     if (!dirty_.contains(edit.key)) {
-      // revertKey ran while the commit was in flight: the staged text
-      // still reached the source, and refresh() below restates the cell
-      // because the key is no longer dirty.
+      // Defensive mirror of commit()'s rule: the staged-op guards make
+      // owner-side dirty_ mutation impossible while in flight, so this
+      // should not fire -- but an applied edit with no pending key must
+      // never be re-dirtied.
       continue;
     }
     const auto cell = cellFor(edit.key);
@@ -449,13 +476,25 @@ ProjectionSession::publishCommit(const xanadu::vortex::OutcomeCell outcome) {
       }
     }
   }
-  (void)refresh();
+  if (*tag != xanadu::vortex::IoOutcomeTag::Complete) {
+    // Every unapplied edit stays dirty: nothing the worker refused or
+    // never attempted leaves pending, exactly commit()'s refusal rule.
+    return std::unexpected(std::string("commit outcome ") +
+                           std::string(xanadu::vortex::toString(*tag)));
+  }
+  auto refreshed = refresh();
+  if (!refreshed) {
+    return std::unexpected(refreshed.error());
+  }
   return applied;
 }
 
 std::expected<void, std::string>
 ProjectionSession::editContent(const ExternalKey &key,
                                const std::string_view text) {
+  if (stagedKind_ != StagedKind::None) {
+    return std::unexpected("a staged source operation is in flight");
+  }
   if (refKeys_.contains(key)) {
     return std::unexpected("ref cells are read-only in the session (U-L5)");
   }
@@ -483,6 +522,9 @@ ProjectionSession::editContent(const ExternalKey &key,
 
 std::expected<void, std::string>
 ProjectionSession::revertKey(const ExternalKey &key) {
+  if (stagedKind_ != StagedKind::None) {
+    return std::unexpected("a staged source operation is in flight");
+  }
   if (dirty_.erase(key) == 0) {
     return {}; // never dirtied -- a true no-op
   }
@@ -492,11 +534,19 @@ ProjectionSession::revertKey(const ExternalKey &key) {
   if (!presentKeys_.contains(key)) {
     return std::unexpected("nothing to restate: " + key);
   }
-  (void)refresh();
+  auto refreshed = refresh();
+  if (!refreshed) {
+    return std::unexpected(refreshed.error());
+  }
   return {};
 }
 
 std::expected<int, std::string> ProjectionSession::commit() {
+  if (stagedKind_ != StagedKind::None) {
+    // The worker may be inside the lens's unproject half; the sync write
+    // path would race it. Use prepareCommit/publishCommit instead.
+    return std::unexpected("a staged source operation is in flight");
+  }
   // Move the dirty set out, and guard it: every key the loop never
   // attempts goes back to dirty_ when this scope exits -- on a refusal
   // AND if applyContentChange throws, where the moved-out set would
@@ -543,7 +593,10 @@ std::expected<int, std::string> ProjectionSession::commit() {
       cellToKey_.emplace(*cell, *res);
     }
   }
-  (void)refresh();
+  auto refreshed = refresh();
+  if (!refreshed) {
+    return std::unexpected(refreshed.error());
+  }
   return applied;
 }
 

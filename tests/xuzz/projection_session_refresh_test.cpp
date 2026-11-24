@@ -119,7 +119,7 @@ TEST(RefreshTest, SameKeyKeepsCellAndRestatesContent) {
   EXPECT_EQ(f.core.arena().textOf(*before), "beta");
 
   f.lens->nodes[1].content = std::string{"beta-v2"};
-  EXPECT_EQ(f.session->refresh(), 0u); // nothing new minted
+  EXPECT_EQ(f.session->refresh().value(), 0u); // nothing new minted
 
   const auto after = f.session->cellFor("B");
   ASSERT_TRUE(after.has_value());
@@ -143,7 +143,7 @@ TEST(RefreshTest, NewKeyMintsAbsentKeyStales) {
   f.lens->nodes.push_back(
       {.key = "D", .content = std::string{"delta"}, .attributes = {}});
 
-  EXPECT_EQ(f.session->refresh(), 1u);
+  EXPECT_EQ(f.session->refresh().value(), 1u);
   EXPECT_TRUE(f.session->cellFor("D").has_value());
   const auto b = f.session->cellFor("B");
   ASSERT_TRUE(b.has_value());
@@ -166,7 +166,7 @@ TEST(RefreshTest, TombstoneSeversRemovedEdgesAndEmptiesRank) {
 
   // Remove every edge: A's firstborn is severed, B's sibling link dies.
   f.lens->edges.clear();
-  EXPECT_EQ(f.session->refresh(), 0u);
+  EXPECT_EQ(f.session->refresh().value(), 0u);
   EXPECT_FALSE(f.core.arena().linked(a, contains, Posward).has_value());
   EXPECT_FALSE(f.core.arena().linked(c, seq, DimVector::NEG).has_value());
   // Every node now floats -> every node is a structural root.

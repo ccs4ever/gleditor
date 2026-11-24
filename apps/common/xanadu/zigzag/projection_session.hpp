@@ -96,15 +96,17 @@ public:
   ///    lens's staleAttributes(key) returns (default {});
   ///  - recompute roots() over the keys present in THIS enumeration only --
   ///    or the lens's forEachRoot() list when it declares one;
-  ///  - atomicity: refresh() wraps its body in an internal mark() -- the
+  ///  - atomicity: refresh() wraps its body in an ArenaSavepoint -- the
   ///    innermost, legal even under outstanding scroll checkpoints.
+  /// Refuses while a staged source op is in flight: the worker may be
+  /// inside the lens's unproject half, and forEachNode would race it.
   /// Returns the count of newly minted node cells.
-  [[nodiscard]] std::size_t refresh();
+  [[nodiscard]] std::expected<std::size_t, std::string> refresh();
 
   /// The evented funnel's marks-quiesced entry: refresh() iff the lens
   /// reports its source moved (pollChanged). Returns whether a refresh
-  /// ran. This is where an app's pull loop funnels -- the event flows
-  /// lens -> app -> session, and this is the app's side of the seam.
+  /// ran; false while a staged op is in flight (pollChanged would race
+  /// the worker's lens access) or when refresh() refuses.
   [[nodiscard]] bool refreshIfChanged();
 
   // -- staged publication (design/vortex-io-implementation-plan.md §6)
@@ -126,16 +128,18 @@ public:
   /// pollChanged is the admitted source-moved check (§6: "probe I/O is
   /// an admitted service operation"); the projection itself is
   /// publishRefresh's refresh(), which each lens's forEachNode makes
-  /// self-sufficient.
+  /// self-sufficient. Refuses while a staged op is in flight.
   [[nodiscard]] std::expected<std::uint32_t, std::string>
   prepareRefresh(xanadu::vortex::StagedLensSourceAdapter &adapter);
 
   /// Stage the dirty-edit batch as a Commit op on @p adapter: each edit's
   /// key and the cell's current text are frozen owner-side into a shared
   /// CommitEditBatch the worker applies through the lens's unproject
-  /// half. dirty_ is NOT cleared here -- publishCommit erases exactly
-  /// the edits that reached the source, so a refused or cancelled commit
-  /// leaves every edit pending, commit()'s rule.
+  /// half (sorted by key so the apply order is deterministic). dirty_ is
+  /// NOT cleared here -- publishCommit erases exactly the edits that
+  /// reached the source, so a refused or cancelled commit leaves every
+  /// edit pending, commit()'s rule. Refuses while a staged op is in
+  /// flight.
   [[nodiscard]] std::expected<std::uint32_t, std::string>
   prepareCommit(xanadu::vortex::StagedLensSourceAdapter &adapter);
 
@@ -147,12 +151,15 @@ public:
   [[nodiscard]] std::expected<std::size_t, std::string>
   publishRefresh(const xanadu::vortex::OutcomeCell outcome);
 
-  /// Consume the terminal OutcomeCell of a staged commit. Complete reads
-  /// the shared batch's per-edit results: applied edits leave dirty_
-  /// (a key re-edited while in flight stays dirty with its newer text),
-  /// relocated keys rebind like commit()'s, then refresh() restates what
-  /// the source reports back. Any other tag leaves every edit dirty.
-  /// Returns the count of edits the worker applied.
+  /// Consume the terminal OutcomeCell of a staged commit. The shared
+  /// batch's per-edit applied/relocated flags are consumed on ANY
+  /// terminal tag: a Failed/Partial/Cancelled outcome can still carry
+  /// edits the worker applied before stopping, and those must leave
+  /// dirty_ exactly as commit()'s applied prefix does (a key re-edited
+  /// while in flight stays dirty with its newer text; relocated keys
+  /// rebind). Only Complete then runs refresh() to restate what the
+  /// source reports back; every other tag is a typed refusal. Returns
+  /// the count of edits the worker applied.
   [[nodiscard]] std::expected<int, std::string>
   publishCommit(const xanadu::vortex::OutcomeCell outcome);
 
@@ -166,7 +173,9 @@ public:
   /// the lens's canApply() probe refuses is refused here too, before
   /// anything dirties. A scalar-kind cell (Int64/Double/Bool) goes
   /// text-typed while dirty -- the edit IS a span run; commit()/
-  /// revertKey()'s restate restores the source's kind and spans.
+  /// revertKey()'s restate restores the source's kind and spans. Refuses
+  /// while a staged op is in flight: the worker may be inside the lens's
+  /// unproject half and a mid-flight dirty-set change would race it.
   [[nodiscard]] std::expected<void, std::string>
   editContent(const ExternalKey &key, std::string_view text);
 
@@ -176,7 +185,8 @@ public:
   /// unknown ones -- are a true no-op. Errs when the key was dirty but
   /// the source no longer emits it: refresh() only stale-marks absent
   /// cells (restateContent runs for present keys alone), so nothing
-  /// would put the pre-edit content back.
+  /// would put the pre-edit content back. Refuses while a staged op is
+  /// in flight.
   [[nodiscard]] std::expected<void, std::string>
   revertKey(const ExternalKey &key);
 
@@ -187,6 +197,8 @@ public:
   /// source relocated rebinds (the cell follows the source item).
   /// Every key the loop never attempted -- behind a refusal or an
   /// applyContentChange throw -- goes back into dirty_ on scope exit.
+  /// Refuses while a staged op is in flight (the worker owns the lens
+  /// then; use prepareCommit/publishCommit for the async write path).
   [[nodiscard]] std::expected<int, std::string> commit();
 
   /// Dirty edits waiting on commit() -- the number the write gesture
