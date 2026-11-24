@@ -232,4 +232,73 @@ auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context)
       Complete{{}, std::move(out), terminalProgress(out.size())}, {}};
 }
 
+// -- UnionSourceAdapter -------------------------------------------------------
+
+auto UnionSourceAdapter::prepare(const CellRequest &request,
+                                 OwnerContext &context)
+    -> std::expected<PreparedOperation, IoErrorInfo> {
+  const auto index = select_ ? select_(request) : 0;
+  if (index >= members_.size() || members_[index] == nullptr)
+    return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+
+  auto memberPrepared = members_[index]->prepare(request, context);
+  if (!memberPrepared) return std::unexpected(memberPrepared.error());
+
+  const auto memberIndex = static_cast<std::uint32_t>(index);
+  std::vector<std::byte> bytes(sizeof(memberIndex) +
+                               memberPrepared->bytes.size());
+  std::memcpy(bytes.data(), &memberIndex, sizeof(memberIndex));
+  if (!memberPrepared->bytes.empty())
+    std::memcpy(bytes.data() + sizeof(memberIndex),
+                memberPrepared->bytes.data(), memberPrepared->bytes.size());
+  return PreparedOperation{request.key, std::move(bytes)};
+}
+
+void UnionSourceAdapter::execute(const BackendCommand &command,
+                                 BackendContext &context,
+                                 CompletionSink &sink) noexcept {
+  std::uint32_t index{};
+  std::vector<std::byte> memberBytes;
+  if (command.operation.bytes.size() >= sizeof(index)) {
+    std::memcpy(&index, command.operation.bytes.data(), sizeof(index));
+    memberBytes.assign(command.operation.bytes.begin() + sizeof(index),
+                       command.operation.bytes.end());
+  }
+  if (index >= members_.size() || members_[index] == nullptr) {
+    sink.terminalCandidate(
+        command.token,
+        BackendResult{Failed{{IoErrorCode::InvalidRequest, 0}, {}, {}}, {}},
+        {});
+    // The request was already admitted, so the reserved terminal slot
+    // needs its release acknowledgement or the completion never
+    // materializes (same contract every other adapter's execute keeps).
+    sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
+    return;
+  }
+  {
+    const std::lock_guard lock(routeMutex_);
+    route_[command.token.value] = index;
+  }
+  const BackendCommand memberCommand{
+      command.token, PreparedOperation{command.operation.key, memberBytes}};
+  members_[index]->execute(memberCommand, context, sink);
+}
+
+auto UnionSourceAdapter::publish(const NativeCompletion &completion,
+                                 OwnerContext &context)
+    -> std::expected<OwnerPublication, IoErrorInfo> {
+  std::size_t index{};
+  {
+    const std::lock_guard lock(routeMutex_);
+    const auto it = route_.find(completion.token.value);
+    if (it == route_.end())
+      return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+    index = it->second;
+    route_.erase(it);
+  }
+  if (index >= members_.size() || members_[index] == nullptr)
+    return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+  return members_[index]->publish(completion, context);
+}
+
 } // namespace xanadu::vortex

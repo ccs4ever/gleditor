@@ -23,6 +23,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -170,6 +171,37 @@ public:
 
 private:
   IoAdapter &delegate_;
+};
+
+/// Composes several member adapters behind one `AdapterKey` registration,
+/// preserving original request/source identity the way `RouterSourceAdapter`
+/// does for a single delegate (design/vortex-io-implementation-plan.md §6:
+/// "Router/Union adapters may delegate a prepared immutable operation ...
+/// they do not resubmit"). `select` picks exactly one member index per
+/// request on the owner thread during `prepare`; that same index rides along
+/// in `PreparedOperation::bytes` (ahead of the member's own encoding) so
+/// `execute`/`publish` dispatch to the same member without re-running
+/// `select` or touching any other member -- one caller submission still
+/// produces exactly one `prepare`/`execute`/`publish` call, on one member.
+class UnionSourceAdapter final : public IoAdapter {
+public:
+  using Selector = std::function<std::size_t(const CellRequest &)>;
+
+  UnionSourceAdapter(std::vector<IoAdapter *> members, Selector select)
+      : members_(std::move(members)), select_(std::move(select)) {}
+
+  auto prepare(const CellRequest &request, OwnerContext &context)
+      -> std::expected<PreparedOperation, IoErrorInfo> override;
+  void execute(const BackendCommand &command, BackendContext &context,
+               CompletionSink &sink) noexcept override;
+  auto publish(const NativeCompletion &completion, OwnerContext &context)
+      -> std::expected<OwnerPublication, IoErrorInfo> override;
+
+private:
+  std::vector<IoAdapter *> members_;
+  Selector select_;
+  mutable std::mutex routeMutex_;
+  std::unordered_map<std::uint64_t, std::size_t> route_;
 };
 
 } // namespace xanadu::vortex

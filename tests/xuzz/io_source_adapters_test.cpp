@@ -267,6 +267,47 @@ TEST(RouterSourceAdapterTest, DelegatesEveryCallExactlyOnceWithoutResubmit) {
   EXPECT_EQ(underlying.publishCalls, 1U);
 }
 
+TEST(UnionSourceAdapterTest, SelectsOneMemberAndDoesNotSubmitToTheOther) {
+  CountingAdapter first;
+  CountingAdapter second;
+  UnionSourceAdapter adapterUnion(
+      {&first, &second}, [](const CellRequest &request) {
+        return static_cast<std::size_t>(request.specification);
+      });
+  OwnerContext owner;
+  PayloadResolver payloads;
+  auto context = makeContext(payloads);
+
+  // specification == 1 selects the second member only.
+  const auto prepared = adapterUnion.prepare(requestFor(streamKey, 1), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink;
+  adapterUnion.execute(BackendCommand{{9}, *prepared}, context, sink);
+  ASSERT_TRUE(sink.candidate);
+  const auto published = adapterUnion.publish(
+      NativeCompletion{{9}, *sink.candidate, {}, {{9}}}, owner);
+  ASSERT_TRUE(published);
+
+  EXPECT_EQ(second.prepareCalls, 1U);
+  EXPECT_EQ(second.executeCalls, 1U);
+  EXPECT_EQ(second.publishCalls, 1U);
+  EXPECT_EQ(first.prepareCalls, 0U);
+  EXPECT_EQ(first.executeCalls, 0U);
+  EXPECT_EQ(first.publishCalls, 0U);
+}
+
+TEST(UnionSourceAdapterTest, UnknownMemberIndexRefusesBeforeAdmission) {
+  CountingAdapter only;
+  UnionSourceAdapter adapterUnion({&only}, [](const CellRequest &) {
+    return static_cast<std::size_t>(5);
+  });
+  OwnerContext owner;
+  const auto prepared = adapterUnion.prepare(requestFor(streamKey, 0), owner);
+  ASSERT_FALSE(prepared);
+  EXPECT_EQ(prepared.error().code, IoErrorCode::InvalidRequest);
+  EXPECT_EQ(only.prepareCalls, 0U);
+}
+
 class FakeCells final : public IoCellStore {
 public:
   auto authorizeOpen(const OpenSpec &)
