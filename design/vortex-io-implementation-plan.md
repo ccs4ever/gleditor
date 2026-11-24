@@ -770,6 +770,28 @@ Ordering: M1 → M2 → {M3, M4, M7a}; M3, M4 and M7a may proceed in parallel on
 M4 and M6 follows M5. The language milestones proceed in parallel after M7a; each is blocked from
 completion until both its language expert reviewer and the Vortex expert reviewer approve.
 
+M4 implementation notes and deliberate deferrals:
+
+- Byte output never rides `IoResultValue` (which is `std::monostate` or
+  `OpenedEndpoint` only): adapters publish produced bytes through
+  `publishTransientBytes`, place the retained `PayloadRange` in the terminal
+  outcome's payload field, and hand the `PayloadLease` to
+  `CompletionSink::terminalCandidate`. Owner-side consumers resolve the range
+  through `PayloadResolver` (or `outcomeCellPayloadRange` on the outcome cell).
+- `ProjectionSession::publishRefresh`/`publishCommit` trust the caller to hand
+  them the outcome their staged request produced; binding the outcome cell
+  back to the staged spec cell needs outcome→request→specification readers
+  the I/O cell layer does not yet expose, so cross-session outcome mix-ups are
+  a caller-contract matter for M4 (revisit if a second staged consumer lands).
+- `CommandMailboxAdapter` carries one bounded reply per command as a payload;
+  streaming or multi-message command replies are not framed and stay deferred
+  to the file/media milestone that needs them.
+- `ProcessIoAdapter` cannot kill a `popen` child mid-read (`context.stop` is
+  honored between `fread` chunks); `NetIoAdapter` serializes per fd because
+  concurrent ops would interleave on one stream; the lens adapters' fetch
+  generation is an adapter-local watermark, not the underlying store's own
+  change detection.
+
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per
 repository policy. Run source-level focused tests while implementing and full `make -j$(nproc) test`
 before release; backend comparison only if graphics code is touched. Do not claim performance
