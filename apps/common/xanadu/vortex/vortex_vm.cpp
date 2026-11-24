@@ -313,7 +313,7 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // ceiling with the generated-vocabulary bound in meta.cpp.
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::CheckClosureCall)) {
+            static_cast<std::uint64_t>(OpcodeKind::Await)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -585,7 +585,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::CheckClosureCall)) {
+          static_cast<std::uint64_t>(OpcodeKind::Await)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -2533,6 +2533,10 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
                             const std::vector<CellValue> &inputs,
                             std::vector<CellValue> &outputs,
                             const std::optional<CellRef> cursor, bool &jumped) {
+  if (kind == OpcodeKind::Await)
+    return {.success       = false,
+            .failingClause = opcode,
+            .errorMessage  = "Await requires a VM cursor"};
   if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
     return {.success      = false,
             .errorMessage = "activation-frame opcodes require a VM cursor"};
@@ -3879,17 +3883,34 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
                          .errorMessage      = ""};
 }
 
-ExecutionResult VortexVM::step(CellRef cursor) {
+VmExecutionResult VortexVM::step(CellRef cursor) {
+  const auto fail = [](std::string message) {
+    return VmExecutionResult{
+        ExecutionResult{.success = false, .errorMessage = std::move(message)},
+        StepDisposition::Failed};
+  };
+  for (const auto &[continuation, parked] : parkedAwaits_) {
+    if (parked.cursor != cursor || parked.outcome) continue;
+    if (!core_.arena().matches(cursor, parked.incarnation)) {
+      return VmExecutionResult{
+          ExecutionResult{.success      = false,
+                          .errorMessage = "parked cursor incarnation is stale"},
+          StepDisposition::Failed};
+    }
+    VmExecutionResult result{ExecutionResult{}, StepDisposition::Pending};
+    result.pending = PendingAwait{continuation, parked.waiter};
+    return result;
+  }
   if (relationProviderActive_)
-    return {.success = false,
-            .errorMessage =
-                "a relation provider cannot re-enter the VM (step or run)"};
+    return fail("a relation provider cannot re-enter the VM (step or run)");
+  if (const auto op = getCursorOpcode(cursor);
+      op && getOpcodeKind(*op) == OpcodeKind::Await)
+    return stepAwait(cursor, *op);
   if (const auto groups = mutationGroups_.find(cursor);
       groups != mutationGroups_.end() && groups->second &&
       !groups->second->empty() && guardLimits_.maxMutationGroupCycles == 0) {
     abortOwnedMutationGroups(cursor, std::nullopt);
-    return {.success      = false,
-            .errorMessage = "mutation-group cycle limit exceeded"};
+    return fail("mutation-group cycle limit exceeded");
   }
   if (const auto groups = mutationGroups_.find(cursor);
       groups != mutationGroups_.end() && groups->second &&
@@ -3899,8 +3920,7 @@ ExecutionResult VortexVM::step(CellRef cursor) {
                    guardLimits_.maxMutationGroupCycles;
       })) {
     abortOwnedMutationGroups(cursor, std::nullopt);
-    return {.success      = false,
-            .errorMessage = "mutation-group cycle limit exceeded"};
+    return fail("mutation-group cycle limit exceeded");
   }
   ExecutionResult result;
   try {
@@ -3909,7 +3929,221 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     result = {.success = false, .errorMessage = error.what()};
   }
   if (!result.success) abortOwnedMutationGroups(cursor, std::nullopt);
+  const auto disposition =
+      result.success ? StepDisposition::Progress : StepDisposition::Failed;
+  return VmExecutionResult{std::move(result), disposition};
+}
+
+VmExecutionResult VortexVM::stepAwait(const CellRef cursor,
+                                      const CellRef opcode) {
+  const auto fail = [opcode](std::string message) {
+    return VmExecutionResult{
+        ExecutionResult{.success       = false,
+                        .failingClause = opcode,
+                        .errorMessage  = std::move(message)},
+        StepDisposition::Failed};
+  };
+  const auto cursorIncarnation = core_.arena().incarnationOf(cursor);
+  if (!cursorIncarnation) return fail("Await requires a live arena cursor");
+
+  // A resumed await consumes the owner-published OutcomeCell without
+  // re-registering the request or re-running any preceding submit operation.
+  for (auto it = parkedAwaits_.begin(); it != parkedAwaits_.end(); ++it) {
+    auto &parked = it->second;
+    if (parked.cursor != cursor || parked.opcode != opcode ||
+        parked.incarnation != *cursorIncarnation)
+      continue;
+    const auto inputs = inputsOf(opcode);
+    const auto currentRequest =
+        inputs.size() == 1
+            ? resolveCell(inputs, {}, cellReferences_, 0, core_.arena())
+            : std::nullopt;
+    if (!parked.request || !currentRequest ||
+        *currentRequest != parked.request->cell ||
+        !core_.arena().matches(parked.request->cell,
+                               parked.request->incarnation))
+      return fail("resumed Await request changed or became stale");
+    if (!parked.outcome) continue;
+    if (!core_.arena().matches(parked.outcome->cell,
+                               parked.outcome->incarnation) ||
+        !xanadu::vortex::ioOutcomeTag(core_.arena(), *parked.outcome)) {
+      const auto staleContinuation = it->first;
+      retireAwait(cursor, *cursorIncarnation, staleContinuation);
+      break;
+    }
+    const auto outputs = outputsOf(opcode);
+    if (outputs.size() != 1)
+      return fail("Await requires exactly one OutcomeCell output");
+    const CellRef outcome = parked.outcome->cell;
+    try {
+      writeCellReferences(outputs, {static_cast<std::int64_t>(outcome)});
+      setCursorOpcode(cursor, core_.arena().linked(opcode, core_.dims().spin,
+                                                   DimVector::POS));
+    } catch (const std::exception &error) {
+      return fail(error.what());
+    }
+    const auto continuation = it->first;
+    ++totalCycles_;
+    retireAwait(cursor, *cursorIncarnation, continuation);
+    return VmExecutionResult{ExecutionResult{}, StepDisposition::Progress};
+  }
+
+  const auto inputs  = inputsOf(opcode);
+  const auto outputs = outputsOf(opcode);
+  if (inputs.size() != 1 || outputs.size() != 1)
+    return fail(
+        "Await requires one RequestCell input and one OutcomeCell output");
+  if (!awaitHandler_) return fail("Await has no I/O host installed");
+  const auto requestRef =
+      resolveCell(inputs, {}, cellReferences_, 0, core_.arena());
+  if (!requestRef) return fail("Await request reference is stale or invalid");
+  const auto requestIncarnation = core_.arena().incarnationOf(*requestRef);
+  if (!requestIncarnation ||
+      xanadu::vortex::ioCellTag(core_.arena(), *requestRef,
+                                *requestIncarnation) !=
+          xanadu::vortex::IoCellTag::Request)
+    return fail("Await input is not a live RequestCell");
+
+  if (mutationGroupActive(cursor))
+    return fail("Await cannot suspend inside an active mutation group");
+  const xanadu::vortex::RequestCell request{*requestRef, *requestIncarnation};
+  const auto result = awaitHandler_(request, cursor);
+  if (const auto *ready = std::get_if<xanadu::vortex::Ready>(&result.value)) {
+    if (!xanadu::vortex::ioOutcomeTag(core_.arena(), ready->outcome))
+      return fail("Await host returned a stale or invalid OutcomeCell");
+    try {
+      writeCellReferences(outputs,
+                          {static_cast<std::int64_t>(ready->outcome.cell)});
+      setCursorOpcode(cursor, core_.arena().linked(opcode, core_.dims().spin,
+                                                   DimVector::POS));
+    } catch (const std::exception &error) {
+      return fail(error.what());
+    }
+    ++totalCycles_;
+    return VmExecutionResult{ExecutionResult{}, StepDisposition::Progress};
+  }
+
+  const auto &pending = std::get<xanadu::vortex::Pending>(result.value);
+  if (!parkedAwaits_.contains(pending.continuation)) {
+    const auto parked = parkAwait(cursor, *cursorIncarnation,
+                                  pending.continuation, pending.waiter);
+    if (!parked.success || parked.disposition != StepDisposition::Pending)
+      return fail(parked.errorMessage.empty()
+                      ? "Await failed to retain its pending continuation"
+                      : parked.errorMessage);
+  }
+  parkedAwaits_.at(pending.continuation).request = request;
+  VmExecutionResult vmResult{ExecutionResult{}, StepDisposition::Pending};
+  vmResult.pending = PendingAwait{pending.continuation, pending.waiter};
+  return vmResult;
+}
+
+xanadu::vortex::ContinuationId VortexVM::createContinuation(
+    const CellRef cursor,
+    const xanadu::vortex::AllocationIncarnation incarnation) {
+  if (!core_.arena().matches(cursor, incarnation))
+    throw std::invalid_argument("cannot continue a stale cursor");
+  if (nextContinuationId_ == 0 ||
+      nextContinuationId_ ==
+          std::numeric_limits<xanadu::vortex::ContinuationId>::max())
+    throw std::overflow_error("Vortex continuation IDs exhausted");
+  const auto continuation = nextContinuationId_++;
+  issuedContinuations_.emplace(continuation, std::pair{cursor, incarnation});
+  return continuation;
+}
+
+VmExecutionResult
+VortexVM::parkAwait(const CellRef cursor,
+                    const xanadu::vortex::AllocationIncarnation incarnation,
+                    const xanadu::vortex::ContinuationId continuation,
+                    const xanadu::vortex::WaiterCell waiter) {
+  const auto failure = [](std::string message) {
+    return VmExecutionResult{
+        ExecutionResult{.success = false, .errorMessage = std::move(message)},
+        StepDisposition::Failed};
+  };
+  if (!core_.arena().matches(cursor, incarnation))
+    return failure("cannot park a stale cursor");
+  const auto issued = issuedContinuations_.find(continuation);
+  if (issued == issuedContinuations_.end() ||
+      issued->second != std::pair{cursor, incarnation})
+    return failure("continuation does not belong to this cursor incarnation");
+  if (!core_.arena().matches(waiter.cell, waiter.incarnation) ||
+      xanadu::vortex::ioCellTag(core_.arena(), waiter.cell,
+                                waiter.incarnation) !=
+          xanadu::vortex::IoCellTag::Waiter)
+    return failure("await waiter is stale or has the wrong cell tag");
+  if (const auto existing = parkedAwaits_.find(continuation);
+      existing != parkedAwaits_.end()) {
+    if (existing->second.cursor != cursor ||
+        existing->second.incarnation != incarnation ||
+        existing->second.waiter != waiter || existing->second.outcome)
+      return failure("continuation is already in use");
+  } else {
+    parkedAwaits_.emplace(continuation,
+                          ParkedAwait{cursor,
+                                      getCursorOpcode(cursor).value_or(noCell),
+                                      incarnation,
+                                      waiter,
+                                      {},
+                                      {}});
+  }
+  VmExecutionResult result{ExecutionResult{}, StepDisposition::Pending};
+  result.pending = PendingAwait{continuation, waiter};
   return result;
+}
+
+VmExecutionResult
+VortexVM::resumeAwait(const CellRef cursor,
+                      const xanadu::vortex::AllocationIncarnation incarnation,
+                      const xanadu::vortex::ContinuationId continuation,
+                      const xanadu::vortex::OutcomeCell outcome) {
+  const auto failure = [](std::string message) {
+    return VmExecutionResult{
+        ExecutionResult{.success = false, .errorMessage = std::move(message)},
+        StepDisposition::Failed};
+  };
+  const auto issued = issuedContinuations_.find(continuation);
+  const auto parked = parkedAwaits_.find(continuation);
+  if (issued == issuedContinuations_.end() ||
+      issued->second != std::pair{cursor, incarnation} ||
+      parked == parkedAwaits_.end() || parked->second.cursor != cursor ||
+      parked->second.incarnation != incarnation)
+    return failure("resume does not match a parked cursor continuation");
+  if (!core_.arena().matches(cursor, incarnation))
+    return failure("cannot resume a stale cursor");
+  if (!xanadu::vortex::ioOutcomeTag(core_.arena(), outcome))
+    return failure("resume outcome is stale or has the wrong cell tag");
+  if (parked->second.outcome && *parked->second.outcome != outcome)
+    return failure("continuation already resumed with another outcome");
+  parked->second.outcome = outcome;
+  return VmExecutionResult{ExecutionResult{}, StepDisposition::Progress};
+}
+
+std::optional<xanadu::vortex::OutcomeCell> VortexVM::takeAwaitOutcome(
+    const CellRef cursor,
+    const xanadu::vortex::AllocationIncarnation incarnation,
+    const xanadu::vortex::ContinuationId continuation) {
+  const auto parked = parkedAwaits_.find(continuation);
+  if (parked == parkedAwaits_.end() || parked->second.cursor != cursor ||
+      parked->second.incarnation != incarnation || !parked->second.outcome ||
+      !core_.arena().matches(cursor, incarnation) ||
+      !core_.arena().matches(parked->second.outcome->cell,
+                             parked->second.outcome->incarnation))
+    return std::nullopt;
+  return parked->second.outcome;
+}
+
+void VortexVM::retireAwait(
+    const CellRef cursor,
+    const xanadu::vortex::AllocationIncarnation incarnation,
+    const xanadu::vortex::ContinuationId continuation) noexcept {
+  if (const auto issued = issuedContinuations_.find(continuation);
+      issued != issuedContinuations_.end() && issued->second.first == cursor &&
+      issued->second.second == incarnation) {
+    issuedContinuations_.erase(issued);
+    parkedAwaits_.erase(continuation);
+  }
 }
 
 ExecutionResult VortexVM::stepImpl(CellRef cursor) {
@@ -4851,49 +5085,45 @@ ExecutionResult VortexVM::prepareTypeContract(OpcodeKind kind, CellRef opcode) {
   return {.success = true};
 }
 
-ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
-                              std::stop_token stopToken) {
+VmExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
+                                std::stop_token stopToken) {
+  const auto fail = [](std::string message) {
+    return VmExecutionResult{
+        ExecutionResult{.success = false, .errorMessage = std::move(message)},
+        StepDisposition::Failed};
+  };
   if (hasScopedChoices() && !scopedChoicesOwnedBy(cursor)) {
-    return {.success = false,
-            .errorMessage =
-                "execution cursor does not match the active scoped choice"};
+    return fail("execution cursor does not match the active scoped choice");
   }
+  if (!stopToken.stop_requested() &&
+      std::ranges::any_of(parkedAwaits_, [cursor](const auto &entry) {
+        return entry.second.cursor == cursor && !entry.second.outcome;
+      }))
+    return step(cursor);
   for (std::size_t i = 0; i < maxCycles; ++i) {
     if (stopToken.stop_requested()) {
       abortOwnedMutationGroups(cursor, std::nullopt);
-      return ExecutionResult{.success           = false,
-                             .contractViolation = ContractViolationKind::None,
-                             .failingClause     = std::nullopt,
-                             .errorMessage      = "Cancelled by cut"};
+      return fail("Cancelled by cut");
     }
     const auto op = getCursorOpcode(cursor);
     if (!op) {
       if (mutationGroupActive(cursor)) {
         abortOwnedMutationGroups(cursor, std::nullopt);
-        return {.success = false,
-                .errorMessage =
-                    "cursor finished with an active mutation group"};
+        return fail("cursor finished with an active mutation group");
       }
       if (hasScopedChoices()) {
-        return {.success      = false,
-                .errorMessage = "cursor finished with an active scoped choice"};
+        return fail("cursor finished with an active scoped choice");
       }
       if (activationDepth(cursor) != 0)
-        return {.success = false,
-                .errorMessage =
-                    "activation frame lost its cursor continuation"};
+        return fail("activation frame lost its cursor continuation");
       if (const auto guards = guardStacks_.find(cursor);
           guards != guardStacks_.end() && guards->second &&
           !guards->second->empty())
-        return {.success      = false,
-                .errorMessage = "cursor finished with an active guard"};
+        return fail("cursor finished with an active guard");
       if (pendingGuardChecks_.contains(cursor))
-        return {.success = false,
-                .errorMessage =
-                    "cursor finished with pending guard validation"};
+        return fail("cursor finished with pending guard validation");
       if (guardScopes_.contains(cursor))
-        return {.success      = false,
-                .errorMessage = "cursor finished with an active guard scope"};
+        return fail("cursor finished with an active guard scope");
       return ExecutionResult{.success           = true,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = std::nullopt,
@@ -4903,33 +5133,28 @@ ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles,
     if (kind && *kind == OpcodeKind::Halt) {
       if (mutationGroupActive(cursor)) {
         abortOwnedMutationGroups(cursor, std::nullopt);
-        return {.success      = false,
-                .errorMessage = "Halt reached with an active mutation group"};
+        return fail("Halt reached with an active mutation group");
       }
       if (hasScopedChoices()) {
-        return {.success      = false,
-                .errorMessage = "Halt reached with an active scoped choice"};
+        return fail("Halt reached with an active scoped choice");
       }
       if (activationDepth(cursor) != 0)
-        return {.success      = false,
-                .errorMessage = "Halt reached with an active activation frame"};
+        return fail("Halt reached with an active activation frame");
       if (const auto guards = guardStacks_.find(cursor);
           guards != guardStacks_.end() && guards->second &&
           !guards->second->empty())
-        return {.success      = false,
-                .errorMessage = "Halt reached with an active guard"};
+        return fail("Halt reached with an active guard");
       if (pendingGuardChecks_.contains(cursor))
-        return {.success      = false,
-                .errorMessage = "Halt reached with pending guard validation"};
+        return fail("Halt reached with pending guard validation");
       if (guardScopes_.contains(cursor))
-        return {.success      = false,
-                .errorMessage = "Halt reached with an active guard scope"};
+        return fail("Halt reached with an active guard scope");
       return ExecutionResult{.success           = true,
                              .contractViolation = ContractViolationKind::None,
                              .failingClause     = std::nullopt,
                              .errorMessage      = "Halted"};
     }
     auto res = step(cursor);
+    if (res.disposition == StepDisposition::Pending) return res;
     if (!res.success) {
       return res;
     }
@@ -4969,7 +5194,7 @@ std::size_t VortexVM::stepScheduler(std::stop_token stopToken) {
     const auto op = getCursorOpcode(cursor);
     if (op) {
       auto res = step(cursor);
-      if (res.success) {
+      if (res.success && res.disposition == StepDisposition::Progress) {
         executed++;
       }
     }

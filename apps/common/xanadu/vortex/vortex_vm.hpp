@@ -27,6 +27,8 @@
 
 #include <gleditor/cpp26.hpp>
 
+#include "common/xanadu/vortex/io_cells.hpp"
+#include "common/xanadu/vortex/io_protocol.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 
 namespace xanadu {
@@ -34,6 +36,29 @@ class MultiStoreCoordinator;
 }
 
 namespace zigzag::vortex {
+
+enum class StepDisposition : std::uint8_t {
+  Progress,
+  Yielded,
+  Pending,
+  Halted,
+  Failed,
+};
+
+struct PendingAwait {
+  xanadu::vortex::ContinuationId continuation{};
+  xanadu::vortex::WaiterCell waiter;
+};
+
+struct VmExecutionResult : ExecutionResult {
+  StepDisposition disposition{StepDisposition::Progress};
+  std::optional<PendingAwait> pending;
+
+  VmExecutionResult() = default;
+  VmExecutionResult(ExecutionResult result,
+                    StepDisposition stepDisposition = StepDisposition::Progress)
+      : ExecutionResult(std::move(result)), disposition(stepDisposition) {}
+};
 
 inline constexpr std::size_t closureStreamCapacity           = 64;
 inline constexpr std::size_t closureMetadataRelationCapacity = 64;
@@ -199,6 +224,10 @@ enum class OpcodeKind : std::uint8_t {
   // Validate a dynamic closure and its arity before argument graphs run.
   // Appended to preserve persisted opcode-kind integers.
   CheckClosureCall,
+
+  // One RequestCell input and one OutcomeCell output. Appended to preserve
+  // persisted opcode ordinals.
+  Await,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.
@@ -670,9 +699,27 @@ public:
   setCutCallback(std::function<void(std::string_view deweyPrefix)> cb);
 
   // -- Execution Lifecycle ----------------------------------------------------
-  ExecutionResult step(CellRef cursor);
-  ExecutionResult run(CellRef cursor, std::size_t maxCycles = 100000,
-                      std::stop_token stopToken = {});
+  VmExecutionResult step(CellRef cursor);
+  VmExecutionResult run(CellRef cursor, std::size_t maxCycles = 100000,
+                        std::stop_token stopToken = {});
+  [[nodiscard]] xanadu::vortex::ContinuationId
+  createContinuation(CellRef cursor,
+                     xanadu::vortex::AllocationIncarnation incarnation);
+  VmExecutionResult parkAwait(CellRef cursor,
+                              xanadu::vortex::AllocationIncarnation incarnation,
+                              xanadu::vortex::ContinuationId continuation,
+                              xanadu::vortex::WaiterCell waiter);
+  VmExecutionResult
+  resumeAwait(CellRef cursor, xanadu::vortex::AllocationIncarnation incarnation,
+              xanadu::vortex::ContinuationId continuation,
+              xanadu::vortex::OutcomeCell outcome);
+  [[nodiscard]] std::optional<xanadu::vortex::OutcomeCell>
+  takeAwaitOutcome(CellRef cursor,
+                   xanadu::vortex::AllocationIncarnation incarnation,
+                   xanadu::vortex::ContinuationId continuation);
+  void retireAwait(CellRef cursor,
+                   xanadu::vortex::AllocationIncarnation incarnation,
+                   xanadu::vortex::ContinuationId continuation) noexcept;
   std::size_t stepScheduler(std::stop_token stopToken = {});
 
   // -- Cursor PC Tracking ----------------------------------------------------
@@ -696,6 +743,16 @@ public:
   /// not VM state: it is not trailed by backtracking.
   VortexVM *setRelationProvider(std::string relation,
                                 RelationProvider provider);
+  /// Installs the owner-thread service boundary used by Await.
+  VortexVM *setAwaitHandler(std::function<xanadu::vortex::AwaitResult(
+                                xanadu::vortex::RequestCell, CellRef)>
+                                handler) {
+    awaitHandler_ = std::move(handler);
+    return this;
+  }
+  [[nodiscard]] bool hasAwaitHandler() const noexcept {
+    return static_cast<bool>(awaitHandler_);
+  }
   [[nodiscard]] FrameLimits frameLimits() const noexcept {
     return frameLimits_;
   }
@@ -768,6 +825,7 @@ private:
   ExecutionResult executeFrameOpcode(OpcodeKind kind, CellRef opcode,
                                      CellRef cursor);
   ExecutionResult stepImpl(CellRef cursor);
+  VmExecutionResult stepAwait(CellRef cursor, CellRef opcode);
   ExecutionResult invokeFramePrepared(
       CellRef descriptorCell, std::span<const std::vector<CellRef>> arguments,
       std::span<const CellRef> resultSlots, CellRef cursor,
@@ -878,6 +936,22 @@ private:
   std::optional<CellRef> streamCursor_;
   std::unordered_map<CellRef, std::string> memoizedOps_;
   std::unordered_map<CellRef, std::optional<CellRef>> cursorPC_;
+  struct ParkedAwait {
+    CellRef cursor{};
+    CellRef opcode{};
+    xanadu::vortex::AllocationIncarnation incarnation{};
+    xanadu::vortex::WaiterCell waiter;
+    std::optional<xanadu::vortex::RequestCell> request;
+    std::optional<xanadu::vortex::OutcomeCell> outcome;
+  };
+  std::unordered_map<xanadu::vortex::ContinuationId, ParkedAwait> parkedAwaits_;
+  std::unordered_map<xanadu::vortex::ContinuationId,
+                     std::pair<CellRef, xanadu::vortex::AllocationIncarnation>>
+      issuedContinuations_;
+  xanadu::vortex::ContinuationId nextContinuationId_{1};
+  std::function<xanadu::vortex::AwaitResult(xanadu::vortex::RequestCell,
+                                            CellRef)>
+      awaitHandler_;
   std::unordered_map<CellRef, ActivationStack> activationFrames_;
   GuardStackMap guardStacks_;
   PendingGuardMap pendingGuardChecks_;
