@@ -3480,7 +3480,13 @@ ArenaManifold::exportPrefix(const Mark &m) const {
       hasUnsupportedUntrackedPrefixIdentity()) {
     return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
   }
-  if (!ownerLeases_.empty() || !runtimeOnly_.empty()) {
+  // A cleared lease keeps a null-valued entry while its mark is outstanding
+  // so release() can restore the trailed previous value; only a live owner
+  // is runtime state a prefix cannot carry.
+  const auto holdsLease = [](const auto &entry) {
+    return static_cast<bool>(entry.second);
+  };
+  if (std::ranges::any_of(ownerLeases_, holdsLease) || !runtimeOnly_.empty()) {
     return std::unexpected{ArenaRefusal::RuntimeOnlyState};
   }
 
