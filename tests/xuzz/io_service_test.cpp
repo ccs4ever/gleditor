@@ -331,8 +331,22 @@ TEST(IoServiceTest, PartialAndUnknownRemainTypedTerminalOutcomes) {
   const auto unknownRequest = harness.submit();
   const auto unknownToken   = tokenOf(*harness.scheduler, 1);
   const IoProgress progress{.transferredBytes = 3, .phase = IoPhase::Terminal};
+  // Partial always names a payload range; an unresolvable one degrades the
+  // outcome to Failed, so this case registers real transient bytes.
+  const std::vector<std::byte> payloadBytes{std::byte{'p'}, std::byte{'a'},
+                                            std::byte{'r'}, std::byte{'t'}};
+  const auto payloadOrigin = harness.payloads.registerSource(
+      PayloadRef{.kind       = PayloadSourceKind::Transient,
+                 .source     = 1,
+                 .generation = 1,
+                 .occurrence = 1},
+      payloadBytes);
+  ASSERT_TRUE(payloadOrigin);
+  const PayloadRange partialRange{
+      .origin = *payloadOrigin, .offset = 0, .length = payloadBytes.size()};
   harness.scheduler->candidate(
-      partialToken, Partial{{}, PartialCause::BackendFailure, progress});
+      partialToken,
+      Partial{partialRange, PartialCause::BackendFailure, progress});
   harness.scheduler->acknowledge(partialToken);
   harness.scheduler->candidate(unknownToken, Unknown{progress});
   harness.scheduler->acknowledge(unknownToken);
