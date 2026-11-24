@@ -625,6 +625,10 @@ auto IoService::requestShutdown(const ShutdownMode mode) -> ShutdownResult {
   return scheduler_->requestStop(mode);
 }
 
+auto IoService::refuse(const IoErrorInfo reason) -> OutcomeCell {
+  return cells_.mintRefusal(reason);
+}
+
 void IoService::progress(const PrivateRequestToken token,
                          const IoProgress progressValue) noexcept {
   std::scoped_lock lock(sinkState_->mutex);

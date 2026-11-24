@@ -7,8 +7,8 @@
 namespace xanadu::vortex {
 
 IoHost::IoHost(IoService &service, zigzag::ArenaManifold &arena,
-               zigzag::vortex::VortexVM &vm)
-    : service_(service), arena_(arena), vm_(vm),
+               zigzag::vortex::VortexVM &vm, const IoExecutionProfile profile)
+    : service_(service), arena_(arena), vm_(vm), profile_(profile),
       owner_(std::this_thread::get_id()) {
   if (vm_.hasAwaitHandler()) {
     throw std::invalid_argument("VM already has an I/O await host");
@@ -38,9 +38,34 @@ void IoHost::abandon(ParkedAwait &parked) noexcept {
   vm_.retireAwait(parked.cursor, parked.cursorIncarnation, parked.continuation);
 }
 
+auto IoHost::profile() const noexcept -> IoExecutionProfile { return profile_; }
+
+auto IoHost::submitCell(const CapabilityCell capability,
+                        const zigzag::CellRef requestSpec) -> SubmitResult {
+  requireOwner();
+  if (!policyFor(profile_).allowDirectSubmit) {
+    return {Refused{service_.refuse(profileRefusal())}};
+  }
+  return service_.submit(capability, requestSpec);
+}
+
+auto IoHost::admitOpen(OpenSpec spec) -> SubmitResult {
+  requireOwner();
+  if (!policyFor(profile_).allowDirectSubmit) {
+    return {Refused{service_.refuse(profileRefusal())}};
+  }
+  return service_.admitOpen(std::move(spec));
+}
+
 auto IoHost::awaitCell(const RequestCell request, const zigzag::CellRef cursor)
     -> AwaitResult {
   requireOwner();
+  if (!policyFor(profile_).allowAwaitSuspension) {
+    // §9: an actor turn's direct Await is refused before admission, same
+    // as Submit; the VM sees a terminal Ready carrying the typed refusal,
+    // never a park, so no continuation or waiter is ever created for it.
+    return {Ready{service_.refuse(profileRefusal())}};
+  }
   const auto cursorIncarnation = arena_.incarnationOf(cursor);
   if (!cursorIncarnation) {
     throw std::invalid_argument("I/O await cursor is stale");

@@ -81,6 +81,12 @@ public:
   [[nodiscard]] auto pump(std::size_t completionBudget) -> std::size_t;
   [[nodiscard]] auto requestShutdown(ShutdownMode) -> ShutdownResult;
 
+  /// Mints a `Rejected`-shaped refusal outcome without admitting any
+  /// request. Used by `IoHost` for a profile refusal (§9): the check runs
+  /// entirely ahead of this service, but the typed outcome cell it
+  /// reports is minted through the same owner-only cell store.
+  [[nodiscard]] auto refuse(IoErrorInfo reason) -> OutcomeCell;
+
 private:
   struct LaneKey {
     zigzag::CellRef endpoint{};

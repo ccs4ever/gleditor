@@ -6,6 +6,7 @@
 #include <map>
 #include <thread>
 
+#include "common/xanadu/vortex/io_profile.hpp"
 #include "common/xanadu/vortex/io_service.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
@@ -17,7 +18,8 @@ namespace xanadu::vortex {
 class IoHost final {
 public:
   IoHost(IoService &service, zigzag::ArenaManifold &arena,
-         zigzag::vortex::VortexVM &vm);
+         zigzag::vortex::VortexVM &vm,
+         IoExecutionProfile profile = IoExecutionProfile::Interactive);
   ~IoHost();
 
   IoHost(const IoHost &)            = delete;
@@ -29,6 +31,17 @@ public:
       -> AwaitResult;
   [[nodiscard]] auto cancelWaiter(WaiterCell waiter) -> WaiterCancelResult;
   void retireWaiter(WaiterCell waiter);
+
+  /// The immutable per-run profile applied before every admission below.
+  [[nodiscard]] auto profile() const noexcept -> IoExecutionProfile;
+
+  /// §9's generic gate: a direct `submit`/`admitOpen` reached while this
+  /// host's profile forbids it (an actor turn) is refused before the
+  /// request ever reaches `IoService`. Core/VM never see this check; it
+  /// runs only here, ahead of the service boundary.
+  [[nodiscard]] auto submitCell(CapabilityCell capability,
+                                zigzag::CellRef requestSpec) -> SubmitResult;
+  [[nodiscard]] auto admitOpen(OpenSpec spec) -> SubmitResult;
 
   /// The budget covers service completions and waiter checks/resumptions.
   /// Pending waiters are visited round-robin, so a large parked set cannot
@@ -50,6 +63,7 @@ private:
   IoService &service_;
   zigzag::ArenaManifold &arena_;
   zigzag::vortex::VortexVM &vm_;
+  const IoExecutionProfile profile_;
   const std::thread::id owner_;
   std::map<std::uint64_t, ParkedAwait> parked_;
   std::uint64_t nextId_{1};
