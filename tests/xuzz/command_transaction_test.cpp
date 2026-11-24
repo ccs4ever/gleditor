@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/vortex/payload_resolver.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/command_transaction.hpp"
 #include "common/xanadu/zigzag/crdt_zz.hpp"
@@ -14,6 +15,7 @@
 namespace {
 
 using namespace zigzag;
+using namespace xanadu::vortex;
 
 TEST(CommandTransactionTest, SubmitAndResolveSuccess) {
   ArenaManifold arena;
@@ -85,6 +87,149 @@ TEST(CommandTransactionTest, MultipleConcurrentTransactionsNoCollision) {
   }
 
   EXPECT_TRUE(crdt::CRDTEngine::verifyManifoldInvariants(arena));
+}
+
+// -- the async half: beginTransaction/publishResult -------------------------
+
+TEST(CommandTransactionTest, BeginLeavesPendingUntilPublishResult) {
+  ArenaManifold arena;
+  const CellRef target = arena.makeCell("proc:77");
+
+  CommandMailbox mailbox;
+  const CellRef promise = mailbox.beginTransaction(arena, target, "status");
+  ASSERT_NE(promise, noCell);
+  EXPECT_EQ(arena.textOf(promise), "pending");
+
+  mailbox.publishResult(arena, promise,
+                        CommandResult{.success = true, .response = "running"});
+  const auto reply = mailbox.queryPromise(arena, promise);
+  ASSERT_TRUE(reply.has_value());
+  EXPECT_TRUE(reply->success);
+  EXPECT_EQ(reply->response, "running");
+  EXPECT_TRUE(crdt::CRDTEngine::verifyManifoldInvariants(arena));
+}
+
+// -- CommandMailboxAdapter: the §6 request-cell migration --------------------
+
+namespace {
+
+struct CapturingSink final : CompletionSink {
+  void progress(PrivateRequestToken, IoProgress) noexcept override {}
+  void terminalCandidate(PrivateRequestToken, BackendResult result,
+                         std::optional<PayloadLease>) noexcept override {
+    candidate = std::move(result);
+  }
+  void releaseAcknowledged(BackendReleaseAck ack) noexcept override {
+    released = ack;
+  }
+  std::optional<BackendResult> candidate;
+  std::optional<BackendReleaseAck> released;
+};
+
+BackendContext makeContext(PayloadResolver &payloads) {
+  return BackendContext{.stop = {}, .payloads = payloads, .budget = {1 << 20}};
+}
+
+CellRequest requestFor(AdapterKey key, std::uint32_t specification) {
+  return CellRequest{.key           = key,
+                     .capability    = CapabilityCell{},
+                     .specification = specification};
+}
+
+constexpr AdapterKey mailboxKey{30, 1};
+
+} // namespace
+
+TEST(CommandMailboxAdapterTest,
+     StagePrepareExecutePublishRoundTripsThroughResultOf) {
+  CommandMailboxAdapter adapter;
+  CommandMailbox mailbox;
+  ArenaManifold arena;
+  const CellRef target  = arena.makeCell("proc:5");
+  const CellRef promise = mailbox.beginTransaction(arena, target, "ping");
+  ASSERT_NE(promise, noCell);
+
+  const auto key =
+      adapter.stage("ping", [](std::string_view verb) -> CommandResult {
+        return CommandResult{.success = true,
+                             .response =
+                                 std::string("pong:") + std::string(verb)};
+      });
+  OwnerContext owner;
+  PayloadResolver payloads;
+
+  const auto prepared = adapter.prepare(requestFor(mailboxKey, key), owner);
+  ASSERT_TRUE(prepared.has_value());
+
+  CapturingSink sink;
+  auto context = makeContext(payloads);
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  ASSERT_TRUE(sink.candidate.has_value());
+  ASSERT_TRUE(sink.released.has_value());
+  EXPECT_TRUE(std::holds_alternative<Complete>(sink.candidate->outcome));
+
+  const auto published = adapter.publish(
+      NativeCompletion{{1}, *sink.candidate, {}, *sink.released}, owner);
+  ASSERT_TRUE(published.has_value());
+
+  const auto result = CommandMailboxAdapter::resultOf(published->outcome);
+  EXPECT_TRUE(result.success);
+  EXPECT_EQ(result.response, "pong:ping");
+
+  // The owner-side half: the decoded result fills the promise cell.
+  mailbox.publishResult(arena, promise, result);
+  const auto reply = mailbox.queryPromise(arena, promise);
+  ASSERT_TRUE(reply.has_value());
+  EXPECT_TRUE(reply->success);
+  EXPECT_EQ(reply->response, "pong:ping");
+}
+
+TEST(CommandMailboxAdapterTest, PrepareRefusesAnUnknownStagingKey) {
+  CommandMailboxAdapter adapter;
+  OwnerContext owner;
+  const auto prepared = adapter.prepare(requestFor(mailboxKey, 77), owner);
+  ASSERT_FALSE(prepared.has_value());
+  EXPECT_EQ(prepared.error().code, IoErrorCode::InvalidRequest);
+}
+
+TEST(CommandMailboxAdapterTest, StagedEntriesAreOneShot) {
+  CommandMailboxAdapter adapter;
+  OwnerContext owner;
+  PayloadResolver payloads;
+  auto context = makeContext(payloads);
+
+  const auto key      = adapter.stage("once", [](std::string_view) {
+    return CommandResult{.success = true, .response = "ran"};
+  });
+  const auto prepared = adapter.prepare(requestFor(mailboxKey, key), owner);
+  ASSERT_TRUE(prepared.has_value());
+
+  CapturingSink first;
+  adapter.execute(BackendCommand{{1}, *prepared}, context, first);
+  ASSERT_TRUE(first.candidate.has_value());
+  EXPECT_TRUE(std::holds_alternative<Complete>(first.candidate->outcome));
+
+  // A replayed command can never re-invoke the handler: the staged entry
+  // was consumed by the first worker turn.
+  CapturingSink replay;
+  adapter.execute(BackendCommand{{2}, *prepared}, context, replay);
+  ASSERT_TRUE(replay.candidate.has_value());
+  const auto *failed = std::get_if<Failed>(&replay.candidate->outcome);
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::InvalidRequest);
+}
+
+TEST(CommandMailboxAdapterTest, ResultOfDecodesFailuresWithoutThrowing) {
+  const auto failedOutcome =
+      IoOutcome{Failed{{IoErrorCode::BackendFailure, 3}, {}, {}}};
+  const auto result = CommandMailboxAdapter::resultOf(failedOutcome);
+  EXPECT_FALSE(result.success);
+  EXPECT_NE(result.response.find("Failed"), std::string::npos);
+
+  const auto complete = IoOutcome{Complete{
+      {}, std::vector<std::byte>{}, IoProgress{.phase = IoPhase::Terminal}}};
+  const auto empty    = CommandMailboxAdapter::resultOf(complete);
+  EXPECT_FALSE(empty.success);
 }
 
 } // namespace
