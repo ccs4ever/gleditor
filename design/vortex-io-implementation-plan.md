@@ -630,7 +630,7 @@ reuses exact translated addresses (e.g. \[0,10) then \[5,15) appends \[10,15)); 
 only when both translations are contiguous. Hashes validate integrity only. Translation entries do
 not pin transient bytes. Local capture does not invent remote signature/provenance.
 
-The new private durable capture journal is `capture.journal`, signature `\x89XUDCAP`, version 1,
+The new private durable capture journal is `capture.journal`, signature `\x89XUDCAP`, version 2,
 length-delimited records with record kind, sequence, CaptureId, source interval, permascroll span,
 append digest, and checksum. Records are append-only; unknown signature/version, checksum failure,
 truncated record or sequence gap is a typed refusal naming the number/error. It stores metadata
@@ -765,7 +765,7 @@ expand this work.
 | M3 — profiles/actor                   | Generic profile gate, VAgent intent staging, durable journal, Evidence adapter preservation. Depends M1–M2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Crash injection around journal flush/dispatch/receipt/checkpoint; unknown refuses replay, no silent resend, actor completion is later message, full journal refuses before service admission.                                                                                                                                                                                                                           |
 | M4 — lenses/adapters                  | Registered IoAdapter staged source plan, stream/process/net, command mailbox, then DB/config/Git/log. Depends M2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Source generation/conflict tests, ProjectionSession transaction semantics retained, Router/Union no duplicate submission, endpoint direction ordering.                                                                                                                                                                                                                                                                  |
 | M5 — file/media                       | ReadObservation, live/stable capability contracts, 64-bit range reads, bounded decoder/cache leases. Depends M1/M4.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Replacement/truncation/in-place mutation/external writer tests; offsets above 4 GiB; no path-only cache reuse; bounds and cancellation cleanup; unsupported atomicity refuses.                                                                                                                                                                                                                                          |
-| M6 — capture                          | Per-user overlap map, capture coordinator and v1 journal. Depends M0/M1/M5.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | \[0,10) then \[5,15) reuses overlap; discontiguous split; mismatched append request/outcome refuses publication; failures injected after each durable step; restart reconciles; no hash identity; orphan bytes handled explicitly.                                                                                                                                                                                      |
+| M6 — capture                          | Per-user overlap map, capture coordinator and v2 journal. Depends M0/M1/M5.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | \[0,10) then \[5,15) reuses overlap; discontiguous split; mismatched append request/outcome refuses publication; failures injected after each durable step; restart reconciles; no hash identity; orphan bytes handled explicitly.                                                                                                                                                                                      |
 | M7a — frontend common bridge features | Language-neutral pieces every frontend shares: managed `IoSubmissionValue` `Admitted`/`Refused` tagged-sum cell and its pattern accessors; generic `FrontendRunResult = Completed or Parked{FrontendToken} or Failed{FrontendDiagnostic}` carrier; `FrontendToken` (suspended activation, request cell and incarnation, waiter cell, continuation ID, optional position) as host state, never a language value; `IoHost` wakeup routing of a token to its owning runner; shared terminal-status gating for payload access (`Complete` exposes payload, `EndOfStream` none, `Partial`/`Failed`/`Cancelled`/`TimedOut` only when present); shared diagnostic-code registry for the frontend refusals in §10 and §14; Direct Vortex shared-host baseline conformance (Submit/Await cell protocol, runner `Parked` path); reusable conformance test harness every language milestone runs. Depends M2; adapter gates only via the M1 delayed fake backend. | Direct-host conformance suite passes, proving no frontend branches in Core/VM and no raw IDs in cells. Harness proves same-request Pending resume, refusal remains a value, terminal outcomes are not logical failure, and no raw `RequestId`/`WaiterId`/`ContinuationId` in language-visible values.                                                                                                                   |
 | M7-VQL                                | `EffectClause` `let $r := submit(...); match $r { admitted => await, refused => $err }` in script grammar only; `ExecutionBlock` result gains `Completed{rows}`/`Parked{scriptActivation, effectAction, requestCell}`; submit runs once per reached script action; row/query placement refused with `VQL_IO_QUERY_CONTEXT`. Depends M7a; real `read_bytes`/file endpoints need the M4/M5 gate, otherwise fake backend.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Script-action multiplicity (no per-row fanout), same-request Pending resume, terminal outcomes are script values never `QueryError`/empty rows, pure query clauses/projections, vquery/vqueryc CLI host I/O audited. Passes the M7a conformance harness. Gate: approved by a VQL expert reviewer and a Vortex expert reviewer; reports under `design/projects/vortex-io-implementation-review/m7-vql/`.                 |
 | M7-VPL                                | `R ← submit¨ Caps Specs`; `Out ← await¨ R` shape-preserving sums; `ExecutionResult` gains `Parked{activation, submissions, outcomes, nextPosition, requestCell, waiterCell}` separate from `ExecutionError`; one left-to-right waiter per activation; equal shapes required before submit; message/frame modes refused with `IO_UNSUPPORTED_MODE`. Depends M7a; real endpoints need the M4/M5 gate, otherwise fake backend.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Out-of-order completion with one left-to-right waiter, per-slot refusal passes through, shape mismatch refused before submit, same-request Pending resume, pure arithmetic, vpl/vplc CLI host I/O audited. Passes the M7a conformance harness. Gate: approved by a VPL expert reviewer and a Vortex expert reviewer; reports under `design/projects/vortex-io-implementation-review/m7-vpl/`.                           |
@@ -882,13 +882,14 @@ M6 implementation notes and deliberate deferrals:
   terminal `Complete`; another capture's outcome, a stale incarnation, a nonterminal request or a
   non-`Complete` outcome returns `Refused` with no journal record, cell or translation published.
 - Journal records are `Append` (intent, before submission), `Appended` (span plus full translation
-  intent, fsynced before the receipt cell is minted), `Committed` (after publication) and `Aborted`
-  (with an uncertain flag). `recover()` rebuilds translations from `Appended`/`Committed`, pins the
-  source intervals of open intents and uncertain aborts (`NeedsReconciliation`, overlapping prepare
-  then refuses with `Conflict`), and reports `orphanBytes` as the sum of append lengths that may
-  have landed without a proven commit. It never resubmits. Corruption, bad signature/version and
-  sequence gaps are `PersistenceRefusal` naming the 1-based record; a torn tail is cut by the
-  constructor.
+  intent, fsynced before the receipt cell is minted), `Committed` (after Structure publication and
+  the Store save), `Aborted` (with an uncertain flag) and, from version 2, `Reconciled` (the owner's
+  promote-or-release decision for a pinned capture; version 1 had no such record and is refused).
+  `recover()` rebuilds translations from `Appended`/`Committed`, pins the source intervals of open
+  intents and uncertain aborts (`NeedsReconciliation`, overlapping prepare then refuses with
+  `Conflict`), and reports `orphanBytes` as the sum of append lengths that may have landed without a
+  proven commit. It never resubmits. Corruption, bad signature/version and sequence gaps are
+  `PersistenceRefusal` naming the 1-based record; a torn tail is cut by the constructor.
 - Journal frame sizes are exported from `capture_journal.hpp` (`kCaptureJournal*Bytes`,
   `captureJournalFramedBytes`), and the coordinator derives its reservations from them; nothing
   hardcodes the format. Fallback bounds (`maxIntervals`, `maxAppendBytes`, `maxPieces`,
@@ -931,18 +932,50 @@ M6 implementation notes and deliberate deferrals:
 - Crash injection is covered three ways: restart tests tear the whole world down after each durable
   step (intent, append executed, `Appended`, `Committed`, certain and uncertain abort); coordinator
   crash points bracket the `Appended` fsync; the journal's own hooks are exercised directly.
-- Deferred, M6 is NOT fully met: the plan's §8.2 publication contract -- `commit` "publishes
-  translated Structure spans plus a receipt under one owner mark" -- is not implemented. `commit`
-  mints the receipt cell with span fields in the owner arena only and emits no Structure operations
-  into a `Store`, so no durable slice references a captured span; a later milestone owes that
-  publication and its own recovery rule (a durable `Committed` record presently proves only the
-  journal and map, not a published reference). Also deferred: explicit reconciliation of `Pinned`
-  intervals (they stay refused until restart policy changes); tests of
-  `UserPermascrollCaptureSink`/`SegmentedPrimediaCaptureSink` against the real spools (tests use an
-  in-memory sink whose `loseUnsynced()` models the crash); and moving the `capture_defaults` bounds
-  into `system://settings` (M8). Source chunks are not pinned by the map, so a capture of a
-  transient origin whose last lease dropped is refused `Unresolved` by design (the tests hold a
-  standing lease).
+- Structure publication (`capture_publication.{hpp,cpp}`, `CapturePublisher`, attached with
+  `setPublisher` before `recover()`). Using only the existing Store API (`makeDimension` through the
+  dimension registry, `makeCell`, `makeScalarCell`, `setLink`), a capture publishes: a receipt cell
+  that is a scalar whose canonical int64 bits are the `CaptureId`, chained along `d.io.capture`
+  (headed by the dimension's own cell); per appended piece a cell whose content is the permanent
+  permascroll span, on the receipt's `d.io.range` rank; and per piece a `d.io.provenance` chain of
+  scalar cells (source kind, source, generation, occurrence, source offset). The receipt joins
+  `d.io.capture` last, so a reachable receipt is a complete publication and a failure part-way
+  leaves only unlinked cells. A capture wholly covered by earlier translations appends nothing and
+  publishes a receipt with an empty range rank; the spans it reuses were published by the capture
+  that appended them. No change to `store.hpp`, `ops.hpp`, `CompactOpNode`, `store.tables` or any
+  OpKind was needed.
+- Crash ordering (decision): `Appended` (after the permascroll sync, fsynced) -> publish into the
+  Store -> `Store::save` -> `Committed` -> in-process translations. `Committed` therefore proves the
+  bytes, the references and their durability. Publication is idempotent keyed by `CaptureId` (a walk
+  of the receipt rank, never a content hash). Death after `Appended` and before the save: recovery
+  finds no receipt, publishes once, saves, writes `Committed`. Death after the save and before
+  `Committed`: recovery finds the receipt, mints nothing, writes `Committed`. A `Committed` capture
+  whose Store lost its receipt is republished the same way. A refused publish or save fails `commit`
+  with `PersistenceRefusal` and leaves the capture retriable; the retry cannot double-publish. If
+  recovery cannot finish a publication the entry reports `PublicationIncomplete`, translations are
+  rebuilt, nothing is pinned, and `resumePublications()` retries. Publication runs on
+  `store.latest()`, so the Store must be single-writer while a coordinator uses it. With no
+  publisher attached a `Committed` record proves only the journal and the map, as before.
+- Explicit reconciliation: `reconcile(CaptureId, ReconcileRelease | ReconcilePromote{span?})`
+  resolves a pinned capture (open intent, uncertain abort, `SpanBeyondPermascroll`, ambiguous
+  order). Promote never searches for bytes: the owner names the span (or the journal's `Appended`
+  span is used), and the coordinator verifies scroll, length, the permascroll high-water mark and
+  the append digest of the bytes read back through `CaptureByteSink::read` before anything changes;
+  a failed check is `Conflict` and the pin stays. The decision is journaled (`Reconciled`) before it
+  is acted on, so a restart replays it: Release unpins and leaves any landed bytes orphaned, Promote
+  proceeds like an `Appended` record (translations, publication, `Committed`), including after a
+  restart between `Reconciled` and `Committed`.
+- The real sinks (`UserPermascrollCaptureSink`, `SegmentedPrimediaCaptureSink`) are tested against
+  real spools in a temp directory: `sync()` is what moves bytes into the segment file,
+  `highWaterBytes()` is the size after reopen, and an end-to-end capture runs through the real
+  permascroll and Store save/reload.
+- Remaining, deliberately: moving the `capture_defaults` bounds into `system://settings` (M8); there
+  is no UI or keymap command invoking `reconcile` yet (it is an owner API); an ambiguous journal
+  order is reconcilable only by the same promote/release decisions, with no tool that explains why
+  it was ambiguous; the Store is saved whole per commit (`Store::save` is not incremental per
+  capture, so a commit's cost grows with the store); and source chunks are not pinned by the map, so
+  a capture of a transient origin whose last lease dropped is refused `Unresolved` by design (the
+  tests hold a standing lease).
 
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per
 repository policy. Run source-level focused tests while implementing and full `make -j$(nproc) test`
