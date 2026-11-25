@@ -1,15 +1,9 @@
 #include "common/xanadu/vortex/capture_journal.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <cstring>
-#include <fcntl.h>
-#include <gleditor/logging.hpp>
 #include <limits>
 #include <span>
-#include <sys/stat.h>
-#include <system_error>
-#include <unistd.h>
 
 namespace xanadu::vortex {
 
@@ -28,34 +22,6 @@ constexpr std::size_t kReconciledBytes  = kCaptureJournalReconciledBytes;
 constexpr std::size_t kIntervalCountOffset = kFixedBodyBytes + 32 + 8;
 constexpr std::size_t kMaxKindValue =
     static_cast<std::size_t>(CaptureJournalRecordKind::Reconciled);
-
-void appendBytes(std::vector<std::byte> &out, const void *data,
-                 const std::size_t size) {
-  const auto *bytes = static_cast<const std::byte *>(data);
-  out.insert(out.end(), bytes, bytes + size);
-}
-
-template <typename T>
-void appendValue(std::vector<std::byte> &out, const T &value) {
-  appendBytes(out, &value, sizeof(T));
-}
-
-/// FNV-1a-64 over the concatenation of two spans. The record checksum
-/// covers every body byte except the checksum field itself; hashing the
-/// two sides separately avoids copying the body for verification.
-std::uint64_t checksumOf(const std::span<const std::byte> first,
-                         const std::span<const std::byte> second) {
-  std::uint64_t hash = 14695981039346656037ull;
-  const auto mix     = [&hash](const std::span<const std::byte> bytes) {
-    for (const auto byte : bytes) {
-      hash ^= static_cast<std::uint8_t>(byte);
-      hash *= 1099511628211ull;
-    }
-  };
-  mix(first);
-  mix(second);
-  return hash;
-}
 
 /// The kind-specific payload size an honest encode produces, or
 /// std::nullopt when the record cannot be represented (interval count
@@ -140,21 +106,11 @@ std::vector<std::byte> encodeBody(const CaptureJournalRecord &record) {
   }
 
   const auto sum =
-      checksumOf(std::span<const std::byte>(body.data(), kChecksumOffset),
-                 std::span<const std::byte>(body.data() + kFixedBodyBytes,
-                                            body.size() - kFixedBodyBytes));
+      fnv1a64(std::span<const std::byte>(body.data(), kChecksumOffset),
+              std::span<const std::byte>(body.data() + kFixedBodyBytes,
+                                         body.size() - kFixedBodyBytes));
   std::memcpy(body.data() + kChecksumOffset, &sum, sizeof(sum));
   return body;
-}
-
-/// u32-framed record: bodyLen(4) + body. encodeBody output is trusted to
-/// be non-empty; callers run payloadBytesFor first so no length truncates.
-std::vector<std::byte> frameBody(const std::vector<std::byte> &body) {
-  std::vector<std::byte> framed;
-  framed.reserve(body.size() + sizeof(std::uint32_t));
-  appendValue(framed, static_cast<std::uint32_t>(body.size()));
-  framed.insert(framed.end(), body.begin(), body.end());
-  return framed;
 }
 
 /// Fully validate one record body and decode it. Every check the durable
@@ -175,9 +131,9 @@ std::optional<CaptureJournalRecord> decodeBody(const std::byte *body,
   std::uint64_t storedChecksum{};
   std::memcpy(&storedChecksum, body + kChecksumOffset, sizeof(storedChecksum));
   const auto computed =
-      checksumOf(std::span<const std::byte>(body, kChecksumOffset),
-                 std::span<const std::byte>(body + kFixedBodyBytes,
-                                            bodyLen - kFixedBodyBytes));
+      fnv1a64(std::span<const std::byte>(body, kChecksumOffset),
+              std::span<const std::byte>(body + kFixedBodyBytes,
+                                         bodyLen - kFixedBodyBytes));
   if (computed != storedChecksum) return std::nullopt;
 
   CaptureJournalRecord record;
@@ -280,43 +236,6 @@ std::optional<CaptureJournalRecord> decodeBody(const std::byte *body,
   return record;
 }
 
-bool writeAll(const int fd, const void *data, const std::size_t size) {
-  const auto *cursor    = static_cast<const char *>(data);
-  std::size_t remaining = size;
-  while (remaining > 0) {
-    const auto written = ::write(fd, cursor, remaining);
-    if (written < 0) {
-      if (errno == EINTR) continue;
-      return false;
-    }
-    cursor += written;
-    remaining -= static_cast<std::size_t>(written);
-  }
-  return true;
-}
-
-/// Closes the descriptor on scope exit so a throwing crash hook cannot
-/// leak the fd (same discipline as ActorIoJournal).
-struct FdGuard {
-  int fd;
-  ~FdGuard() {
-    if (fd >= 0) ::close(fd);
-  }
-};
-
-struct CaptureJournalScan {
-  /// Offset just past the last complete, fully-valid record -- the
-  /// boundary a crash-torn tail starts at. Meaningful only when !corrupt.
-  std::size_t boundary{};
-  bool corrupt{};
-  /// 1-based position of the failing record; 0 when the header or the
-  /// scan itself failed before any record was proven.
-  std::size_t errorRecord{};
-  /// Next sequence a valid append must carry (last valid + 1, from 1).
-  std::uint64_t nextSequence{1};
-  CaptureId maxCaptureId{};
-};
-
 /// Whether @p partial (the bytes present after a length prefix announcing
 /// @p bodyLen) can be the start of one genuine, interrupted record: its kind
 /// is known, the announced length is one that kind can have, its sequence (once
@@ -368,239 +287,60 @@ bool tornTailPlausible(const std::span<const std::byte> partial,
   return true;
 }
 
-/// Scan a journal image: verify header, then walk records validating
-/// kind, exact per-kind length, checksum, interval count consistency and
-/// gapless sequence. A trailing *incomplete* record is a tolerated tear
-/// (the scan stops at its start); a fully-present invalid record,
-/// signature/version mismatch or sequence gap is corruption. Shared by
-/// the constructor's tail repair and recover() so the two can never
-/// disagree about what counts as corruption.
-CaptureJournalScan scanJournalImage(const std::span<const std::byte> bytes) {
-  CaptureJournalScan scan;
-  if (bytes.size() < kHeaderBytes) {
-    scan.corrupt     = true;
-    scan.errorRecord = 0;
-    return scan;
-  }
-  if (std::memcmp(bytes.data(), kCaptureJournalSignature,
-                  sizeof(kCaptureJournalSignature)) != 0 ||
-      [&] {
-        std::uint32_t version{};
-        std::memcpy(&version, bytes.data() + sizeof(kCaptureJournalSignature),
-                    sizeof(version));
-        return version != kCaptureJournalVersion;
-      }()) {
-    scan.corrupt     = true;
-    scan.errorRecord = 0;
-    return scan;
-  }
-
-  std::size_t cursor        = kHeaderBytes;
-  std::uint64_t expectedSeq = 1;
-  std::size_t recordOrdinal = 0;
-  while (cursor + sizeof(std::uint32_t) <= bytes.size()) {
-    std::uint32_t bodyLen{};
-    std::memcpy(&bodyLen, bytes.data() + cursor, sizeof(bodyLen));
-    if (bodyLen < kFixedBodyBytes) {
-      scan.corrupt     = true;
-      scan.errorRecord = recordOrdinal + 1;
-      return scan;
-    }
-    // A claimed body that runs past the file is a tear only when what
-    // is present is the self-consistent start of the very record the
-    // length announces. Anything else -- a corrupt length mid-file -- must
-    // refuse: cutting there would silently delete the valid records after
-    // it.
-    const auto available = bytes.size() - cursor - sizeof(std::uint32_t);
-    if (bodyLen > available) {
-      if (tornTailPlausible(bytes.subspan(cursor + sizeof(std::uint32_t)),
-                            bodyLen, expectedSeq)) {
-        break;
-      }
-      scan.corrupt     = true;
-      scan.errorRecord = recordOrdinal + 1;
-      return scan;
-    }
-    const std::byte *body = bytes.data() + cursor + sizeof(std::uint32_t);
-    ++recordOrdinal;
-    const auto record = decodeBody(body, bodyLen);
-    if (!record || record->sequence != expectedSeq) {
-      scan.corrupt     = true;
-      scan.errorRecord = recordOrdinal;
-      return scan;
-    }
-    scan.maxCaptureId = std::max(scan.maxCaptureId, record->captureId);
-    scan.nextSequence = ++expectedSeq;
-    cursor += sizeof(std::uint32_t) + bodyLen;
-  }
-  scan.boundary = cursor;
-  return scan;
-}
+constexpr FramedLogFormat kFormat{kCaptureJournalSignature,
+                                  kCaptureJournalVersion, kFixedBodyBytes};
 
 } // namespace
 
+auto CaptureJournal::scanImage(const std::span<const std::byte> bytes,
+                               CaptureId &maxId, std::uint64_t &nextSequence)
+    -> FramedLogScan {
+  CaptureId seenMax{};
+  std::uint64_t seenNext = 1;
+  const auto scan        = scanFramedLog(
+      kFormat, bytes,
+      [](const std::span<const std::byte> partial, const std::size_t bodyLen,
+         const std::size_t ordinal) {
+        return tornTailPlausible(partial, bodyLen, ordinal + 1);
+      },
+      [&](const std::byte *body, const std::size_t bodyLen,
+          const std::size_t ordinal) {
+        const auto record = decodeBody(body, bodyLen);
+        if (!record || record->sequence != ordinal + 1) return false;
+        seenMax  = std::max(seenMax, record->captureId);
+        seenNext = record->sequence + 1;
+        return true;
+      });
+  maxId        = seenMax;
+  nextSequence = seenNext;
+  return scan;
+}
+
 CaptureJournal::CaptureJournal(std::filesystem::path path,
                                const std::size_t maxBytes)
-    : path_(std::move(path)), maxBytes_(maxBytes) {
-  std::error_code ec;
-  if (!std::filesystem::exists(path_, ec)) {
-    // Absent is the only clean "fresh" state; an exists() error means the
-    // boundary cannot be proven, so appends refuse rather than land on a
-    // guess.
-    poisoned_ = static_cast<bool>(ec);
-    return;
-  }
-  const auto size = std::filesystem::file_size(path_, ec);
-  if (ec) {
-    poisoned_ = true;
-    return;
-  }
-  writtenBytes_ = static_cast<std::size_t>(size);
-  if (writtenBytes_ == 0) return; // empty: the first append writes header
-  if (writtenBytes_ < kHeaderBytes) {
-    // 1..kHeaderBytes-1 bytes: either the start of the very header a crash
-    // interrupted (the first record is written with its header in one
-    // write, so nothing can follow) or foreign bytes. Only the former is a
-    // fresh journal; it is cut back to empty. Anything else would have the
-    // first append land its header *behind* the remnant, so poison.
-    repairTornHeader();
-    return;
-  }
-  wroteHeader_ = true;
-  repairTornTail();
-}
-
-void CaptureJournal::repairTornHeader() {
-  const int fd = ::open(path_.c_str(), O_RDWR);
-  if (fd < 0) {
-    poisoned_ = true;
-    return;
-  }
-  const FdGuard guard{fd};
-  std::byte remnant[kHeaderBytes]{};
-  std::size_t have = 0;
-  while (have < writtenBytes_) {
-    const auto n = ::read(fd, remnant + have, writtenBytes_ - have);
-    if (n < 0 && errno == EINTR) continue;
-    if (n <= 0) {
-      poisoned_ = true;
-      return;
-    }
-    have += static_cast<std::size_t>(n);
-  }
-  std::byte expected[kHeaderBytes]{};
-  std::memcpy(expected, kCaptureJournalSignature,
-              sizeof(kCaptureJournalSignature));
-  std::memcpy(expected + sizeof(kCaptureJournalSignature),
-              &kCaptureJournalVersion, sizeof(kCaptureJournalVersion));
-  if (std::memcmp(remnant, expected, writtenBytes_) != 0) {
-    poisoned_ = true;
-    return;
-  }
-  if (::ftruncate(fd, 0) != 0) {
-    poisoned_ = true;
-    return;
-  }
-  writtenBytes_ = 0;
-  GLEDITOR_LOG_WARN("vortex.io.capture",
-                    "capture journal: cut torn header remnant, journal is "
-                    "fresh");
-}
-
-void CaptureJournal::repairTornTail() {
-  // A crash between writeAll and fsync leaves a torn tail: bytes after
-  // the last complete, fully-valid record. O_APPEND would land every
-  // later record behind it, hiding them from recover()'s prefix parse,
-  // so cut the file back to the last valid boundary before this instance
-  // appends anything. A tail the scan cannot prove torn-vs-corrupt -- or
-  // one it cannot cut -- poisons the journal.
-  int fd = ::open(path_.c_str(), O_RDWR);
-  if (fd < 0) fd = ::open(path_.c_str(), O_RDONLY);
-  if (fd < 0) {
-    poisoned_ = true;
-    return;
-  }
-  const FdGuard guard{fd};
-
-  std::vector<std::byte> bytes;
-  char buffer[4096];
-  bool readOk = true;
-  for (;;) {
-    const auto n = ::read(fd, buffer, sizeof(buffer));
-    if (n < 0) {
-      if (errno == EINTR) continue;
-      readOk = false;
-      break;
-    }
-    if (n == 0) break;
-    appendBytes(bytes, buffer, static_cast<std::size_t>(n));
-  }
-  if (!readOk) {
-    poisoned_ = true;
-    return;
-  }
-
-  const auto scan = scanJournalImage(bytes);
-  if (scan.corrupt) {
-    // A fully-present invalid record is corruption, not a tear: cutting
-    // to its start would silently delete the valid records after it.
-    // Poison so appends refuse and recover() reports the same Corrupt.
-    poisoned_     = true;
-    poisonDetail_ = static_cast<std::uint32_t>(scan.errorRecord);
-    GLEDITOR_LOG_ERROR("vortex.io.capture",
-                       "capture journal corrupt at record {}: refusing to "
-                       "truncate",
-                       scan.errorRecord);
-    return;
-  }
-  writtenBytes_ = scan.boundary;
-  wroteHeader_  = true; // the scan proved the header bytes are ours
-  nextSequence_ = scan.nextSequence;
-  maxCaptureId_ = scan.maxCaptureId;
-  if (scan.boundary == bytes.size()) return; // no tear to cut
-  if (::ftruncate(fd, static_cast<off_t>(scan.boundary)) != 0) {
-    poisoned_ = true;
-    return;
-  }
-  GLEDITOR_LOG_WARN("vortex.io.capture",
-                    "capture journal: cut {} torn tail bytes after record "
-                    "boundary {}",
-                    bytes.size() - scan.boundary, scan.boundary);
+    // 0 meaning "unbounded" is a sentinel the capture coordinator still
+    // passes; the actor journal already takes an explicit optional.
+    : log_(std::move(path), kFormat,
+           maxBytes == 0 ? std::nullopt : std::optional{maxBytes}) {
+  log_.open([this](const std::span<const std::byte> bytes) {
+    return scanImage(bytes, maxCaptureId_, nextSequence_);
+  });
 }
 
 CaptureJournal::~CaptureJournal() = default;
 
-void CaptureJournal::syncParentDirectory() const noexcept {
-  auto dir = path_.parent_path();
-  if (dir.empty()) dir = ".";
-  const int fd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY);
-  if (fd < 0) return;
-  const FdGuard guard{fd};
-  while (::fsync(fd) != 0 && errno == EINTR) {
-  }
-}
-
 auto CaptureJournal::path() const -> const std::filesystem::path & {
-  return path_;
+  return log_.path();
 }
 
-auto CaptureJournal::sizeBytes() const -> std::size_t { return writtenBytes_; }
+auto CaptureJournal::sizeBytes() const -> std::size_t {
+  return log_.sizeBytes();
+}
 
 auto CaptureJournal::fits(const std::size_t framedBytes,
                           const bool countHolds) const
     -> std::expected<void, IoErrorInfo> {
-  // The on-disk body length is u32: a payload that cannot be represented
-  // is refused here, before appendRecord ever encodes.
-  if (framedBytes > std::numeric_limits<std::uint32_t>::max()) {
-    return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest, 0});
-  }
-  const std::size_t header = wroteHeader_ ? 0 : kHeaderBytes;
-  const std::size_t held   = countHolds ? heldBytes_ : 0;
-  if (maxBytes_ != 0 &&
-      writtenBytes_ + header + held + framedBytes > maxBytes_) {
-    return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded, 0});
-  }
-  return {};
+  return log_.fits(framedBytes, countHolds ? heldBytes_ : 0);
 }
 
 auto CaptureJournal::hold(const std::size_t framedBytes)
@@ -629,11 +369,9 @@ auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
                                   const CaptureJournalRecord &payload,
                                   const CaptureJournalCrashPoints &crash)
     -> std::expected<CaptureJournalRecord, IoErrorInfo> {
-  if (poisoned_) {
+  if (log_.poisoned()) {
     // A previous append could not prove the file still ends on a record
-    // boundary; bytes written now would land behind a tail recover()
-    // reads as the tolerated trailing remnant while hiding every record
-    // after it. Refuse rather than deepen the tear.
+    // boundary; refuse rather than deepen the tear.
     return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
   }
   CaptureJournalRecord record = payload;
@@ -644,147 +382,55 @@ auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
   if (!payloadBytes) {
     return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest, 0});
   }
-  const auto body = encodeBody(record);
-  auto framed     = frameBody(body);
+  const auto framed = frameBody(encodeBody(record));
   if (const auto ok = fits(framed.size(), false); !ok) {
     return std::unexpected(ok.error());
   }
-  // The first record travels with the header in one write: a crash can
-  // then leave only a header prefix (repairTornHeader's case), never a
-  // header followed by a torn first record that repair could not tell
-  // from corruption.
-  const bool creating = !wroteHeader_;
-  if (creating) {
-    std::vector<std::byte> withHeader;
-    withHeader.reserve(kHeaderBytes + framed.size());
-    appendBytes(withHeader, kCaptureJournalSignature,
-                sizeof(kCaptureJournalSignature));
-    appendValue(withHeader, kCaptureJournalVersion);
-    withHeader.insert(withHeader.end(), framed.begin(), framed.end());
-    framed = std::move(withHeader);
-  }
-
-  // writtenBytes_ is the offset of the last byte this journal knows is a
-  // complete, valid record (the header counts once flushed): the
-  // boundary a failed append truncates back to.
-  const auto recordStart = static_cast<off_t>(writtenBytes_);
-
-  const int fd = ::open(path_.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
-  if (fd < 0) {
-    return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
-  }
-  const FdGuard guard{fd};
-
-  const auto rollbackTo = [&](const off_t target) {
-    // recover() tolerates exactly one trailing, incomplete record, so a
-    // torn tail followed by later appends would hide those records.
-    // Roll the file back to the last known boundary; when even that
-    // cannot be proven the journal is poisoned and every later append
-    // refuses.
-    if (::ftruncate(fd, target) == 0) {
-      writtenBytes_ = static_cast<std::size_t>(target);
-    } else {
-      poisoned_ = true;
-      struct stat st{};
-      if (::fstat(fd, &st) == 0 && st.st_size >= 0) {
-        writtenBytes_ = static_cast<std::size_t>(st.st_size);
-      }
-    }
+  // Bookkeeping that follows durability runs inside the afterFlush slot of
+  // the shared append, ahead of the caller's own hook, so a throwing hook
+  // still leaves a durable record counted.
+  const auto counted = [&] {
+    ++nextSequence_;
+    maxCaptureId_ = std::max(maxCaptureId_, captureId);
+    if (crash.afterFlush) crash.afterFlush();
   };
-  const auto failAppend =
-      [&]() -> std::expected<CaptureJournalRecord, IoErrorInfo> {
-    rollbackTo(recordStart);
-    return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
-  };
-
-  const bool ok = writeAll(fd, framed.data(), framed.size());
-
-  if (!ok) return failAppend();
-
-  if (crash.beforeFlush) {
-    try {
-      crash.beforeFlush();
-    } catch (...) {
-      // Simulated death before fsync: the record was written but never
-      // durably flushed, so roll it back to the last known boundary
-      // exactly like a failed write.
-      rollbackTo(recordStart);
-      throw;
-    }
+  if (const auto ok = log_.append(framed, crash.beforeFlush, counted); !ok) {
+    return std::unexpected(ok.error());
   }
-  while (::fsync(fd) != 0) {
-    if (errno != EINTR) return failAppend();
-  }
-  // fsync acknowledged: the record IS durable. Bookkeeping must reflect
-  // that BEFORE afterFlush can throw -- otherwise a throwing afterFlush
-  // leaves writtenBytes_/nextSequence_ behind a record recover() already
-  // counts, and a later failAppend ftruncate could erase durable bytes.
-  if (creating) {
-    // The file's directory entry is part of the journal's durability: a
-    // created file whose entry was never fsynced can vanish whole.
-    syncParentDirectory();
-    wroteHeader_ = true;
-  }
-  writtenBytes_ += framed.size();
-  ++nextSequence_;
-  maxCaptureId_ = std::max(maxCaptureId_, captureId);
-  if (crash.afterFlush) crash.afterFlush();
   return record;
 }
 
 auto CaptureJournal::recover() const -> CaptureJournalRecovery {
   CaptureJournalRecovery recovery;
-  if (poisoned_) {
+  if (log_.poisoned()) {
     // This instance already knows the file may not end on a record
-    // boundary: a failed append's rollback could not be proven, so bytes
-    // on disk may hide records behind what would parse as the tolerated
+    // boundary: a failed append's rollback could not be proven, so bytes on
+    // disk may hide records behind what would parse as the tolerated
     // trailing remnant. Refuse rather than classify a prefix.
     recovery.status = CaptureJournalStatus::Corrupt;
     recovery.refusal =
-        IoErrorInfo{IoErrorCode::PersistenceRefusal, poisonDetail_};
+        IoErrorInfo{IoErrorCode::PersistenceRefusal, log_.poisonDetail()};
     return recovery;
   }
 
-  std::vector<std::byte> bytes;
-  {
-    const int fd = ::open(path_.c_str(), O_RDONLY);
-    if (fd < 0) {
-      if (errno == ENOENT) {
-        // Nothing was ever written: a never-used journal is vacuously
-        // clean.
-        recovery.status = CaptureJournalStatus::Clean;
-        return recovery;
-      }
-      // Any other open failure means the contents cannot be proven.
-      recovery.status  = CaptureJournalStatus::Corrupt;
-      recovery.refusal = IoErrorInfo{IoErrorCode::PersistenceRefusal, 0};
-      return recovery;
-    }
-    const FdGuard guard{fd};
-    char buffer[4096];
-    for (;;) {
-      const auto n = ::read(fd, buffer, sizeof(buffer));
-      if (n < 0) {
-        if (errno == EINTR) continue;
-        recovery.status  = CaptureJournalStatus::Corrupt;
-        recovery.refusal = IoErrorInfo{IoErrorCode::PersistenceRefusal, 0};
-        return recovery;
-      }
-      if (n == 0) break;
-      appendBytes(bytes, buffer, static_cast<std::size_t>(n));
-    }
+  const auto image = log_.readImage();
+  if (!image) {
+    recovery.status  = CaptureJournalStatus::Corrupt;
+    recovery.refusal = image.error();
+    return recovery;
   }
-
-  if (bytes.empty()) {
+  // Nothing was ever written: a never-used journal is vacuously clean.
+  if (!*image || (*image)->empty()) {
     recovery.status = CaptureJournalStatus::Clean;
     return recovery;
   }
-  // A trailing incomplete record is the tolerated crash tear; the scan
-  // already cut it in the constructor when this instance appended, and
-  // a fresh instance's constructor cut it before recover() could run.
-  // Here the same scan proves the boundary so recover() and repair can
-  // never disagree.
-  const auto scan = scanJournalImage(bytes);
+  const auto &bytes = **image;
+  // A trailing incomplete record is the tolerated crash tear; the
+  // constructor already cut it when this instance appended. Here the same
+  // scan proves the boundary so recover() and repair can never disagree.
+  CaptureId maxId{};
+  std::uint64_t nextSequence{1};
+  const auto scan = scanImage(bytes, maxId, nextSequence);
   if (scan.corrupt) {
     recovery.status = CaptureJournalStatus::Corrupt;
     recovery.refusal =
@@ -793,9 +439,9 @@ auto CaptureJournal::recover() const -> CaptureJournalRecovery {
     return recovery;
   }
 
-  // Every record in [kHeaderBytes, scan.boundary) is complete and
-  // fully valid (the scan proved it), so decode cannot fail; decodeBody
-  // runs again only to materialize the fields.
+  // Every record in [header, scan.boundary) is complete and fully valid
+  // (the scan proved it), so decode cannot fail; decodeBody runs again only
+  // to materialize the fields.
   std::size_t cursor = kHeaderBytes;
   while (cursor < scan.boundary) {
     std::uint32_t bodyLen{};
@@ -806,8 +452,8 @@ auto CaptureJournal::recover() const -> CaptureJournalRecovery {
     }
     cursor += sizeof(std::uint32_t) + bodyLen;
   }
-  recovery.nextSequence = scan.nextSequence;
-  recovery.maxCaptureId = scan.maxCaptureId;
+  recovery.nextSequence = nextSequence;
+  recovery.maxCaptureId = maxId;
   recovery.status       = CaptureJournalStatus::Clean;
   return recovery;
 }

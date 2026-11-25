@@ -10,21 +10,33 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/vortex/framed_log.hpp"
 #include "common/xanadu/vortex/io_error.hpp"
 
 // design/vortex-io-implementation-plan.md §9, actor ledger format:
-// `actor-io.journal`, signature \x89XUDACT, version 1, append-only
+// `actor-io.journal`, signature \x89XUDACT, version 2, append-only
 // bounded length-delimited records for stable intent identity, endpoint
 // generation, request identity, admission, receipt/unknown result and
-// checkpoint causal floor. Recovery never resends an attempt. Missing,
-// unknown or unreconciled proof refuses actor restore/replay by typed
-// outcome.
+// checkpoint causal floor. Every record carries a gapless sequence and an
+// FNV-1a-64 checksum (version 1 had neither and is refused by number).
+// Recovery never resends an attempt. Missing, unknown or unreconciled
+// proof refuses actor restore/replay by typed outcome. The file mechanics
+// -- header, torn-tail repair, fsynced append, directory durability,
+// atomic replacement -- are `FramedLog`'s, shared with the capture journal.
 
 namespace xanadu::vortex {
 
 inline constexpr char kActorJournalSignature[8]     = {'\x89', 'X', 'U', 'D',
                                                        'A',    'C', 'T', '\n'};
-inline constexpr std::uint32_t kActorJournalVersion = 1;
+inline constexpr std::uint32_t kActorJournalVersion = 2;
+
+/// kind(1) + sequence(8) + checksum(8) + six u64 fields + argsLen(4): the
+/// smallest body a record can have, and the offset arithmetic the tests and
+/// the plausibility check share with the encoder.
+inline constexpr std::size_t kActorJournalFixedBodyBytes =
+    1 + 8 + 8 + 6 * 8 + 4;
+inline constexpr std::size_t kActorJournalArgsLenOffset =
+    kActorJournalFixedBodyBytes - sizeof(std::uint32_t);
 
 enum class ActorIntentRecordKind : std::uint8_t {
   Intent,     // reversible effect intent committed by a turn
@@ -98,7 +110,10 @@ struct ActorJournalCrashPoints {
 /// own one instance; it never runs on a worker thread.
 class ActorIoJournal {
 public:
-  ActorIoJournal(std::filesystem::path path, std::size_t maxBytes);
+  /// @p maxBytes bounds the file; std::nullopt is the explicit unbounded
+  /// choice. Zero holds nothing: every reservation refuses.
+  ActorIoJournal(std::filesystem::path path,
+                 std::optional<std::size_t> maxBytes);
   ~ActorIoJournal();
   ActorIoJournal(const ActorIoJournal &)                     = delete;
   auto operator=(const ActorIoJournal &) -> ActorIoJournal & = delete;
@@ -107,8 +122,23 @@ public:
   /// full/unavailable refuses before external work" and "a full journal
   /// refuses before service admission" — callers check this before
   /// calling IoService at all, not after a failed append.
-  [[nodiscard]] auto reserve(std::size_t recordBytes) const
+  ///
+  /// A journal that would overflow first retires what the latest
+  /// checkpoint covers (`compact()`), so "full" means full of records no
+  /// checkpoint has released: `BudgetExceeded` is then recoverable by
+  /// advancing the checkpoint floor, and only that.
+  [[nodiscard]] auto reserve(std::size_t recordBytes)
       -> std::expected<void, IoErrorInfo>;
+
+  /// Retire every record the latest checkpoint covers (§9: "ledger records
+  /// retire only after checkpoint causal floor ... permit retirement").
+  /// Rewrites the file as the latest checkpoint followed by the records
+  /// above its floor, through a temp file, fsync, rename and directory
+  /// sync, so a crash leaves the old or the new journal and never a mix.
+  /// Recovery of the compacted file classifies every intent exactly as the
+  /// original did. Returns the bytes reclaimed; 0 when no checkpoint
+  /// exists or nothing is retirable.
+  [[nodiscard]] auto compact() -> std::expected<std::size_t, IoErrorInfo>;
 
   /// Commit the reversible effect intent. Must be called, and durably
   /// flushed and acknowledged, before `admit`. A failed/rewound turn
@@ -136,10 +166,10 @@ public:
   [[nodiscard]] auto recordUnresolved(std::uint64_t intentId)
       -> std::expected<void, IoErrorInfo>;
 
-  /// Advance the causal floor. Records at or below `floor` may retire
-  /// (be dropped on the next compaction) once acknowledgements already
-  /// observed permit it; `recover()` treats everything at or below the
-  /// latest checkpoint as resolved.
+  /// Advance the causal floor. Records at or below `floor` retire at the
+  /// next compaction (`reserve()` runs one when the journal would
+  /// overflow); `recover()` treats everything at or below the latest
+  /// checkpoint as resolved.
   [[nodiscard]] auto checkpoint(std::uint64_t floor,
                                 const ActorJournalCrashPoints & = {})
       -> std::expected<void, IoErrorInfo>;
@@ -164,22 +194,14 @@ public:
 private:
   auto appendRecord(const ActorIntentRecord &, const ActorJournalCrashPoints &)
       -> std::expected<void, IoErrorInfo>;
-  /// Constructor-time pass over an existing file: scans to the last
-  /// complete record, cuts a proven crash-torn tail with ftruncate, and
-  /// poisons the journal when the boundary cannot be proven or repaired.
-  void repairTornTail();
+  /// compact() with @p pending, when set, counted as the newest checkpoint
+  /// and written into the replacement.
+  auto compactTo(const ActorIntentRecord *pending)
+      -> std::expected<std::size_t, IoErrorInfo>;
 
-  std::filesystem::path path_;
-  std::size_t maxBytes_;
-  std::size_t writtenBytes_{};
+  FramedLog log_;
+  std::uint64_t nextSequence_{1};
   bool quiescent_{false};
-  bool wroteHeader_{false};
-  /// Set when the append boundary cannot be proven: a failed append's
-  /// rollback could not be proven, the constructor found a file it cannot
-  /// classify or repair, or the file is too short to ever hold a header.
-  /// Every later append refuses and recover() reports Corrupt rather than
-  /// risk parsing records hidden behind a tolerated trailing remnant.
-  bool poisoned_{false};
 };
 
 } // namespace xanadu::vortex

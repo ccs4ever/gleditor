@@ -8,9 +8,11 @@
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include "common/xanadu/spool.hpp"
+#include "common/xanadu/vortex/framed_log.hpp"
 #include "common/xanadu/vortex/io_error.hpp"
 #include "common/xanadu/vortex/payload_resolver.hpp"
 
@@ -246,39 +248,22 @@ public:
   [[nodiscard]] auto sizeBytes() const -> std::size_t;
 
 private:
-  auto appendEncoded(const CaptureJournalRecord &record,
-                     const CaptureJournalCrashPoints &)
-      -> std::expected<CaptureJournalRecord, IoErrorInfo>;
-  /// Constructor-time pass over an existing file: scans to the last
-  /// complete, checksum-valid, gapless record, cuts a proven crash-torn
-  /// tail with ftruncate, restores nextSequence_/maxCaptureId, and poisons
-  /// the journal when the boundary cannot be proven or repaired.
-  void repairTornTail();
-  /// A file of 1..header-1 bytes: cut it to empty when it is the start of
-  /// our own header, poison otherwise.
-  void repairTornHeader();
-  void syncParentDirectory() const noexcept;
   /// Whether @p framedBytes more fit in the budget on top of what is
   /// written, optionally counting holds.
   [[nodiscard]] auto fits(std::size_t framedBytes, bool countHolds) const
       -> std::expected<void, IoErrorInfo>;
+  /// Scan callbacks for FramedLog: validate one body (checksum, per-kind
+  /// length, gapless sequence) and judge whether a partial tail is the start
+  /// of the very record its length prefix announces.
+  static auto scanImage(std::span<const std::byte> bytes, CaptureId &maxId,
+                        std::uint64_t &nextSequence) -> FramedLogScan;
 
-  std::filesystem::path path_;
-  std::size_t maxBytes_;
-  std::size_t writtenBytes_{};
+  /// File mechanics shared with ActorIoJournal: header, torn-tail repair,
+  /// fsynced appends with rollback, directory durability.
+  FramedLog log_;
   std::size_t heldBytes_{};
   std::uint64_t nextSequence_{1};
   CaptureId maxCaptureId_{};
-  bool wroteHeader_{};
-  /// Set when the append boundary cannot be proven: a failed append's
-  /// rollback could not be proven, the constructor found a file it cannot
-  /// classify or repair, or the file is too short to ever hold a header.
-  /// Every later append refuses and recover() reports Corrupt rather than
-  /// risk parsing records hidden behind a tolerated trailing remnant.
-  bool poisoned_{};
-  /// The failing record's 1-based position when poisoning came from a
-  /// corrupt scan (0 otherwise); recover() reports it as the refusal detail.
-  std::uint32_t poisonDetail_{};
 };
 
 } // namespace xanadu::vortex
