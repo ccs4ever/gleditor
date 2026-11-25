@@ -830,10 +830,16 @@ M5 implementation notes and deliberate deferrals:
   owner-side reader.
 - File endpoints are served by `FileEndpointAdapter` (`fileOpenAdapterKey`/`fileDataAdapterKey`,
   `d.io.kind` "file"): `admitOpen` runs `::open` inside `execute` on the scheduler worker (§7.2's
-  off-owner-thread rule) and adopts the descriptor in a per-locator `FileSourceAdapter`, so every
-  later op addresses the opened inode (`FileSourceIdentity::OpenedInode`, declared on
+  off-owner-thread rule) and adopts the descriptor in a `FileSourceAdapter` registered under a
+  per-open `FileOpenId` (never per path: reopening a replaced path is a second, independent open), so
+  every later op addresses the opened inode (`FileSourceIdentity::OpenedInode`, declared on
   `FileOpenCapabilities`). `makeFileRequestDecoder` freezes spec-cell text into `CellRequest`s;
-  `stageAt` keys are the minted spec cells' refs.
+  `stageAt` keys are the minted spec cells' refs (`StageKey`, the width of `OwnerCell`) and a live
+  duplicate is refused. `release(FileOpenId)` is the close path; in-flight operations hold the file
+  by `shared_ptr`, so the descriptor closes when the last one lets go. Deferred: nothing maps an
+  `EndpointCell` to its `FileOpenId`, so `IoService::closeEndpoint` does not yet reach `release`
+  (the owner calls it); await each open before starting another of the same locator so
+  `openIdsFor(locator).back()` is the one just completed.
 - Live/stable consistency is typed vocabulary, not adapter-private: `SourceConsistency` lives in
   `io_cells.hpp`, `ioConsistencyLive`/`ioConsistencyStable` mask
   `OpenSpec`/`OpenGrant::consistency`, and `FileSourceAdapter` offers `Live` only — a `Stable`
@@ -848,9 +854,14 @@ M5 implementation notes and deliberate deferrals:
   `maxDecodeLeases` bound) is a placeholder accounting seam: no decoder or derived-product cache
   exists behind it, so leases record source range + generation but retain no decoded bytes. It
   exists so the lease/budget class is settled before a real decoder lands.
-- `generationFromStat` (size + mtime + inode) detects an uncertain write but cannot see a same-size,
-  same-timestamp in-place rewrite — proven by `SameSizeRewriteWithRestoredMtimeSharesTheGeneration`.
-  That blind spot is why `Stable`/CAS is refused rather than synthesized from the generation value.
+- `FileGeneration` (device, inode, size, mtime seconds and nanoseconds, compared field for field)
+  detects an uncertain write but cannot see a same-size, same-timestamp in-place rewrite — proven by
+  `SameSizeRewriteWithRestoredMtimeSharesTheGeneration`. That blind spot is why `Stable`/CAS is
+  refused rather than synthesized from the generation value. The `uint64_t` the protocol carries is
+  an id the adapter interns per exact value (bounded, oldest evicted; an evicted value that returns
+  gets a new id, so an old expectation can only fail). A read samples the generation before and
+  after the transfer and answers `Conflict` when they differ, publishing no bytes and recording no
+  observation; `setAfterTransferHook` is the test seam for that window.
 
 M6 implementation notes and deliberate deferrals:
 
