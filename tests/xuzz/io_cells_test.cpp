@@ -159,6 +159,55 @@ TEST(IoCellsTest,
       firstSnapshot.capabilityView.cell);
 }
 
+std::size_t rankLength(const Topology &t, const CellRef head,
+                       const IoDimension which) {
+  std::size_t length = 0;
+  for (auto at = t.pos(head, which); at; at = t.pos(*at, which)) ++length;
+  return length;
+}
+
+TEST(IoCellsTest, reapedRequestsLeaveTheRanksEverySubmitWalks) {
+  Topology t;
+  const auto first =
+      appendIoRequest(t.arena, t.schema, t.endpoint, t.capability).value();
+  const auto middle =
+      appendIoRequest(t.arena, t.schema, t.endpoint, t.capability).value();
+  const auto last =
+      appendIoRequest(t.arena, t.schema, t.endpoint, t.capability).value();
+  reapIoRequest(t.arena, t.schema, middle.request);
+  const auto queued = queuedRequests(t.arena, t.schema, t.endpoint);
+  ASSERT_TRUE(queued);
+  EXPECT_EQ(*queued, (std::vector<RequestCell>{first.request, last.request}));
+  // The ranks stayed whole chains around the gap.
+  EXPECT_EQ(t.pos(first.endpointView.cell, IoDimension::Clone),
+            std::optional{last.endpointView.cell});
+  EXPECT_EQ(t.neg(last.capabilityView.cell, IoDimension::Clone),
+            std::optional{first.capabilityView.cell});
+  // A reaped request is detached and a second reap changes nothing.
+  EXPECT_FALSE(t.pos(middle.endpointView.cell, IoDimension::Clone));
+  reapIoRequest(t.arena, t.schema, middle.request);
+  EXPECT_EQ(queuedRequests(t.arena, t.schema, t.endpoint)->size(), 2U);
+
+  // A long-lived endpoint serving a stream: the ranks stay as long as the
+  // live requests, so a submit is O(live), not O(every request ever).
+  constexpr std::size_t stream = 10'000;
+  const auto queueHead = endpointQueue(t.arena, t.schema, t.endpoint).value();
+  const auto endpointCloneBefore =
+      rankLength(t, t.endpoint.cell, IoDimension::Clone);
+  const auto capabilityCloneBefore =
+      rankLength(t, t.capability.cell, IoDimension::Clone);
+  for (std::size_t i = 0; i < stream; ++i) {
+    const auto graph =
+        appendIoRequest(t.arena, t.schema, t.endpoint, t.capability).value();
+    reapIoRequest(t.arena, t.schema, graph.request);
+  }
+  EXPECT_EQ(rankLength(t, queueHead.cell, IoDimension::Queue), 2U);
+  EXPECT_EQ(rankLength(t, t.endpoint.cell, IoDimension::Clone),
+            endpointCloneBefore);
+  EXPECT_EQ(rankLength(t, t.capability.cell, IoDimension::Clone),
+            capabilityCloneBefore);
+}
+
 TEST(IoCellsTest, capabilityOfAnotherEndpointIsRefusedUntouched) {
   Topology t;
   const auto other = makeEndpointCell(t.arena, t.schema);

@@ -41,7 +41,6 @@ constexpr std::string_view kindName(const CaptureJournalRecordKind kind) {
   return "Unknown";
 }
 
-constexpr IoDimension kRequestDim = IoDimension::Request;
 constexpr IoDimension kOutcomeDim = IoDimension::Outcome;
 constexpr IoDimension kFieldRank  = IoDimension::Occurrence;
 constexpr IoDimension kFieldValue = IoDimension::State;
@@ -554,6 +553,9 @@ void CaptureCoordinator::retire(
   }
   releaseLeases(pending);
   journal_.unhold(pending.heldJournalBytes);
+  if (arena_.matches(pending.cell.cell, pending.cell.incarnation)) {
+    detachClonedField(arena_, schema_, pending.cell.cell, IoDimension::Request);
+  }
   pending_.erase(it);
 }
 
@@ -1082,23 +1084,15 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
   }
   const auto &request = std::get<Admitted>(admitted.value).request;
 
-  // Record the append request occurrence in this exact CaptureCell:
-  // capture -d.io.request-> occurrence -d.io.request-> request.
+  // Record the append request in this exact CaptureCell through a clone
+  // view of the request (capture -d.io.request-> occurrence -> view), so
+  // an await's waiter can attach its own view without evicting this link.
   const auto linked =
       transact(arena_, [&]() -> std::expected<void, IoCellError> {
-        auto occurrence = mintPlain(arena_, "io capture request occurrence");
-        if (!occurrence) return std::unexpected(occurrence.error());
-        const auto requestDim = schema_.dim(kRequestDim);
-        if (const auto ok = linkFresh(arena_, pending.cell.cell, requestDim,
-                                      occurrence->cell);
-            !ok) {
-          return std::unexpected(ok.error());
-        }
-        if (const auto ok =
-                linkFresh(arena_, occurrence->cell, requestDim, request.cell);
-            !ok) {
-          return std::unexpected(ok.error());
-        }
+        const auto attached =
+            attachClonedField(arena_, schema_, pending.cell.cell,
+                              IoDimension::Request, request.cell);
+        if (!attached) return std::unexpected(attached.error());
         return {};
       });
   if (!linked) {
@@ -1139,13 +1133,10 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
 
   // Follow the append request occurrence stored in THIS CaptureCell and
   // validate the request allocation's incarnation.
-  const auto requestDim = schema_.dim(kRequestDim);
-  const auto occurrence =
-      arena_.linked(capture.cell, requestDim, DimVector::POS);
-  if (!occurrence) return refuse({IoErrorCode::InvalidRequest, 1});
   const auto requestRef =
-      arena_.linked(*occurrence, requestDim, DimVector::POS);
-  if (!requestRef || *requestRef != pending.appendRequest->cell) {
+      canonicalOfField(arena_, schema_, capture.cell, IoDimension::Request);
+  if (!requestRef) return refuse({IoErrorCode::InvalidRequest, 1});
+  if (*requestRef != pending.appendRequest->cell) {
     return refuse({IoErrorCode::InvalidRequest, 2});
   }
   if (!arena_.matches(pending.appendRequest->cell,

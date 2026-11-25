@@ -239,7 +239,7 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
                     .terminalEntries = 1,
                     .completionBytes = request.completionBoundBytes +
                                        request.payloadBoundBytes,
-                    .payloadBytes    = request.payloadBoundBytes};
+                    .payloadBytes = request.payloadBoundBytes};
   auto reservation = scheduler_->reserve(cost);
   if (!reservation) return refuseAdmission(reservation.error());
 
@@ -251,8 +251,8 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
   const auto token = reservation->token;
   {
     std::scoped_lock lock(sinkState_->mutex);
-    auto &event = sinkState_->events[tokenKey(token)];
-    event.token = token;
+    auto &event                         = sinkState_->events[tokenKey(token)];
+    event.token                         = token;
     sinkState_->limits[tokenKey(token)] = {request.completionBoundBytes,
                                            request.payloadBoundBytes};
   }
@@ -376,6 +376,7 @@ void IoService::eraseRequestState(const std::uint64_t tokenKey) {
   if (!linked) return;
   requestByCell_.erase(
       std::pair{found->second.cell.cell, found->second.cell.incarnation});
+  cells_.reapRequest(found->second.cell);
   {
     std::scoped_lock lock(sinkState_->mutex);
     sinkState_->limits.erase(tokenKey);

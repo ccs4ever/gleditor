@@ -378,6 +378,73 @@ TEST_F(IoCaptureTest, PrepareAppendCommitPublishesReceiptAndSpan) {
   EXPECT_EQ(view.records[1].intervals[0].dstOffset, std::uint64_t{0});
 }
 
+std::optional<zigzag::CellRef> requestOf(const zigzag::ArenaManifold &arena,
+                                         const IoCellSchema &schema,
+                                         const zigzag::CellRef owner,
+                                         const IoDimension field) {
+  const auto canonical = canonicalOfField(arena, schema, owner, field);
+  if (!canonical) return std::nullopt;
+  return *canonical;
+}
+
+/// A live arena cell standing in for an await's cursor.
+OwnerWaiterRegistration waiterOn(World &world, const std::uint64_t label) {
+  const auto cursor      = world.arena.makeCell("await cursor");
+  const auto incarnation = world.arena.incarnationOf(cursor);
+  EXPECT_TRUE(incarnation.has_value());
+  return OwnerWaiterRegistration{static_cast<OwnerCell>(cursor),
+                                 incarnation.value_or(0), label};
+}
+
+TEST_F(IoCaptureTest, AwaitingTheAppendRequestDoesNotEvictTheCaptureLink) {
+  RecordingSink sink;
+  auto world = boot(sink, journalPath_);
+  ASSERT_TRUE(world);
+  auto origin = registerPinned(*world, transientRef(1), bytesOf("abcdefgh"));
+  ASSERT_TRUE(origin.has_value());
+  const PayloadRange selection[]{rangeOf(*origin, 0, 4)};
+  auto prepared = world->coordinator->prepare(selection);
+  ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
+  const auto capture = std::get<Prepared>(prepared).capture;
+  auto appended      = world->coordinator->appendRequest(capture);
+  ASSERT_TRUE(std::holds_alternative<Admitted>(appended.admission.value));
+  const auto request = std::get<Admitted>(appended.admission.value).request;
+
+  const auto schema = makeIoCellSchema(world->arena).value();
+  // Two waiters on one request, both before the outcome: each must keep
+  // its own request link and the capture's must survive both.
+  const auto first  = world->service->await(request, waiterOn(*world, 1));
+  const auto second = world->service->await(request, waiterOn(*world, 2));
+  ASSERT_TRUE(std::holds_alternative<Pending>(first.value));
+  ASSERT_TRUE(std::holds_alternative<Pending>(second.value));
+  const auto requestDim = schema.dim(IoDimension::Request);
+  for (const auto &waiter : {std::get<Pending>(first.value).waiter,
+                             std::get<Pending>(second.value).waiter}) {
+    EXPECT_EQ(
+        requestOf(world->arena, schema, waiter.cell, IoDimension::Request),
+        std::optional{request.cell});
+  }
+  EXPECT_EQ(requestOf(world->arena, schema, capture.cell, IoDimension::Request),
+            std::optional{request.cell});
+  // The request is never a direct target on d.io.request.
+  EXPECT_FALSE(
+      world->arena.linked(request.cell, requestDim, zigzag::DimVector::NEG));
+
+  // Retiring one waiter leaves the other's and the capture's chains whole.
+  world->service->retireWaiter(std::get<Pending>(first.value).waiter);
+  EXPECT_EQ(requestOf(world->arena, schema,
+                      std::get<Pending>(second.value).waiter.cell,
+                      IoDimension::Request),
+            std::optional{request.cell});
+
+  world->scheduler->runNext();
+  static_cast<void>(world->service->pump(8));
+  const auto poll = world->service->poll(request);
+  ASSERT_TRUE(poll.outcome.has_value());
+  EXPECT_TRUE(std::holds_alternative<Committed>(
+      world->coordinator->commit(capture, *poll.outcome)));
+}
+
 TEST_F(IoCaptureTest, OverlappingLaterSelectionReusesCommittedSpan) {
   RecordingSink sink;
   auto world = boot(sink, journalPath_);

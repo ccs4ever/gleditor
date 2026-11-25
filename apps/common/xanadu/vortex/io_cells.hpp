@@ -155,6 +155,36 @@ ioCellTag(const zigzag::ArenaManifold &arena, zigzag::CellRef cell,
 [[nodiscard]] std::expected<IoOutcomeTag, IoCellError>
 ioOutcomeTag(const zigzag::ArenaManifold &arena, OutcomeCell outcome) noexcept;
 
+/// A field's private occurrence and the clone view it points at.
+struct IoFieldCells {
+  IoOccurrenceCell occurrence;
+  IoOccurrenceCell view;
+};
+
+/// The one way any I/O cell reaches a canonical cell (endpoint, capability,
+/// request): owner -field-> occurrence -field-> clone view, the view
+/// appended to @p canonical's d.io.clone rank. The canonical cell is never
+/// a target on @p field, so two owners never evict each other. Not
+/// transactional: call it inside one.
+[[nodiscard]] std::expected<IoFieldCells, IoCellError>
+attachClonedField(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+                  zigzag::CellRef owner, IoDimension field,
+                  zigzag::CellRef canonical);
+/// The canonical cell behind @p owner's @p field.
+[[nodiscard]] std::expected<zigzag::CellRef, IoCellError>
+canonicalOfField(const zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+                 zigzag::CellRef owner, IoDimension field);
+/// Remove @p owner's @p field view from its canonical's clone rank, joining
+/// the neighbours so the rank stays one chain. A no-op without the field.
+void detachClonedField(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+                       zigzag::CellRef owner, IoDimension field) noexcept;
+/// Take a retired request out of its endpoint's queue and its endpoint and
+/// capability clone ranks, so those ranks (walked on every submit) stay as
+/// long as the live requests rather than every request ever made. The
+/// request keeps its outcome link: a late poll still resolves.
+void reapIoRequest(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+                   RequestCell request) noexcept;
+
 /// The d.io.* dimensions through the arena's dimension registry
 /// (ArenaManifold::ensureDimension): minted on first use, found thereafter.
 [[nodiscard]] std::expected<IoCellSchema, IoCellError>

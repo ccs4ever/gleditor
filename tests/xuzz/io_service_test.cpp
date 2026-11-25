@@ -122,6 +122,10 @@ public:
   void retireWaiter(WaiterCell waiter) noexcept override {
     retired.push_back(waiter);
   }
+  void reapRequest(RequestCell request) noexcept override {
+    reaped.push_back(request);
+  }
+  std::vector<RequestCell> reaped;
 
   bool rejectFreeze{};
   bool failMintRequest{};
@@ -517,7 +521,11 @@ TEST(IoServiceTest, TerminalRequestRetirementReturnsBoundedAdmissionCapacity) {
   EXPECT_TRUE(std::holds_alternative<Refused>(
       harness.service.submit(testCapability, testSpec).value));
 
+  EXPECT_TRUE(harness.cells.reaped.empty());
   harness.service.retireRequest(request);
+  // The cell store is told once the state is gone, so it can take the
+  // request out of the ranks later submits walk.
+  EXPECT_EQ(harness.cells.reaped, std::vector<RequestCell>{request});
   const auto replacement = harness.service.submit(testCapability, testSpec);
   ASSERT_TRUE(std::holds_alternative<Admitted>(replacement.value));
   const auto replacementToken = tokenOf(*harness.scheduler, 1);

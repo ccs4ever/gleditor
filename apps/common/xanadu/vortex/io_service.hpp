@@ -65,7 +65,10 @@ public:
   virtual auto mintWaiter(RequestCell, OwnerWaiterRegistration)
       -> std::expected<WaiterCell, IoErrorInfo>  = 0;
   virtual void retireWaiter(WaiterCell) noexcept = 0;
-  virtual ~IoCellStore()                         = default;
+  /// The service has dropped a request's state for good: take its cells out
+  /// of the ranks later submits walk. Optional; the outcome link must stay.
+  virtual void reapRequest(RequestCell) noexcept {}
+  virtual ~IoCellStore() = default;
 };
 
 class IoService final : private CompletionSink {

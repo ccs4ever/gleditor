@@ -108,32 +108,6 @@ auto appendField(ArenaManifold &arena, const CellRef record,
          arena.link(field, valueDim, DimVector::POS, content);
 }
 
-auto attachCanonical(ArenaManifold &arena, const IoCellSchema &schema,
-                     const CellRef owner, const IoDimension field,
-                     const CellRef canonical) -> bool {
-  const auto fieldDim = schema.dim(field);
-  const auto cloneDim = schema.dim(IoDimension::Clone);
-  auto tail           = canonical;
-  for (std::size_t visited = 0; visited <= arena.traversalBound(); ++visited) {
-    const auto next = arena.linked(tail, cloneDim, DimVector::POS);
-    if (!next) break;
-    tail = *next;
-    if (visited == arena.traversalBound()) return false;
-  }
-  const auto occurrence = arena.makeCell("io field occurrence");
-  const auto view       = arena.makeCell("io clone view");
-  if (!arena.incarnationOf(occurrence) || !arena.incarnationOf(view) ||
-      !arena.markRuntimeOnly(occurrence) || !arena.markRuntimeOnly(view) ||
-      arena.linked(owner, fieldDim, DimVector::POS) ||
-      arena.linked(tail, cloneDim, DimVector::POS) ||
-      arena.linked(view, cloneDim, DimVector::NEG)) {
-    return false;
-  }
-  return arena.link(owner, fieldDim, DimVector::POS, occurrence) &&
-         arena.link(occurrence, fieldDim, DimVector::POS, view) &&
-         arena.link(tail, cloneDim, DimVector::POS, view);
-}
-
 auto addProgress(ArenaManifold &arena, const IoCellSchema &schema,
                  const CellRef outcome, const IoProgress &progress) -> bool {
   const auto occurrence            = arena.makeCell("io progress occurrence");
@@ -283,12 +257,14 @@ auto addOutcomeDetails(ArenaManifold &arena, const IoCellSchema &schema,
             return endpointTag && *endpointTag == IoCellTag::Endpoint &&
                    capabilityTag && *capabilityTag == IoCellTag::Capability &&
                    bound && *bound == opened->endpoint &&
-                   attachCanonical(arena, schema, outcome,
-                                   IoDimension::Endpoint,
-                                   opened->endpoint.cell) &&
-                   attachCanonical(arena, schema, outcome,
-                                   IoDimension::Capability,
-                                   opened->initialCapability.cell);
+                   attachClonedField(arena, schema, outcome,
+                                     IoDimension::Endpoint,
+                                     opened->endpoint.cell)
+                       .has_value() &&
+                   attachClonedField(arena, schema, outcome,
+                                     IoDimension::Capability,
+                                     opened->initialCapability.cell)
+                       .has_value();
           }
           if (const auto *observed =
                   std::get_if<ReadObservationResult>(&value.value)) {
@@ -566,8 +542,9 @@ auto ArenaIoCellStore::mintOpenedEndpoint(const OpenSpec &spec)
       return std::unexpected{cellError(capability.error())};
     }
     if (spec.authCapability &&
-        !attachCanonical(arena_, schema_, capability->cell,
-                         IoDimension::Capability, spec.authCapability->cell)) {
+        !attachClonedField(arena_, schema_, capability->cell,
+                           IoDimension::Capability, spec.authCapability->cell)
+             .has_value()) {
       static_cast<void>(arena_.release(mark));
       return std::unexpected{IoErrorInfo{IoErrorCode::InvalidCapability, 3}};
     }
@@ -609,14 +586,12 @@ auto ArenaIoCellStore::mintWaiter(const RequestCell request,
       static_cast<void>(arena_.release(mark));
       return std::unexpected{cellError(waiter.error())};
     }
-    const auto requestOccurrence = arena_.makeCell("io waiter request");
-    const auto requestOccurrenceIncarnation =
-        arena_.incarnationOf(requestOccurrence);
-    const auto dim = schema_.dim(IoDimension::Request);
-    if (!requestOccurrenceIncarnation ||
-        !arena_.markRuntimeOnly(requestOccurrence) ||
-        !arena_.link(waiter->cell, dim, DimVector::POS, requestOccurrence) ||
-        !arena_.link(requestOccurrence, dim, DimVector::POS, request.cell)) {
+    // Through a clone view like every other reference to a request: a
+    // direct d.io.request link would give the request a second inbound
+    // neighbour and evict whoever linked first (a capture's append).
+    if (!attachClonedField(arena_, schema_, waiter->cell, IoDimension::Request,
+                           request.cell)
+             .has_value()) {
       static_cast<void>(arena_.release(mark));
       return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 2}};
     }
@@ -652,12 +627,17 @@ void ArenaIoCellStore::retireWaiter(const WaiterCell waiter) noexcept {
           IoCellTag::Waiter) {
     return;
   }
+  detachClonedField(arena_, schema_, waiter.cell, IoDimension::Request);
   const auto dim        = schema_.dim(IoDimension::Request);
   const auto occurrence = arena_.linked(waiter.cell, dim, DimVector::POS);
   if (occurrence) {
     static_cast<void>(arena_.unlink(waiter.cell, dim, DimVector::POS));
     static_cast<void>(arena_.unlink(*occurrence, dim, DimVector::POS));
   }
+}
+
+void ArenaIoCellStore::reapRequest(const RequestCell request) noexcept {
+  reapIoRequest(arena_, schema_, request);
 }
 
 } // namespace xanadu::vortex

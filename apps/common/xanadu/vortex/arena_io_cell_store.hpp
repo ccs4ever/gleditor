@@ -57,6 +57,7 @@ public:
   auto mintWaiter(RequestCell request, OwnerWaiterRegistration registration)
       -> std::expected<WaiterCell, IoErrorInfo> override;
   void retireWaiter(WaiterCell waiter) noexcept override;
+  void reapRequest(RequestCell request) noexcept override;
 
 private:
   auto openGrant(const OpenSpec &spec) -> std::expected<OpenGrant, IoErrorInfo>;

@@ -145,18 +145,14 @@ handleOf(const ArenaManifold &arena, const CellRef cell) {
   return handle;
 }
 
-struct FieldCells {
-  IoOccurrenceCell occurrence;
-  IoOccurrenceCell view;
-};
+} // namespace
 
 /// owner -field-> occurrence -field-> view, the view appended to
 /// @p canonical's clone rank.
-std::expected<FieldCells, IoCellError> attachField(ArenaManifold &arena,
-                                                   const IoCellSchema &schema,
-                                                   const CellRef owner,
-                                                   const IoDimension field,
-                                                   const CellRef canonical) {
+std::expected<IoFieldCells, IoCellError>
+attachClonedField(ArenaManifold &arena, const IoCellSchema &schema,
+                  const CellRef owner, const IoDimension field,
+                  const CellRef canonical) {
   const auto fieldDim = schema.dim(field);
   const auto cloneDim = schema.dim(IoDimension::Clone);
   const auto tail     = rankTail(arena, canonical, cloneDim);
@@ -173,14 +169,14 @@ std::expected<FieldCells, IoCellError> attachField(ArenaManifold &arena,
       return std::unexpected{linked.error()};
     }
   }
-  return FieldCells{.occurrence = *occurrence, .view = *view};
+  return IoFieldCells{.occurrence = *occurrence, .view = *view};
 }
 
 /// The canonical cell behind @p owner's @p field.
-std::expected<CellRef, IoCellError> fieldCanonical(const ArenaManifold &arena,
-                                                   const IoCellSchema &schema,
-                                                   const CellRef owner,
-                                                   const IoDimension field) {
+std::expected<CellRef, IoCellError> canonicalOfField(const ArenaManifold &arena,
+                                                     const IoCellSchema &schema,
+                                                     const CellRef owner,
+                                                     const IoDimension field) {
   const auto fieldDim   = schema.dim(field);
   const auto occurrence = arena.linked(owner, fieldDim, DimVector::POS);
   if (!occurrence) return std::unexpected{IoCellError::MalformedGraph};
@@ -194,7 +190,36 @@ std::expected<CellRef, IoCellError> fieldCanonical(const ArenaManifold &arena,
   return *canonical;
 }
 
-} // namespace
+void detachFromRank(ArenaManifold &arena, const CellRef member,
+                    const DimRef dim) noexcept {
+  const auto previous = arena.linked(member, dim, DimVector::NEG);
+  const auto next     = arena.linked(member, dim, DimVector::POS);
+  if (!previous && !next) return;
+  if (previous) static_cast<void>(arena.unlink(member, dim, DimVector::NEG));
+  if (next) static_cast<void>(arena.unlink(member, dim, DimVector::POS));
+  if (previous && next) {
+    static_cast<void>(arena.link(*previous, dim, DimVector::POS, *next));
+  }
+}
+
+void detachClonedField(ArenaManifold &arena, const IoCellSchema &schema,
+                       const CellRef owner, const IoDimension field) noexcept {
+  const auto occurrence =
+      arena.linked(owner, schema.dim(field), DimVector::POS);
+  if (!occurrence) return;
+  const auto view =
+      arena.linked(*occurrence, schema.dim(field), DimVector::POS);
+  if (!view) return;
+  detachFromRank(arena, *view, schema.dim(IoDimension::Clone));
+}
+
+void reapIoRequest(ArenaManifold &arena, const IoCellSchema &schema,
+                   const RequestCell request) noexcept {
+  if (!arena.matches(request.cell, request.incarnation)) return;
+  detachFromRank(arena, request.cell, schema.dim(IoDimension::Queue));
+  detachClonedField(arena, schema, request.cell, IoDimension::Endpoint);
+  detachClonedField(arena, schema, request.cell, IoDimension::Capability);
+}
 
 std::string_view toString(const IoCellTag tag) noexcept {
   return nameAt(cellTagNames, static_cast<std::size_t>(tag));
@@ -342,8 +367,8 @@ makeCapabilityCell(ArenaManifold &arena, const IoCellSchema &schema,
   return transact(arena, [&]() -> std::expected<CapabilityCell, IoCellError> {
     const auto capability = mint(arena, "io capability", IoCellTag::Capability);
     if (!capability) return std::unexpected{capability.error()};
-    const auto field = attachField(arena, schema, capability->cell,
-                                   IoDimension::Endpoint, endpoint.cell);
+    const auto field = attachClonedField(arena, schema, capability->cell,
+                                         IoDimension::Endpoint, endpoint.cell);
     if (!field) return std::unexpected{field.error()};
     return CapabilityCell{.cell        = capability->cell,
                           .incarnation = capability->incarnation};
@@ -360,7 +385,7 @@ capabilityEndpoint(const ArenaManifold &arena, const IoCellSchema &schema,
     return std::unexpected{ok.error()};
   }
   const auto canonical =
-      fieldCanonical(arena, schema, capability.cell, IoDimension::Endpoint);
+      canonicalOfField(arena, schema, capability.cell, IoDimension::Endpoint);
   if (!canonical) return std::unexpected{canonical.error()};
   return handleOf<IoCellTag::Endpoint>(arena, *canonical);
 }
@@ -380,10 +405,10 @@ appendIoRequest(ArenaManifold &arena, const IoCellSchema &schema,
   return transact(arena, [&]() -> std::expected<IoRequestGraph, IoCellError> {
     const auto request = mint(arena, "io request", IoCellTag::Request);
     if (!request) return std::unexpected{request.error()};
-    const auto endpointField = attachField(
+    const auto endpointField = attachClonedField(
         arena, schema, request->cell, IoDimension::Endpoint, endpoint.cell);
     if (!endpointField) return std::unexpected{endpointField.error()};
-    const auto capabilityField = attachField(
+    const auto capabilityField = attachClonedField(
         arena, schema, request->cell, IoDimension::Capability, capability.cell);
     if (!capabilityField) return std::unexpected{capabilityField.error()};
     const auto queueDim = schema.dim(IoDimension::Queue);
@@ -414,7 +439,7 @@ requestEndpoint(const ArenaManifold &arena, const IoCellSchema &schema,
     return std::unexpected{ok.error()};
   }
   const auto canonical =
-      fieldCanonical(arena, schema, request.cell, IoDimension::Endpoint);
+      canonicalOfField(arena, schema, request.cell, IoDimension::Endpoint);
   if (!canonical) return std::unexpected{canonical.error()};
   return handleOf<IoCellTag::Endpoint>(arena, *canonical);
 }
@@ -429,7 +454,7 @@ requestCapability(const ArenaManifold &arena, const IoCellSchema &schema,
     return std::unexpected{ok.error()};
   }
   const auto canonical =
-      fieldCanonical(arena, schema, request.cell, IoDimension::Capability);
+      canonicalOfField(arena, schema, request.cell, IoDimension::Capability);
   if (!canonical) return std::unexpected{canonical.error()};
   return handleOf<IoCellTag::Capability>(arena, *canonical);
 }
