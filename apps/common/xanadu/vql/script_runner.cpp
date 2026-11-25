@@ -61,11 +61,17 @@ ScriptRunner::ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
     : session_(session), vm_(vm), ports_(std::move(ports)), options_(options) {}
 
 ScriptRunner::~ScriptRunner() {
-  if (submission_) ports_.bridge.release(*submission_);
-  for (const auto &[continuation, waiter] : parked_) {
+  for (const auto &[continuation, held] : parked_) {
     static_cast<void>(continuation);
-    static_cast<void>(ports_.host.cancelWaiter(waiter));
+    static_cast<void>(ports_.host.cancelWaiter(held.first));
   }
+  parked_.clear();
+  // A waiter already completed (AlreadyComplete) keeps its route until its
+  // wake; nothing may call this runner after it is gone.
+  static_cast<void>(ports_.host.unrouteRunner(*this));
+  // Nothing reads the last action's outcome once the runner is gone, so its
+  // request leaves the service's index and the arena with it.
+  if (submission_) retireSubmission(*submission_);
 }
 
 auto ScriptRunner::diagnose(const std::string_view code, std::string message,
@@ -88,6 +94,22 @@ auto ScriptRunner::takeWake() -> std::optional<ScriptWake> {
   auto next = std::move(woken_.front());
   woken_.pop_front();
   return next;
+}
+
+void ScriptRunner::retireSubmission(
+    const vortex::SubmissionCell submission) noexcept {
+  const auto matched = ports_.bridge.match(submission);
+  const auto *admitted =
+      matched ? std::get_if<vortex::Admitted>(&*matched) : nullptr;
+  const bool awaited = admitted != nullptr &&
+                       std::ranges::any_of(parked_, [&](const auto &entry) {
+                         return entry.second.second == admitted->request;
+                       });
+  if (awaited) {
+    ports_.bridge.release(submission);
+  } else {
+    ports_.bridge.retire(submission);
+  }
 }
 
 void ScriptRunner::retire(
@@ -244,7 +266,10 @@ auto ScriptRunner::runAction(const std::shared_ptr<Activation> &activation,
   }
   // `$submission` stays bound, as a language variable does, until the next
   // action rebinds it; the request or outcome it names is untouched by that.
-  if (submission_) ports_.bridge.release(*submission_);
+  // The previous action's outcome is no longer what `$submission` names, and
+  // its rows were returned by the run that finished it, so its request is
+  // retired here: a long session holds one action's request, not all of them.
+  if (submission_) retireSubmission(*submission_);
   submission_ = *submission;
 
   // The language's own match: a refusal is bound and kept as the script's
@@ -271,7 +296,9 @@ auto ScriptRunner::settle(
     return finishAction(activation, done->value);
   }
   if (auto *parked = std::get_if<Awaited::Parked>(&awaited.value)) {
-    parked_.insert_or_assign(parked->token.continuation, parked->token.waiter);
+    parked_.insert_or_assign(
+        parked->token.continuation,
+        std::pair{parked->token.waiter, parked->token.request});
     return ScriptRunResult::parked(std::move(parked->token));
   }
   auto diagnostic = std::get<Awaited::Failed>(awaited.value).diagnostic;

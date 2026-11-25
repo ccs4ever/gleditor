@@ -493,6 +493,9 @@ int main(int argc, char *argv[]) {
   zigzag::vortex::VortexVM vm(coordinator.core());
   // Script I/O is built on first use, so a plain query never starts workers.
   std::unique_ptr<xanadu::vortex::FileReadHost> io;
+  // Declared after `io`, so the runner dies first and cancels its waiters on a
+  // live host.
+  std::unique_ptr<xanadu::vql::ScriptRunner> ioRunner;
   const auto ioHost = [&]() -> xanadu::vortex::FileReadHost & {
     if (!io)
       io = std::make_unique<xanadu::vortex::FileReadHost>(vm,
@@ -538,8 +541,14 @@ int main(int argc, char *argv[]) {
       -> std::expected<std::vector<zigzag::CellRef>,
                        xanadu::vortex::FrontendDiagnostic> {
     auto &host = ioHost();
-    xanadu::vql::ScriptRunner runner(engine, vm,
-                                     xanadu::vql::fileScriptPorts(host));
+    // One runner for the session: it retires an action's request when the
+    // next action replaces it, so the rows printed from this script stay
+    // readable until then and a long session holds one request, not all.
+    if (!ioRunner) {
+      ioRunner = std::make_unique<xanadu::vql::ScriptRunner>(
+          engine, vm, xanadu::vql::fileScriptPorts(host));
+    }
+    auto &runner = *ioRunner;
     return xanadu::vql::driveToCompletion(
         runner, runner.run(std::move(ast)), [&] { host.pump(ioPumpBudget); },
         [] { std::this_thread::sleep_for(ioIdleSleep); });

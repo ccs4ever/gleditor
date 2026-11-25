@@ -865,11 +865,11 @@ TEST(IoServiceTest, RetiredRequestIsFreedAndALatePollFindsItStale) {
   EXPECT_EQ(ioOutcomeTag(arena, *outcome).error(), IoCellError::StaleCell);
 }
 
-TEST(IoServiceTest, TenThousandSubmitAndRetireCyclesLeaveTheArenaBounded) {
-  // P4: a service that retires what it serves does not grow its arena. The
-  // request's cells (request, field occurrences and views, outcome) are freed
-  // by the reaper and the slots reused; only the caller's own spec cell is
-  // the test's to free.
+/// Submit, optionally await (a parked waiter, retired by the terminal pass or
+/// by a cancel), complete, poll and retire @p stream requests, and require the
+/// arena to hold no more after them than after the first. Only the caller's own
+/// spec and cursor cells are the test's to free.
+void runBoundedCycles(const bool awaiting) {
   zigzag::ArenaManifold arena;
   const auto schema = makeIoCellSchema(arena);
   ASSERT_TRUE(schema);
@@ -904,19 +904,34 @@ TEST(IoServiceTest, TenThousandSubmitAndRetireCyclesLeaveTheArenaBounded) {
     ASSERT_TRUE(std::holds_alternative<Admitted>(submitted.value));
     const auto request = std::get<Admitted>(submitted.value).request;
     const auto token   = tokenOf(*scripted, index);
+    const auto cursor  = arena.makeCell("await cursor");
+    if (awaiting) {
+      const OwnerWaiterRegistration registration{
+          cursor, arena.incarnationOf(cursor).value(), index + 1U};
+      const auto pending = service.await(request, registration);
+      ASSERT_TRUE(std::holds_alternative<Pending>(pending.value));
+      if (index % 2U == 1U) {
+        // Half the waiters leave by cancel, half by the terminal pass.
+        ASSERT_EQ(
+            service.cancelWaiter(std::get<Pending>(pending.value).waiter).state,
+            WaiterCancelState::Removed);
+      }
+    }
     scripted->candidate(token, Complete{{}, {}, {}});
     scripted->acknowledge(token);
     static_cast<void>(service.pump(8));
     ASSERT_TRUE(service.poll(request).outcome.has_value());
-    if (index == 0) {
+    if (index == 0 && !awaiting) {
       // What one served request holds while it is live, for the plan's price:
       // everything it minted but the caller's own spec cell.
-      RecordProperty("liveCellsPerServedRequest",
-                     static_cast<int>(arena.liveCells() - liveBeforeSubmit));
+      ::testing::Test::RecordProperty(
+          "liveCellsPerServedRequest",
+          static_cast<int>(arena.liveCells() - liveBeforeSubmit));
     }
     service.retireRequest(request);
     ASSERT_TRUE(arena.freeCell(specification,
                                arena.incarnationOf(specification).value()));
+    ASSERT_TRUE(arena.freeCell(cursor, arena.incarnationOf(cursor).value()));
   };
 
   cycle(0);
@@ -930,6 +945,20 @@ TEST(IoServiceTest, TenThousandSubmitAndRetireCyclesLeaveTheArenaBounded) {
   EXPECT_EQ(arena.liveCells(), liveAfterOne);
   EXPECT_EQ(arena.cellCount(), slotsAfterOne);
   EXPECT_EQ(queuedRequests(arena, *schema, *endpoint)->size(), 0U);
+}
+
+TEST(IoServiceTest, TenThousandSubmitAndRetireCyclesLeaveTheArenaBounded) {
+  // P4: a service that retires what it serves does not grow its arena. The
+  // request's cells (request, field occurrences and views, outcome) are freed
+  // by the reaper and the slots reused.
+  runBoundedCycles(false);
+}
+
+TEST(IoServiceTest, TenThousandAwaitCyclesLeaveTheArenaBoundedToo) {
+  // M1 of the M7a review: the waiter graph (cell, request occurrence and view,
+  // cursor/incarnation/continuation records) is freed when the waiter retires,
+  // by cancel or by the terminal pass, not left behind per parked await.
+  runBoundedCycles(true);
 }
 
 TEST(IoSchedulerTest, BoundedPoolNeverRunsAdapterOnTheSubmittingThread) {

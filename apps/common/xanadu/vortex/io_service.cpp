@@ -598,6 +598,13 @@ void IoService::retireRequest(const RequestCell request) {
   eraseRequestState(found->first);
 }
 
+void IoService::reapRetiredRequest(const RequestCell request) {
+  if (requestByCell_.contains(std::pair{request.cell, request.incarnation})) {
+    return;
+  }
+  cells_.reapRequest(request);
+}
+
 auto IoService::closeEndpoint(const EndpointCell endpoint, const CloseMode mode)
     -> SubmitResult {
   if (shuttingDown_) {

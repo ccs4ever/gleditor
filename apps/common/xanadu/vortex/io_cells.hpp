@@ -201,6 +201,13 @@ void detachClonedField(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
 void reapIoRequest(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
                    RequestCell request) noexcept;
 
+/// Free a retired waiter's graph (its request field occurrence and view, and
+/// the cursor, incarnation and continuation records), leaf first, after its
+/// request view leaves the request's clone rank. A waiter with clone views of
+/// its own is kept whole. Idempotent: a stale handle is a no-op.
+void reapIoWaiter(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+                  WaiterCell waiter) noexcept;
+
 /// The d.io.* dimensions through the arena's dimension registry
 /// (ArenaManifold::ensureDimension): minted on first use, found thereafter.
 [[nodiscard]] std::expected<IoCellSchema, IoCellError>

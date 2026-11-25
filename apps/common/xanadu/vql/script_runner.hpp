@@ -95,8 +95,10 @@ public:
   /// runs its queries on, so the core has one write guard.
   ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
                ScriptIoPorts ports, QueryExecutionOptions options = {});
-  /// Cancels every live activation's waiter (never its request), so the host
-  /// holds no route to a dead runner.
+  /// Cancels every live activation's waiter (never its request) and drops
+  /// every route to this runner, so the host holds none to a dead one. The
+  /// last action's request is retired if it is terminal: rows a caller still
+  /// holds from it are valid until the next action or this destructor.
   ~ScriptRunner() override;
 
   ScriptRunner(const ScriptRunner &)            = delete;
@@ -148,6 +150,10 @@ private:
                               std::optional<std::size_t> position = {}) const
       -> vortex::FrontendDiagnostic;
   void retire(const std::shared_ptr<Activation> &activation) noexcept;
+  /// Retire a finished action's submission and its terminal request, unless a
+  /// parked activation still awaits that request (then only the sum is
+  /// released).
+  void retireSubmission(vortex::SubmissionCell submission) noexcept;
 
   VQLEngine &session_;
   zigzag::vortex::VortexVM &vm_;
@@ -155,7 +161,9 @@ private:
   QueryExecutionOptions options_;
   std::optional<vortex::SubmissionCell> submission_;
   std::deque<ScriptWake> woken_;
-  std::map<vortex::ContinuationId, vortex::WaiterCell> parked_;
+  std::map<vortex::ContinuationId,
+           std::pair<vortex::WaiterCell, vortex::RequestCell>>
+      parked_;
 };
 
 /// Drive @p first to its end the way a CLI does, through the host and never

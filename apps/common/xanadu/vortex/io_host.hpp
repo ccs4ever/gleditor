@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <expected>
 #include <map>
+#include <memory>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -42,6 +43,13 @@ public:
   /// cell may still need `ensureTerminalOutcome` rematerialization, so
   /// retire after the arena state that could invalidate it is committed).
   void retireRequest(RequestCell request);
+  /// Retire @p request only when it is already terminal, so its outcome is
+  /// readable and nobody is cancelled by the call. False for a request still
+  /// running (which `retireRequest` would cancel), or a stale one.
+  auto retireIfTerminal(RequestCell request) -> bool;
+  /// Reap the graph of a request that is already retired; see
+  /// IoService::reapRetiredRequest.
+  void reapRetiredRequest(RequestCell request);
 
   /// The immutable per-run profile applied before every admission below.
   [[nodiscard]] auto profile() const noexcept -> IoExecutionProfile;
@@ -62,11 +70,27 @@ public:
   /// Bind a parked await's wakeup to its owning runner (plan §10). The
   /// token must name an await this host parked; when `pumpIo` later resumes
   /// (or abandons) that cursor, the same token is handed to @p runner. The
-  /// runner must outlive the route: a cancelled waiter drops it silently and
-  /// ~IoHost drops what is left without calling anyone. Host-side by nature:
-  /// the route is native state beside the parked entry it belongs to.
+  /// runner need not outlive the route: delivery re-checks the runner's
+  /// `routeLife()` just before each call and skips a dead one, a cancelled
+  /// waiter drops the route silently, and ~IoHost drops what is left without
+  /// calling anyone. Routing the same token to the same runner and activation
+  /// again is accepted; another runner or activation is `AlreadyRouted`.
+  /// Host-side by nature: the route is native state beside the parked entry
+  /// it belongs to.
   [[nodiscard]] auto routeWake(FrontendToken token, FrontendRunner &runner)
       -> std::expected<void, WakeRouteError>;
+  /// Drop the route of @p continuation without touching the parked await, for
+  /// a runner that stops caring about one wake. True when a route was
+  /// removed.
+  auto unrouteWake(ContinuationId continuation) -> bool;
+  /// Drop every route to @p runner; what a runner's teardown calls. Returns
+  /// how many were removed.
+  auto unrouteRunner(const FrontendRunner &runner) -> std::size_t;
+  /// Wakes whose delivery threw and so were contained: the token was
+  /// abandoned, its VM continuation retired. Diagnostic counter.
+  [[nodiscard]] auto failedWakes() const noexcept -> std::size_t {
+    return failedWakes_;
+  }
 
   /// A runner that is not stepping an Await opcode collects the outcome
   /// `pumpIo` delivered to a woken token: the VM's parked outcome for
@@ -94,15 +118,18 @@ private:
 
   struct WakeRoute {
     FrontendRunner *runner{};
+    std::weak_ptr<const void> life;
     FrontendToken token;
   };
   struct PendingWake {
     WakeRoute route;
     FrontendWake why{};
+    zigzag::CellRef cursor{};
+    AllocationIncarnation cursorIncarnation{};
   };
 
   void requireOwner() const;
-  void collectWake(ContinuationId continuation, FrontendWake why,
+  void collectWake(const ParkedAwait &parked, FrontendWake why,
                    std::vector<PendingWake> &wakes);
   void abandon(ParkedAwait &parked) noexcept;
   /// The VM-facing await handler: awaitCell with its exceptions turned into
@@ -119,6 +146,7 @@ private:
   std::map<ContinuationId, WakeRoute> routes_;
   std::uint64_t nextId_{1};
   std::uint64_t nextVisit_{1};
+  std::size_t failedWakes_{};
 };
 
 } // namespace xanadu::vortex

@@ -521,6 +521,66 @@ TEST(VqlIoScriptTest, DestroyingARunnerCancelsItsWaiterNotItsRequest) {
       << "the request completes on its own; cancelling the waiter is not it";
 }
 
+TEST(VqlIoScriptTest, ARunnerRetiresEachActionsRequestOnceTheNextReplacesIt) {
+  // M1 of the M7a review: a long session holds one finished action's request,
+  // not every request it ever made.
+  ScriptWorld s;
+  std::optional<RequestCell> previous;
+  std::optional<OutcomeCell> previousOutcome;
+  constexpr std::size_t times = 5;
+  for (std::size_t i = 0; i < times; ++i) {
+    const auto begun  = s.run(readOnCap);
+    const auto *token = parkedToken(begun);
+    ASSERT_NE(token, nullptr);
+    if (previous) {
+      EXPECT_FALSE(s.w.arena.matches(previous->cell, previous->incarnation))
+          << "the replaced action's request is retired and freed";
+      EXPECT_FALSE(s.w.arena.matches(previousOutcome->cell,
+                                     previousOutcome->incarnation));
+    }
+    const auto request = token->request;
+    s.w.complete(i, EndOfStream{{}});
+    const auto done = s.wakeAndResume();
+    ASSERT_NE(completedRows(done), nullptr);
+    previousOutcome = *s.w.service.poll(request).outcome;
+    EXPECT_TRUE(
+        s.w.arena.matches(previousOutcome->cell, previousOutcome->incarnation))
+        << "the rows just returned stay readable until the next action";
+    previous = request;
+  }
+}
+
+TEST(VqlIoScriptTest, DestroyingARunnerRetiresItsTerminalRequestOnly) {
+  World w;
+  RequestCell finished;
+  RequestCell running;
+  {
+    VQLEngine engine(w.core);
+    engine.setVariable("cap", w.capability.cell);
+    ScriptRunner runner(
+        engine, w.vm,
+        ScriptIoPorts{w.bridge, w.host, w.payloads, w.diagnostics,
+                      [&](CapabilityCell, std::uint64_t, std::uint64_t)
+                          -> std::expected<CellRef, FrontendDiagnostic> {
+                        return w.specification();
+                      }});
+    const auto first = runner.run(Parser(readOnCap).parseQuery());
+    ASSERT_NE(parkedToken(first), nullptr);
+    finished = parkedToken(first)->request;
+    w.complete(0, EndOfStream{{}});
+    static_cast<void>(w.pump());
+    auto woken = runner.takeWake();
+    ASSERT_TRUE(woken);
+    ASSERT_NE(completedRows(runner.resume(*std::move(woken))), nullptr);
+    const auto second = runner.run(Parser(readOnCap).parseQuery());
+    ASSERT_NE(parkedToken(second), nullptr);
+    running = parkedToken(second)->request;
+  }
+  EXPECT_FALSE(w.arena.matches(finished.cell, finished.incarnation));
+  EXPECT_TRUE(w.arena.matches(running.cell, running.incarnation))
+      << "an unfinished request is never cancelled by the runner";
+}
+
 // ---- The shared conformance harness ---------------------------------------
 
 /// The VQL driver: its program is the script action itself, run through the
@@ -599,6 +659,10 @@ struct FileScriptWorld {
   zigzag::vortex::VortexVM vm{core};
   VQLEngine engine{core};
   xanadu::vortex::FileReadHost host{vm, arena};
+  // One runner for the session, as vquery has: it retires an action's request
+  // when the next action or the runner replaces it, so the rows a test reads
+  // after `run` returns are still live.
+  ScriptRunner runner{engine, vm, xanadu::vql::fileScriptPorts(host)};
   std::filesystem::path dir;
 
   FileScriptWorld() {
@@ -637,7 +701,6 @@ struct FileScriptWorld {
   }
   auto run(const std::string &source)
       -> std::expected<std::vector<CellRef>, FrontendDiagnostic> {
-    ScriptRunner runner(engine, vm, xanadu::vql::fileScriptPorts(host));
     return xanadu::vql::driveToCompletion(
         runner, runner.run(Parser(source).parseQuery()), [&] { host.pump(16); },
         [] { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });

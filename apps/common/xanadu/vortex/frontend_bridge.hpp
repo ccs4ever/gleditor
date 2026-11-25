@@ -82,8 +82,17 @@ public:
   /// The pattern match: which arm, with its handle.
   [[nodiscard]] auto match(SubmissionCell submission) const
       -> std::expected<IoSubmissionValue, FrontendDiagnostic>;
-  /// Drop the sum's cells; the request or outcome it named is untouched.
+  /// Drop the sum's cells; the request or outcome it named is untouched,
+  /// except that a request the service had already retired (and the reaper
+  /// kept whole while this sum viewed it) is freed now that the view is gone.
   void release(SubmissionCell submission) noexcept;
+  /// The language is done with the submission and the outcome it named:
+  /// release the sum, then retire the request if it is terminal so the
+  /// service's index and the arena hold only live requests. A request still
+  /// running is left alone, never cancelled (cancelling is an explicit act);
+  /// call it only once nothing will poll, await or read the outcome again, as
+  /// an outcome row a caller still holds is freed with the request.
+  void retire(SubmissionCell submission) noexcept;
 
   /// Await an *admitted* submission for @p cursor. A refused submission is
   /// `IO_AWAIT_NOT_ADMITTED` (refusal stays a value; a language matches it
@@ -145,8 +154,10 @@ struct LanguageValueFinding {
 /// can follow (everything except the owner-only clone, queue, waiter, lease
 /// and provenance ranks) and report: an owner-only tag (Waiter, Capture), a
 /// text that names a native identity ("continuation", "waiter", "cursor",
-/// "token", "requestid"), or a text equal to one of @p forbiddenDecimals (the
-/// raw ids the caller knows were issued).
+/// "token", "requestid"), or a text or a scalar value (integer or integral
+/// real) equal to one of @p forbiddenDecimals (the ContinuationId, waiter and
+/// request cell numbers and the cursor the caller knows were issued), under
+/// any label.
 [[nodiscard]] auto
 auditLanguageValue(const zigzag::ArenaManifold &arena,
                    const IoCellSchema &schema,

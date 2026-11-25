@@ -41,6 +41,7 @@ namespace xuzz_conformance {
 using namespace xanadu::vortex;
 using zigzag::ArenaManifold;
 using zigzag::CellRef;
+using zigzag::DimVector;
 using zigzag::vortex::VortexCore;
 using zigzag::vortex::VortexVM;
 
@@ -370,13 +371,41 @@ inline void checkNoRawIdsInLanguageValues(const DriverFactory &make) {
   ASSERT_NE(token, nullptr);
   const auto parkedToken = *token;
 
+  // The ids the contract names, as issued: the scheduler's private tokens, the
+  // continuation, and the waiter and request cell numbers. Any of them in a
+  // reachable cell's text or scalar value, under any label, is a leak.
   std::vector<std::uint64_t> forbidden;
   for (const auto &entry : w.scheduler->entries) {
     forbidden.push_back(entry.command.token.value);
   }
+  forbidden.push_back(parkedToken.continuation);
+  forbidden.push_back(parkedToken.waiter.cell);
+  forbidden.push_back(parkedToken.request.cell);
   const auto roots = driver->visibleCells();
   ASSERT_FALSE(roots.empty());
   EXPECT_TRUE(auditLanguageValue(w.arena, w.schema, roots, forbidden).empty());
+
+  // The audit can fail on each issued id, by text and by scalar, behind a
+  // label that names nothing native.
+  const auto plant = [&](const std::uint64_t id, const bool scalar) {
+    const auto root = w.arena.makeCell("benign root");
+    const auto leak =
+        scalar ? w.arena.makeScalarCell(static_cast<std::int64_t>(id))
+               : w.arena.makeCell(std::to_string(id));
+    EXPECT_TRUE(w.arena.link(root, w.schema.dim(IoDimension::State),
+                             DimVector::POS, leak));
+    const std::vector<CellRef> planted{root};
+    EXPECT_FALSE(
+        auditLanguageValue(w.arena, w.schema, planted, forbidden).empty())
+        << "a planted " << (scalar ? "scalar " : "text ") << id
+        << " must be caught";
+  };
+  for (const auto id :
+       {parkedToken.continuation, std::uint64_t{parkedToken.waiter.cell},
+        std::uint64_t{parkedToken.request.cell}}) {
+    plant(id, false);
+    plant(id, true);
+  }
 
   const std::vector<CellRef> waiterRoot{parkedToken.waiter.cell};
   EXPECT_FALSE(auditLanguageValue(w.arena, w.schema, waiterRoot).empty())

@@ -627,13 +627,7 @@ void ArenaIoCellStore::retireWaiter(const WaiterCell waiter) noexcept {
           IoCellTag::Waiter) {
     return;
   }
-  detachClonedField(arena_, schema_, waiter.cell, IoDimension::Request);
-  const auto dim        = schema_.dim(IoDimension::Request);
-  const auto occurrence = arena_.linked(waiter.cell, dim, DimVector::POS);
-  if (occurrence) {
-    static_cast<void>(arena_.unlink(waiter.cell, dim, DimVector::POS));
-    static_cast<void>(arena_.unlink(*occurrence, dim, DimVector::POS));
-  }
+  reapIoWaiter(arena_, schema_, waiter);
 }
 
 void ArenaIoCellStore::reapRequest(const RequestCell request) noexcept {

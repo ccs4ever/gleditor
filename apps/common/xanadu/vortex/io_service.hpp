@@ -89,6 +89,12 @@ public:
   void retireWaiter(WaiterCell);
   [[nodiscard]] auto cancelRequest(RequestCell) -> RequestCancelResult;
   void retireRequest(RequestCell);
+  /// Free the graph of a request the service no longer indexes. A request
+  /// retired while a submission view still named it was kept whole by the
+  /// reaper and nothing re-reaps it once the view leaves; the owner calls this
+  /// after releasing the view. A request still indexed is left alone (it is
+  /// retired, not reaped, through retireRequest); a stale handle is a no-op.
+  void reapRetiredRequest(RequestCell);
   [[nodiscard]] auto closeEndpoint(EndpointCell, CloseMode) -> SubmitResult;
   [[nodiscard]] auto pump(std::size_t completionBudget) -> std::size_t;
   [[nodiscard]] auto requestShutdown(ShutdownMode) -> ShutdownResult;

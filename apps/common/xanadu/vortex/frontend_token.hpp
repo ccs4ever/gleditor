@@ -62,6 +62,23 @@ class FrontendRunner {
 public:
   virtual void wake(FrontendToken token, FrontendWake why) = 0;
   virtual ~FrontendRunner()                                = default;
+
+  /// Expires when the runner is destroyed. IoHost keeps this, not just the
+  /// runner's address, and checks it immediately before every delivery, so a
+  /// runner that dies without cancelling its waiters (or is destroyed by
+  /// another runner's wake in the same pass) is skipped instead of called.
+  /// Owner-thread only, like every route.
+  [[nodiscard]] auto routeLife() const noexcept -> std::weak_ptr<const void> {
+    return life_;
+  }
+
+protected:
+  FrontendRunner()                                  = default;
+  FrontendRunner(const FrontendRunner &)            = delete;
+  FrontendRunner &operator=(const FrontendRunner &) = delete;
+
+private:
+  std::shared_ptr<const int> life_{std::make_shared<const int>(0)};
 };
 
 /// `Completed{value} | Parked{FrontendToken} | Failed{FrontendDiagnostic}`.

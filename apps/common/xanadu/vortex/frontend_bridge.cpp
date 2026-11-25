@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <gleditor/logging.hpp>
 #include <stdexcept>
 #include <unordered_set>
@@ -113,7 +114,27 @@ auto FrontendBridge::match(const SubmissionCell submission) const
 }
 
 void FrontendBridge::release(const SubmissionCell submission) noexcept {
+  const auto request = submissionRequest(arena_, schema_, submission);
   releaseSubmissionCell(arena_, schema_, submission);
+  if (!request) return;
+  try {
+    host_.reapRetiredRequest(*request);
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN("vortex.io.frontend", "request reap after release: {}",
+                      error.what());
+  }
+}
+
+void FrontendBridge::retire(const SubmissionCell submission) noexcept {
+  const auto request = submissionRequest(arena_, schema_, submission);
+  releaseSubmissionCell(arena_, schema_, submission);
+  if (!request) return;
+  try {
+    static_cast<void>(host_.retireIfTerminal(*request));
+    host_.reapRetiredRequest(*request);
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN("vortex.io.frontend", "request retire: {}", error.what());
+  }
 }
 
 auto FrontendBridge::awaitSubmission(
@@ -173,13 +194,19 @@ auto FrontendBridge::awaitRequest(
                       .continuation = pending.continuation,
                       .position     = position};
   const auto routed = host_.routeWake(token, runner);
-  if (!routed && routed.error() != IoHost::WakeRouteError::AlreadyRouted) {
-    return Result::failed(diagnose(frontend_codes::tokenStale,
-                                   "parked await could not be routed",
-                                   position));
+  if (!routed) {
+    // AlreadyRouted is a refusal too: the host keeps the first runner and
+    // activation, so a second one would be woken never, or the first one with
+    // the wrong activation. Re-awaiting with the same runner and activation is
+    // accepted by routeWake itself.
+    return Result::failed(diagnose(
+        frontend_codes::tokenStale,
+        routed.error() == IoHost::WakeRouteError::AlreadyRouted
+            ? "the parked await is already routed to another runner or "
+              "activation"
+            : "parked await could not be routed",
+        position));
   }
-  // AlreadyRouted: the same request and cursor re-awaited while Pending; the
-  // host keeps the first route and the continuation is unchanged.
   return Result::parked(std::move(token));
 }
 
@@ -222,6 +249,11 @@ auto auditLanguageValue(const ArenaManifold &arena, const IoCellSchema &schema,
     forbiddenText.push_back(std::to_string(value));
   }
 
+  const auto isForbidden = [&](const std::uint64_t value) {
+    return std::ranges::find(forbiddenDecimals, value) !=
+           forbiddenDecimals.end();
+  };
+
   for (std::size_t at = 0; at < frontier.size(); ++at) {
     const auto cell = frontier[at];
     if (const auto incarnation = arena.incarnationOf(cell)) {
@@ -240,6 +272,16 @@ auto auditLanguageValue(const ArenaManifold &arena, const IoCellSchema &schema,
     }
     if (std::ranges::find(forbiddenText, text) != forbiddenText.end()) {
       findings.push_back({cell, "carries a raw id: " + text});
+    }
+    // The typed half of a scalar cell is the same leak with no text at all.
+    if (const auto bits = arena.asInt64(cell);
+        bits && *bits >= 0 && isForbidden(static_cast<std::uint64_t>(*bits))) {
+      findings.push_back(
+          {cell, "carries a raw id as a scalar: " + std::to_string(*bits)});
+    } else if (const auto real = arena.asDouble(cell);
+               real && *real >= 0 && *real == std::floor(*real) &&
+               isForbidden(static_cast<std::uint64_t>(*real))) {
+      findings.push_back({cell, "carries a raw id as a scalar"});
     }
     for (std::size_t which = 0; which < ioDimensionCount; ++which) {
       const auto dimension = static_cast<IoDimension>(which);

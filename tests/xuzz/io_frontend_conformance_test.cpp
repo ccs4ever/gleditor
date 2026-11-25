@@ -7,7 +7,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -349,6 +351,256 @@ TEST(IoFrontendBridgeTest, AuditFlagsPlantedNativeIdentities) {
   ASSERT_TRUE(w.arena.link(leak, w.schema.dim(IoDimension::State),
                            DimVector::POS, raw));
   EXPECT_EQ(auditLanguageValue(w.arena, w.schema, roots, forbidden).size(), 2U);
+}
+
+// ---- Retirement, routes and wake containment (M7a review R1) --------------
+
+/// A runner that only counts the wakes it is given and says where it was
+/// called from, for the lifetime tests.
+struct CountingRunner final : FrontendRunner {
+  explicit CountingRunner(int &count) : calls(count) {}
+  void wake(FrontendToken, FrontendWake) override { ++calls; }
+  int &calls;
+};
+
+TEST(IoFrontendRetireTest, ParkedAwaitCyclesLeaveTheArenaBounded) {
+  // M1: each cycle parks an await (a waiter graph), wakes it, resumes, and
+  // retires the submission; none of it may outlive the cycle.
+  World w;
+  struct Sink final : FrontendRunner {
+    void wake(FrontendToken token, FrontendWake) override {
+      tokens.push_back(std::move(token));
+    }
+    std::vector<FrontendToken> tokens;
+  } sink;
+  const auto cursor = w.vm.spawnCursor(w.vm.mintOpcode(OpcodeKind::Nop));
+  const auto cycle  = [&](const std::size_t index) {
+    const auto specification = w.specification();
+    const auto submission    = w.bridge.submit(w.capability, specification);
+    ASSERT_TRUE(submission);
+    const auto awaited =
+        w.bridge.awaitSubmission(*submission, cursor, sink, nullptr);
+    ASSERT_NE(detail::parked(awaited), nullptr);
+    w.complete(index, EndOfStream{{}});
+    static_cast<void>(w.pump());
+    ASSERT_EQ(sink.tokens.size(), 1U);
+    const auto resumed = w.bridge.resume(sink.tokens[0], cursor, sink);
+    ASSERT_TRUE(detail::completed(resumed));
+    sink.tokens.clear();
+    w.bridge.retire(*submission);
+    ASSERT_TRUE(w.arena.freeCell(specification,
+                                  w.arena.incarnationOf(specification).value()));
+  };
+  cycle(0);
+  const auto liveAfterOne      = w.arena.liveCells();
+  const auto slotsAfterOne     = w.arena.cellCount();
+  constexpr std::size_t stream = 10'000;
+  for (std::size_t i = 1; i <= stream; ++i) {
+    cycle(i);
+    if (::testing::Test::HasFatalFailure()) return;
+  }
+  EXPECT_EQ(w.arena.liveCells(), liveAfterOne);
+  EXPECT_EQ(w.arena.cellCount(), slotsAfterOne);
+}
+
+TEST(IoFrontendRetireTest,
+     ARequestRetiredBeforeItsSubmissionIsReapedOnRelease) {
+  World w;
+  const auto specification = w.specification();
+  const auto baseline      = w.arena.liveCells();
+  const auto submission    = w.bridge.submit(w.capability, specification);
+  ASSERT_TRUE(submission);
+  const auto request = *submissionRequest(w.arena, w.schema, *submission);
+  w.complete(0, EndOfStream{{}});
+  static_cast<void>(w.pump());
+  ASSERT_TRUE(w.service.poll(request).outcome);
+
+  // The service retires first: the submission's view on the request's clone
+  // rank keeps the whole graph, which is the pre-fix leak.
+  w.host.retireRequest(request);
+  EXPECT_GT(w.arena.liveCells(), baseline);
+  w.bridge.release(*submission);
+  EXPECT_EQ(w.arena.liveCells(), baseline) << "release reaps the retired graph";
+  EXPECT_FALSE(w.arena.matches(request.cell, request.incarnation));
+}
+
+TEST(IoFrontendRetireTest, RetireNeverCancelsARunningRequest) {
+  World w;
+  const auto submission = w.bridge.submit(w.capability, w.specification());
+  ASSERT_TRUE(submission);
+  const auto request = *submissionRequest(w.arena, w.schema, *submission);
+  w.bridge.retire(*submission);
+  EXPECT_TRUE(w.arena.matches(request.cell, request.incarnation));
+  w.complete(0, EndOfStream{{}});
+  static_cast<void>(w.pump());
+  EXPECT_TRUE(w.service.poll(request).outcome)
+      << "the unfinished request ran to completion; retire is not cancel";
+}
+
+TEST(IoFrontendRetireTest, ACellAnotherCellViewsSurvivesTheReap) {
+  // The reaper detached the head of an outcome's clone rank and went on to
+  // free it. An outcome that something else views must stay whole.
+  World w;
+  const auto submitted = w.host.submitCell(w.capability, w.specification());
+  ASSERT_TRUE(std::holds_alternative<Admitted>(submitted.value));
+  const auto request = std::get<Admitted>(submitted.value).request;
+  w.complete(0, EndOfStream{{}});
+  static_cast<void>(w.pump());
+  const auto outcome = w.service.poll(request).outcome;
+  ASSERT_TRUE(outcome);
+  const auto holder = w.arena.makeCell("holder");
+  ASSERT_TRUE(attachClonedField(w.arena, w.schema, holder, IoDimension::Outcome,
+                                outcome->cell));
+
+  w.host.retireRequest(request);
+  EXPECT_FALSE(w.arena.matches(request.cell, request.incarnation));
+  EXPECT_TRUE(w.arena.matches(outcome->cell, outcome->incarnation))
+      << "the viewed outcome is kept";
+  const auto canonical =
+      canonicalOfField(w.arena, w.schema, holder, IoDimension::Outcome);
+  ASSERT_TRUE(canonical) << "the holder's graph is not malformed";
+  EXPECT_EQ(*canonical, outcome->cell);
+  EXPECT_EQ(ioOutcomeTag(w.arena, *outcome), IoOutcomeTag::EndOfStream);
+}
+
+TEST(IoFrontendRouteTest, ADeadRunnerIsNeverCalledAndNothingElseIsDropped) {
+  // Two awaits of one request, from two cursors: both wake in the same pass.
+  World w;
+  const auto cell = w.bridge.submit(w.capability, w.specification());
+  ASSERT_TRUE(cell);
+  const auto dyingCursor = w.vm.spawnCursor(w.vm.mintOpcode(OpcodeKind::Nop));
+  const auto liveCursor  = w.vm.spawnCursor(w.vm.mintOpcode(OpcodeKind::Nop));
+  int deadCalls          = 0;
+  int liveCalls          = 0;
+  CountingRunner live(liveCalls);
+  {
+    CountingRunner dying(deadCalls);
+    ASSERT_TRUE(detail::parked(
+        w.bridge.awaitSubmission(*cell, dyingCursor, dying, nullptr)));
+    ASSERT_TRUE(detail::parked(
+        w.bridge.awaitSubmission(*cell, liveCursor, live, nullptr)));
+    // Dies with its waiter still parked and routed: no cancelWaiter.
+  }
+  w.complete(0, EndOfStream{{}});
+  static_cast<void>(w.pump());
+  EXPECT_EQ(deadCalls, 0) << "the dead runner is skipped, not called";
+  EXPECT_EQ(liveCalls, 1) << "the rest of the batch is still delivered";
+}
+
+TEST(IoFrontendRouteTest, AWakeThatDestroysALaterRunnerInTheSamePassIsSafe) {
+  World w;
+  const auto cell = w.bridge.submit(w.capability, w.specification());
+  ASSERT_TRUE(cell);
+  const auto killerCursor = w.vm.spawnCursor(w.vm.mintOpcode(OpcodeKind::Nop));
+  const auto victimCursor = w.vm.spawnCursor(w.vm.mintOpcode(OpcodeKind::Nop));
+  int victimCalls         = 0;
+  auto victim             = std::make_unique<CountingRunner>(victimCalls);
+  struct Killer final : FrontendRunner {
+    std::unique_ptr<CountingRunner> *target{};
+    int calls{};
+    void wake(FrontendToken, FrontendWake) override {
+      ++calls;
+      target->reset();
+    }
+  } killer;
+  killer.target = &victim;
+  // The killer parks first, so its wake is delivered first in the pass.
+  ASSERT_TRUE(detail::parked(
+      w.bridge.awaitSubmission(*cell, killerCursor, killer, nullptr)));
+  ASSERT_TRUE(detail::parked(
+      w.bridge.awaitSubmission(*cell, victimCursor, *victim, nullptr)));
+  w.complete(0, EndOfStream{{}});
+  static_cast<void>(w.pump());
+  EXPECT_EQ(killer.calls, 1);
+  EXPECT_EQ(victimCalls, 0) << "a runner destroyed mid-pass is not woken";
+  EXPECT_EQ(victim, nullptr);
+}
+
+TEST(IoFrontendRouteTest, UnrouteDropsTheRouteAndLeavesTheParkedAwait) {
+  World w;
+  const auto cell = w.bridge.submit(w.capability, w.specification());
+  ASSERT_TRUE(cell);
+  const auto cursor = w.vm.spawnCursor(w.vm.mintOpcode(OpcodeKind::Nop));
+  int calls         = 0;
+  CountingRunner runner(calls);
+  const auto parked = w.bridge.awaitSubmission(*cell, cursor, runner, nullptr);
+  ASSERT_NE(detail::parked(parked), nullptr);
+  const auto continuation = detail::parked(parked)->continuation;
+  EXPECT_TRUE(w.host.unrouteWake(continuation));
+  EXPECT_FALSE(w.host.unrouteWake(continuation)) << "already gone";
+  w.complete(0, EndOfStream{{}});
+  static_cast<void>(w.pump());
+  EXPECT_EQ(calls, 0);
+  EXPECT_TRUE(w.host.takeResumedOutcome(cursor, continuation))
+      << "the cursor was still resumed; only the route was dropped";
+
+  // unrouteRunner drops every route the runner holds.
+  const auto a = w.bridge.submit(w.capability, w.specification());
+  const auto b = w.bridge.submit(w.capability, w.specification());
+  ASSERT_TRUE(a && b);
+  ASSERT_TRUE(
+      detail::parked(w.bridge.awaitSubmission(*a, cursor, runner, nullptr)));
+  ASSERT_TRUE(
+      detail::parked(w.bridge.awaitSubmission(*b, cursor, runner, nullptr)));
+  EXPECT_EQ(w.host.unrouteRunner(runner), 2U);
+}
+
+TEST(IoFrontendRouteTest, AThrowingWakeIsContainedAndTheBatchIsDelivered) {
+  World w;
+  const auto cell = w.bridge.submit(w.capability, w.specification());
+  ASSERT_TRUE(cell);
+  const auto badCursor  = w.vm.spawnCursor(w.vm.mintOpcode(OpcodeKind::Nop));
+  const auto goodCursor = w.vm.spawnCursor(w.vm.mintOpcode(OpcodeKind::Nop));
+  struct Thrower final : FrontendRunner {
+    void wake(FrontendToken, FrontendWake) override {
+      throw std::runtime_error("wake failed");
+    }
+  } thrower;
+  int calls = 0;
+  CountingRunner after(calls);
+  const auto parkedBad =
+      w.bridge.awaitSubmission(*cell, badCursor, thrower, nullptr);
+  ASSERT_NE(detail::parked(parkedBad), nullptr);
+  ASSERT_TRUE(detail::parked(
+      w.bridge.awaitSubmission(*cell, goodCursor, after, nullptr)));
+  w.complete(0, EndOfStream{{}});
+  EXPECT_NO_THROW(static_cast<void>(w.pump()));
+  EXPECT_EQ(calls, 1) << "a later runner is still woken";
+  EXPECT_EQ(w.host.failedWakes(), 1U);
+  EXPECT_FALSE(w.host.takeResumedOutcome(
+      badCursor, detail::parked(parkedBad)->continuation))
+      << "the failed token's continuation was released";
+}
+
+TEST(IoFrontendRouteTest, AReawaitByAnotherRunnerOrActivationIsRefusedTyped) {
+  World w;
+  const auto cell = w.bridge.submit(w.capability, w.specification());
+  ASSERT_TRUE(cell);
+  const auto cursor = w.vm.spawnCursor(w.vm.mintOpcode(OpcodeKind::Nop));
+  int firstCalls    = 0;
+  int secondCalls   = 0;
+  CountingRunner first(firstCalls);
+  CountingRunner second(secondCalls);
+  struct Activation final : FrontendActivation {};
+  const auto one = std::make_shared<Activation>();
+  const auto two = std::make_shared<Activation>();
+  ASSERT_NE(detail::parked(w.bridge.awaitSubmission(*cell, cursor, first, one)),
+            nullptr);
+
+  const auto sameAgain = w.bridge.awaitSubmission(*cell, cursor, first, one);
+  EXPECT_NE(detail::parked(sameAgain), nullptr) << "idempotent for the owner";
+  const auto otherRunner = w.bridge.awaitSubmission(*cell, cursor, second, one);
+  const auto otherActivation =
+      w.bridge.awaitSubmission(*cell, cursor, first, two);
+  for (const auto *result : {&otherRunner, &otherActivation}) {
+    const auto *failed = std::get_if<RunResult::Failed>(&result->value);
+    ASSERT_NE(failed, nullptr);
+    EXPECT_EQ(failed->diagnostic.code, frontend_codes::tokenStale);
+  }
+  w.complete(0, EndOfStream{{}});
+  static_cast<void>(w.pump());
+  EXPECT_EQ(firstCalls, 1);
+  EXPECT_EQ(secondCalls, 0);
 }
 
 // ---- Diagnostic registry --------------------------------------------------
