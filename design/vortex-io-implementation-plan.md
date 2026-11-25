@@ -831,8 +831,8 @@ M5 implementation notes and deliberate deferrals:
 - File endpoints are served by `FileEndpointAdapter` (`fileOpenAdapterKey`/`fileDataAdapterKey`,
   `d.io.kind` "file"): `admitOpen` runs `::open` inside `execute` on the scheduler worker (§7.2's
   off-owner-thread rule) and adopts the descriptor in a `FileSourceAdapter` registered under a
-  per-open `FileOpenId` (never per path: reopening a replaced path is a second, independent open), so
-  every later op addresses the opened inode (`FileSourceIdentity::OpenedInode`, declared on
+  per-open `FileOpenId` (never per path: reopening a replaced path is a second, independent open),
+  so every later op addresses the opened inode (`FileSourceIdentity::OpenedInode`, declared on
   `FileOpenCapabilities`). `makeFileRequestDecoder` freezes spec-cell text into `CellRequest`s;
   `stageAt` keys are the minted spec cells' refs (`StageKey`, the width of `OwnerCell`) and a live
   duplicate is refused. `release(FileOpenId)` is the close path; in-flight operations hold the file
@@ -889,22 +889,60 @@ M6 implementation notes and deliberate deferrals:
   have landed without a proven commit. It never resubmits. Corruption, bad signature/version and
   sequence gaps are `PersistenceRefusal` naming the 1-based record; a torn tail is cut by the
   constructor.
-- The prior draft encoded 49-byte intervals but declared 41, so every journal read as corrupt; the
-  size is now `1 + 6 * 8`. `journalReserveBytes` in the coordinator still hardcodes the journal's
-  frame sizes and must change with the format.
-- Crash injection is covered two ways: restart tests tear the whole world down after each durable
-  step (intent, append executed, `Appended`, `Committed`, certain and uncertain abort) and boot a
-  fresh coordinator over the same journal and sink; `CaptureJournalCrashPoints` is exercised on the
-  journal directly (`beforeFlush` rolls back, `afterFlush` keeps the record).
-- Deferred: `commit` mints the receipt cell with span fields in the owner arena only; it does not
-  yet emit Structure operations into a `Store` (the plan's "translated Structure spans"), so no
-  durable slice references a captured span. The coordinator does not thread
-  `CaptureJournalCrashPoints`, so failures between journal write and fsync are tested at journal
-  level only. `UserPermascrollCaptureSink` and `SegmentedPrimediaCaptureSink` have no test of their
-  own (tests use an in-memory sink). Explicit reconciliation of `Pinned` intervals is not built:
-  they stay refused until restart policy changes. Source chunks are not pinned by the map, so a
-  capture of a transient origin whose last lease dropped is refused `Unresolved` by design (the
-  tests hold a standing lease).
+- Journal frame sizes are exported from `capture_journal.hpp` (`kCaptureJournal*Bytes`,
+  `captureJournalFramedBytes`), and the coordinator derives its reservations from them; nothing
+  hardcodes the format. Fallback bounds (`maxIntervals`, `maxAppendBytes`, `maxPieces`,
+  `maxPendingCaptures`, `maxMapEntries`, `journalMaxBytes`, `completionBoundBytes`) live in
+  `capture_constants.hpp` with rationale; M8 moves the configurable ones into `system://settings`
+  and these become the schema defaults.
+- Durability order (M6 review): `commit` calls `CaptureByteSink::sync()` (for the permascroll,
+  `UserPermascroll::flush()`: write the tail to the active segment file and fsync) BEFORE it writes
+  the `Appended` record, and refuses with `PersistenceRefusal` when the sink cannot sync.
+  `recover()` reconciles every `Appended`/`Committed` span against
+  `CaptureByteSink::highWaterBytes()` (the permascroll's size at restart): a span in another scroll,
+  of the wrong length, or ending past the high-water mark is never a translation; it is pinned, its
+  bytes counted as orphans, and reported as `SpanBeyondPermascroll`. Intervals that do not fit their
+  span are `InvalidTranslation`; any overlap with an existing slot that is not an identical slot is
+  `MapConflict`, inserted all-or-nothing.
+- `prepare` refuses (`Stale`) until `recover()` has succeeded, and the id counter is seeded from the
+  journal's maximum at construction, so an id is never reused. `recover()` is idempotent: it caches
+  its report and later calls return it without touching the map, so it cannot re-insert inside slots
+  that live commits coalesced. Zero-length and wrapping selections are refused up front, and no
+  zero-length piece or slot is ever emitted.
+- Journal budget is held, not just checked: `prepare` holds the capture's worst-case record set
+  (`Append` + `Appended` + `Committed` + `Aborted`) against `written + held`, so N pending captures
+  cannot jointly exhaust it; holds are consumed as records land and returned on retirement. A retry
+  after a refused admission tops the hold up before submitting.
+- Terminal captures leave `pending_`: a committed capture frees its pending slot at once; a certain
+  abort erases its `Pending` slots and releases its leases (the range can be retried immediately);
+  an uncertain abort (and a swept capture whose append was requested) turns its slots `Pinned`
+  in-process, matching what recovery would do after a restart, and releases its leases.
+- Journal repair: a 1..11 byte file that is a prefix of our own header is a fresh journal (the first
+  record is written with the header in one write, and the file and its directory are fsynced on
+  creation); foreign bytes poison. A length prefix that claims more than remains is a torn tail only
+  when the bytes present are the self-consistent start of the announced record (known kind, length
+  valid for that kind, next expected sequence, interval count agreeing with the length); otherwise
+  the journal is `Corrupt` naming the record and nothing is truncated.
+- `translationFor(PayloadRange)` is the read-only query: the permanent span a range maps to when it
+  lies wholly inside one committed translation, else `std::nullopt`.
+- Journal write failures are logged (`vortex.io.capture`, record kind and refusal code, never
+  content). `setJournalCrashPoints` threads `CaptureJournalCrashPoints` through the coordinator, and
+  tests cover death before and after the `Appended` fsync.
+- Crash injection is covered three ways: restart tests tear the whole world down after each durable
+  step (intent, append executed, `Appended`, `Committed`, certain and uncertain abort); coordinator
+  crash points bracket the `Appended` fsync; the journal's own hooks are exercised directly.
+- Deferred, M6 is NOT fully met: the plan's §8.2 publication contract -- `commit` "publishes
+  translated Structure spans plus a receipt under one owner mark" -- is not implemented. `commit`
+  mints the receipt cell with span fields in the owner arena only and emits no Structure operations
+  into a `Store`, so no durable slice references a captured span; a later milestone owes that
+  publication and its own recovery rule (a durable `Committed` record presently proves only the
+  journal and map, not a published reference). Also deferred: explicit reconciliation of `Pinned`
+  intervals (they stay refused until restart policy changes); tests of
+  `UserPermascrollCaptureSink`/`SegmentedPrimediaCaptureSink` against the real spools (tests use an
+  in-memory sink whose `loseUnsynced()` models the crash); and moving the `capture_defaults` bounds
+  into `system://settings` (M8). Source chunks are not pinned by the map, so a capture of a
+  transient origin whose last lease dropped is refused `Unresolved` by design (the tests hold a
+  standing lease).
 
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per
 repository policy. Run source-level focused tests while implementing and full `make -j$(nproc) test`
