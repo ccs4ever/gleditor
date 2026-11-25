@@ -109,6 +109,19 @@ struct CompilationResult {
   std::vector<SessionBinding> sessionBindings;
   /// Set exactly when success is false.
   std::optional<QueryErrorCategory> category;
+  /// The statement being compiled when a refusal was thrown, when known.
+  std::optional<std::size_t> failingStatement;
+  /// One lowered script I/O action: its Submit and the Await a parked cursor
+  /// stops at, and the index of the statement that action is.
+  struct IoActionSite {
+    zigzag::CellRef submitOpcode{};
+    zigzag::CellRef awaitOpcode{};
+    std::size_t statement{};
+  };
+  std::vector<IoActionSite> ioActions;
+  /// The last statement is a script I/O action, so its result is an outcome
+  /// cell whose payload the host may append as text.
+  bool finalIsIoEffect{false};
 };
 
 /// Compares two microversions by causal ancestry: `<` is strict ancestor and
@@ -417,6 +430,10 @@ private:
   /// Q4, compile_watch.cpp.
   std::optional<zigzag::CellRef>
   compileWatchOrPerspectiveStatement(const Statement &statement);
+  /// Lowers one script I/O action (compile_io_effect.cpp) to MakeTerm, Submit,
+  /// a branch on the arm, and Await; the result is the outcome cell.
+  std::optional<zigzag::CellRef>
+  compileIoEffect(const IoEffectStatement &effect, std::size_t statement);
   void compileMountDeclarations(const QueryExpression &query);
   /// Q5, compile_dynamic_view.cpp.
   void compileDynamicShapeProjection(const ShapeLiteral &shape);
@@ -616,6 +633,9 @@ private:
   std::optional<zigzag::CellRef> currentOp_;
   std::vector<zigzag::CellRef> allOps_;
   std::vector<zigzag::CellRef> lastResultCells_;
+  std::vector<CompilationResult::IoActionSite> ioActions_;
+  std::optional<std::size_t> failingStatement_;
+  bool finalIsIoEffect_{false};
 
   std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
   std::unordered_map<std::string, std::vector<PathStep>> functorBindings_;

@@ -64,10 +64,11 @@ inline constexpr std::string_view vqlQueryContext = "VQL_IO_QUERY_CONTEXT";
 /// A script action's capability, offset or bound is not a usable value; the
 /// script stops before anything is submitted.
 inline constexpr std::string_view vqlEffectArgument = "VQL_IO_EFFECT_ARGUMENT";
-/// The query was asked to compile to bytecode (or run without an I/O host),
-/// but a script I/O action has no bytecode lowering and no blocking fallback.
-inline constexpr std::string_view vqlEffectNotCompilable =
-    "VQL_IO_EFFECT_NOT_COMPILABLE";
+/// A synchronous executor was asked to run a script holding an I/O action. The
+/// action compiles to bytecode but can park, and there is no blocking
+/// fallback, so such a script runs only through begin/resume (the runner).
+inline constexpr std::string_view vqlEffectNeedsRunner =
+    "VQL_IO_EFFECT_NEEDS_RUNNER";
 /// A query segment of a script failed (the QueryError category and message
 /// ride in the diagnostic's message).
 inline constexpr std::string_view vqlScriptFailed  = "VQL_SCRIPT_FAILED";

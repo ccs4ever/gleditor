@@ -1,7 +1,9 @@
 // Typed query failures shared by the compiler, the executor and VQLEngine.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -27,6 +29,8 @@ struct QueryError {
 
   Category category{Category::Runtime};
   std::string message;
+  /// The script statement a compile-time refusal came from, when known.
+  std::optional<std::size_t> statement;
 };
 
 /// A refusal that is not a malformed request: Unsupported, Unknown, Runtime

@@ -485,6 +485,9 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   functorBindings_ = options.initialFunctors;
   lastResultCells_.clear();
   dynamicStreams_.clear();
+  ioActions_.clear();
+  failingStatement_.reset();
+  finalIsIoEffect_ = false;
 
   try {
     const auto resultCell = compileQuery(query);
@@ -530,6 +533,8 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
         .terminalOpcode   = terminal,
         .cursor           = cursor,
         .resultSlots      = lastResultCells_,
+        .ioActions        = ioActions_,
+        .finalIsIoEffect  = finalIsIoEffect_,
     };
     for (const auto &[name, slots] : streamBindings_) {
       if (name == ".") continue;
@@ -583,6 +588,7 @@ CompilationResult VQLCompiler::failCompilation(const std::exception &refused) {
       .generatedOpcodes = {},
       .disassembly      = "",
       .category         = classifyCompilerFailure(refused),
+      .failingStatement = std::exchange(failingStatement_, std::nullopt),
   };
 }
 
@@ -659,21 +665,13 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   }
   if (!query.mounts.empty() || !query.namespaceDeclarations.empty())
     compileMountDeclarations(query);
-  for (const auto &statement : query.body.statements) {
-    // No bytecode lowering exists for a script I/O action (the VM has no
-    // Submit opcode) and no blocking stand-in is allowed, so the whole query
-    // is refused before any of it compiles.
-    if (std::holds_alternative<IoEffectStatement>(statement))
-      throw QueryRefusal(
-          QueryErrorCategory::Unsupported,
-          std::string{vortex::frontend_codes::vqlEffectNotCompilable} +
-              ": a script I/O action runs only through the vquery script "
-              "runner, which parks and resumes it; it has no bytecode form");
-  }
   if (!query.body.statements.empty()) {
     std::optional<CellRef> result;
+    std::size_t index = 0;
     for (const auto &statement : query.body.statements) {
       lastResultCells_.clear();
+      failingStatement_ = index;
+      finalIsIoEffect_  = false;
       if (const auto *path = std::get_if<PathExpression>(&statement)) {
         result = compilePathExpression(*path, core_.home());
       } else if (const auto *block = std::get_if<ExecutionBlock>(&statement)) {
@@ -681,10 +679,16 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
       } else if (const auto *weave = std::get_if<WeaveStatement>(&statement)) {
         result = compileExecutionBlock(
             ExecutionBlock{.action = ActionClause{.clause = weave->effect}});
+      } else if (const auto *effect =
+                     std::get_if<IoEffectStatement>(&statement)) {
+        result           = compileIoEffect(*effect, index);
+        finalIsIoEffect_ = true;
       } else {
         result = compileWatchOrPerspectiveStatement(statement);
       }
+      ++index;
     }
+    failingStatement_.reset();
     return result;
   }
   if (std::holds_alternative<PathExpression>(query.expr)) {

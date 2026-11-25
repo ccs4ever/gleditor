@@ -125,19 +125,27 @@ QueryExecutor::execute(const std::string_view source,
 std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
 QueryExecutor::execute(const QueryExpression &query,
                        const std::vector<zigzag::CellRef> &contextCells) {
+  if (hasIoEffect(query)) {
+    return std::unexpected(QueryExecutionError{
+        .category = QueryExecutionError::Category::Unsupported,
+        .message  = std::string{vortex::frontend_codes::vqlEffectNeedsRunner} +
+                   ": a script I/O action can park and resume; run the "
+                   "script through ScriptRunner (or begin/resume), which "
+                   "never blocks"});
+  }
+  const auto prepared = prepare(query);
+  if (!prepared) return std::unexpected(prepared.error());
+  return executeVortex(*prepared, contextCells);
+}
+
+std::expected<QueryExpression, QueryExecutionError>
+QueryExecutor::prepare(const QueryExpression &query) {
   disassembly_.clear();
   if (&coordinator_.core() != &vm_.core()) {
     return std::unexpected(QueryExecutionError{
         .category = QueryExecutionError::Category::Runtime,
         .message  = "VQL executor engines must share one VortexCore",
     });
-  }
-  if (hasIoEffect(query)) {
-    return std::unexpected(QueryExecutionError{
-        .category = QueryExecutionError::Category::Unsupported,
-        .message = std::string{vortex::frontend_codes::vqlEffectNotCompilable} +
-                   ": a script I/O action parks and resumes; run the script "
-                   "through ScriptRunner, which never blocks"});
   }
   QueryExpression effectiveQuery = query;
   if (session_ != nullptr) {
@@ -170,12 +178,89 @@ QueryExecutor::execute(const QueryExpression &query,
         .message =
             "direct execution was removed; VQL requires Vortex compilation",
     });
-  return executeVortex(effectiveQuery, contextCells);
+  return effectiveQuery;
 }
+
+/// One compiled program between its first step and its end: what a parked
+/// script keeps so the same cursor resumes at the same Await. Everything the
+/// run changed on the VM (the contract coordinator, the prose_hits provider,
+/// the cursor) is undone when the run ends, finishes or is abandoned.
+class ProgramRun {
+public:
+  ProgramRun(zigzag::vortex::VortexVM &vm, CompilationResult compiled,
+             QueryExpression query)
+      : vm_(vm), compiled_(std::move(compiled)), query_(std::move(query)) {}
+  ~ProgramRun() { close(); }
+  ProgramRun(const ProgramRun &)            = delete;
+  ProgramRun &operator=(const ProgramRun &) = delete;
+
+  void onClose(std::function<void()> undo) { undo_.push_back(std::move(undo)); }
+  void close() noexcept {
+    if (closed_) return;
+    closed_ = true;
+    try {
+      vm_.abortScopedChoices(cursor());
+      vm_.setCursorOpcode(cursor(), std::nullopt);
+    } catch (const std::exception &) {
+    }
+    for (auto undo = undo_.rbegin(); undo != undo_.rend(); ++undo) {
+      try {
+        (*undo)();
+      } catch (const std::exception &) {
+      }
+    }
+  }
+  [[nodiscard]] zigzag::CellRef cursor() const { return *compiled_.cursor; }
+
+  zigzag::vortex::VortexVM &vm_;
+  CompilationResult compiled_;
+  QueryExpression query_;
+  zigzag::Mark preCompileMark;
+  bool markHeld{true};
+  std::uint32_t preRunTrailSize{};
+  std::uint32_t preRunCellCount{};
+  std::size_t preCompileViewCount{};
+
+private:
+  std::vector<std::function<void()>> undo_;
+  bool closed_{false};
+};
 
 std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
 QueryExecutor::executeVortex(const QueryExpression &query,
                              const std::vector<zigzag::CellRef> &contextCells) {
+  auto step = beginVortex(query, contextCells);
+  if (!step) return std::unexpected(std::move(step.error()));
+  if (auto *done = std::get_if<ProgramResult>(&*step))
+    return std::move(done->rows);
+  // Only a program holding an I/O action can park, and execute() refuses those
+  // before compiling.
+  return std::unexpected(QueryExecutionError{
+      .category = QueryExecutionError::Category::Runtime,
+      .message  = "a synchronous execution parked on an await"});
+}
+
+std::expected<ProgramStep, QueryExecutionError>
+QueryExecutor::begin(const QueryExpression &query,
+                     const std::vector<zigzag::CellRef> &contextCells) {
+  const auto prepared = prepare(query);
+  if (!prepared) return std::unexpected(prepared.error());
+  return beginVortex(*prepared, contextCells);
+}
+
+std::expected<ProgramStep, QueryExecutionError>
+QueryExecutor::resume(ParkedProgram &parked) {
+  if (!parked.run)
+    return std::unexpected(QueryExecutionError{
+        .category = QueryExecutionError::Category::Runtime,
+        .message  = "the parked program is already finished"});
+  auto run = std::move(parked.run);
+  return advance(std::move(run));
+}
+
+std::expected<ProgramStep, QueryExecutionError>
+QueryExecutor::beginVortex(const QueryExpression &query,
+                           const std::vector<zigzag::CellRef> &contextCells) {
   if (options_.maxCycles == 0) {
     return std::unexpected(QueryExecutionError{
         .category = QueryExecutionError::Category::Budget,
@@ -183,11 +268,18 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     });
   }
   const auto priorContractCoordinator = vm_.contractCoordinator();
-  const RestoreScope restoreContractCoordinator{
-      [this, priorContractCoordinator] {
-        vm_.setContractCoordinator(priorContractCoordinator);
-      }};
-  const auto preCompileMark = coordinator_.core().arena().mark();
+  const auto preCompileMark           = coordinator_.core().arena().mark();
+  const std::size_t preCompileViewCount =
+      session_ ? session_->dynamicViews().viewCells.size() : 0U;
+  // Until the program has a run to own them, a refusal undoes these itself.
+  std::vector<std::function<void()>> undo;
+  const auto undoAll = [&undo] {
+    for (auto it = undo.rbegin(); it != undo.rend(); ++it) (*it)();
+    undo.clear();
+  };
+  undo.push_back([this, priorContractCoordinator] {
+    vm_.setContractCoordinator(priorContractCoordinator);
+  });
   try {
     // PROSE-HITS REGISTRATION SITE
     struct ProseHitsCache {
@@ -196,8 +288,7 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       std::vector<zigzag::CellRef> hits;
     };
     auto cache = std::make_shared<ProseHitsCache>();
-    const RestoreScope restoreProseHits{
-        [this] { vm_.setRelationProvider("prose_hits", nullptr); }};
+    undo.push_back([this] { vm_.setRelationProvider("prose_hits", nullptr); });
     vm_.setRelationProvider(
         "prose_hits",
         [this, cache](const zigzag::vortex::RelationQuery &rq)
@@ -231,8 +322,6 @@ QueryExecutor::executeVortex(const QueryExpression &query,
     compilation.contextCells = contextCells;
     compilation.initialBindings =
         bindingSource_ ? bindingSource_->get() : bindings_;
-    const std::size_t preCompileViewCount =
-        session_ ? session_->dynamicViews().viewCells.size() : 0U;
     if (session_) {
       compilation.dynamicViews    = &session_->dynamicViews();
       compilation.initialFunctors = session_->compilerFunctors();
@@ -249,52 +338,97 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       zigzag::expectMarkOrder(
           coordinator_.core().arena().release(preCompileMark));
       vm_.pruneAssemblyState();
-      return std::vector<zigzag::CellRef>{};
+      undoAll();
+      return ProgramStep{ProgramResult{}};
     }
-    const auto result = compiler.compile(query, compilation);
-    disassembly_      = result.disassembly;
+    auto result = compiler.compile(query, compilation);
     if (!result.success) {
       zigzag::expectMarkOrder(
           coordinator_.core().arena().release(preCompileMark));
       vm_.pruneAssemblyState();
+      disassembly_ = result.disassembly;
+      undoAll();
       return std::unexpected(QueryExecutionError{
           .category = result.category.value_or(QueryErrorCategory::Unsupported),
           .message  = result.errorMessage,
+          .statement = result.failingStatement,
       });
     }
+    disassembly_ = result.disassembly;
 
     if (!result.cursor || !result.terminalOpcode) {
       zigzag::expectMarkOrder(
           coordinator_.core().arena().release(preCompileMark));
       vm_.pruneAssemblyState();
+      undoAll();
       return std::unexpected(QueryExecutionError{
           .category = QueryExecutionError::Category::Compile,
           .message  = "compiled VQL has no executable activation metadata",
       });
     }
-    const auto cursor = *result.cursor;
+    auto run = std::make_shared<ProgramRun>(vm_, std::move(result), query);
+    run->preCompileMark      = preCompileMark;
+    run->preCompileViewCount = preCompileViewCount;
+    run->preRunTrailSize     = coordinator_.core().arena().trailSize();
+    run->preRunCellCount     = coordinator_.core().arena().cellCount();
+    for (auto &action : undo) run->onClose(std::move(action));
+    undo.clear();
+    return advance(std::move(run));
+  } catch (const TypeContractError &error) {
+    vm_.clearChoicePoints();
+    zigzag::expectMarkOrder(
+        coordinator_.core().arena().release(preCompileMark));
+    vm_.pruneAssemblyState();
+    undoAll();
+    return std::unexpected(QueryExecutionError{
+        .category = QueryExecutionError::Category::TypeContract,
+        .message  = error.what(),
+    });
+  } catch (const std::exception &error) {
+    vm_.clearChoicePoints();
+    zigzag::expectMarkOrder(
+        coordinator_.core().arena().release(preCompileMark));
+    vm_.pruneAssemblyState();
+    undoAll();
+    return std::unexpected(runtimeError(error));
+  }
+}
 
-    // A frontend request has no resume handle. Keep raw VM stops resumable,
-    // but release this request's cursor on success, failure, or exception.
-    const RestoreScope finishRequest{[this, id = cursor] {
-      vm_.abortScopedChoices(id);
-      vm_.setCursorOpcode(id, std::nullopt);
-    }};
-    const auto preRunTrailSize = coordinator_.core().arena().trailSize();
-    const auto preRunCellCount = coordinator_.core().arena().cellCount();
-
+std::expected<ProgramStep, QueryExecutionError>
+QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
+  auto &arena       = coordinator_.core().arena();
+  const auto cursor = run->cursor();
+  // A mark still held here is the pre-compile one; once the run has parked it
+  // was cut (see below) and the remaining paths have nothing to release.
+  const auto settleMark = [&](const bool keep) {
+    if (!run->markHeld) return;
+    run->markHeld = false;
+    zigzag::expectMarkOrder(keep ? arena.discard(run->preCompileMark)
+                                 : arena.release(run->preCompileMark));
+    if (!keep) vm_.pruneAssemblyState();
+  };
+  try {
     const auto execution = vm_.run(cursor, options_.maxCycles);
+    if (execution.disposition == zigzag::vortex::StepDisposition::Pending &&
+        execution.pending) {
+      // A parked program has run an I/O action and so changed the arena; its
+      // cells are kept and the mark is cut now, because another parked program
+      // may take a mark of its own before this one ends and marks end in
+      // order.
+      settleMark(true);
+      ParkedProgram parked{
+          .run = run, .cursor = cursor, .pending = *execution.pending};
+      const auto at = vm_.getCursorOpcode(cursor);
+      for (const auto &site : run->compiled_.ioActions)
+        if (at && site.awaitOpcode == *at) parked.statement = site.statement;
+      return ProgramStep{std::move(parked)};
+    }
     if (!execution.success) {
       vm_.abortScopedChoices(cursor);
       vm_.setCursorOpcode(cursor, std::nullopt);
       vm_.clearChoicePoints();
-      if (coordinator_.core().arena().trailSize() == preRunTrailSize) {
-        zigzag::expectMarkOrder(
-            coordinator_.core().arena().release(preCompileMark));
-        vm_.pruneAssemblyState();
-      } else {
-        zigzag::expectMarkOrder(
-            coordinator_.core().arena().discard(preCompileMark));
+      if (run->markHeld) {
+        settleMark(arena.trailSize() != run->preRunTrailSize);
       }
       const auto category =
           execution.contractViolation ==
@@ -303,22 +437,29 @@ QueryExecutor::executeVortex(const QueryExpression &query,
               : (budgetFailure(execution.errorMessage)
                      ? QueryExecutionError::Category::Budget
                      : QueryExecutionError::Category::Runtime);
+      std::optional<std::size_t> statement;
+      for (const auto &site : run->compiled_.ioActions)
+        if (execution.failingClause &&
+            (site.submitOpcode == *execution.failingClause ||
+             site.awaitOpcode == *execution.failingClause))
+          statement = site.statement;
       return std::unexpected(QueryExecutionError{
-          .category = category,
-          .message  = execution.errorMessage,
+          .category  = category,
+          .message   = execution.errorMessage,
+          .statement = statement,
       });
     }
 
     std::vector<zigzag::CellRef> cells;
-    for (const auto slot : result.resultSlots) {
+    for (const auto slot : run->compiled_.resultSlots) {
       const auto values = vm_.resultCells(slot);
       cells.insert(cells.end(), values.begin(), values.end());
     }
     if (session_) {
       ContractBindings published;
       std::unordered_map<std::string, std::vector<PathStep>> functors;
-      publishMounts(session_, result.sessionBindings);
-      for (const auto &binding : result.sessionBindings) {
+      publishMounts(session_, run->compiled_.sessionBindings);
+      for (const auto &binding : run->compiled_.sessionBindings) {
         using Kind = CompilationResult::SessionBinding::Kind;
         if (binding.kind == Kind::Mount || binding.kind == Kind::Unmount)
           continue;
@@ -334,55 +475,56 @@ QueryExecutor::executeVortex(const QueryExpression &query,
       }
       session_->publishCompilerBindings(std::move(published),
                                         std::move(functors));
-      session_->publishUserDefs(query.defs);
+      session_->publishUserDefs(run->query_.defs);
     }
     vm_.abortScopedChoices(cursor);
     vm_.setCursorOpcode(cursor, std::nullopt);
     vm_.clearChoicePoints();
 
-    const auto &arena = coordinator_.core().arena();
-    const bool noDynamicViewsChanged =
-        !session_ ||
-        (session_->dynamicViews().viewCells.size() == preCompileViewCount &&
-         session_->dynamicViews().shapeHandles.empty() &&
-         session_->dynamicViews().cellLenses.empty());
-    const bool noMutations =
-        noDynamicViewsChanged && arena.trailSize() == preRunTrailSize &&
-        arena.cellCount() == preRunCellCount &&
-        arena.spaceCount() == preCompileMark.spaceCount &&
-        std::ranges::none_of(result.sessionBindings, [](const auto &binding) {
-          return binding.kind ==
-                 CompilationResult::SessionBinding::Kind::Stream;
-        });
-    const bool noNewResultCells =
-        std::ranges::all_of(cells, [&](zigzag::CellRef c) {
-          const auto dense = arena.denseOf(c);
-          return !dense.has_value() || *dense < preCompileMark.cellCount;
-        });
-
-    if (noMutations && noNewResultCells) {
-      zigzag::expectMarkOrder(
-          coordinator_.core().arena().release(preCompileMark));
-      vm_.pruneAssemblyState();
-    } else {
-      zigzag::expectMarkOrder(
-          coordinator_.core().arena().discard(preCompileMark));
+    if (run->markHeld) {
+      const bool noDynamicViewsChanged =
+          !session_ || (session_->dynamicViews().viewCells.size() ==
+                            run->preCompileViewCount &&
+                        session_->dynamicViews().shapeHandles.empty() &&
+                        session_->dynamicViews().cellLenses.empty());
+      const bool noMutations =
+          noDynamicViewsChanged && arena.trailSize() == run->preRunTrailSize &&
+          arena.cellCount() == run->preRunCellCount &&
+          arena.spaceCount() == run->preCompileMark.spaceCount &&
+          std::ranges::none_of(
+              run->compiled_.sessionBindings, [](const auto &binding) {
+                return binding.kind ==
+                       CompilationResult::SessionBinding::Kind::Stream;
+              });
+      const bool noNewResultCells =
+          std::ranges::all_of(cells, [&](zigzag::CellRef c) {
+            const auto dense = arena.denseOf(c);
+            return !dense.has_value() || *dense < run->preCompileMark.cellCount;
+          });
+      settleMark(!(noMutations && noNewResultCells));
     }
-    return cells;
+    ProgramResult done{.rows            = std::move(cells),
+                       .finalIsIoEffect = run->compiled_.finalIsIoEffect};
+    run->close();
+    return ProgramStep{std::move(done)};
   } catch (const TypeContractError &error) {
     vm_.clearChoicePoints();
-    zigzag::expectMarkOrder(
-        coordinator_.core().arena().release(preCompileMark));
-    vm_.pruneAssemblyState();
+    if (run->markHeld) {
+      run->markHeld = false;
+      zigzag::expectMarkOrder(arena.release(run->preCompileMark));
+      vm_.pruneAssemblyState();
+    }
     return std::unexpected(QueryExecutionError{
         .category = QueryExecutionError::Category::TypeContract,
         .message  = error.what(),
     });
   } catch (const std::exception &error) {
     vm_.clearChoicePoints();
-    zigzag::expectMarkOrder(
-        coordinator_.core().arena().release(preCompileMark));
-    vm_.pruneAssemblyState();
+    if (run->markHeld) {
+      run->markHeld = false;
+      zigzag::expectMarkOrder(arena.release(run->preCompileMark));
+      vm_.pruneAssemblyState();
+    }
     return std::unexpected(runtimeError(error));
   }
 }

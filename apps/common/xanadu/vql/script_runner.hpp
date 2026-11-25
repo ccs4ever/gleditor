@@ -7,17 +7,20 @@
  *        actions (`effect { ... }`), parking at an unfinished await and
  *        resuming the same action when the host wakes it (plan §10, M7-VQL).
  *
- * The runner sits above `QueryExecutor`: it cuts the script at each script
- * action, runs each stretch of ordinary statements through the executor
- * exactly as before, and runs the action itself through the shared
- * `FrontendBridge` (submit, match, await). It is host C++ because it parks a
- * native activation across a pump; VQL's own evaluation stays on the Vortex VM
- * and the VM has no Submit opcode, so a script action has no bytecode form.
+ * The compiler lowers a script action to Vortex bytecode (MakeTerm, Submit, a
+ * branch on the submission's arm, Await). The runner is the host loop around
+ * that one compiled program: it runs it through `QueryExecutor::begin`, parks
+ * the token when the program stops at an unfinished Await, and `resume` runs
+ * the same cursor on from that Await. It answers the program's Submit (the VM
+ * hook) by decoding the request description, staging the read and admitting it
+ * through the shared `FrontendBridge`, and it reads a finished action's
+ * payload, which lives outside the arena. One runner per VM: it owns the VM's
+ * submit hook.
  *
- * Multiplicity: an action submits once each time the runner reaches it.
- * Resuming a parked action re-awaits the request it already holds and never
- * submits again. No query, row, filter or projection can reach a submit: the
- * parser refuses those with VQL_IO_QUERY_CONTEXT.
+ * Multiplicity: a Submit executes once each time the program reaches it.
+ * Resuming a parked action continues at its Await and never submits again. No
+ * query, row, filter or projection can reach a submit: the parser refuses
+ * those with VQL_IO_QUERY_CONTEXT.
  */
 
 #include <cstddef>
@@ -129,18 +132,18 @@ public:
 private:
   struct Activation;
 
-  [[nodiscard]] auto advance(const std::shared_ptr<Activation> &activation)
-      -> ScriptRunResult;
-  [[nodiscard]] auto runAction(const std::shared_ptr<Activation> &activation,
-                               const IoEffectStatement &action)
-      -> ScriptRunResult;
-  [[nodiscard]] auto finishAction(const std::shared_ptr<Activation> &activation,
-                                  vortex::OutcomeCell outcome)
-      -> ScriptRunResult;
+  /// The VM's Submit hook: decode the description, stage and admit the read.
+  [[nodiscard]] auto admit(vortex::CapabilityCell capability,
+                           zigzag::CellRef description)
+      -> zigzag::vortex::VmSubmission;
   [[nodiscard]] auto
   settle(const std::shared_ptr<Activation> &activation,
-         vortex::FrontendRunResult<vortex::OutcomeCell> awaited)
+         std::expected<ProgramStep, QueryExecutionError> step)
       -> ScriptRunResult;
+  [[nodiscard]] auto finish(const ProgramResult &done) -> ScriptRunResult;
+  [[nodiscard]] auto number(zigzag::CellRef cell, const std::string &what,
+                            std::optional<std::size_t> position) const
+      -> std::expected<std::uint64_t, vortex::FrontendDiagnostic>;
   [[nodiscard]] auto operand(const IoOperand &value, std::size_t position) const
       -> std::expected<std::uint64_t, vortex::FrontendDiagnostic>;
   [[nodiscard]] auto capability(const std::string &name,
@@ -149,7 +152,6 @@ private:
   [[nodiscard]] auto diagnose(std::string_view code, std::string message,
                               std::optional<std::size_t> position = {}) const
       -> vortex::FrontendDiagnostic;
-  void retire(const std::shared_ptr<Activation> &activation) noexcept;
   /// Retire a finished action's submission and its terminal request, unless a
   /// parked activation still awaits that request (then only the sum is
   /// released).
@@ -160,6 +162,9 @@ private:
   ScriptIoPorts ports_;
   QueryExecutionOptions options_;
   std::optional<vortex::SubmissionCell> submission_;
+  /// Why the Submit hook refused to admit, kept for the diagnostic the VM's
+  /// own typed failure message cannot carry.
+  std::optional<vortex::FrontendDiagnostic> stageFailure_;
   std::deque<ScriptWake> woken_;
   std::map<vortex::ContinuationId,
            std::pair<vortex::WaiterCell, vortex::RequestCell>>
