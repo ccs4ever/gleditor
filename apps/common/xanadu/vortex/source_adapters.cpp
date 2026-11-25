@@ -17,6 +17,14 @@ namespace {
 /// rather than evicting an entry an in-flight request still names.
 constexpr std::size_t maxStagedSpecs = 4096;
 
+/// Total frozen write bytes the staging table may hold across all live
+/// specs. The entry cap alone lets 4096 staged writes pin unbounded memory
+/// (each StreamOpSpec carries its own byte vector); the bound sits well
+/// above the scheduler's default 16 MiB per-op backend budget so
+/// legitimate multi-op staging still fits, while a stage past it fails as
+/// key 0 exactly like a full table.
+constexpr std::size_t maxStagedWriteBytes = 64U * 1024U * 1024U;
+
 IoProgress terminalProgress(std::uint64_t transferred) {
   return IoProgress{.acceptedBytes    = transferred,
                     .transferredBytes = transferred,
@@ -53,17 +61,25 @@ inline auto payloadOutcome(PayloadResolver &payloads,
 
 std::uint32_t StagedByteSourceAdapter::stage(StreamOpSpec spec) {
   const std::lock_guard lock(mutex_);
-  if (staged_.size() >= maxStagedSpecs) return 0;
+  if (staged_.size() >= maxStagedSpecs ||
+      spec.writeBytes.size() > maxStagedWriteBytes - stagedWriteBytes_)
+    return 0;
   // Skip 0 (the table-full sentinel a request reports as InvalidRequest)
   // and any still-live key a wrapped nextKey_ could revisit.
   auto key = nextKey_++;
   while (key == 0 || staged_.contains(key)) key = nextKey_++;
-  staged_[key] = std::move(spec);
+  const auto byteCount = spec.writeBytes.size();
+  staged_[key]         = std::move(spec);
+  // Count only once the spec is actually staged: a throwing map insert
+  // must not leave the byte ledger ahead of the table.
+  stagedWriteBytes_ += byteCount;
   return key;
 }
 
 void StagedByteSourceAdapter::abandon(const std::uint32_t key) {
   const std::lock_guard lock(mutex_);
+  const auto it = staged_.find(key);
+  if (it != staged_.end()) stagedWriteBytes_ -= it->second.writeBytes.size();
   staged_.erase(key);
 }
 
@@ -122,6 +138,7 @@ void StagedByteSourceAdapter::execute(const BackendCommand &command,
       const std::lock_guard lock(mutex_);
       const auto it = staged_.find(key);
       if (it != staged_.end()) {
+        stagedWriteBytes_ -= it->second.writeBytes.size();
         spec = it->second;
         staged_.erase(it);
       }
@@ -320,9 +337,22 @@ auto ProcessIoAdapter::perform(const StreamOpSpec &spec,
 // -- NetIoAdapter
 // --------------------------------------------------------------
 
+auto NetIoAdapter::validateSpec(const StreamOpSpec &spec) const
+    -> std::optional<IoErrorInfo> {
+  // A connected socket has no seekable offset; refuse before admission
+  // rather than silently ignoring it -- ProcessIoAdapter's rule, which a
+  // socket shares: there is nowhere for a nonzero offset to apply.
+  if (spec.offset != 0) return IoErrorInfo{IoErrorCode::InvalidRequest, 0};
+  return std::nullopt;
+}
+
 auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context,
                            std::optional<PayloadLease> &payload)
     -> BackendResult {
+  // prepare()'s validateSpec already refused this; keep the execute-side
+  // guard so a spec that reaches the worker by any other path still
+  // cannot pretend a socket honors an offset.
+  if (spec.offset != 0) return failedResult({IoErrorCode::InvalidRequest, 0});
   // One descriptor, one flight: concurrent ops on this adapter would
   // interleave reads and writes on the same stream, so they serialize.
   const std::lock_guard ioLock(ioMutex_);

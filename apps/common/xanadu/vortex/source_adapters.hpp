@@ -63,9 +63,11 @@ public:
   /// Owner-thread: stage one operation's bounded arguments and return the
   /// key to place in the request's `specification` cell/value before
   /// calling `IoService::submit`. Returns 0 when the staging table is full
-  /// (bounded at 4096 live specs); a request staged under key 0 then fails
-  /// `prepare` as InvalidRequest. Keys are never recycled within the
-  /// adapter's lifetime; the 32-bit wrap is a documented M4 limit.
+  /// (bounded at 4096 live specs) or when the spec's `writeBytes` would push
+  /// the table's total staged bytes past the byte bound -- a request staged
+  /// under key 0 then fails `prepare` as InvalidRequest. Keys are never
+  /// recycled within the adapter's lifetime; the 32-bit wrap is a documented
+  /// M4 limit.
   [[nodiscard]] std::uint32_t stage(StreamOpSpec spec);
 
   /// Owner-thread: drop a staged spec that will never reach `execute`
@@ -118,6 +120,9 @@ private:
   mutable std::mutex mutex_;
   std::unordered_map<std::uint32_t, StreamOpSpec> staged_;
   std::uint32_t nextKey_{1};
+  /// Sum of writeBytes held across staged_ (guarded by mutex_); the byte
+  /// half of the staging bound the entry count alone cannot express.
+  std::size_t stagedWriteBytes_{};
 };
 
 /// An in-memory byte buffer source: `d.io.kind` "stream". Bumping its
@@ -193,6 +198,8 @@ public:
 protected:
   auto perform(const StreamOpSpec &spec, BackendContext &context,
                std::optional<PayloadLease> &payload) -> BackendResult override;
+  [[nodiscard]] std::optional<IoErrorInfo>
+  validateSpec(const StreamOpSpec &spec) const override;
 
 private:
   int fd_;

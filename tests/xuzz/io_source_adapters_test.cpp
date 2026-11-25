@@ -283,6 +283,36 @@ TEST(StreamSourceAdapterTest, AbandonedStageFailsPrepare) {
   EXPECT_EQ(prepared.error().code, IoErrorCode::InvalidRequest);
 }
 
+TEST(StreamSourceAdapterTest, StagedWriteByteBoundRefusesBeforeEntryCap) {
+  InMemoryStreamAdapter adapter;
+
+  // Each staged spec carries its whole writeBytes vector: the 4096-entry
+  // cap alone would let the table pin unbounded memory, so stage() also
+  // bounds the total staged bytes and fails as key 0 past it.
+  std::vector<std::uint32_t> keys;
+  const auto chunk = std::vector<std::byte>(8U * 1024U * 1024U);
+  for (int i = 0; i < 4096; ++i) {
+    const auto key = adapter.stage(
+        StreamOpSpec{.kind = StreamOpKind::Write, .writeBytes = chunk});
+    if (key == 0) break;
+    keys.push_back(key);
+  }
+  EXPECT_FALSE(keys.empty());
+  EXPECT_LT(keys.size(), 4096U); // refused on bytes, not on entries
+
+  // Byte-free specs are unaffected by the write-byte bound.
+  const auto readKey =
+      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 1});
+  EXPECT_NE(readKey, 0U);
+
+  // Abandoning a staged write returns its bytes to the budget.
+  adapter.abandon(keys.back());
+  keys.pop_back();
+  const auto again = adapter.stage(
+      StreamOpSpec{.kind = StreamOpKind::Write, .writeBytes = chunk});
+  EXPECT_NE(again, 0U);
+}
+
 // -- net adapter (loopback socketpair; real syscalls, off the owner thread) --
 
 /// socketpair(2) ends closed on every exit path, including ASSERT aborts.
@@ -396,6 +426,24 @@ TEST(NetIoAdapterTest, ZeroLengthReadCompletesWithoutPolling) {
   ASSERT_TRUE(sink.candidate);
   EXPECT_TRUE(std::holds_alternative<Complete>(sink.candidate->outcome));
   EXPECT_FALSE(sink.payloadLease.has_value());
+}
+
+TEST(NetIoAdapterTest, NonzeroOffsetIsRefusedAtPrepare) {
+  SocketPair pair;
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair.fds), 0);
+  NetIoAdapter adapter(pair.fds[0]);
+  OwnerContext owner;
+
+  // A connected socket has no seekable offset: like ProcessIoAdapter, the
+  // spec refuses before admission instead of the adapter silently
+  // ignoring a field the caller believed was honored.
+  const auto key = adapter.stage(
+      StreamOpSpec{.kind = StreamOpKind::Read, .offset = 4, .length = 8});
+  ASSERT_NE(key, 0U);
+  const auto prepared =
+      adapter.prepare(requestFor(AdapterKey{3, 1}, key), owner);
+  ASSERT_FALSE(prepared.has_value());
+  EXPECT_EQ(prepared.error().code, IoErrorCode::InvalidRequest);
 }
 
 // -- Router/Union composition does not resubmit -----------------------------
