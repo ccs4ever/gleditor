@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <poll.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 namespace xanadu::vortex {
@@ -53,14 +54,22 @@ inline auto payloadOutcome(PayloadResolver &payloads,
 std::uint32_t StagedByteSourceAdapter::stage(StreamOpSpec spec) {
   const std::lock_guard lock(mutex_);
   if (staged_.size() >= maxStagedSpecs) return 0;
-  const auto key = nextKey_++;
-  staged_[key]   = std::move(spec);
+  // Skip 0 (the table-full sentinel a request reports as InvalidRequest)
+  // and any still-live key a wrapped nextKey_ could revisit.
+  auto key = nextKey_++;
+  while (key == 0 || staged_.contains(key)) key = nextKey_++;
+  staged_[key] = std::move(spec);
   return key;
 }
 
 void StagedByteSourceAdapter::abandon(const std::uint32_t key) {
   const std::lock_guard lock(mutex_);
   staged_.erase(key);
+}
+
+void StagedByteSourceAdapter::abandonStaged(
+    const OwnerCell specification) noexcept {
+  abandon(static_cast<std::uint32_t>(specification));
 }
 
 auto StagedByteSourceAdapter::prepare(const CellRequest &request,
@@ -103,6 +112,10 @@ void StagedByteSourceAdapter::execute(const BackendCommand &command,
   // so an escaped exception would terminate the worker.
   BackendResult result;
   std::optional<PayloadLease> payload;
+  // A PayloadLease dropped on any path -- the catch below, an early exit --
+  // must still release its resolver lease; terminalCandidate's own release
+  // of the same id on the success path makes the guard's a no-op there.
+  const PayloadLeaseGuard payloadGuard(context.payloads, payload);
   try {
     std::optional<StreamOpSpec> spec;
     {
@@ -120,7 +133,6 @@ void StagedByteSourceAdapter::execute(const BackendCommand &command,
     }
   } catch (...) {
     result = failedResult({IoErrorCode::BackendFailure, 0});
-    payload.reset();
   }
   sink.terminalCandidate(command.token, std::move(result), payload);
   sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
@@ -225,7 +237,9 @@ ProcessIoAdapter::ProcessIoAdapter(std::string command)
 auto ProcessIoAdapter::validateSpec(const StreamOpSpec &spec) const
     -> std::optional<IoErrorInfo> {
   // A spawned process has no seekable offset; refuse before admission
-  // rather than silently ignoring it.
+  // rather than silently ignoring it. Writes have no stdin channel at all.
+  if (spec.kind != StreamOpKind::Read)
+    return IoErrorInfo{IoErrorCode::Unsupported, 0};
   if (spec.offset != 0) return IoErrorInfo{IoErrorCode::InvalidRequest, 0};
   return std::nullopt;
 }
@@ -333,8 +347,10 @@ auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context,
       if (pfd.revents & (POLLERR | POLLNVAL))
         return failedResult({IoErrorCode::BackendFailure, 0},
                             terminalProgress(sent));
-      const auto result = ::write(fd_, spec.writeBytes.data() + sent,
-                                  spec.writeBytes.size() - sent);
+      // send(..., MSG_NOSIGNAL): a plain ::write on a closed peer raises
+      // SIGPIPE, which kills embedders that do not ignore it.
+      const auto result = ::send(fd_, spec.writeBytes.data() + sent,
+                                 spec.writeBytes.size() - sent, MSG_NOSIGNAL);
       if (result < 0) {
         if (errno == EINTR) continue;
         return failedResult(
@@ -377,9 +393,10 @@ auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context,
     if (pfd.revents & (POLLERR | POLLNVAL))
       return failedResult({IoErrorCode::BackendFailure, 0},
                           terminalProgress(out.size()));
-    // POLLHUP still reaches read() (which then reports EOF); POLLPRI alone
-    // would leave a blocking read waiting, so re-poll instead.
-    if ((pfd.revents & (POLLIN | POLLHUP)) == 0) continue;
+    // POLLHUP still reaches read() (which then reports EOF). POLLPRI counts
+    // as readable too: urgent data precedes the normal stream on TCP, and
+    // treating it as nothing-to-read would spin the poll loop.
+    if ((pfd.revents & (POLLIN | POLLHUP | POLLPRI)) == 0) continue;
     const auto toRead =
         std::min<std::size_t>(buffer.size(), limit - out.size());
     const auto received = ::read(fd_, buffer.data(), toRead);
@@ -498,6 +515,12 @@ auto UnionSourceAdapter::publish(const NativeCompletion &completion,
   if (index >= members_.size() || members_[index] == nullptr)
     return OwnerPublication{completion.result.outcome};
   return members_[index]->publish(completion, context);
+}
+
+void UnionSourceAdapter::abandonStaged(const OwnerCell specification) noexcept {
+  for (auto *member : members_) {
+    if (member != nullptr) member->abandonStaged(specification);
+  }
 }
 
 } // namespace xanadu::vortex

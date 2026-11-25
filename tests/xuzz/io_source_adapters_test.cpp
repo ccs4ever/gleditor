@@ -31,16 +31,27 @@ std::string textOf(const std::vector<std::byte> &bytes) {
 }
 
 struct CapturingSink final : CompletionSink {
+  /// @p resolver mirrors the service sink: the terminal event retains the
+  /// payload so the bytes outlive the worker lease `execute`'s guard
+  /// releases on return. Pass the same PayloadResolver the BackendContext
+  /// carries.
+  explicit CapturingSink(PayloadResolver *resolver = nullptr)
+      : payloads(resolver) {}
   void progress(PrivateRequestToken, IoProgress) noexcept override {}
   void
   terminalCandidate(PrivateRequestToken, BackendResult result,
                     std::optional<PayloadLease> payload) noexcept override {
-    candidate    = std::move(result);
-    payloadLease = std::move(payload);
+    candidate = std::move(result);
+    if (payload && payloads) {
+      if (auto retained = payloads->retain(payload->range)) {
+        payloadLease = *retained;
+      }
+    }
   }
   void releaseAcknowledged(BackendReleaseAck ack) noexcept override {
     released = ack;
   }
+  PayloadResolver *payloads;
   std::optional<BackendResult> candidate;
   std::optional<PayloadLease> payloadLease;
   std::optional<BackendReleaseAck> released;
@@ -82,7 +93,7 @@ TEST(StreamSourceAdapterTest, ReadSucceedsAndMatchesStagedGeneration) {
   const auto prepared = adapter.prepare(requestFor(streamKey, key), owner);
   ASSERT_TRUE(prepared);
 
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   auto context = makeContext(payloads);
   static_cast<IoAdapter &>(adapter).execute(BackendCommand{{1}, *prepared},
                                             context, sink);
@@ -138,7 +149,7 @@ TEST(StreamSourceAdapterTest,
   // request's admission and its worker turn.
   adapter.setContent(bytesOf("raced"));
 
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   auto context = makeContext(payloads);
   static_cast<IoAdapter &>(adapter).execute(BackendCommand{{2}, *prepared},
                                             context, sink);
@@ -159,7 +170,7 @@ TEST(StreamSourceAdapterTest, EndOfStreamIsDistinctFromCompleteZeroBytes) {
       StreamOpSpec{.kind = StreamOpKind::Read, .offset = 2, .length = 10});
   const auto prepared = adapter.prepare(requestFor(streamKey, key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   auto context = makeContext(payloads);
   static_cast<IoAdapter &>(adapter).execute(BackendCommand{{3}, *prepared},
                                             context, sink);
@@ -178,7 +189,7 @@ TEST(ProcessIoAdapterTest, CapturesBoundedChildStdout) {
   const auto prepared =
       adapter.prepare(requestFor(AdapterKey{2, 1}, key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   auto context = makeContext(payloads);
   static_cast<IoAdapter &>(adapter).execute(BackendCommand{{1}, *prepared},
                                             context, sink);
@@ -189,6 +200,44 @@ TEST(ProcessIoAdapterTest, CapturesBoundedChildStdout) {
   const auto bytes = readPayload(payloads, *sink.payloadLease);
   ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "hello");
+}
+
+TEST(ProcessIoAdapterTest, WriteAndOffsetSpecsAreRefusedAtPrepare) {
+  // A spawned process has no seekable offset and no stdin channel: both
+  // shapes refuse before admission instead of being silently ignored.
+  ProcessIoAdapter adapter("printf hello");
+  OwnerContext owner;
+
+  const auto writeKey = adapter.stage(
+      StreamOpSpec{.kind = StreamOpKind::Write, .writeBytes = bytesOf("x")});
+  ASSERT_NE(writeKey, 0U);
+  const auto writePrepared =
+      adapter.prepare(requestFor(AdapterKey{2, 1}, writeKey), owner);
+  ASSERT_FALSE(writePrepared.has_value());
+  EXPECT_EQ(writePrepared.error().code, IoErrorCode::Unsupported);
+
+  const auto offsetKey = adapter.stage(
+      StreamOpSpec{.kind = StreamOpKind::Read, .offset = 4, .length = 8});
+  ASSERT_NE(offsetKey, 0U);
+  const auto offsetPrepared =
+      adapter.prepare(requestFor(AdapterKey{2, 1}, offsetKey), owner);
+  ASSERT_FALSE(offsetPrepared.has_value());
+  EXPECT_EQ(offsetPrepared.error().code, IoErrorCode::InvalidRequest);
+}
+
+TEST(StreamSourceAdapterTest, AbandonedStageFailsPrepare) {
+  InMemoryStreamAdapter adapter;
+  adapter.setContent(bytesOf("data"));
+  OwnerContext owner;
+  const auto key = adapter.stage(
+      StreamOpSpec{.kind = StreamOpKind::Read, .offset = 0, .length = 2});
+  ASSERT_NE(key, 0U);
+  // A submission refused before execute (or abandoned by its caller) must
+  // not leave a staged entry that a later request could consume.
+  adapter.abandon(key);
+  const auto prepared = adapter.prepare(requestFor(streamKey, key), owner);
+  ASSERT_FALSE(prepared.has_value());
+  EXPECT_EQ(prepared.error().code, IoErrorCode::InvalidRequest);
 }
 
 // -- net adapter (loopback socketpair; real syscalls, off the owner thread) --
@@ -217,7 +266,7 @@ TEST(NetIoAdapterTest, RoundTripsBytesOverAConnectedSocketPair) {
   const auto preparedWrite =
       writer.prepare(requestFor(AdapterKey{3, 1}, writeKey), owner);
   ASSERT_TRUE(preparedWrite);
-  CapturingSink writeSink;
+  CapturingSink writeSink{&payloads};
   static_cast<IoAdapter &>(writer).execute(BackendCommand{{1}, *preparedWrite},
                                            context, writeSink);
   ASSERT_TRUE(writeSink.candidate);
@@ -228,7 +277,7 @@ TEST(NetIoAdapterTest, RoundTripsBytesOverAConnectedSocketPair) {
   const auto preparedRead =
       reader.prepare(requestFor(AdapterKey{3, 1}, readKey), owner);
   ASSERT_TRUE(preparedRead);
-  CapturingSink readSink;
+  CapturingSink readSink{&payloads};
   static_cast<IoAdapter &>(reader).execute(BackendCommand{{2}, *preparedRead},
                                            context, readSink);
   ASSERT_TRUE(readSink.candidate);
@@ -272,7 +321,7 @@ TEST(RouterSourceAdapterTest, DelegatesEveryCallExactlyOnceWithoutResubmit) {
 
   const auto prepared = router.prepare(requestFor(streamKey, 0), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   router.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   const auto published =
@@ -301,7 +350,7 @@ TEST(UnionSourceAdapterTest, SelectsOneMemberAndDoesNotSubmitToTheOther) {
   // specification == 1 selects the second member only.
   const auto prepared = adapterUnion.prepare(requestFor(streamKey, 1), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   adapterUnion.execute(BackendCommand{{9}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   const auto published = adapterUnion.publish(
@@ -352,11 +401,20 @@ public:
   auto mintRefusal(IoErrorInfo) -> OutcomeCell override {
     return OutcomeCell{nextCell++, 1};
   }
-  auto publishTerminal(RequestCell, const IoOutcome &outcome,
+  auto publishTerminal(RequestCell request, const IoOutcome &outcome,
                        const IoProgress &, const std::optional<PayloadLease> &)
       -> std::expected<OutcomeCell, IoErrorInfo> override {
     outcomes.push_back(outcome);
-    return OutcomeCell{nextCell++, 1};
+    const OutcomeCell cell{nextCell++, 1};
+    requestOutcomes.emplace_back(request, cell);
+    return cell;
+  }
+  [[nodiscard]] auto outcomeFor(const RequestCell request)
+      -> std::optional<OutcomeCell> override {
+    for (const auto &[req, cell] : requestOutcomes) {
+      if (req == request) return cell;
+    }
+    return std::nullopt;
   }
   auto mintOpenedEndpoint(const OpenSpec &)
       -> std::expected<OpenedEndpoint, IoErrorInfo> override {
@@ -370,6 +428,7 @@ public:
 
   std::uint32_t nextCell{100};
   std::vector<IoOutcome> outcomes;
+  std::vector<std::pair<RequestCell, OutcomeCell>> requestOutcomes;
 };
 
 TEST(RouterSourceAdapterTest,

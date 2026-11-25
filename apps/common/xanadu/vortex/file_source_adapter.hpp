@@ -150,6 +150,11 @@ public:
   /// request staged under key 0 then fails `prepare` as InvalidRequest.
   void abandon(std::uint32_t key);
 
+  /// `IoAdapter` hook: the service calls this with the request's
+  /// `specification` when a submission is refused or its request reaches a
+  /// terminal state without `execute` consuming the staged entry.
+  void abandonStaged(OwnerCell specification) noexcept override;
+
   auto prepare(const CellRequest &request, OwnerContext &context)
       -> std::expected<PreparedOperation, IoErrorInfo> override;
   void execute(const BackendCommand &command, BackendContext &context,
@@ -190,6 +195,8 @@ private:
   };
 
   [[nodiscard]] std::uint64_t statGeneration() const noexcept;
+  /// Next free auto stage key; caller holds mutex_.
+  std::uint32_t nextStageKeyLocked();
 
   int fd_{-1};
   std::string path_;

@@ -31,16 +31,27 @@ std::string textOf(const std::vector<std::byte> &bytes) {
 }
 
 struct CapturingSink final : CompletionSink {
+  /// @p resolver mirrors the service sink: the terminal event retains the
+  /// payload so the bytes outlive the worker lease `execute`'s guard
+  /// releases on return. Pass the same PayloadResolver the BackendContext
+  /// carries.
+  explicit CapturingSink(PayloadResolver *resolver = nullptr)
+      : payloads(resolver) {}
   void progress(PrivateRequestToken, IoProgress) noexcept override {}
   void
   terminalCandidate(PrivateRequestToken, BackendResult result,
                     std::optional<PayloadLease> payload) noexcept override {
-    candidate    = std::move(result);
-    payloadLease = std::move(payload);
+    candidate = std::move(result);
+    if (payload && payloads) {
+      if (auto retained = payloads->retain(payload->range)) {
+        payloadLease = *retained;
+      }
+    }
   }
   void releaseAcknowledged(BackendReleaseAck ack) noexcept override {
     released = ack;
   }
+  PayloadResolver *payloads;
   std::optional<BackendResult> candidate;
   std::optional<PayloadLease> payloadLease;
   std::optional<BackendReleaseAck> released;
@@ -113,7 +124,7 @@ TEST_F(FileSourceAdapterTest, ReadSucceedsAndRecordsDistinctObservation) {
       adapter.stageRead(MediaRange{0, 5}, adapter.currentGeneration());
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
@@ -131,7 +142,7 @@ TEST_F(FileSourceAdapterTest, ReadSucceedsAndRecordsDistinctObservation) {
       adapter.stageRead(MediaRange{0, 5}, adapter.currentGeneration());
   const auto prepared2 = adapter.prepare(requestFor(key2), owner);
   ASSERT_TRUE(prepared2);
-  CapturingSink sink2;
+  CapturingSink sink2{&payloads};
   adapter.execute(BackendCommand{{2}, *prepared2}, context, sink2);
   ASSERT_TRUE(sink2.candidate);
   ASSERT_TRUE(std::holds_alternative<Complete>(sink2.candidate->outcome));
@@ -152,7 +163,7 @@ TEST_F(FileSourceAdapterTest, ReadAtOrPastEndOfFileIsEndOfStream) {
   const auto key      = adapter.stageRead(MediaRange{2, 10}, 0);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   EXPECT_TRUE(std::holds_alternative<EndOfStream>(sink.candidate->outcome));
@@ -169,7 +180,7 @@ TEST_F(FileSourceAdapterTest, ReadBeyondBudgetIsBounded) {
   const auto key      = adapter.stageRead(MediaRange{0, 4096}, 0);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
@@ -232,7 +243,7 @@ TEST_F(FileSourceAdapterTest,
     ::close(fd);
   }
 
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   EXPECT_TRUE(std::holds_alternative<Conflict>(sink.candidate->outcome));
@@ -255,7 +266,7 @@ TEST_F(FileSourceAdapterTest, TruncationBumpsGenerationAndShortensReads) {
   const auto key      = adapter.stageRead(MediaRange{0, 10}, 0);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
@@ -289,7 +300,7 @@ TEST_F(FileSourceAdapterTest, HeldFdKeepsReadingUnlinkedOriginalAfterReplace) {
   const auto key      = adapter.stageRead(MediaRange{0, 8}, 0);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
@@ -330,7 +341,7 @@ TEST_F(FileSourceAdapterTest, ReadsPast4GiBOffsetOnASparseFile) {
       adapter.stageRead(MediaRange{fiveGiB, sizeof(marker) - 1}, 0);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
@@ -354,7 +365,7 @@ TEST_F(FileSourceAdapterTest, TwoAdaptersOverSamePathShareNoObservations) {
   const auto key = first.stageRead(MediaRange{0, 6}, first.currentGeneration());
   const auto prepared = first.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   first.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   ASSERT_TRUE(std::holds_alternative<Complete>(sink.candidate->outcome));
@@ -381,7 +392,7 @@ TEST_F(FileSourceAdapterTest,
   const auto key      = adapter.stageRead(MediaRange{0, 5}, 0);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   EXPECT_TRUE(std::holds_alternative<Cancelled>(sink.candidate->outcome));
@@ -438,7 +449,7 @@ TEST_F(FileSourceAdapterTest, WritableAdapterWritesAndBumpsGeneration) {
   const auto key      = adapter.stageWrite(2, bytesOf("XY"), before);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate);
   ASSERT_TRUE(std::holds_alternative<Complete>(sink.candidate->outcome));
@@ -447,7 +458,7 @@ TEST_F(FileSourceAdapterTest, WritableAdapterWritesAndBumpsGeneration) {
   const auto readKey      = adapter.stageRead(MediaRange{0, 10}, 0);
   const auto readPrepared = adapter.prepare(requestFor(readKey), owner);
   ASSERT_TRUE(readPrepared);
-  CapturingSink readSink;
+  CapturingSink readSink{&payloads};
   adapter.execute(BackendCommand{{2}, *readPrepared}, context, readSink);
   const auto *complete = std::get_if<Complete>(&readSink.candidate->outcome);
   ASSERT_NE(complete, nullptr);

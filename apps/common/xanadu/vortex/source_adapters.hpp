@@ -70,6 +70,11 @@ public:
   /// or already-consumed keys.
   void abandon(std::uint32_t key);
 
+  /// `IoAdapter` hook: the service calls this with the request's
+  /// `specification` when a submission is refused or its request reaches a
+  /// terminal state without `execute` consuming the staged entry.
+  void abandonStaged(OwnerCell specification) noexcept override;
+
   auto prepare(const CellRequest &request, OwnerContext &context)
       -> std::expected<PreparedOperation, IoErrorInfo> final;
   auto publish(const NativeCompletion &completion, OwnerContext &context)
@@ -148,6 +153,16 @@ public:
   /// pattern already used by Vlace's lowering (lower_io.cpp); this adapter
   /// moves that transfer onto the Vortex I/O worker path instead of the
   /// evaluation thread.
+  ///
+  /// Only `StreamOpKind::Read` is supported: a spawned process has no
+  /// seekable offset and no stdin channel, so `prepare` refuses any other
+  /// kind as Unsupported before admission.
+  ///
+  /// Documented limit: the child can block the worker indefinitely -- a
+  /// command that never exits and never closes its stdout keeps
+  /// `pclose`/`read` waiting, and `context.stop` only ends the read loop,
+  /// not a blocked `pclose`. Callers needing a hard bound must wrap the
+  /// command in a timeout of its own (e.g. `timeout(1)`).
   explicit ProcessIoAdapter(std::string command);
 
 protected:
@@ -203,6 +218,9 @@ public:
       -> std::expected<OwnerPublication, IoErrorInfo> override {
     return delegate_.publish(completion, context);
   }
+  void abandonStaged(OwnerCell specification) noexcept override {
+    delegate_.abandonStaged(specification);
+  }
 
 private:
   IoAdapter &delegate_;
@@ -231,6 +249,15 @@ public:
                CompletionSink &sink) noexcept override;
   auto publish(const NativeCompletion &completion, OwnerContext &context)
       -> std::expected<OwnerPublication, IoErrorInfo> override;
+  /// Forwards the abandonment to every member: only the selected member's
+  /// staging table actually held the entry, but the union cannot recover
+  /// the selection here (route_ is keyed by token, publish may already have
+  /// consumed it). Documented M4 limit: members share one 32-bit staged-key
+  /// space, so a same-key entry staged on a *different* member for an
+  /// unrelated in-flight request could be dropped early -- it then fails
+  /// `prepare`/`execute` as InvalidRequest, a typed refusal, never silent
+  /// corruption.
+  void abandonStaged(OwnerCell specification) noexcept override;
 
 private:
   std::vector<IoAdapter *> members_;
