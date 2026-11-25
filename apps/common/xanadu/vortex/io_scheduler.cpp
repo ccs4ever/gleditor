@@ -125,14 +125,14 @@ auto BoundedIoScheduler::reserve(const AdmissionCost cost)
     return std::unexpected(IoErrorInfo{IoErrorCode::SchedulerUnavailable, 1});
   }
 
-  auto &job         = **found;
-  job.state         = Job::State::Reserved;
-  job.token         = PrivateRequestToken{nextToken_++};
-  job.reservedBytes = bytes;
-  job.backendBytes  = cost.completionBytes;
+  auto &job               = **found;
+  job.state               = Job::State::Reserved;
+  job.token               = PrivateRequestToken{nextToken_++};
+  job.reservedBytes       = bytes;
+  job.backendBytes        = cost.completionBytes;
   job.backendPayloadBytes = cost.payloadBytes;
-  job.hasProgress   = false;
-  job.cancellation  = std::stop_source{};
+  job.hasProgress         = false;
+  job.cancellation        = std::stop_source{};
   reservedBytes_ += bytes;
   return SchedulerReservation{job.token, bytes};
 }
@@ -183,8 +183,8 @@ void BoundedIoScheduler::releaseUnused(
   job->reservedBytes = 0;
   job->backendBytes  = 0;
   job->backendPayloadBytes.reset();
-  job->hasProgress   = false;
-  job->state         = Job::State::Free;
+  job->hasProgress = false;
+  job->state       = Job::State::Free;
 }
 
 auto BoundedIoScheduler::cancel(const PrivateRequestToken token) noexcept

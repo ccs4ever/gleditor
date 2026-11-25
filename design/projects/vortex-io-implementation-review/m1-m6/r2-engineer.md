@@ -41,7 +41,7 @@ None.
 
 ## MAJOR
 
-### M1. A failed directory sync after a compaction rename leaves `nextSequence_` stale, so the next append writes a gap and the journal refuses at the following open
+### M1. A failed directory sync after a compaction rename leaves `nextSequence_` stale: a gap
 
 **Problem.** `FramedLog::replaceRecords` renames the new image over the journal and updates
 `writtenBytes_`, then returns failure if `syncParentDirectory` fails (`framed_log.cpp:437-440`).
@@ -77,7 +77,7 @@ compaction tests cover only the creation path, not a post-rename directory failu
 refusal. Add a test with an unsyncable directory that runs a compaction followed by an append, then
 reopens.
 
-### M2. `MeshLensChannel` frames values with `|` and splits on every `|`, so any cell name or content containing `|` is truncated or looked up under a wrong name
+### M2. `MeshLensChannel` frames values with `|` and splits on every `|`: names truncated
 
 **Problem.** `LENS_REQ|node|cellName|proxyRef` and `LENS_RESP|node|cellName|content` are built by
 concatenation and read back with `split(payload, '|')`, using `parts[3]` as the whole content
@@ -106,7 +106,7 @@ name and the value.
 
 ## MINOR
 
-### m1. A durable `PayloadRange` held by value can no longer be retained after its last lease, and `sourceReachable` says durable is always reachable
+### m1. A durable `PayloadRange` held by value cannot be retained; `sourceReachable` always true
 
 After E2, `retain()` of a `Durable` range returns `Unresolved` once no lease or owner token keeps
 the chunk alive (`payload_resolver.cpp:111-125`), and nothing re-reads the permascroll there. Yet
@@ -123,7 +123,7 @@ the checkpoint. `replaceRecords` does no size check, unlike `CaptureJournal::com
 (`capture_journal.cpp:545-549`). The cap is exceeded by one record and the call reports success.
 Check the rewritten size against `maxBytes` and return `BudgetExceeded`.
 
-### m3. `reapIoRequest`, `detachClonedField` and `detachFromRank` are `noexcept` around throwing arena calls
+### m3. `reapIoRequest`, `detachClonedField`, `detachFromRank` are `noexcept` over throwing calls
 
 `ArenaManifold::link` can throw (shadow allocation, link-run limit, incarnation exhaustion:
 `arena_manifold.cpp:2326-2346`, `applyLinkWrites`). `detachFromRank` unlinks both sides and then
@@ -131,7 +131,7 @@ re-links the neighbours (`io_cells.cpp:193-202`). A throw from the re-link insid
 function calls `std::terminate`, in `IoService::eraseRequestState` on the owner thread. It would
 first leave the rank cut in two if it were caught. Catch inside and log, or do the re-link first.
 
-### m4. `CaptureAppendAdapter::complete` deferral can erase the next capture's receipt if the key is reused while the first turn still runs
+### m4. `CaptureAppendAdapter::complete` deferral can erase the next capture's receipt
 
 With more than one worker, a retired capture's deferred `complete(key)` sits in `completeAfterTurn_`
 (`capture_coordinator.cpp:308-315`). A new capture that reuses the raw `uint32` key can start its

@@ -64,8 +64,10 @@ TEST(LogLensSourceAdapterTest, BrowseSucceedsAndBumpsGeneration) {
   PayloadResolver payloads;
 
   const auto startGeneration = adapter.generation();
-  const auto key             = adapter.stage(
-      LensOpSpec{.kind = LensOpKind::Browse, .expectedGeneration = 0}).value();
+  const auto key             = adapter
+                       .stage(LensOpSpec{.kind = LensOpKind::Browse,
+                                         .expectedGeneration = 0})
+                       .value();
   const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
   ASSERT_TRUE(prepared);
 
@@ -93,7 +95,8 @@ TEST(LogLensSourceAdapterTest, PrepareRefusesStaleGenerationBeforeAdmission) {
 
   const auto staleGeneration = adapter.generation();
   // A browse that succeeds bumps the adapter past staleGeneration.
-  const auto bumpKey = adapter.stage(LensOpSpec{.kind = LensOpKind::Browse}).value();
+  const auto bumpKey =
+      adapter.stage(LensOpSpec{.kind = LensOpKind::Browse}).value();
   const auto bumpPrepared = adapter.prepare(requestFor(logKey, bumpKey), owner);
   ASSERT_TRUE(bumpPrepared);
   PayloadResolver payloads;
@@ -104,8 +107,10 @@ TEST(LogLensSourceAdapterTest, PrepareRefusesStaleGenerationBeforeAdmission) {
   ASSERT_TRUE(bumpSink.candidate);
   EXPECT_TRUE(std::holds_alternative<Complete>(bumpSink.candidate->outcome));
 
-  const auto key      = adapter.stage(LensOpSpec{
-           .kind = LensOpKind::Browse, .expectedGeneration = staleGeneration}).value();
+  const auto key = adapter
+                       .stage(LensOpSpec{.kind = LensOpKind::Browse,
+                                         .expectedGeneration = staleGeneration})
+                       .value();
   const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
   ASSERT_FALSE(prepared);
   EXPECT_EQ(prepared.error().code, IoErrorCode::Stale);
@@ -122,14 +127,18 @@ TEST(LogLensSourceAdapterTest,
   PayloadResolver payloads;
   auto context = makeContext(payloads);
 
-  const auto key      = adapter.stage(LensOpSpec{
-           .kind = LensOpKind::Browse, .expectedGeneration = adapter.generation()}).value();
+  const auto key =
+      adapter
+          .stage(LensOpSpec{.kind               = LensOpKind::Browse,
+                            .expectedGeneration = adapter.generation()})
+          .value();
   const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
   ASSERT_TRUE(prepared);
 
   // A second, already-admitted browse lands on this adapter between this
   // request's admission and its worker turn.
-  const auto raceKey = adapter.stage(LensOpSpec{.kind = LensOpKind::Browse}).value();
+  const auto raceKey =
+      adapter.stage(LensOpSpec{.kind = LensOpKind::Browse}).value();
   const auto racePrepared = adapter.prepare(requestFor(logKey, raceKey), owner);
   ASSERT_TRUE(racePrepared);
   CapturingSink raceSink;
@@ -196,8 +205,10 @@ TEST(SqlLensSourceAdapterTest, BrowseFetchesAndBumpsGeneration) {
   auto context = makeContext(payloads);
 
   const auto startGeneration = adapter.generation();
-  const auto key             = adapter.stage(
-      LensOpSpec{.kind = LensOpKind::Browse, .argument = "invoices"}).value();
+  const auto key =
+      adapter
+          .stage(LensOpSpec{.kind = LensOpKind::Browse, .argument = "invoices"})
+          .value();
   const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
   ASSERT_TRUE(prepared);
 
@@ -224,7 +235,7 @@ TEST(SqlLensSourceAdapterTest, ProbeDoesNotBumpGeneration) {
   auto context = makeContext(payloads);
 
   const auto startGeneration = adapter.generation();
-  const auto key      = adapter.stage(LensOpSpec{.kind = LensOpKind::Probe}).value();
+  const auto key = adapter.stage(LensOpSpec{.kind = LensOpKind::Probe}).value();
   const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink;
@@ -270,7 +281,8 @@ TEST(GitLensSourceAdapterTest, BrowseFetchesAndBumpsGeneration) {
   auto context = makeContext(payloads);
 
   const auto startGeneration = adapter.generation();
-  const auto key      = adapter.stage(LensOpSpec{.kind = LensOpKind::Browse}).value();
+  const auto key =
+      adapter.stage(LensOpSpec{.kind = LensOpKind::Browse}).value();
   const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
   ASSERT_TRUE(prepared);
 
@@ -290,8 +302,10 @@ TEST(GitLensSourceAdapterTest, MaterializeOnUnknownWindowRefuses) {
   PayloadResolver payloads;
   auto context = makeContext(payloads);
 
-  const auto key = adapter.stage(LensOpSpec{.kind = LensOpKind::Materialize,
-                                            .windowKey = "git:no-such-window"}).value();
+  const auto key = adapter
+                       .stage(LensOpSpec{.kind      = LensOpKind::Materialize,
+                                         .windowKey = "git:no-such-window"})
+                       .value();
   const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink;
@@ -315,7 +329,7 @@ TEST(ConfigLensSourceAdapterTest,
   auto context = makeContext(payloads);
 
   const auto startGeneration = adapter.generation();
-  const auto key      = adapter.stage(LensOpSpec{.kind = LensOpKind::Probe}).value();
+  const auto key = adapter.stage(LensOpSpec{.kind = LensOpKind::Probe}).value();
   const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink;
@@ -334,8 +348,10 @@ TEST(ConfigLensSourceAdapterTest, MaterializeIsRefusedAtPrepareTime) {
   ConfigLensSourceAdapter adapter(**lensResult);
   OwnerContext owner;
 
-  const auto key = adapter.stage(
-      LensOpSpec{.kind = LensOpKind::Materialize, .windowKey = "cfg:no-such"}).value();
+  const auto key = adapter
+                       .stage(LensOpSpec{.kind      = LensOpKind::Materialize,
+                                         .windowKey = "cfg:no-such"})
+                       .value();
   ASSERT_NE(key, 0U);
   const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
   ASSERT_FALSE(prepared.has_value());

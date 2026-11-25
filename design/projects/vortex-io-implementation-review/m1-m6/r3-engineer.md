@@ -26,7 +26,7 @@ None.
 
 ## MAJOR
 
-### E1. Journal compaction on the owner loses a record a worker appended between `recover()` and `compact()`
+### E1. Owner journal compaction loses a record a worker appended between `recover()` and it
 
 **Problem.** `compactJournal()` takes a snapshot with `journal_.recover()` (mutex taken and
 released), computes `keep` from it, then calls `journal_.compact(keep)`, which takes the mutex again
@@ -60,7 +60,7 @@ refuse (`Stale`) when the record count differs from the view the caller computed
 refuse compaction while any `pending.durable` is set. Add a test that appends from a second thread
 between the two calls (the `crash` hooks give a deterministic seam).
 
-### E2. A Buffered `Store::save()` advances `durableOps`, so a later Fsync snapshot skips the fsync and the Committed record claims durability that does not exist
+### E2. A Buffered `Store::save()` advances `durableOps`; a later Fsync snapshot skips the fsync
 
 **Problem.** `SnapshotWriter::write` advances the shared `durableOps` after a Buffered write (page
 cache only; `store.cpp` `channel.durableOps.store(snapshot.endOps())`). A later `Fsync` snapshot of
@@ -91,7 +91,7 @@ and never let a Buffered write advance the count an Fsync writer trusts.
 
 ## MINOR
 
-### m1. Replace over an existing `ops.nodes` truncates in place, so a crash mid-rewrite destroys already-Committed captures
+### m1. Replace over an existing `ops.nodes` truncates in place: a crash destroys Committed captures
 
 `writeSegmentRange(Replace)` opens with `O_TRUNC` and rewrites (`segmented_ops_spool.cpp:777-790`).
 Replace is reached routinely after a `BaseMismatch` reset (the documented "one retry"). A crash

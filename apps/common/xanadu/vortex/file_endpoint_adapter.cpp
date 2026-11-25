@@ -3,8 +3,8 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
-#include <sys/stat.h>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>

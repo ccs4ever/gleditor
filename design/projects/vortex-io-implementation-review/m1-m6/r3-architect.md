@@ -45,7 +45,7 @@ Target e16ec377. Tally: 0 BLOCKING, 1 MAJOR (R3-1), 1 MINOR.
 
 ## MAJOR
 
-### R3-1. `durableOps` conflates "written" with "fsynced": a Fsync commit can claim durability for operations only in the page cache
+### R3-1. `durableOps` conflates "written" with "fsynced": a Fsync commit can overclaim
 
 **Problem.** `SnapshotChannel::durableOps` is advanced after any successful write, Buffered or Fsync
 (`store.cpp:4329`). The writer then skips every operation at or below it (`store.cpp:4308-4312`),

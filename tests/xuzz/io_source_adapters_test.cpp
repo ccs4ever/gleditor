@@ -87,10 +87,12 @@ TEST(StreamSourceAdapterTest, ReadSucceedsAndMatchesStagedGeneration) {
   PayloadResolver payloads;
 
   const auto key =
-      adapter.stage(StreamOpSpec{.kind               = StreamOpKind::Read,
-                                 .offset             = 0,
-                                 .length             = 5,
-                                 .expectedGeneration = adapter.generation()}).value();
+      adapter
+          .stage(StreamOpSpec{.kind               = StreamOpKind::Read,
+                              .offset             = 0,
+                              .length             = 5,
+                              .expectedGeneration = adapter.generation()})
+          .value();
   const auto prepared = adapter.prepare(requestFor(streamKey, key), owner);
   ASSERT_TRUE(prepared);
 
@@ -121,10 +123,12 @@ TEST(StreamSourceAdapterTest, PrepareRefusesStaleGenerationBeforeAdmission) {
   adapter.setContent(bytesOf("v2")); // a concurrent writer moves the source
 
   const auto key =
-      adapter.stage(StreamOpSpec{.kind               = StreamOpKind::Read,
-                                 .offset             = 0,
-                                 .length             = 2,
-                                 .expectedGeneration = staleGeneration}).value();
+      adapter
+          .stage(StreamOpSpec{.kind               = StreamOpKind::Read,
+                              .offset             = 0,
+                              .length             = 2,
+                              .expectedGeneration = staleGeneration})
+          .value();
   const auto prepared = adapter.prepare(requestFor(streamKey, key), owner);
   ASSERT_FALSE(prepared);
   EXPECT_EQ(prepared.error().code, IoErrorCode::Stale);
@@ -138,10 +142,12 @@ TEST(StreamSourceAdapterTest,
   PayloadResolver payloads;
 
   const auto key =
-      adapter.stage(StreamOpSpec{.kind               = StreamOpKind::Write,
-                                 .offset             = 0,
-                                 .writeBytes         = bytesOf("XX"),
-                                 .expectedGeneration = adapter.generation()}).value();
+      adapter
+          .stage(StreamOpSpec{.kind               = StreamOpKind::Write,
+                              .offset             = 0,
+                              .writeBytes         = bytesOf("XX"),
+                              .expectedGeneration = adapter.generation()})
+          .value();
   // Admitted while current: prepare succeeds.
   const auto prepared = adapter.prepare(requestFor(streamKey, key), owner);
   ASSERT_TRUE(prepared);
@@ -167,8 +173,11 @@ TEST(StreamSourceAdapterTest, EndOfStreamIsDistinctFromCompleteZeroBytes) {
   OwnerContext owner;
   PayloadResolver payloads;
 
-  const auto key = adapter.stage(
-      StreamOpSpec{.kind = StreamOpKind::Read, .offset = 2, .length = 10}).value();
+  const auto key =
+      adapter
+          .stage(StreamOpSpec{
+              .kind = StreamOpKind::Read, .offset = 2, .length = 10})
+          .value();
   const auto prepared = adapter.prepare(requestFor(streamKey, key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink{&payloads};
@@ -188,8 +197,11 @@ TEST(StreamSourceAdapterTest, ZeroLengthReadCompletesEmptyNotEndOfStream) {
   // length == 0 asks for zero bytes: every adapter completes trivially
   // with an empty Complete -- EndOfStream would claim the source is
   // exhausted when the request simply named no bytes.
-  const auto key = adapter.stage(
-      StreamOpSpec{.kind = StreamOpKind::Read, .offset = 0, .length = 0}).value();
+  const auto key =
+      adapter
+          .stage(StreamOpSpec{
+              .kind = StreamOpKind::Read, .offset = 0, .length = 0})
+          .value();
   const auto prepared = adapter.prepare(requestFor(streamKey, key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink{&payloads};
@@ -210,7 +222,8 @@ TEST(ProcessIoAdapterTest, CapturesBoundedChildStdout) {
   OwnerContext owner;
   PayloadResolver payloads;
   const auto key =
-      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 64}).value();
+      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 64})
+          .value();
   const auto prepared =
       adapter.prepare(requestFor(AdapterKey{2, 1}, key), owner);
   ASSERT_TRUE(prepared);
@@ -232,7 +245,8 @@ TEST(ProcessIoAdapterTest, ZeroLengthReadCompletesWithoutSpawning) {
   OwnerContext owner;
   PayloadResolver payloads;
   const auto key =
-      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 0}).value();
+      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 0})
+          .value();
   const auto prepared =
       adapter.prepare(requestFor(AdapterKey{2, 1}, key), owner);
   ASSERT_TRUE(prepared);
@@ -251,16 +265,21 @@ TEST(ProcessIoAdapterTest, WriteAndOffsetSpecsAreRefusedAtPrepare) {
   ProcessIoAdapter adapter("printf hello");
   OwnerContext owner;
 
-  const auto writeKey = adapter.stage(
-      StreamOpSpec{.kind = StreamOpKind::Write, .writeBytes = bytesOf("x")}).value();
+  const auto writeKey = adapter
+                            .stage(StreamOpSpec{.kind = StreamOpKind::Write,
+                                                .writeBytes = bytesOf("x")})
+                            .value();
   ASSERT_NE(writeKey, 0U);
   const auto writePrepared =
       adapter.prepare(requestFor(AdapterKey{2, 1}, writeKey), owner);
   ASSERT_FALSE(writePrepared.has_value());
   EXPECT_EQ(writePrepared.error().code, IoErrorCode::Unsupported);
 
-  const auto offsetKey = adapter.stage(
-      StreamOpSpec{.kind = StreamOpKind::Read, .offset = 4, .length = 8}).value();
+  const auto offsetKey =
+      adapter
+          .stage(StreamOpSpec{
+              .kind = StreamOpKind::Read, .offset = 4, .length = 8})
+          .value();
   ASSERT_NE(offsetKey, 0U);
   const auto offsetPrepared =
       adapter.prepare(requestFor(AdapterKey{2, 1}, offsetKey), owner);
@@ -272,8 +291,11 @@ TEST(StreamSourceAdapterTest, AbandonedStageFailsPrepare) {
   InMemoryStreamAdapter adapter;
   adapter.setContent(bytesOf("data"));
   OwnerContext owner;
-  const auto key = adapter.stage(
-      StreamOpSpec{.kind = StreamOpKind::Read, .offset = 0, .length = 2}).value();
+  const auto key =
+      adapter
+          .stage(StreamOpSpec{
+              .kind = StreamOpKind::Read, .offset = 0, .length = 2})
+          .value();
   ASSERT_NE(key, 0U);
   // A submission refused before execute (or abandoned by its caller) must
   // not leave a staged entry that a later request could consume.
@@ -302,14 +324,17 @@ TEST(StreamSourceAdapterTest, StagedWriteByteBoundRefusesBeforeEntryCap) {
 
   // Byte-free specs are unaffected by the write-byte bound.
   const auto readKey =
-      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 1}).value();
+      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 1})
+          .value();
   EXPECT_NE(readKey, 0U);
 
   // Abandoning a staged write returns its bytes to the budget.
   adapter.abandon(keys.back());
   keys.pop_back();
-  const auto again = adapter.stage(
-      StreamOpSpec{.kind = StreamOpKind::Write, .writeBytes = chunk}).value();
+  const auto again =
+      adapter
+          .stage(StreamOpSpec{.kind = StreamOpKind::Write, .writeBytes = chunk})
+          .value();
   EXPECT_NE(again, 0U);
 }
 
@@ -334,8 +359,10 @@ TEST(NetIoAdapterTest, RoundTripsBytesOverAConnectedSocketPair) {
   PayloadResolver payloads;
   auto context = makeContext(payloads);
 
-  const auto writeKey = writer.stage(
-      StreamOpSpec{.kind = StreamOpKind::Write, .writeBytes = bytesOf("ping")}).value();
+  const auto writeKey = writer
+                            .stage(StreamOpSpec{.kind = StreamOpKind::Write,
+                                                .writeBytes = bytesOf("ping")})
+                            .value();
   const auto preparedWrite =
       writer.prepare(requestFor(AdapterKey{3, 1}, writeKey), owner);
   ASSERT_TRUE(preparedWrite);
@@ -346,7 +373,8 @@ TEST(NetIoAdapterTest, RoundTripsBytesOverAConnectedSocketPair) {
   EXPECT_TRUE(std::holds_alternative<Complete>(writeSink.candidate->outcome));
 
   const auto readKey =
-      reader.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 4}).value();
+      reader.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 4})
+          .value();
   const auto preparedRead =
       reader.prepare(requestFor(AdapterKey{3, 1}, readKey), owner);
   ASSERT_TRUE(preparedRead);
@@ -374,8 +402,11 @@ TEST(NetIoAdapterTest, WriteBeyondByteBudgetRefusesBeforeSending) {
   // loop must refuse BudgetExceeded up front, the way the read clamp and
   // the file/in-memory adapters bound their transfers -- not stream a
   // partial write and misreport it.
-  const auto writeKey = writer.stage(StreamOpSpec{
-      .kind = StreamOpKind::Write, .writeBytes = bytesOf("0123456789abcdef")}).value();
+  const auto writeKey =
+      writer
+          .stage(StreamOpSpec{.kind       = StreamOpKind::Write,
+                              .writeBytes = bytesOf("0123456789abcdef")})
+          .value();
   const auto preparedWrite =
       writer.prepare(requestFor(AdapterKey{3, 1}, writeKey), owner);
   ASSERT_TRUE(preparedWrite);
@@ -393,7 +424,8 @@ TEST(NetIoAdapterTest, WriteBeyondByteBudgetRefusesBeforeSending) {
   // was sent, so a following read sees an open-but-silent socket -- a
   // poll timeout, never a truncated prefix of the refused buffer.
   const auto readKey =
-      reader.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 16}).value();
+      reader.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 16})
+          .value();
   const auto preparedRead =
       reader.prepare(requestFor(AdapterKey{3, 1}, readKey), owner);
   ASSERT_TRUE(preparedRead);
@@ -415,7 +447,8 @@ TEST(NetIoAdapterTest, ZeroLengthReadCompletesWithoutPolling) {
   // instead of inventing a default chunk the frozen spec never named --
   // and without ever polling the descriptor.
   const auto key =
-      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 0}).value();
+      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 0})
+          .value();
   const auto prepared =
       adapter.prepare(requestFor(AdapterKey{3, 1}, key), owner);
   ASSERT_TRUE(prepared);
@@ -437,8 +470,11 @@ TEST(NetIoAdapterTest, NonzeroOffsetIsRefusedAtPrepare) {
   // A connected socket has no seekable offset: like ProcessIoAdapter, the
   // spec refuses before admission instead of the adapter silently
   // ignoring a field the caller believed was honored.
-  const auto key = adapter.stage(
-      StreamOpSpec{.kind = StreamOpKind::Read, .offset = 4, .length = 8}).value();
+  const auto key =
+      adapter
+          .stage(StreamOpSpec{
+              .kind = StreamOpKind::Read, .offset = 4, .length = 8})
+          .value();
   ASSERT_NE(key, 0U);
   const auto prepared =
       adapter.prepare(requestFor(AdapterKey{3, 1}, key), owner);
