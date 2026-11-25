@@ -8,6 +8,7 @@ Workflow brief: [`brief-common.md`](brief-common.md).
 
 ## Round summary
 
-| Round | Target commit | Critics | BLOCKING | MAJOR | MINOR | Status      |
-| ----- | ------------- | ------- | -------- | ----- | ----- | ----------- |
-| 1     | `757cd55b`    | 4       | 2        | 15    | 25    | Fixing      |
+| Round | Target commit | Critics | BLOCKING | MAJOR | MINOR | Status                                                     |
+| ----- | ------------- | ------- | -------- | ----- | ----- | ---------------------------------------------------------- |
+| 1     | `757cd55b`    | 4       | 2        | 15    | 25    | Fixed (A, B)                                               |
+| 2     | `dbe8e40c`    | 4       | 0        | 4     | 13    | Fixed ([disposition](r2-disposition.md)); vortex CONVERGED |
