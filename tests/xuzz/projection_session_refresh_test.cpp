@@ -455,6 +455,43 @@ TEST(CommitTest, RelocatedKeyRebindsCellAndKeepsMintOrderForRoots) {
   EXPECT_EQ(f.session->roots()[0], cellA);
 }
 
+TEST(CommitTest, RelocatedKeyCollidingWithBoundKeyKeepsBothBindings) {
+  Fixture f;
+  f.start();
+  // An edge-free node so the renamed A->D edge (the old A->B contains
+  // edge) cannot self-loop during the trailing refresh().
+  f.lens->nodes.push_back(
+      {.key = "D", .content = std::string{"delta"}, .attributes = {}});
+  (void)f.session->refresh();
+  const auto cellA = *f.session->cellFor("A");
+  const auto cellD = *f.session->cellFor("D");
+
+  // The source renames A onto D's already-bound name: a collision the
+  // rebind must refuse. Unguarded, keyToCell_.emplace would keep D->cellD
+  // while cellToKey_ and mintOrder_ claimed D for cellA too -- the maps
+  // and recomputeRoots() would then disagree (and elect cellD twice).
+  f.lens->renameOnApply["A"] = "D";
+  ASSERT_TRUE(f.session->editContent("A", "a-edit"));
+  const auto committed = f.session->commit();
+  ASSERT_TRUE(committed.has_value()) << committed.error();
+  EXPECT_EQ(*committed, 1);
+
+  // The rebind was skipped: A's cell stays bound to A (the source no
+  // longer emits it, so it goes stale), and D's binding is untouched.
+  ASSERT_TRUE(f.session->cellFor("A").has_value());
+  EXPECT_EQ(*f.session->cellFor("A"), cellA);
+  ASSERT_TRUE(f.session->keyFor(cellA).has_value());
+  EXPECT_EQ(*f.session->keyFor(cellA), "A");
+  ASSERT_TRUE(f.session->cellFor("D").has_value());
+  EXPECT_EQ(*f.session->cellFor("D"), cellD);
+  EXPECT_EQ(*f.session->keyFor(cellD), "D");
+
+  // mintOrder_ kept its single "D" entry: the root election names
+  // cellD once, not twice.
+  ASSERT_EQ(f.session->roots().size(), 1U);
+  EXPECT_EQ(f.session->roots()[0], cellD);
+}
+
 TEST(CommitTest, CommitRefusalLeavesFailedAndUnattemptedKeysDirty) {
   Fixture f;
   f.start();

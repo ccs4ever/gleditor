@@ -394,6 +394,35 @@ TEST(ProjectionSessionStagedTest,
   EXPECT_EQ(session.dirtyCount(), 0U);
 }
 
+TEST(ProjectionSessionStagedTest,
+     DeadOutcomeCellDoesNotConsumeTheStagedRefresh) {
+  SessionStack stack("{\"name\":\"old\"}\n");
+  auto &session      = *stack.session;
+  const auto nameKey = "cfg:" + stack.path.string() + ":/name";
+  ASSERT_TRUE(session.cellFor(nameKey).has_value());
+
+  const auto staged = session.prepareRefresh(*stack.adapter);
+  ASSERT_TRUE(staged.has_value());
+
+  // Same caller-error rule publishCommit keeps: a live cell that is not
+  // an outcome must refuse WITHOUT consuming the staged slot -- dropping
+  // it here would leave the probe's real terminal outcome with nothing
+  // to publish against.
+  const auto plain            = stack.fixture.arena.makeCell("not an outcome");
+  const auto plainIncarnation = stack.fixture.arena.incarnationOf(plain);
+  ASSERT_TRUE(plainIncarnation.has_value());
+  const auto wrongTag =
+      OutcomeCell{.cell = plain, .incarnation = *plainIncarnation};
+  EXPECT_FALSE(session.publishRefresh(wrongTag).has_value());
+
+  // The staged slot survived: the real terminal outcome still publishes.
+  const auto outcome =
+      submitAndAwait(*stack.service, stack.fixture.capability, *staged);
+  ASSERT_TRUE(outcome.has_value());
+  const auto published = session.publishRefresh(*outcome);
+  ASSERT_TRUE(published.has_value()) << published.error();
+}
+
 TEST(ProjectionSessionStagedTest, RewindRefusesWhileAStagedOpIsInFlight) {
   SessionStack stack("{\"name\":\"old\"}\n");
   auto &session = *stack.session;

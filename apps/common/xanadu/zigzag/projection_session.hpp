@@ -225,11 +225,7 @@ public:
     /// verb also moves the arena mark, so the boundary fields already
     /// distinguish the checkpoints that matter.
     std::unordered_set<ExternalKey> dirty;
-    /// The earliest node key the mint log records above this mark, filled at
-    /// rewind() time -- the key the windowed lens's discard is driven by.
-    ExternalKey boundaryKey;
-    /// Identity = the same boundary (Mark has no ==; boundaryKey is filled
-    /// later and not part of identity).
+    /// Identity = the same boundary (Mark has no ==).
     bool operator==(const Checkpoint &o) const {
       return mark.cellCount == o.mark.cellCount &&
              mark.linkSize == o.mark.linkSize &&

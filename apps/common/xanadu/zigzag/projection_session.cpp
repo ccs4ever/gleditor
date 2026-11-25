@@ -126,6 +126,16 @@ void ProjectionSession::mintNode(const SourceNode &node) {
 
 void ProjectionSession::rebindKey(const ExternalKey &from,
                                   const ExternalKey &to, const CellRef cell) {
+  // `to` already naming a DIFFERENT cell is a source-side collision:
+  // keyToCell_.emplace would silently keep the old binding while
+  // cellToKey_ claimed `to` for both cells and mintOrder_ carried `to`
+  // twice -- the maps and rewind()'s repair would desync. Skip the
+  // rebind: `from` stays bound and the next refresh() reconciles
+  // whatever the source actually emits.
+  if (const auto existing = keyToCell_.find(to);
+      existing != keyToCell_.end() && existing->second != cell) {
+    return;
+  }
   if (const auto kit = keyToCell_.find(from); kit != keyToCell_.end()) {
     keyToCell_.erase(kit);
     keyToCell_.emplace(to, cell);
@@ -426,13 +436,17 @@ ProjectionSession::publishRefresh(const xanadu::vortex::OutcomeCell outcome) {
   if (stagedKind_ != StagedKind::Refresh) {
     return std::unexpected("no staged refresh in flight");
   }
-  // Whatever the terminal tag, the staged slot is done: the probe ran
-  // (or was refused) and nothing else may publish against it.
-  stagedKind_    = StagedKind::None;
+  // Validate the outcome cell BEFORE consuming the staged slot, the same
+  // order publishCommit keeps: a dead cell is a caller error, and
+  // dropping the slot here would leave the in-flight probe with no
+  // outcome left to publish against.
   const auto tag = xanadu::vortex::ioOutcomeTag(core_.arena(), outcome);
   if (!tag) {
     return std::unexpected("outcome cell is not a live outcome");
   }
+  // Whatever the terminal tag, the staged slot is done: the probe ran
+  // (or was refused) and nothing else may publish against it.
+  stagedKind_ = StagedKind::None;
   if (*tag != xanadu::vortex::IoOutcomeTag::Complete) {
     return std::unexpected(std::string("refresh outcome ") +
                            std::string(xanadu::vortex::toString(*tag)));
@@ -697,8 +711,7 @@ ProjectionSession::Checkpoint ProjectionSession::checkpoint() {
                 .keyHighWater   = mintOrder_.size(),
                 .rootsHighWater = roots_.size(),
                 .mintHighWater  = mintCount_,
-                .dirty          = dirty_,
-                .boundaryKey    = {}};
+                .dirty          = dirty_};
   cps_.push_back(cp);
   return cp;
 }
