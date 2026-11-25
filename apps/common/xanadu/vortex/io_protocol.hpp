@@ -8,6 +8,7 @@
 #include <expected>
 #include <optional>
 #include <stop_token>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -62,11 +63,26 @@ struct OpenedEndpoint {
   EndpointCell endpoint;
   CapabilityCell initialCapability;
 };
+/// Terminal result details for a successful live read (plan §7.2): the
+/// adapter's observation id, the source generation and consistency it
+/// observed, and the ACTUAL bytes-read extent -- which may be shorter than
+/// requested at EOF. The retained bytes ride the outcome's `payload`
+/// field; the cell store mints the ReadObservation cell binding them, so
+/// an owner maps a completed read to its observation through the outcome.
+struct ReadObservationResult {
+  std::uint64_t observationId{};
+  std::uint64_t sourceGeneration{};
+  std::uint64_t readOffset{};
+  std::uint64_t readLength{};
+  std::string locator;
+  SourceConsistency consistency{SourceConsistency::Live};
+};
 /// Terminal result details that travel inside the outcome itself.
 /// Byte payloads never live here: adapters route produced bytes through
 /// PayloadResolver (publishTransientBytes) and name the retained range in
 /// the outcome's `payload` field instead (plan §3.2, §4).
-using IoResultValue = std::variant<std::monostate, OpenedEndpoint>;
+using IoResultValue =
+    std::variant<std::monostate, OpenedEndpoint, ReadObservationResult>;
 struct Complete {
   std::optional<PayloadRange> payload;
   IoResultValue value;
@@ -161,6 +177,15 @@ struct RequestCancelResult {
   RequestCell request;
   std::optional<OutcomeCell> refusal;
 };
+
+/// Consistency mask bits for `OpenSpec::consistency` /
+/// `OpenGrant::consistency` (plan §7.2, §8.5): one bit per
+/// `SourceConsistency` a requester may demand and a grant may allow.
+/// Bits beyond these stay adapter-defined (the masks are uint64 and the
+/// grant check is a bitmask subset test); file/media adapters use exactly
+/// these two.
+inline constexpr std::uint64_t ioConsistencyLive   = 1ULL << 0;
+inline constexpr std::uint64_t ioConsistencyStable = 1ULL << 1;
 
 struct AdapterKey {
   std::uint32_t sourceKind{};

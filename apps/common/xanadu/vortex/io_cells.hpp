@@ -18,7 +18,9 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -84,12 +86,13 @@ template <IoCellTag Tag> struct IoCellHandle {
   friend bool operator==(const IoCellHandle &, const IoCellHandle &) = default;
 };
 
-using EndpointCell   = IoCellHandle<IoCellTag::Endpoint>;
-using CapabilityCell = IoCellHandle<IoCellTag::Capability>;
-using RequestCell    = IoCellHandle<IoCellTag::Request>;
-using PayloadCell    = IoCellHandle<IoCellTag::Payload>;
-using OutcomeCell    = IoCellHandle<IoCellTag::Outcome>;
-using WaiterCell     = IoCellHandle<IoCellTag::Waiter>;
+using EndpointCell        = IoCellHandle<IoCellTag::Endpoint>;
+using CapabilityCell      = IoCellHandle<IoCellTag::Capability>;
+using RequestCell         = IoCellHandle<IoCellTag::Request>;
+using PayloadCell         = IoCellHandle<IoCellTag::Payload>;
+using OutcomeCell         = IoCellHandle<IoCellTag::Outcome>;
+using ReadObservationCell = IoCellHandle<IoCellTag::ReadObservation>;
+using WaiterCell          = IoCellHandle<IoCellTag::Waiter>;
 
 /// A private, untagged structural cell: a field occurrence, clone view or
 /// queue head.
@@ -193,6 +196,43 @@ queuedRequests(const zigzag::ArenaManifold &arena, const IoCellSchema &schema,
 makeOutcomeCell(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
                 std::optional<RequestCell> request, IoOutcomeTag tag);
 
+/// Declared capability a source endpoint offers for a read's consistency
+/// requirement (plan §7.2). `Live` is best-effort observation of whatever
+/// the backend returns; `Stable` requires a backend-proven immutable
+/// snapshot/CAS the source must actually offer. Shared protocol
+/// vocabulary: consumed by `ReadObservationRecord`, file capabilities and
+/// the `OpenSpec`/`OpenGrant` consistency masks.
+enum class SourceConsistency : std::uint8_t { Live, Stable };
+
+/// The typed record a ReadObservation cell's owner lease carries (plan
+/// §7.2): what a live read observed -- the source locator, the generation
+/// and consistency at transfer time, the ACTUAL bytes-read extent (which
+/// may be shorter than requested at EOF), and the exact retained bytes it
+/// binds.
+struct ReadObservationRecord {
+  std::uint64_t observationId{};
+  std::uint64_t sourceGeneration{};
+  std::string locator;
+  SourceConsistency consistency{SourceConsistency::Live};
+  /// First source offset of the retained bytes.
+  std::uint64_t offset{};
+  /// Retained byte count: the actual extent read, not the request's.
+  std::uint64_t length{};
+  /// The retained bytes this observation binds; absent for a zero-byte
+  /// read. Resolved/read through PayloadResolver like any payload range.
+  std::optional<PayloadRange> payload;
+};
+
+/// What a ReadObservation cell's owner lease holds: the record plus, when
+/// the read retained bytes, the PayloadOwnerToken pinning them -- the same
+/// token a PayloadCell holds, so the bound bytes stay readable through
+/// PayloadOwnerToken::read while the observation cell lives, independent
+/// of the outcome's payload cell.
+struct ReadObservationOwnerToken {
+  ReadObservationRecord record;
+  std::shared_ptr<const PayloadOwnerToken> payload;
+};
+
 /// A payload cell owning a fresh resolver lease on @p lease's range; rollback
 /// or overwrite of the cell, or arena destruction, releases that lease.
 [[nodiscard]] std::expected<PayloadCell, IoCellError>
@@ -208,6 +248,25 @@ payloadRangeOf(const zigzag::ArenaManifold &arena, PayloadCell payload);
 [[nodiscard]] std::optional<PayloadRange>
 outcomeCellPayloadRange(const zigzag::ArenaManifold &arena,
                         const IoCellSchema &schema, OutcomeCell outcome);
+
+/// Mint a ReadObservation cell recording @p record (plan §7.2). When
+/// record.payload names a range, the cell takes its own owner lease on
+/// those bytes -- independent of the outcome's payload cell -- so the
+/// observation keeps them readable while it lives.
+[[nodiscard]] std::expected<ReadObservationCell, IoCellError>
+makeReadObservationCell(zigzag::ArenaManifold &arena, PayloadResolver &resolver,
+                        const ReadObservationRecord &record);
+/// The record a ReadObservation cell carries, or nullopt when the cell is
+/// stale, wrong-tag or holds no owner lease.
+[[nodiscard]] std::optional<ReadObservationRecord>
+readObservationOf(const zigzag::ArenaManifold &arena,
+                  ReadObservationCell observation);
+/// The ReadObservation record an outcome cell links, if any: walks the
+/// outcome's d.io.source occurrence to its observation cell (the cell
+/// store mints one for a Complete carrying ReadObservationResult).
+[[nodiscard]] std::optional<ReadObservationRecord>
+outcomeCellReadObservation(const zigzag::ArenaManifold &arena,
+                           const IoCellSchema &schema, OutcomeCell outcome);
 
 } // namespace xanadu::vortex
 

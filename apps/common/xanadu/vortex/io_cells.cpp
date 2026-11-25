@@ -533,4 +533,65 @@ std::optional<PayloadRange> outcomeCellPayloadRange(const ArenaManifold &arena,
       arena, PayloadCell{.cell = *payloadCell, .incarnation = *incarnation});
 }
 
+std::expected<ReadObservationCell, IoCellError>
+makeReadObservationCell(ArenaManifold &arena, PayloadResolver &resolver,
+                        const ReadObservationRecord &record) {
+  // Pin the bound bytes before minting: a refused retain must not leave a
+  // cell claiming a binding it does not hold. retain -> retainOwner ->
+  // release mirrors addPayload's non-provided-lease path.
+  std::shared_ptr<const PayloadOwnerToken> payload;
+  if (record.payload) {
+    auto retained = resolver.retain(*record.payload);
+    if (!retained) return std::unexpected{IoCellError::PayloadRefused};
+    auto owner = resolver.retainOwner(*retained);
+    resolver.release(retained->lease);
+    if (!owner) return std::unexpected{IoCellError::PayloadRefused};
+    payload = std::move(*owner);
+  }
+  return transact(
+      arena, [&]() -> std::expected<ReadObservationCell, IoCellError> {
+        const auto cell =
+            mint(arena, "io read observation", IoCellTag::ReadObservation);
+        if (!cell) return std::unexpected{cell.error()};
+        auto token = std::make_shared<ReadObservationOwnerToken>(
+            ReadObservationOwnerToken{.record = record, .payload = payload});
+        if (!arena.setOwnerLease(cell->cell, cell->incarnation,
+                                 std::static_pointer_cast<void>(token))) {
+          return std::unexpected{IoCellError::ArenaRefused};
+        }
+        return ReadObservationCell{.cell        = cell->cell,
+                                   .incarnation = cell->incarnation};
+      });
+}
+
+std::optional<ReadObservationRecord>
+readObservationOf(const ArenaManifold &arena, const ReadObservationCell cell) {
+  if (const auto ok = require(arena, cell); !ok) return std::nullopt;
+  // Only makeReadObservationCell puts an owner lease on a
+  // ReadObservation-tagged cell, and it is always a
+  // ReadObservationOwnerToken.
+  const auto owner = std::static_pointer_cast<const ReadObservationOwnerToken>(
+      arena.ownerLeaseOf(cell.cell, cell.incarnation));
+  if (!owner) return std::nullopt;
+  return owner->record;
+}
+
+std::optional<ReadObservationRecord>
+outcomeCellReadObservation(const ArenaManifold &arena,
+                           const IoCellSchema &schema,
+                           const OutcomeCell outcome) {
+  // The cell store links outcome -d.io.source-> occurrence -d.io.source->
+  // observation cell for a Complete carrying ReadObservationResult.
+  const auto dim        = schema.dim(IoDimension::Source);
+  const auto occurrence = arena.linked(outcome.cell, dim, DimVector::POS);
+  if (!occurrence) return std::nullopt;
+  const auto observationCell = arena.linked(*occurrence, dim, DimVector::POS);
+  if (!observationCell) return std::nullopt;
+  const auto incarnation = arena.incarnationOf(*observationCell);
+  if (!incarnation) return std::nullopt;
+  return readObservationOf(arena,
+                           ReadObservationCell{.cell        = *observationCell,
+                                               .incarnation = *incarnation});
+}
+
 } // namespace xanadu::vortex

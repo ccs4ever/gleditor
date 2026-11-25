@@ -231,8 +231,38 @@ auto addPayload(ArenaManifold &arena, const IoCellSchema &schema,
   return true;
 }
 
+/// Mint the ReadObservation cell a Complete carrying ReadObservationResult
+/// names and link it off the outcome's d.io.source field (plan §7.2). The
+/// cell binds the same retained range the outcome's payload cell does, so
+/// the owner maps a completed read to its observation -- and its bytes --
+/// through the outcome alone.
+auto addReadObservation(ArenaManifold &arena, const IoCellSchema &schema,
+                        PayloadResolver &resolver, const CellRef outcome,
+                        const ReadObservationResult &result,
+                        const std::optional<PayloadRange> &payload) -> bool {
+  const ReadObservationRecord record{.observationId = result.observationId,
+                                     .sourceGeneration =
+                                         result.sourceGeneration,
+                                     .locator     = result.locator,
+                                     .consistency = result.consistency,
+                                     .offset      = result.readOffset,
+                                     .length      = result.readLength,
+                                     .payload     = payload};
+  auto observation = makeReadObservationCell(arena, resolver, record);
+  if (!observation) return false;
+  const auto occurrence  = arena.makeCell("io observation occurrence");
+  const auto incarnation = arena.incarnationOf(occurrence);
+  if (!incarnation || !arena.markRuntimeOnly(occurrence)) return false;
+  const auto dim = schema.dim(IoDimension::Source);
+  return arena.link(outcome, dim, DimVector::POS, occurrence) &&
+         arena.link(occurrence, dim, DimVector::POS, observation->cell);
+}
+
 auto addOutcomeDetails(ArenaManifold &arena, const IoCellSchema &schema,
-                       const CellRef outcome, const IoOutcome &result) -> bool {
+                       PayloadResolver &resolver, const CellRef outcome,
+                       const IoOutcome &result,
+                       const std::optional<PayloadRange> &boundPayload)
+    -> bool {
   const auto add = [&](const std::string_view label,
                        const std::string_view value) {
     return appendField(arena, outcome, schema.dim(IoDimension::Occurrence),
@@ -242,27 +272,32 @@ auto addOutcomeDetails(ArenaManifold &arena, const IoCellSchema &schema,
       [&](const auto &value) -> bool {
         using T = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<T, Complete>) {
-          const auto *opened = std::get_if<OpenedEndpoint>(&value.value);
+          if (const auto *opened = std::get_if<OpenedEndpoint>(&value.value)) {
+            const auto endpointTag = ioCellTag(arena, opened->endpoint.cell,
+                                               opened->endpoint.incarnation);
+            const auto capabilityTag =
+                ioCellTag(arena, opened->initialCapability.cell,
+                          opened->initialCapability.incarnation);
+            const auto bound =
+                capabilityEndpoint(arena, schema, opened->initialCapability);
+            return endpointTag && *endpointTag == IoCellTag::Endpoint &&
+                   capabilityTag && *capabilityTag == IoCellTag::Capability &&
+                   bound && *bound == opened->endpoint &&
+                   attachCanonical(arena, schema, outcome,
+                                   IoDimension::Endpoint,
+                                   opened->endpoint.cell) &&
+                   attachCanonical(arena, schema, outcome,
+                                   IoDimension::Capability,
+                                   opened->initialCapability.cell);
+          }
+          if (const auto *observed =
+                  std::get_if<ReadObservationResult>(&value.value)) {
+            return addReadObservation(arena, schema, resolver, outcome,
+                                      *observed, boundPayload);
+          }
           // monostate carries no inline details; byte output travels only
           // through the outcome's payload range, never IoResultValue.
-          if (opened == nullptr) {
-            return true;
-          }
-          const auto endpointTag = ioCellTag(arena, opened->endpoint.cell,
-                                             opened->endpoint.incarnation);
-          const auto capabilityTag =
-              ioCellTag(arena, opened->initialCapability.cell,
-                        opened->initialCapability.incarnation);
-          const auto bound =
-              capabilityEndpoint(arena, schema, opened->initialCapability);
-          return endpointTag && *endpointTag == IoCellTag::Endpoint &&
-                 capabilityTag && *capabilityTag == IoCellTag::Capability &&
-                 bound && *bound == opened->endpoint &&
-                 attachCanonical(arena, schema, outcome, IoDimension::Endpoint,
-                                 opened->endpoint.cell) &&
-                 attachCanonical(arena, schema, outcome,
-                                 IoDimension::Capability,
-                                 opened->initialCapability.cell);
+          return true;
         } else if constexpr (std::is_same_v<T, Failed>) {
           return add("errorCode", toString(value.reason.code)) &&
                  add("stableDetail", number(value.reason.stableDetail));
@@ -490,7 +525,8 @@ auto ArenaIoCellStore::publishTerminal(const RequestCell request,
       payload = lease->range;
     }
     if (!addProgress(arena_, schema_, cell->cell, progress) ||
-        !addOutcomeDetails(arena_, schema_, cell->cell, outcome) ||
+        !addOutcomeDetails(arena_, schema_, payloads_, cell->cell, outcome,
+                           payload) ||
         (payload && !addPayload(arena_, schema_, payloads_, cell->cell,
                                 *payload, lease))) {
       static_cast<void>(arena_.release(mark));
