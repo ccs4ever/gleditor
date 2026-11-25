@@ -360,6 +360,40 @@ TEST(ProjectionSessionStagedTest,
   EXPECT_NE(readFile(stack.path).find("\"aaa\": 10"), std::string::npos);
 }
 
+TEST(ProjectionSessionStagedTest,
+     DeadOutcomeCellDoesNotConsumeTheStagedCommit) {
+  SessionStack stack("{\"name\":\"old\"}\n");
+  auto &session      = *stack.session;
+  const auto nameKey = "cfg:" + stack.path.string() + ":/name";
+  ASSERT_TRUE(session.cellFor(nameKey).has_value());
+  ASSERT_TRUE(session.editContent(nameKey, "newname"));
+
+  const auto staged = session.prepareCommit(*stack.adapter);
+  ASSERT_TRUE(staged.has_value());
+
+  // A live cell that is not an outcome is a caller error: publishCommit
+  // must refuse WITHOUT consuming the staged batch -- dropping it here
+  // would lose the worker's per-edit applied results with no way to
+  // publish against the real outcome later.
+  const auto plain            = stack.fixture.arena.makeCell("not an outcome");
+  const auto plainIncarnation = stack.fixture.arena.incarnationOf(plain);
+  ASSERT_TRUE(plainIncarnation.has_value());
+  const auto wrongTag =
+      OutcomeCell{.cell = plain, .incarnation = *plainIncarnation};
+  EXPECT_FALSE(session.publishCommit(wrongTag).has_value());
+  EXPECT_EQ(session.dirtyCount(), 1U);
+
+  // The staged slot survived: the real terminal outcome still publishes
+  // and applies the batch.
+  const auto outcome =
+      submitAndAwait(*stack.service, stack.fixture.capability, *staged);
+  ASSERT_TRUE(outcome.has_value());
+  const auto published = session.publishCommit(*outcome);
+  ASSERT_TRUE(published.has_value()) << published.error();
+  EXPECT_EQ(*published, 1);
+  EXPECT_EQ(session.dirtyCount(), 0U);
+}
+
 TEST(ProjectionSessionStagedTest, SyncMutatorsRefuseWhileAStagedOpIsInFlight) {
   SessionStack stack("{\"name\":\"old\"}\n");
   auto &session      = *stack.session;

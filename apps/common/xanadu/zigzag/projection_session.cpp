@@ -429,12 +429,16 @@ ProjectionSession::publishCommit(const xanadu::vortex::OutcomeCell outcome) {
   if (stagedKind_ != StagedKind::Commit || !stagedCommit_) {
     return std::unexpected("no staged commit in flight");
   }
-  auto batch     = std::move(stagedCommit_);
-  stagedKind_    = StagedKind::None;
+  // Validate the outcome cell BEFORE consuming the staged flags: a dead
+  // cell is a caller error, and dropping the batch here would lose the
+  // worker's per-edit applied results (dirty_ cleanup) with no way to
+  // publish against the real outcome later.
   const auto tag = xanadu::vortex::ioOutcomeTag(core_.arena(), outcome);
   if (!tag) {
     return std::unexpected("outcome cell is not a live outcome");
   }
+  auto batch  = std::move(stagedCommit_);
+  stagedKind_ = StagedKind::None;
 
   auto &arena = core_.arena();
   int applied = 0;

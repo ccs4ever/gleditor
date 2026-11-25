@@ -68,10 +68,20 @@ CellRef CommandMailbox::submitTransaction(
     const std::function<CommandResult(std::string_view)> &handler) {
   const CellRef promiseCell = beginTransaction(manifold, targetCell, verb);
 
-  // Invoke handler synchronously
+  // Invoke handler synchronously. A throwing handler must not escape with
+  // the promise cell still "pending" -- it publishes the same ERROR reply
+  // the staged adapter path reports for a throwing handler.
   CommandResult result{.success = false, .response = "Unhandled action"};
   if (handler) {
-    result = handler(verb);
+    try {
+      result = handler(verb);
+    } catch (const std::exception &e) {
+      result =
+          CommandResult{.success  = false,
+                        .response = std::string("handler threw: ") + e.what()};
+    } catch (...) {
+      result = CommandResult{.success = false, .response = "handler threw"};
+    }
   }
   publishResult(manifold, promiseCell, result);
   return promiseCell;
@@ -169,14 +179,22 @@ std::uint32_t CommandMailboxAdapter::stage(
     std::string verb, std::function<CommandResult(std::string_view)> handler) {
   const std::lock_guard lock(mutex_);
   if (staged_.size() >= maxStagedCommands) return 0;
-  const auto key = nextKey_++;
-  staged_[key]   = Staged{std::move(verb), std::move(handler)};
+  // Skip 0 (the table-full sentinel) and any key a wrapped counter could
+  // revisit while still live.
+  auto key = nextKey_++;
+  while (key == 0 || staged_.contains(key)) key = nextKey_++;
+  staged_[key] = Staged{std::move(verb), std::move(handler)};
   return key;
 }
 
 void CommandMailboxAdapter::abandon(const std::uint32_t key) {
   const std::lock_guard lock(mutex_);
   staged_.erase(key);
+}
+
+void CommandMailboxAdapter::abandonStaged(
+    const xanadu::vortex::OwnerCell specification) noexcept {
+  abandon(static_cast<std::uint32_t>(specification));
 }
 
 auto CommandMailboxAdapter::prepare(const xanadu::vortex::CellRequest &request,
@@ -225,6 +243,11 @@ void CommandMailboxAdapter::execute(
   // would terminate the worker.
   xanadu::vortex::BackendResult backend;
   std::optional<xanadu::vortex::PayloadLease> payloadLease;
+  // A PayloadLease dropped on any path -- the catch below, an early exit --
+  // must still release its resolver lease; terminalCandidate's own release
+  // of the same id on the success path makes the guard's a no-op there.
+  const xanadu::vortex::PayloadLeaseGuard payloadGuard(context.payloads,
+                                                       payloadLease);
   try {
     if (!found) {
       backend = mailboxFailed({xanadu::vortex::IoErrorCode::InvalidRequest, 0});
@@ -264,7 +287,6 @@ void CommandMailboxAdapter::execute(
     }
   } catch (...) {
     backend = mailboxFailed({xanadu::vortex::IoErrorCode::BackendFailure, 0});
-    payloadLease.reset();
   }
 
   sink.terminalCandidate(command.token, std::move(backend), payloadLease);

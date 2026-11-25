@@ -4,6 +4,7 @@
  */
 #include <gtest/gtest.h>
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,27 @@ TEST(CommandTransactionTest, SubmitAndResolveFailure) {
   EXPECT_TRUE(crdt::CRDTEngine::verifyManifoldInvariants(arena));
 }
 
+TEST(CommandTransactionTest, ThrowingSyncHandlerPublishesErrorReply) {
+  ArenaManifold arena;
+  const CellRef target = arena.makeCell("proc:throw");
+
+  CommandMailbox mailbox;
+  // A throwing handler must not escape with the promise cell still
+  // "pending": the sync path reports the same ERROR reply the staged
+  // adapter path produces for a throwing handler.
+  const CellRef promiseCell = mailbox.submitTransaction(
+      arena, target, "explode", [](std::string_view) -> CommandResult {
+        throw std::runtime_error("boom");
+      });
+  ASSERT_NE(promiseCell, noCell);
+
+  const auto reply = mailbox.queryPromise(arena, promiseCell);
+  ASSERT_TRUE(reply.has_value());
+  EXPECT_FALSE(reply->success);
+  EXPECT_NE(reply->response.find("handler threw"), std::string::npos);
+  EXPECT_TRUE(crdt::CRDTEngine::verifyManifoldInvariants(arena));
+}
+
 TEST(CommandTransactionTest, MultipleConcurrentTransactionsNoCollision) {
   ArenaManifold arena;
   const CellRef target = arena.makeCell("proc:500");
@@ -114,15 +136,29 @@ TEST(CommandTransactionTest, BeginLeavesPendingUntilPublishResult) {
 namespace {
 
 struct CapturingSink final : CompletionSink {
+  /// @p resolver mirrors the service sink: the terminal event retains the
+  /// payload so the bytes outlive the worker lease `execute`'s guard
+  /// releases on return. Pass the same PayloadResolver the BackendContext
+  /// carries.
+  explicit CapturingSink(PayloadResolver *resolver = nullptr)
+      : payloads(resolver) {}
   void progress(PrivateRequestToken, IoProgress) noexcept override {}
-  void terminalCandidate(PrivateRequestToken, BackendResult result,
-                         std::optional<PayloadLease>) noexcept override {
+  void
+  terminalCandidate(PrivateRequestToken, BackendResult result,
+                    std::optional<PayloadLease> payload) noexcept override {
     candidate = std::move(result);
+    if (payload && payloads) {
+      if (auto retained = payloads->retain(payload->range)) {
+        payloadLease = *retained;
+      }
+    }
   }
   void releaseAcknowledged(BackendReleaseAck ack) noexcept override {
     released = ack;
   }
+  PayloadResolver *payloads;
   std::optional<BackendResult> candidate;
+  std::optional<PayloadLease> payloadLease;
   std::optional<BackendReleaseAck> released;
 };
 
@@ -161,7 +197,7 @@ TEST(CommandMailboxAdapterTest,
   const auto prepared = adapter.prepare(requestFor(mailboxKey, key), owner);
   ASSERT_TRUE(prepared.has_value());
 
-  CapturingSink sink;
+  CapturingSink sink{&payloads};
   auto context = makeContext(payloads);
   adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
   ASSERT_TRUE(sink.candidate.has_value());
@@ -205,14 +241,14 @@ TEST(CommandMailboxAdapterTest, StagedEntriesAreOneShot) {
   const auto prepared = adapter.prepare(requestFor(mailboxKey, key), owner);
   ASSERT_TRUE(prepared.has_value());
 
-  CapturingSink first;
+  CapturingSink first{&payloads};
   adapter.execute(BackendCommand{{1}, *prepared}, context, first);
   ASSERT_TRUE(first.candidate.has_value());
   EXPECT_TRUE(std::holds_alternative<Complete>(first.candidate->outcome));
 
   // A replayed command can never re-invoke the handler: the staged entry
   // was consumed by the first worker turn.
-  CapturingSink replay;
+  CapturingSink replay{&payloads};
   adapter.execute(BackendCommand{{2}, *prepared}, context, replay);
   ASSERT_TRUE(replay.candidate.has_value());
   const auto *failed = std::get_if<Failed>(&replay.candidate->outcome);

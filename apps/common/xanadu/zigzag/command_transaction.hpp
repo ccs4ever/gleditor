@@ -118,6 +118,11 @@ public:
   /// (the submission was refused, or the caller abandoned it).
   void abandon(std::uint32_t key);
 
+  /// `IoAdapter` hook: the service calls this with the request's
+  /// `specification` when a submission is refused or its request reaches a
+  /// terminal state without `execute` consuming the staged entry.
+  void abandonStaged(xanadu::vortex::OwnerCell specification) noexcept override;
+
   auto prepare(const xanadu::vortex::CellRequest &request,
                xanadu::vortex::OwnerContext &)
       -> std::expected<xanadu::vortex::PreparedOperation,
