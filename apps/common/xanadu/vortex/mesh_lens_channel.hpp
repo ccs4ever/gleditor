@@ -117,13 +117,25 @@ public:
   [[nodiscard]] std::size_t proxyCount() const noexcept {
     return proxies_.size();
   }
+  /// Frames carrying a lens tag that did not parse exactly, consumed and not
+  /// forwarded; the most recent one's refusal, if any.
+  [[nodiscard]] std::size_t refusedFrames() const noexcept {
+    return refusedFrames_;
+  }
+  [[nodiscard]] std::optional<MeshError> lastRefusal() const noexcept {
+    return lastRefusal_;
+  }
 
 private:
+  void noteRefusal(MeshError error) noexcept;
+
   NodeId localNode_;
   std::shared_ptr<MeshChannel> channel_;
   std::unordered_map<CellRef, ProxyCell> proxies_;
   std::unordered_map<std::string, CellRef>
-      pendingRequests_; // "node:cellName" -> CellRef
+      pendingRequests_; // bencoded [node, cellName] -> CellRef
+  std::size_t refusedFrames_{};
+  std::optional<MeshError> lastRefusal_;
 };
 
 } // namespace zigzag::vortex::mesh
