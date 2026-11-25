@@ -9,6 +9,8 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -78,16 +80,39 @@ public:
   // content so commit()'s trailing refresh() sees what was sent.
   bool writable{true};
   std::vector<std::pair<ExternalKey, std::string>> applied;
+  // applyContentChange may report the item under a new key (a source
+  // relocation): the node -- and every edge naming it -- is renamed so
+  // the trailing refresh() emits it under the new name, exactly like a
+  // real lens's unproject half would.
+  std::unordered_map<ExternalKey, ExternalKey> renameOnApply;
+  // Keys whose apply refuses: commit() must leave them -- and the
+  // un-attempted tail behind the refusal -- dirty.
+  std::unordered_set<ExternalKey> failApply;
   [[nodiscard]] bool canApply(const ExternalKey &) const override {
     return writable;
   }
   std::expected<ExternalKey, std::string>
   applyContentChange(const ExternalKey &key, std::string_view text) override {
+    if (failApply.contains(key)) {
+      return std::unexpected("lens refused " + key);
+    }
     applied.emplace_back(key, std::string{text});
     for (auto &n : nodes) {
       if (n.key == key) {
         n.content = NodeContent{std::string{text}};
+        if (const auto rename = renameOnApply.find(key);
+            rename != renameOnApply.end()) {
+          for (auto &e : edges) {
+            if (e.from == key) e.from = rename->second;
+            if (e.to == key) e.to = rename->second;
+          }
+          n.key = rename->second;
+        }
       }
+    }
+    if (const auto rename = renameOnApply.find(key);
+        rename != renameOnApply.end()) {
+      return rename->second;
     }
     return key;
   }
@@ -368,6 +393,92 @@ TEST(RefreshTest, StaleCellsNotInRoots) {
   (void)f.session->refresh();
   // Everything stale: present set is empty -> no roots.
   EXPECT_TRUE(f.session->roots().empty());
+}
+
+// -- commit() ordering, relocation and refusal -------------------------------
+
+TEST(CommitTest, CommitAppliesDirtyKeysInSortedOrder) {
+  Fixture f;
+  f.start();
+  for (const char *k : {"D", "E", "F", "G", "H"}) {
+    f.lens->nodes.push_back(
+        {.key = k, .content = std::string{k}, .attributes = {}});
+  }
+  (void)f.session->refresh();
+
+  // Dirty the set in scrambled order; commit() must apply the edits in
+  // sorted key order -- the lens stops at the first refusal, so hash
+  // order would make which edits land nondeterministic.
+  for (const char *k : {"H", "C", "A", "E", "B", "D", "G", "F"}) {
+    ASSERT_TRUE(f.session->editContent(k, std::string{k} + "-edit"));
+  }
+  const auto committed = f.session->commit();
+  ASSERT_TRUE(committed.has_value()) << committed.error();
+  EXPECT_EQ(*committed, 8);
+  ASSERT_EQ(f.lens->applied.size(), 8U);
+  std::vector<std::string> appliedOrder;
+  appliedOrder.reserve(f.lens->applied.size());
+  for (const auto &[key, text] : f.lens->applied) {
+    static_cast<void>(text);
+    appliedOrder.push_back(key);
+  }
+  EXPECT_EQ(appliedOrder,
+            (std::vector<std::string>{"A", "B", "C", "D", "E", "F", "G", "H"}));
+}
+
+TEST(CommitTest, RelocatedKeyRebindsCellAndKeepsMintOrderForRoots) {
+  Fixture f;
+  f.start();
+  const auto cellA = *f.session->cellFor("A");
+  ASSERT_EQ(f.session->roots().size(), 1U);
+  EXPECT_EQ(f.session->roots()[0], cellA);
+
+  // The source renames A -> A2 during the commit's unproject half: the
+  // session must rebind the SAME cell to the new name AND rewrite the
+  // mint-order log, or recomputeRoots() iterates a stale name that
+  // presentKeys_ no longer contains and drops the root entirely.
+  f.lens->renameOnApply["A"] = "A2";
+  ASSERT_TRUE(f.session->editContent("A", "a-edit"));
+  const auto committed = f.session->commit();
+  ASSERT_TRUE(committed.has_value()) << committed.error();
+  EXPECT_EQ(*committed, 1);
+
+  EXPECT_FALSE(f.session->cellFor("A").has_value());
+  ASSERT_TRUE(f.session->cellFor("A2").has_value());
+  EXPECT_EQ(*f.session->cellFor("A2"), cellA);
+  ASSERT_TRUE(f.session->keyFor(cellA).has_value());
+  EXPECT_EQ(*f.session->keyFor(cellA), "A2");
+
+  // The relocated node is still the structural root: mintOrder_ was
+  // rewritten in place, so recomputeRoots sees "A2" where "A" was.
+  ASSERT_EQ(f.session->roots().size(), 1U);
+  EXPECT_EQ(f.session->roots()[0], cellA);
+}
+
+TEST(CommitTest, CommitRefusalLeavesFailedAndUnattemptedKeysDirty) {
+  Fixture f;
+  f.start();
+  ASSERT_TRUE(f.session->editContent("A", "a-edit"));
+  ASSERT_TRUE(f.session->editContent("B", "b-edit"));
+  ASSERT_TRUE(f.session->editContent("C", "c-edit"));
+  f.lens->failApply.insert("B");
+
+  const auto committed = f.session->commit();
+  ASSERT_FALSE(committed.has_value());
+  EXPECT_NE(committed.error().find("B"), std::string::npos);
+  // Sorted order A,B,C: A applied and left dirty_, B refused, C was
+  // never attempted -- the guard reinserts exactly {B,C}.
+  EXPECT_EQ(f.session->dirtyCount(), 2U);
+  ASSERT_EQ(f.lens->applied.size(), 1U);
+  EXPECT_EQ(f.lens->applied.front().first, "A");
+
+  // A retry with the refusal lifted applies the two survivors -- proof
+  // the failed key and the un-attempted tail really stayed pending.
+  f.lens->failApply.clear();
+  const auto retried = f.session->commit();
+  ASSERT_TRUE(retried.has_value()) << retried.error();
+  EXPECT_EQ(*retried, 2);
+  EXPECT_EQ(f.session->dirtyCount(), 0U);
 }
 
 } // namespace

@@ -326,6 +326,11 @@ private:
   /// lens's declared roots).
   void recomputeRoots(const std::unordered_set<ExternalKey> &present,
                       const std::unordered_set<ExternalKey> &containedTargets);
+  /// Rebind @p from's identity to @p to on the same @p cell after the
+  /// source relocated the item: keyToCell_/cellToKey_ swap names AND
+  /// mintOrder_ rewrites the key in place, so rewind()'s map repair and
+  /// roots ordering keep seeing the cell under its current name.
+  void rebindKey(const ExternalKey &from, const ExternalKey &to, CellRef cell);
 };
 
 } // namespace zigzag

@@ -124,6 +124,25 @@ void ProjectionSession::mintNode(const SourceNode &node) {
   mintOrder_.push_back(node.key);
 }
 
+void ProjectionSession::rebindKey(const ExternalKey &from,
+                                  const ExternalKey &to, const CellRef cell) {
+  if (const auto kit = keyToCell_.find(from); kit != keyToCell_.end()) {
+    keyToCell_.erase(kit);
+    keyToCell_.emplace(to, cell);
+  }
+  cellToKey_.erase(cell);
+  cellToKey_.emplace(cell, to);
+  // mintOrder_ logs mint order for rewind()'s map repair and roots()
+  // ordering: the cell keeps its original mint slot, so the key is
+  // rewritten in place. A stale name here would leave the repair unable
+  // to find the cell -- keyToCell_ no longer holds `from` -- and
+  // cellToKey_ would keep a dangling entry after the toss.
+  if (const auto pos = std::ranges::find(mintOrder_, from);
+      pos != mintOrder_.end()) {
+    *pos = to;
+  }
+}
+
 void ProjectionSession::writeAttribute(CellRef cell, std::string_view rank,
                                        std::string_view value) {
   auto &arena      = core_.arena();
@@ -471,13 +490,7 @@ ProjectionSession::publishCommit(const xanadu::vortex::OutcomeCell outcome) {
     if (cell && edit.relocated != edit.key) {
       // Same rebind commit() performs: union identity keeps the cell,
       // the source item's new name points at it.
-      const auto kit = keyToCell_.find(edit.key);
-      if (kit != keyToCell_.end()) {
-        keyToCell_.erase(kit);
-        keyToCell_.emplace(edit.relocated, *cell);
-        cellToKey_.erase(*cell);
-        cellToKey_.emplace(*cell, edit.relocated);
-      }
+      rebindKey(edit.key, edit.relocated, *cell);
     }
   }
   if (*tag != xanadu::vortex::IoOutcomeTag::Complete) {
@@ -560,19 +573,35 @@ std::expected<int, std::string> ProjectionSession::commit() {
   auto pending = std::move(dirty_);
   dirty_.clear();
   struct ReinsertPending {
-    ~ReinsertPending() { dst->insert(src->begin(), src->end()); }
+    ~ReinsertPending() {
+      // unordered_set::insert allocates; a throw inside this
+      // implicitly-noexcept destructor would terminate. Reinsert is
+      // best-effort: on bad_alloc the un-attempted keys are dropped
+      // rather than crash the commit() refusal path.
+      try {
+        dst->insert(src->begin(), src->end());
+      } catch (...) {
+      }
+    }
     std::unordered_set<ExternalKey> *src;
     std::unordered_set<ExternalKey> *dst;
   } guard{&pending, &dirty_};
 
+  // Deterministic apply order, matching prepareCommit(): the lens
+  // applies edits in sequence and stops at the first refusal, so which
+  // edits land must not depend on the dirty set's hash order.
+  std::vector<ExternalKey> order;
+  order.reserve(pending.size());
+  for (const auto &key : pending) order.push_back(key);
+  std::ranges::sort(order);
+
   int applied = 0;
-  for (auto it = pending.begin(); it != pending.end();) {
-    const auto key  = *it;
+  for (const auto &key : order) {
     const auto cell = cellFor(key);
     if (!cell) {
       // Unwound or removed between edit and commit: nothing to apply,
       // and re-dirtying a key with no cell would wedge the session.
-      it = pending.erase(it);
+      pending.erase(key);
       continue;
     }
     auto res = lens_->applyContentChange(key, core_.arena().textOf(*cell));
@@ -582,7 +611,7 @@ std::expected<int, std::string> ProjectionSession::commit() {
       // caller decides what to drop.
       return std::unexpected(key + ": " + res.error());
     }
-    it = pending.erase(it);
+    pending.erase(key);
     ++applied;
     // A relocated key rebinds the same cell: union identity keeps the
     // cell, the source item's new name points at it. NOTE: the rebind
@@ -590,11 +619,7 @@ std::expected<int, std::string> ProjectionSession::commit() {
     // mount stays keyed on the old name until P8 remaps it; no lens
     // relocates today.
     if (*res != key) {
-      const auto kit = keyToCell_.find(key);
-      keyToCell_.erase(kit);
-      keyToCell_.emplace(*res, *cell);
-      cellToKey_.erase(*cell);
-      cellToKey_.emplace(*cell, *res);
+      rebindKey(key, *res, *cell);
     }
   }
   auto refreshed = refresh();
