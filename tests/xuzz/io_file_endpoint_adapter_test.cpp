@@ -54,7 +54,7 @@ struct FileEndpointFixture {
   explicit FileEndpointFixture(std::size_t payloadBound = 1U << 20)
       : cells(arena, schema, payloads,
               makeFileRequestDecoder(arena, fileDataAdapterKey, payloadBound),
-              {},
+              makeFileCloseDecoder(adapter),
               [](const OpenSpec &)
                   -> std::expected<ArenaIoCellStore::OpenGrant, IoErrorInfo> {
                 return ArenaIoCellStore::OpenGrant{
@@ -68,6 +68,7 @@ struct FileEndpointFixture {
         std::move(scheduler), payloads, cells);
     service->registerAdapter(fileOpenAdapterKey, adapter);
     service->registerAdapter(fileDataAdapterKey, adapter);
+    service->registerAdapter(fileCloseAdapterKey, adapter);
   }
   FileEndpointFixture(const FileEndpointFixture &)                     = delete;
   auto operator=(const FileEndpointFixture &) -> FileEndpointFixture & = delete;
@@ -117,12 +118,14 @@ std::optional<OpenedEndpoint> openedEndpointOf(const IoCellSchema &schema,
                         CapabilityCell{*capability, *capabilityInc}};
 }
 
-/// The newest live open of @p path -- the one the caller just awaited.
-FileOpenId lastOpen(const FileEndpointFixture &fixture,
-                    const std::string &path) {
-  const auto ids = fixture.adapter.openIdsFor(path);
-  EXPECT_FALSE(ids.empty());
-  return ids.empty() ? FileOpenId{} : ids.back();
+/// The open the adapter bound to @p opened's endpoint.
+FileOpenId openOf(const FileEndpointFixture &fixture,
+                  const std::optional<OpenedEndpoint> &opened) {
+  EXPECT_TRUE(opened.has_value());
+  if (!opened) return FileOpenId{};
+  const auto id = fixture.adapter.openIdOf(opened->endpoint);
+  EXPECT_TRUE(id.has_value());
+  return id.value_or(FileOpenId{});
 }
 
 /// Mint a spec cell whose text tags the op for makeFileRequestDecoder and
@@ -218,7 +221,7 @@ TEST_F(FileEndpointAdapterTest,
       openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
   ASSERT_TRUE(opened.has_value());
   EXPECT_TRUE(fixture.adapter.openedCount() == 1);
-  const auto caps = fixture.adapter.capabilities(lastOpen(fixture, path));
+  const auto caps = fixture.adapter.capabilities(openOf(fixture, opened));
   ASSERT_TRUE(caps.has_value());
   EXPECT_EQ(caps->locator, path);
   EXPECT_EQ(caps->consistency, SourceConsistency::Live);
@@ -227,7 +230,7 @@ TEST_F(FileEndpointAdapterTest,
   // Stage a read under a live spec cell and submit it on the opened
   // capability: the full admitOpen -> submit -> worker -> publish path.
   const auto spec = stageSpec(
-      fixture, fileReadSpecTag, lastOpen(fixture, path),
+      fixture, fileReadSpecTag, openOf(fixture, opened),
       FileOpSpec{.kind = FileOpSpec::Kind::Read, .range = MediaRange{6, 5}});
   const auto outcome = submitAndAwait(fixture, opened->initialCapability, spec);
   ASSERT_TRUE(outcome.has_value());
@@ -259,7 +262,7 @@ TEST_F(FileEndpointAdapterTest, AdmitOpenThenSubmitWriteUpdatesFile) {
   ASSERT_TRUE(opened.has_value());
 
   const auto spec =
-      stageSpec(fixture, fileWriteSpecTag, lastOpen(fixture, path),
+      stageSpec(fixture, fileWriteSpecTag, openOf(fixture, opened),
                 FileOpSpec{.kind       = FileOpSpec::Kind::Write,
                            .range      = MediaRange{2, 0},
                            .writeBytes = bytesOf("XY")});
@@ -322,7 +325,7 @@ TEST_F(FileEndpointAdapterTest, WriteThroughReadOnlyOpenIsRefusedUnsupported) {
   ASSERT_TRUE(opened.has_value());
 
   const auto spec =
-      stageSpec(fixture, fileWriteSpecTag, lastOpen(fixture, path),
+      stageSpec(fixture, fileWriteSpecTag, openOf(fixture, opened),
                 FileOpSpec{.kind       = FileOpSpec::Kind::Write,
                            .range      = MediaRange{0, 0},
                            .writeBytes = bytesOf("nope")});
@@ -359,10 +362,10 @@ TEST_F(FileEndpointAdapterTest, TwoFilesShareOneAdapterAndDispatchByOpen) {
   EXPECT_EQ(fixture.adapter.openedCount(), 2U);
 
   const auto specA = stageSpec(
-      fixture, fileReadSpecTag, lastOpen(fixture, pathA),
+      fixture, fileReadSpecTag, openOf(fixture, openedA),
       FileOpSpec{.kind = FileOpSpec::Kind::Read, .range = MediaRange{0, 5}});
   const auto specB = stageSpec(
-      fixture, fileReadSpecTag, lastOpen(fixture, pathB),
+      fixture, fileReadSpecTag, openOf(fixture, openedB),
       FileOpSpec{.kind = FileOpSpec::Kind::Read, .range = MediaRange{0, 4}});
   const auto outcomeA =
       submitAndAwait(fixture, openedA->initialCapability, specA);
@@ -385,7 +388,7 @@ TEST_F(FileEndpointAdapterTest, TwoOpensOfOnePathAcrossReplaceKeepTheirInodes) {
   const auto openedA =
       openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
   ASSERT_TRUE(openedA.has_value());
-  const auto idA = lastOpen(fixture, path);
+  const auto idA = openOf(fixture, openedA);
 
   // Replace the file under the same path, then open it again.
   const auto replacement = (dir_ / "replacement.bin").string();
@@ -397,10 +400,7 @@ TEST_F(FileEndpointAdapterTest, TwoOpensOfOnePathAcrossReplaceKeepTheirInodes) {
   const auto openedB =
       openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
   ASSERT_TRUE(openedB.has_value());
-  const auto ids = fixture.adapter.openIdsFor(path);
-  ASSERT_EQ(ids.size(), 2U);
-  EXPECT_EQ(ids.front(), idA);
-  const auto idB = ids.back();
+  const auto idB = openOf(fixture, openedB);
   EXPECT_NE(idA, idB);
   EXPECT_EQ(fixture.adapter.openedCount(), 2U);
 
@@ -441,7 +441,7 @@ TEST_F(FileEndpointAdapterTest, ReleaseClosesTheOpenAndRefusesFurtherUse) {
   const auto opened =
       openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
   ASSERT_TRUE(opened.has_value());
-  const auto id = lastOpen(fixture, path);
+  const auto id = openOf(fixture, opened);
   EXPECT_EQ(fdCount(), baseline + 1);
 
   // A staged op dies with its open; the key is free again afterwards.
@@ -458,7 +458,7 @@ TEST_F(FileEndpointAdapterTest, ReleaseClosesTheOpenAndRefusesFurtherUse) {
   ASSERT_TRUE(released);
   EXPECT_EQ(*released, &fixture.adapter);
   EXPECT_EQ(fixture.adapter.openedCount(), 0U);
-  EXPECT_TRUE(fixture.adapter.openIdsFor(path).empty());
+  EXPECT_FALSE(fixture.adapter.openIdOf(opened->endpoint).has_value());
   EXPECT_FALSE(fixture.adapter.capabilities(id).has_value());
   EXPECT_EQ(fdCount(), baseline + 1);
   EXPECT_TRUE(held->probeCapabilities().has_value());
@@ -482,10 +482,12 @@ TEST_F(FileEndpointAdapterTest, DuplicateLiveStageKeyAcrossOpensIsRefused) {
     out << "beta";
   }
   FileEndpointFixture fixture;
-  ASSERT_TRUE(openAndAwait(fixture, pathA, fileRightRead, ioConsistencyLive));
-  ASSERT_TRUE(openAndAwait(fixture, pathB, fileRightRead, ioConsistencyLive));
-  const auto idA = lastOpen(fixture, pathA);
-  const auto idB = lastOpen(fixture, pathB);
+  const auto openedA =
+      openAndAwait(fixture, pathA, fileRightRead, ioConsistencyLive);
+  const auto openedB =
+      openAndAwait(fixture, pathB, fileRightRead, ioConsistencyLive);
+  const auto idA = openOf(fixture, openedA);
+  const auto idB = openOf(fixture, openedB);
 
   const auto spec = fixture.arena.makeCell(fileReadSpecTag);
   const FileOpSpec read{.kind = FileOpSpec::Kind::Read, .range = {0, 1}};
@@ -497,6 +499,164 @@ TEST_F(FileEndpointAdapterTest, DuplicateLiveStageKeyAcrossOpensIsRefused) {
   // Abandoning frees the key for reuse.
   fixture.adapter.abandon(spec);
   EXPECT_TRUE(fixture.adapter.stageAt(spec, {.open = idB, .op = read}));
+}
+
+/// Open @p path without awaiting: the request cell, for `awaitOutcome` later.
+std::optional<RequestCell> startOpen(FileEndpointFixture &fixture,
+                                     const std::string &path) {
+  const auto submitted = fixture.service->admitOpen(OpenSpec{
+      .adapterKey      = fileOpenAdapterKey,
+      .locator         = bytesOf(path),
+      .requestedRights = fileRightRead,
+      .consistency     = ioConsistencyLive,
+      .deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5)});
+  if (!std::holds_alternative<Admitted>(submitted.value)) return std::nullopt;
+  return std::get<Admitted>(submitted.value).request;
+}
+
+std::size_t openFdCount() {
+  std::size_t n = 0;
+  for ([[maybe_unused]] const auto &entry :
+       std::filesystem::directory_iterator("/proc/self/fd"))
+    ++n;
+  return n;
+}
+
+TEST_F(FileEndpointAdapterTest, ConcurrentOpensOfOnePathBindTheirOwnInodes) {
+  const auto path = makeFile("inode-A");
+  FileEndpointFixture fixture;
+
+  // Both opens are in flight before either is awaited; the replace lands
+  // between them, so completion order is the only thing that could mix them.
+  const auto first = startOpen(fixture, path);
+  ASSERT_TRUE(first.has_value());
+  const auto firstOutcome = awaitOutcome(*fixture.service, *first);
+  ASSERT_TRUE(firstOutcome.has_value());
+  const auto replacement = (dir_ / "replacement.bin").string();
+  {
+    std::ofstream out(replacement, std::ios::binary | std::ios::trunc);
+    out << "inode-B";
+  }
+  ASSERT_EQ(::rename(replacement.c_str(), path.c_str()), 0);
+  const auto second = startOpen(fixture, path);
+  const auto third  = startOpen(fixture, path);
+  ASSERT_TRUE(second.has_value());
+  ASSERT_TRUE(third.has_value());
+  const auto thirdOutcome  = awaitOutcome(*fixture.service, *third);
+  const auto secondOutcome = awaitOutcome(*fixture.service, *second);
+  ASSERT_TRUE(secondOutcome.has_value());
+  ASSERT_TRUE(thirdOutcome.has_value());
+
+  const auto openedA =
+      openedEndpointOf(fixture.schema, fixture.arena, *firstOutcome);
+  const auto openedB =
+      openedEndpointOf(fixture.schema, fixture.arena, *secondOutcome);
+  const auto openedC =
+      openedEndpointOf(fixture.schema, fixture.arena, *thirdOutcome);
+  ASSERT_TRUE(openedA && openedB && openedC);
+  const auto idA = openOf(fixture, openedA);
+  const auto idB = openOf(fixture, openedB);
+  const auto idC = openOf(fixture, openedC);
+  EXPECT_NE(idA, idB);
+  EXPECT_NE(idB, idC);
+  EXPECT_NE(idA, idC);
+  EXPECT_EQ(fixture.adapter.openedCount(), 3U);
+
+  const auto readOf = [&](const std::optional<OpenedEndpoint> &opened,
+                          const FileOpenId id) {
+    const auto spec = stageSpec(
+        fixture, fileReadSpecTag, id,
+        FileOpSpec{.kind = FileOpSpec::Kind::Read, .range = MediaRange{0, 7}});
+    const auto outcome =
+        submitAndAwait(fixture, opened->initialCapability, spec);
+    const auto bytes = outcome ? readOutcomePayload(fixture, *outcome)
+                               : std::unexpected(IoError{});
+    return bytes ? textOf(*bytes) : std::string{};
+  };
+  EXPECT_EQ(readOf(openedA, idA), "inode-A");
+  EXPECT_EQ(readOf(openedB, idB), "inode-B");
+  EXPECT_EQ(readOf(openedC, idC), "inode-B");
+}
+
+TEST_F(FileEndpointAdapterTest, CloseEndpointReleasesTheDescriptor) {
+  const auto path     = makeFile("close me");
+  const auto baseline = openFdCount();
+  FileEndpointFixture fixture;
+  const auto opened =
+      openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
+  ASSERT_TRUE(opened.has_value());
+  const auto id = openOf(fixture, opened);
+  EXPECT_EQ(openFdCount(), baseline + 1);
+
+  const auto close =
+      fixture.service->closeEndpoint(opened->endpoint, CloseMode::Graceful);
+  ASSERT_TRUE(std::holds_alternative<Admitted>(close.value));
+  const auto outcome =
+      awaitOutcome(*fixture.service, std::get<Admitted>(close.value).request);
+  ASSERT_TRUE(outcome.has_value());
+  EXPECT_EQ(ioOutcomeTag(fixture.arena, *outcome), IoOutcomeTag::Complete);
+  EXPECT_EQ(openFdCount(), baseline);
+  EXPECT_EQ(fixture.adapter.openedCount(), 0U);
+  EXPECT_FALSE(fixture.adapter.openIdOf(opened->endpoint).has_value());
+  EXPECT_FALSE(fixture.adapter.capabilities(id).has_value());
+
+  // Later work on the closed endpoint refuses.
+  EXPECT_FALSE(
+      fixture.adapter.stageAt(fixture.arena.makeCell(fileReadSpecTag),
+                              FileEndpointOp{.open = id, .op = FileOpSpec{}}));
+  const auto spec = fixture.arena.makeCell(fileReadSpecTag);
+  const auto late = fixture.service->submit(opened->initialCapability, spec);
+  EXPECT_TRUE(std::holds_alternative<Refused>(late.value));
+}
+
+TEST_F(FileEndpointAdapterTest, SecondCloseIsRefusedTyped) {
+  const auto path = makeFile("close twice");
+  FileEndpointFixture fixture;
+  const auto opened =
+      openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
+  ASSERT_TRUE(opened.has_value());
+  const auto first =
+      fixture.service->closeEndpoint(opened->endpoint, CloseMode::Graceful);
+  ASSERT_TRUE(std::holds_alternative<Admitted>(first.value));
+  ASSERT_TRUE(
+      awaitOutcome(*fixture.service, std::get<Admitted>(first.value).request));
+
+  const auto second =
+      fixture.service->closeEndpoint(opened->endpoint, CloseMode::Graceful);
+  ASSERT_TRUE(std::holds_alternative<Refused>(second.value));
+  EXPECT_EQ(
+      ioOutcomeTag(fixture.arena, std::get<Refused>(second.value).outcome),
+      IoOutcomeTag::Rejected);
+
+  // Below the service's tombstone the adapter refuses too: no binding is
+  // left, so the decoder cannot even freeze a second close.
+  EXPECT_FALSE(makeFileCloseDecoder(fixture.adapter)(opened->endpoint,
+                                                     CloseMode::Graceful));
+  EXPECT_FALSE(fixture.adapter.release(FileOpenId{1}));
+}
+
+TEST_F(FileEndpointAdapterTest, CloseWithAnOpInFlightKeepsTheFileUntilItEnds) {
+  const auto path     = makeFile("in flight");
+  const auto baseline = openFdCount();
+  FileEndpointFixture fixture;
+  const auto opened =
+      openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
+  ASSERT_TRUE(opened.has_value());
+  const auto id = openOf(fixture, opened);
+
+  // An executing op holds the file exactly as this holder does.
+  auto inFlight = fixture.adapter.fileFor(id);
+  ASSERT_NE(inFlight, nullptr);
+  const auto close =
+      fixture.service->closeEndpoint(opened->endpoint, CloseMode::Graceful);
+  ASSERT_TRUE(std::holds_alternative<Admitted>(close.value));
+  ASSERT_TRUE(
+      awaitOutcome(*fixture.service, std::get<Admitted>(close.value).request));
+  EXPECT_EQ(fixture.adapter.openedCount(), 0U);
+  EXPECT_EQ(openFdCount(), baseline + 1);
+  EXPECT_TRUE(inFlight->probeCapabilities().has_value());
+  inFlight.reset();
+  EXPECT_EQ(openFdCount(), baseline);
 }
 
 } // namespace

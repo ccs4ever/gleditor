@@ -835,11 +835,17 @@ M5 implementation notes and deliberate deferrals:
   so every later op addresses the opened inode (`FileSourceIdentity::OpenedInode`, declared on
   `FileOpenCapabilities`). `makeFileRequestDecoder` freezes spec-cell text into `CellRequest`s;
   `stageAt` keys are the minted spec cells' refs (`StageKey`, the width of `OwnerCell`) and a live
-  duplicate is refused. `release(FileOpenId)` is the close path; in-flight operations hold the file
-  by `shared_ptr`, so the descriptor closes when the last one lets go. Deferred: nothing maps an
-  `EndpointCell` to its `FileOpenId`, so `IoService::closeEndpoint` does not yet reach `release`
-  (the owner calls it); await each open before starting another of the same locator so
-  `openIdsFor(locator).back()` is the one just completed.
+  duplicate is refused. Each open's `FileOpenId` is recorded under the open request's private token
+  when the descriptor is adopted, and the generic `IoAdapter::openSettled(token, opened)` hook
+  (called by the service once the outcome mints the endpoint, or with nullopt when none was minted,
+  which drops the open) binds it to the `EndpointCell`; `openIdOf(endpoint)` replaces the old
+  `openIdsFor(locator).back()` guess, so concurrent opens of one path need no ordering.
+  `IoService::closeEndpoint` reaches `release(FileOpenId)` through `makeFileCloseDecoder` (a Control
+  request under `fileCloseAdapterKey`, frozen against the endpoint's initial capability) whose
+  execute releases the open; the service already runs it after the endpoint's in-flight work, and
+  in-flight operations hold the file by `shared_ptr`, so the descriptor closes when the last one
+  lets go. A second close is refused `Conflict` by the service tombstone and `Stale` by the adapter
+  once the binding is gone.
 - Live/stable consistency is typed vocabulary, not adapter-private: `SourceConsistency` lives in
   `io_cells.hpp`, `ioConsistencyLive`/`ioConsistencyStable` mask
   `OpenSpec`/`OpenGrant::consistency`, and `FileSourceAdapter` offers `Live` only — a `Stable`

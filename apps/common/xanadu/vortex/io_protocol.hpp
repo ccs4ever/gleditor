@@ -291,6 +291,15 @@ public:
   /// staging adapters can drop the entry; adapters that stage nothing (and
   /// requests whose specification names no entry) inherit the no-op.
   virtual void abandonStaged(OwnerCell) noexcept {}
+  /// Owner-thread: called once per open request when its terminal outcome
+  /// is settled. @p opened carries the endpoint/capability the service
+  /// minted for it, or nullopt when the open produced none (it failed, was
+  /// cancelled, or the mint was refused). Keyed by the request's private
+  /// token, so concurrent opens of one locator bind unambiguously -- an
+  /// adapter that holds per-open resources binds them to the endpoint here
+  /// or drops them.
+  virtual void openSettled(PrivateRequestToken,
+                           const std::optional<OpenedEndpoint> &) noexcept {}
   virtual ~IoAdapter() = default;
 };
 

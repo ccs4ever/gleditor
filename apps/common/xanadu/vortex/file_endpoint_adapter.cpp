@@ -91,6 +91,9 @@ auto FileEndpointAdapter::release(const FileOpenId open)
     if (it == files_.end()) return std::unexpected("no live open for this id");
     file = std::move(it->second.file);
     files_.erase(it);
+    std::erase_if(bound_, [open](const auto &entry) {
+      return entry.second.open == open;
+    });
     for (auto route = stagedOpen_.begin(); route != stagedOpen_.end();) {
       if (route->second == open) {
         dropped.push_back(route->first);
@@ -128,6 +131,15 @@ auto FileEndpointAdapter::prepare(const CellRequest &request,
     bytes.reserve(spec.locator.size() + 1);
     bytes.push_back(static_cast<std::byte>(writable ? openFlagWritable : 0));
     bytes.insert(bytes.end(), spec.locator.begin(), spec.locator.end());
+    return PreparedOperation{request.key, std::move(bytes)};
+  }
+  if (request.closeOperation) {
+    if (!request.endpoint)
+      return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+    const auto open = openIdOf(*request.endpoint);
+    if (!open) return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
+    std::vector<std::byte> bytes(sizeof(open->value));
+    std::memcpy(bytes.data(), &open->value, sizeof(open->value));
     return PreparedOperation{request.key, std::move(bytes)};
   }
   // Data op: route through the staged key to the file that owns it, then
@@ -182,6 +194,7 @@ void FileEndpointAdapter::execute(const BackendCommand &command,
       opened = std::make_shared<FileSourceAdapter>(fd, locator, writable);
       const std::lock_guard lock(mutex_);
       files_.emplace(nextOpenId_, OpenFile{locator, opened});
+      pendingOpens_.emplace(command.token.value, nextOpenId_);
       ++nextOpenId_.value;
     } catch (...) {
       GLEDITOR_LOG_WARN(fileLogCategory,
@@ -197,6 +210,21 @@ void FileEndpointAdapter::execute(const BackendCommand &command,
     // Complete.value for an open request; monostate is the placeholder.
     reportTerminal(sink, command.token,
                    Complete{{}, std::monostate{}, terminalProgress()});
+    return;
+  }
+  if (command.operation.key == fileCloseAdapterKey) {
+    FileOpenId open{};
+    if (command.operation.bytes.size() >= sizeof(open.value))
+      std::memcpy(&open.value, command.operation.bytes.data(),
+                  sizeof(open.value));
+    // In-flight data ops hold their own shared_ptr to the file, so the
+    // descriptor closes only after the last of them lets go.
+    const auto released = release(open);
+    reportTerminal(
+        sink, command.token,
+        released ? IoOutcome{Complete{{}, std::monostate{}, terminalProgress()}}
+                 : IoOutcome{Failed{
+                       {IoErrorCode::Stale, 0}, {}, terminalProgress()}});
     return;
   }
   // Data op: decode the staged key prepare encoded, route to the owning
@@ -252,14 +280,47 @@ auto FileEndpointAdapter::openedCount() const -> std::size_t {
   return files_.size();
 }
 
-auto FileEndpointAdapter::openIdsFor(const std::string_view locator) const
-    -> std::vector<FileOpenId> {
+void FileEndpointAdapter::openSettled(
+    const PrivateRequestToken request,
+    const std::optional<OpenedEndpoint> &opened) noexcept {
+  try {
+    std::shared_ptr<FileSourceAdapter> dropped;
+    const std::lock_guard lock(mutex_);
+    const auto pending = pendingOpens_.find(request.value);
+    if (pending == pendingOpens_.end()) return;
+    const auto open = pending->second;
+    pendingOpens_.erase(pending);
+    if (opened) {
+      bound_.insert_or_assign(
+          EndpointKey{opened->endpoint.cell, opened->endpoint.incarnation},
+          Binding{open, opened->initialCapability});
+      return;
+    }
+    // The open completed natively but no endpoint was minted for it:
+    // nothing can ever address it, so let the descriptor go.
+    if (const auto it = files_.find(open); it != files_.end()) {
+      dropped = std::move(it->second.file);
+      files_.erase(it);
+    }
+  } catch (...) {
+    GLEDITOR_LOG_WARN(fileLogCategory, "openSettled threw; binding skipped");
+  }
+}
+
+auto FileEndpointAdapter::openIdOf(const EndpointCell endpoint) const
+    -> std::optional<FileOpenId> {
   const std::lock_guard lock(mutex_);
-  std::vector<FileOpenId> ids;
-  // The map is ordered by id, and ids mint in completion order.
-  for (const auto &[id, open] : files_)
-    if (open.locator == locator) ids.push_back(id);
-  return ids;
+  const auto it = bound_.find(EndpointKey{endpoint.cell, endpoint.incarnation});
+  if (it == bound_.end()) return std::nullopt;
+  return it->second.open;
+}
+
+auto FileEndpointAdapter::capabilityOf(const EndpointCell endpoint) const
+    -> std::optional<CapabilityCell> {
+  const std::lock_guard lock(mutex_);
+  const auto it = bound_.find(EndpointKey{endpoint.cell, endpoint.incarnation});
+  if (it == bound_.end()) return std::nullopt;
+  return it->second.capability;
 }
 
 auto FileEndpointAdapter::fileFor(const FileOpenId open)
@@ -267,6 +328,22 @@ auto FileEndpointAdapter::fileFor(const FileOpenId open)
   const std::lock_guard lock(mutex_);
   const auto it = files_.find(open);
   return it == files_.end() ? nullptr : it->second.file;
+}
+
+auto makeFileCloseDecoder(const FileEndpointAdapter &adapter)
+    -> std::function<std::expected<CellRequest, IoErrorInfo>(EndpointCell,
+                                                             CloseMode)> {
+  return [&adapter](const EndpointCell endpoint,
+                    CloseMode) -> std::expected<CellRequest, IoErrorInfo> {
+    const auto capability = adapter.capabilityOf(endpoint);
+    if (!capability) return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
+    return CellRequest{.key                  = fileCloseAdapterKey,
+                       .capability           = *capability,
+                       .endpoint             = endpoint,
+                       .completionBoundBytes = fileCompletionBoundBytes,
+                       .closeOperation       = true,
+                       .direction            = CellRequest::Direction::Control};
+  };
 }
 
 auto makeFileRequestDecoder(zigzag::ArenaManifold &arena, AdapterKey dataKey,

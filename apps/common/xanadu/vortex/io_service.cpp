@@ -700,14 +700,17 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
                                        : errorOutcome(publication.error());
       }
       if (state.open) {
+        std::optional<OpenedEndpoint> minted;
         if (auto *complete = std::get_if<Complete>(&outcome)) {
           const auto opened = cells_.mintOpenedEndpoint(*state.open);
           if (opened) {
             complete->value = *opened;
+            minted          = *opened;
           } else {
             outcome = errorOutcome(opened.error());
           }
         }
+        state.adapter->openSettled(state.token, minted);
       }
       // A payload lease may only ride an outcome variant that has a
       // payload field; attaching one to EndOfStream/Overflow/... would

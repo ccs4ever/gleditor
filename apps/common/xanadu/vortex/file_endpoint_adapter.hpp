@@ -30,13 +30,22 @@
  *   ops, and lets the descriptor close once the last in-flight operation
  *   holding the file lets go.
  *
- * Endpoint-to-open binding is the caller/staged-spec contract, the same
- * trust model M4's staged adapters use: the capability cell proves WHICH
- * endpoint admitted the request, and the staged spec names WHICH opened
- * file it addresses. A spec naming an open this adapter does not hold is
- * refused at `stageAt`. `openIdsFor` lists a locator's live opens in
- * completion order; await each open before starting the next of the same
- * locator so the newest id is the one just completed.
+ * Endpoint-to-open binding: each open's `FileOpenId` is recorded under the
+ * open request's private token when the descriptor is adopted, and
+ * `openSettled` (the service's hook, called when that request's outcome is
+ * published) moves it to the minted endpoint. Concurrent opens of one path
+ * therefore bind to their own endpoints with no ordering assumption, and
+ * `openIdOf(endpoint)` is how an owner finds the id `stageAt` wants.
+ * The capability cell proves WHICH endpoint admitted a data request, and
+ * the staged spec names WHICH opened file it addresses (the M4 trust
+ * model); a spec naming an open this adapter does not hold is refused at
+ * `stageAt`.
+ *
+ * Close: `IoService::closeEndpoint` admits a request under
+ * `fileCloseAdapterKey` (`makeFileCloseDecoder`), whose execute calls
+ * `release` for the endpoint's open. The service runs it after the
+ * endpoint's in-flight work, and a second close finds no binding and is
+ * refused `Stale` at prepare.
  */
 
 #include <cstdint>
@@ -53,6 +62,7 @@
 
 #include "common/xanadu/vortex/file_source_adapter.hpp"
 #include "common/xanadu/vortex/io_protocol.hpp"
+#include "common/xanadu/vortex/io_service.hpp"
 
 namespace zigzag {
 class ArenaManifold;
@@ -67,6 +77,7 @@ namespace xanadu::vortex {
 inline constexpr std::uint32_t fileSourceKind = 4;
 inline constexpr AdapterKey fileOpenAdapterKey{fileSourceKind, 1};
 inline constexpr AdapterKey fileDataAdapterKey{fileSourceKind, 2};
+inline constexpr AdapterKey fileCloseAdapterKey{fileSourceKind, 3};
 
 /// Identity of one completed open of a file endpoint. Minted per open, so
 /// two opens of the same path are two ids.
@@ -114,6 +125,13 @@ public:
   [[nodiscard]] std::expected<FileEndpointAdapter *, std::string>
   release(FileOpenId open);
 
+  /// `IoAdapter` hook: binds the open this request completed to the
+  /// endpoint minted for it (and its initial capability, which the close
+  /// request is bound to); with no endpoint it releases that open instead.
+  void
+  openSettled(PrivateRequestToken request,
+              const std::optional<OpenedEndpoint> &opened) noexcept override;
+
   /// `IoAdapter` hook: the service calls this with the request's
   /// `specification` when a submission is refused or its request reaches a
   /// terminal state without `execute` consuming the staged entry.
@@ -135,9 +153,14 @@ public:
   [[nodiscard]] auto capabilities(FileOpenId open) const
       -> std::optional<FileOpenCapabilities>;
   [[nodiscard]] auto openedCount() const -> std::size_t;
-  /// Live opens of @p locator, oldest completion first.
-  [[nodiscard]] auto openIdsFor(std::string_view locator) const
-      -> std::vector<FileOpenId>;
+  /// The open bound to @p endpoint, or nullopt when it was never bound or
+  /// has been released.
+  [[nodiscard]] auto openIdOf(EndpointCell endpoint) const
+      -> std::optional<FileOpenId>;
+  /// The initial capability minted with @p endpoint's open; the close
+  /// request is frozen against it.
+  [[nodiscard]] auto capabilityOf(EndpointCell endpoint) const
+      -> std::optional<CapabilityCell>;
   /// The `FileSourceAdapter` of a live open, for adapter-level tests and
   /// owners that need its observation/decode-lease views; null when
   /// @p open is not live. Shared so the caller's use cannot outlive it.
@@ -145,6 +168,11 @@ public:
       -> std::shared_ptr<FileSourceAdapter>;
 
 private:
+  struct Binding {
+    FileOpenId open;
+    CapabilityCell capability;
+  };
+  using EndpointKey = std::pair<zigzag::CellRef, AllocationIncarnation>;
   struct OpenFile {
     std::string locator;
     std::shared_ptr<FileSourceAdapter> file;
@@ -158,11 +186,24 @@ private:
   /// mid-call.
   std::map<FileOpenId, OpenFile> files_;
   FileOpenId nextOpenId_{1};
+  /// request token -> the open that request completed, until `openSettled`
+  /// binds it to its endpoint (or drops it).
+  std::unordered_map<std::uint64_t, FileOpenId> pendingOpens_;
+  std::map<EndpointKey, Binding> bound_;
   /// staged spec key -> the open that owns it, so `execute`/`abandonStaged`
   /// can route a data op to its file. Entries live from `stageAt` until
   /// `execute` consumes them or `abandon`/`release` drops them.
   std::unordered_map<StageKey, FileOpenId> stagedOpen_;
 };
+
+/// Build the `CloseDecoder` for `ArenaIoCellStore`: freezes a Control
+/// request under `fileCloseAdapterKey` against the endpoint's initial
+/// capability, which @p adapter remembers from `openSettled`. An endpoint
+/// the adapter has no binding for is refused `Stale`. @p adapter must
+/// outlive the returned function.
+[[nodiscard]] std::function<
+    std::expected<CellRequest, IoErrorInfo>(EndpointCell, CloseMode)>
+makeFileCloseDecoder(const FileEndpointAdapter &adapter);
 
 /// Build the `RequestDecoder` an `ArenaIoCellStore` needs for file
 /// endpoints opened through `FileEndpointAdapter` registered at @p
