@@ -419,23 +419,33 @@ auto ArenaIoCellStore::mintRefusal(const IoErrorInfo error) -> OutcomeCell {
   // §3.2: a Rejected outcome carries the IoErrorInfo that refused it, so
   // BudgetExceeded and Unsupported refusals stay distinguishable to readers.
   const auto mark = arena_.mark();
-  const auto outcome =
-      makeOutcomeCell(arena_, schema_, std::nullopt, IoOutcomeTag::Rejected);
-  if (!outcome ||
-      !appendField(arena_, outcome->cell, schema_.dim(IoDimension::Occurrence),
-                   schema_.dim(IoDimension::State), "errorCode",
-                   toString(error.code)) ||
-      !appendField(arena_, outcome->cell, schema_.dim(IoDimension::Occurrence),
-                   schema_.dim(IoDimension::State), "stableDetail",
-                   number(error.stableDetail))) {
+  try {
+    const auto outcome =
+        makeOutcomeCell(arena_, schema_, std::nullopt, IoOutcomeTag::Rejected);
+    if (!outcome ||
+        !appendField(arena_, outcome->cell,
+                     schema_.dim(IoDimension::Occurrence),
+                     schema_.dim(IoDimension::State), "errorCode",
+                     toString(error.code)) ||
+        !appendField(arena_, outcome->cell,
+                     schema_.dim(IoDimension::Occurrence),
+                     schema_.dim(IoDimension::State), "stableDetail",
+                     number(error.stableDetail))) {
+      static_cast<void>(arena_.release(mark));
+      return {};
+    }
+    if (!arena_.discard(mark)) {
+      static_cast<void>(arena_.release(mark));
+      return {};
+    }
+    return *outcome;
+  } catch (...) {
+    // A throw mid-mint (a field cell's allocation, a resolver fault)
+    // must not strand the choice point: release it and propagate, the
+    // same unwind io_cells.cpp's transact() performs.
     static_cast<void>(arena_.release(mark));
-    return {};
+    throw;
   }
-  if (!arena_.discard(mark)) {
-    static_cast<void>(arena_.release(mark));
-    return {};
-  }
-  return *outcome;
 }
 
 auto ArenaIoCellStore::outcomeFor(const RequestCell request)
@@ -464,32 +474,37 @@ auto ArenaIoCellStore::publishTerminal(const RequestCell request,
     return std::unexpected{IoErrorInfo{IoErrorCode::Stale, 0}};
   }
   const auto mark = arena_.mark();
-  const auto cell =
-      makeOutcomeCell(arena_, schema_, request, outcomeTag(outcome));
-  if (!cell) {
-    static_cast<void>(arena_.release(mark));
-    return std::unexpected{cellError(cell.error())};
-  }
-  auto payload = outcomePayload(outcome);
-  if (lease) {
-    if (payload && *payload != lease->range) {
+  try {
+    const auto cell =
+        makeOutcomeCell(arena_, schema_, request, outcomeTag(outcome));
+    if (!cell) {
       static_cast<void>(arena_.release(mark));
-      return std::unexpected{IoErrorInfo{IoErrorCode::InvalidRequest, 3}};
+      return std::unexpected{cellError(cell.error())};
     }
-    payload = lease->range;
-  }
-  if (!addProgress(arena_, schema_, cell->cell, progress) ||
-      !addOutcomeDetails(arena_, schema_, cell->cell, outcome) ||
-      (payload &&
-       !addPayload(arena_, schema_, payloads_, cell->cell, *payload, lease))) {
+    auto payload = outcomePayload(outcome);
+    if (lease) {
+      if (payload && *payload != lease->range) {
+        static_cast<void>(arena_.release(mark));
+        return std::unexpected{IoErrorInfo{IoErrorCode::InvalidRequest, 3}};
+      }
+      payload = lease->range;
+    }
+    if (!addProgress(arena_, schema_, cell->cell, progress) ||
+        !addOutcomeDetails(arena_, schema_, cell->cell, outcome) ||
+        (payload && !addPayload(arena_, schema_, payloads_, cell->cell,
+                                *payload, lease))) {
+      static_cast<void>(arena_.release(mark));
+      return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 0}};
+    }
+    if (!arena_.discard(mark)) {
+      static_cast<void>(arena_.release(mark));
+      return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 1}};
+    }
+    return *cell;
+  } catch (...) {
     static_cast<void>(arena_.release(mark));
-    return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 0}};
+    throw;
   }
-  if (!arena_.discard(mark)) {
-    static_cast<void>(arena_.release(mark));
-    return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 1}};
-  }
-  return *cell;
 }
 
 auto ArenaIoCellStore::isOutcomeCurrent(
@@ -503,38 +518,43 @@ auto ArenaIoCellStore::mintOpenedEndpoint(const OpenSpec &spec)
   auto grant = openGrant(spec);
   if (!grant) return std::unexpected{grant.error()};
   const auto mark = arena_.mark();
-  auto endpoint   = makeEndpointCell(arena_, schema_);
-  if (!endpoint) {
+  try {
+    auto endpoint = makeEndpointCell(arena_, schema_);
+    if (!endpoint) {
+      static_cast<void>(arena_.release(mark));
+      return std::unexpected{cellError(endpoint.error())};
+    }
+    auto capability = makeCapabilityCell(arena_, schema_, *endpoint);
+    if (!capability) {
+      static_cast<void>(arena_.release(mark));
+      return std::unexpected{cellError(capability.error())};
+    }
+    if (spec.authCapability &&
+        !attachCanonical(arena_, schema_, capability->cell,
+                         IoDimension::Capability, spec.authCapability->cell)) {
+      static_cast<void>(arena_.release(mark));
+      return std::unexpected{IoErrorInfo{IoErrorCode::InvalidCapability, 3}};
+    }
+    if (!appendField(arena_, capability->cell,
+                     schema_.dim(IoDimension::Occurrence),
+                     schema_.dim(IoDimension::State), "rights",
+                     number(spec.requestedRights)) ||
+        !appendField(arena_, capability->cell,
+                     schema_.dim(IoDimension::Occurrence),
+                     schema_.dim(IoDimension::State), "consistency",
+                     number(spec.consistency))) {
+      static_cast<void>(arena_.release(mark));
+      return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 3}};
+    }
+    if (!arena_.discard(mark)) {
+      static_cast<void>(arena_.release(mark));
+      return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 2}};
+    }
+    return OpenedEndpoint{*endpoint, *capability};
+  } catch (...) {
     static_cast<void>(arena_.release(mark));
-    return std::unexpected{cellError(endpoint.error())};
+    throw;
   }
-  auto capability = makeCapabilityCell(arena_, schema_, *endpoint);
-  if (!capability) {
-    static_cast<void>(arena_.release(mark));
-    return std::unexpected{cellError(capability.error())};
-  }
-  if (spec.authCapability &&
-      !attachCanonical(arena_, schema_, capability->cell,
-                       IoDimension::Capability, spec.authCapability->cell)) {
-    static_cast<void>(arena_.release(mark));
-    return std::unexpected{IoErrorInfo{IoErrorCode::InvalidCapability, 3}};
-  }
-  if (!appendField(arena_, capability->cell,
-                   schema_.dim(IoDimension::Occurrence),
-                   schema_.dim(IoDimension::State), "rights",
-                   number(spec.requestedRights)) ||
-      !appendField(arena_, capability->cell,
-                   schema_.dim(IoDimension::Occurrence),
-                   schema_.dim(IoDimension::State), "consistency",
-                   number(spec.consistency))) {
-    static_cast<void>(arena_.release(mark));
-    return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 3}};
-  }
-  if (!arena_.discard(mark)) {
-    static_cast<void>(arena_.release(mark));
-    return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 2}};
-  }
-  return OpenedEndpoint{*endpoint, *capability};
 }
 
 auto ArenaIoCellStore::mintWaiter(const RequestCell request,
@@ -547,40 +567,46 @@ auto ArenaIoCellStore::mintWaiter(const RequestCell request,
   // One choice point for the whole waiter graph: a mid-mint refusal must not
   // orphan the request occurrence or field cells it already made.
   const auto mark = arena_.mark();
-  auto waiter     = makeWaiterCell(arena_);
-  if (!waiter) {
-    static_cast<void>(arena_.release(mark));
-    return std::unexpected{cellError(waiter.error())};
-  }
-  const auto requestOccurrence = arena_.makeCell("io waiter request");
-  const auto requestOccurrenceIncarnation =
-      arena_.incarnationOf(requestOccurrence);
-  const auto dim = schema_.dim(IoDimension::Request);
-  if (!requestOccurrenceIncarnation ||
-      !arena_.markRuntimeOnly(requestOccurrence) ||
-      !arena_.link(waiter->cell, dim, DimVector::POS, requestOccurrence) ||
-      !arena_.link(requestOccurrence, dim, DimVector::POS, request.cell)) {
-    static_cast<void>(arena_.release(mark));
-    return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 2}};
-  }
-  const auto values = std::array{
-      std::pair{std::string_view{"cursor"}, number(registration.cursor)},
-      std::pair{std::string_view{"cursorIncarnation"},
-                number(registration.cursorIncarnation)},
-      std::pair{std::string_view{"continuation"},
-                number(registration.continuation)}};
-  for (const auto &[label, value] : values) {
-    if (!appendField(arena_, waiter->cell, schema_.dim(IoDimension::Occurrence),
-                     schema_.dim(IoDimension::State), label, value)) {
+  try {
+    auto waiter = makeWaiterCell(arena_);
+    if (!waiter) {
       static_cast<void>(arena_.release(mark));
-      return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 3}};
+      return std::unexpected{cellError(waiter.error())};
     }
-  }
-  if (!arena_.discard(mark)) {
+    const auto requestOccurrence = arena_.makeCell("io waiter request");
+    const auto requestOccurrenceIncarnation =
+        arena_.incarnationOf(requestOccurrence);
+    const auto dim = schema_.dim(IoDimension::Request);
+    if (!requestOccurrenceIncarnation ||
+        !arena_.markRuntimeOnly(requestOccurrence) ||
+        !arena_.link(waiter->cell, dim, DimVector::POS, requestOccurrence) ||
+        !arena_.link(requestOccurrence, dim, DimVector::POS, request.cell)) {
+      static_cast<void>(arena_.release(mark));
+      return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 2}};
+    }
+    const auto values = std::array{
+        std::pair{std::string_view{"cursor"}, number(registration.cursor)},
+        std::pair{std::string_view{"cursorIncarnation"},
+                  number(registration.cursorIncarnation)},
+        std::pair{std::string_view{"continuation"},
+                  number(registration.continuation)}};
+    for (const auto &[label, value] : values) {
+      if (!appendField(arena_, waiter->cell,
+                       schema_.dim(IoDimension::Occurrence),
+                       schema_.dim(IoDimension::State), label, value)) {
+        static_cast<void>(arena_.release(mark));
+        return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 3}};
+      }
+    }
+    if (!arena_.discard(mark)) {
+      static_cast<void>(arena_.release(mark));
+      return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 4}};
+    }
+    return *waiter;
+  } catch (...) {
     static_cast<void>(arena_.release(mark));
-    return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 4}};
+    throw;
   }
-  return *waiter;
 }
 
 void ArenaIoCellStore::retireWaiter(const WaiterCell waiter) noexcept {
