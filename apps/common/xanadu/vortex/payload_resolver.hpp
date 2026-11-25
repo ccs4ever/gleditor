@@ -6,6 +6,7 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -84,7 +85,10 @@ public:
   auto operator=(PayloadResolver &&) -> PayloadResolver &      = delete;
 
   /// Admit backend bytes as an immutable chunk. @p ref.kind must be Transient
-  /// or Proxy; durable and scratch bytes enter only through resolve*.
+  /// or Proxy; durable and scratch bytes enter only through resolve*. The
+  /// origin stays resolvable until its first retain and again only while a
+  /// lease or owner token pins the bytes; an origin never retained keeps its
+  /// bytes until retireSource or resolver destruction.
   auto registerSource(PayloadRef ref, std::span<const std::byte> bytes)
       -> std::expected<PayloadRef, IoError>;
   /// Stop new retains of @p ref; leases already taken keep their chunk.
@@ -124,6 +128,11 @@ public:
       -> std::expected<xanadu::PrimediaSpan, IoError>;
 
   [[nodiscard]] auto liveLeases() const -> std::size_t;
+  /// Sources whose bytes are still reachable: every durable origin plus each
+  /// transient/proxy origin with a live registration pin, lease or owner
+  /// token. Expired transient entries awaiting a sweep are not counted, so a
+  /// falling count is the observable proof a chunk was recycled (§8.1).
+  [[nodiscard]] auto liveSources() const -> std::size_t;
   void release(LeaseId lease) noexcept;
 
 private:
@@ -136,14 +145,42 @@ private:
  *        the designed channel for adapter-produced output bytes (plan §3.2,
  *        §4). The caller places `lease->range` in the terminal outcome's
  *        payload field and hands the lease to
- *        CompletionSink::terminalCandidate; the source stays registered so
- *        owner-side consumers can resolve the range through the same
- *        resolver. A process-wide counter mints each source id, so equal
- *        bytes never merge identity.
+ *        CompletionSink::terminalCandidate; the source stays resolvable
+ *        through the same resolver while any lease or owner token pins the
+ *        bytes, and recycles once the last one releases (plan §8.1). A
+ *        process-wide counter mints each source id, so equal bytes never
+ *        merge identity.
  */
 auto publishTransientBytes(PayloadResolver &resolver,
                            std::span<const std::byte> bytes)
     -> std::expected<PayloadLease, IoError>;
+
+/**
+ * @brief Releases the lease inside @p payload on destruction. Adapter execute
+ *        frames hold one so a PayloadLease dropped on any path -- a catch
+ *        block, an early return -- cannot pin its chunk forever; on the
+ *        success path terminalCandidate already released the same id, which
+ *        makes the guard's release a harmless no-op.
+ */
+class PayloadLeaseGuard {
+public:
+  PayloadLeaseGuard(PayloadResolver &resolver,
+                    std::optional<PayloadLease> &payload) noexcept
+      : resolver_(&resolver), payload_(&payload) {}
+  PayloadLeaseGuard(const PayloadLeaseGuard &)                     = delete;
+  auto operator=(const PayloadLeaseGuard &) -> PayloadLeaseGuard & = delete;
+  PayloadLeaseGuard(PayloadLeaseGuard &&)                          = delete;
+  auto operator=(PayloadLeaseGuard &&) -> PayloadLeaseGuard &      = delete;
+  ~PayloadLeaseGuard() {
+    if (payload_ && payload_->has_value()) {
+      resolver_->release(payload_->value().lease);
+    }
+  }
+
+private:
+  PayloadResolver *resolver_;
+  std::optional<PayloadLease> *payload_;
+};
 
 } // namespace xanadu::vortex
 

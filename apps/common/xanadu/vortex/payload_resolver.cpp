@@ -61,8 +61,24 @@ struct PayloadResolver::State {
     Chunk bytes;
   };
 
+  /// A registered transient/proxy origin. `pinned` is the registration's own
+  /// strong reference and is consumed by the first retain; afterwards the
+  /// entry keeps only a weak reference, so the chunk lives exactly as long as
+  /// some lease or owner token still pins it and recycles once the last one
+  /// releases (plan §8.1). An origin registered but never retained keeps its
+  /// bytes until retireSource or resolver destruction -- the pin is what makes
+  /// register-then-retain safe across threads.
+  struct TransientSource {
+    Chunk pinned;
+    std::weak_ptr<const std::vector<std::byte>> bytes;
+  };
+
   mutable std::mutex mutex;
+  /// Durable origins only: permascroll bytes are persistent by design and
+  /// stay resolvable for the resolver's lifetime.
   std::unordered_map<PayloadRef, Chunk, PayloadRefHash> sources;
+  std::unordered_map<PayloadRef, TransientSource, PayloadRefHash>
+      transientSources;
   std::unordered_map<LeaseId, Held> leases;
   LeaseId nextLease{1};
   std::uint64_t nextScratchOccurrence{1};
@@ -91,6 +107,45 @@ struct PayloadResolver::State {
       return refuse(IoErrorCode::InvalidRequest);
     }
     return lease(range, found->second);
+  }
+
+  /// Caller holds mutex. Drops expired transient entries; called on the
+  /// miss path so bookkeeping stays proportional to live sources.
+  void sweepTransient() {
+    for (auto at = transientSources.begin(); at != transientSources.end();) {
+      if (!at->second.pinned && at->second.bytes.expired()) {
+        at = transientSources.erase(at);
+      } else {
+        ++at;
+      }
+    }
+  }
+
+  /// Caller holds mutex. A transient/proxy origin resolves only while its
+  /// bytes are still pinned by a lease or owner token; once the last one is
+  /// gone the source is gone too (plan §8.1). The registration pin is dropped
+  /// only by a successful retain, so a refused range never orphans the
+  /// source.
+  auto retainTransient(const PayloadRange &range)
+      -> std::expected<PayloadLease, IoError> {
+    const auto found = transientSources.find(range.origin);
+    if (found != transientSources.end()) {
+      // `pinned` keeps the weak reference valid until the first retain, so a
+      // null lock means the last lease and owner token are already gone.
+      Chunk chunk = found->second.bytes.lock();
+      if (chunk) {
+        if (!within(range.offset, range.length, chunk->size())) {
+          return refuse(IoErrorCode::InvalidRequest);
+        }
+        found->second.pinned.reset();
+        return lease(range, std::move(chunk));
+      }
+      transientSources.erase(found);
+    }
+    sweepTransient();
+    GLEDITOR_LOG_DEBUG("vortex.io", "payload origin unresolved (kind {})",
+                       static_cast<int>(range.origin.kind));
+    return refuse(IoErrorCode::Unresolved);
   }
 
   /// Caller holds mutex.
@@ -129,7 +184,12 @@ auto PayloadResolver::registerSource(const PayloadRef ref,
                                                               bytes.end());
   const std::lock_guard lock(state_->mutex);
   // Re-registering an origin would let one identity name two byte strings.
-  if (!state_->sources.try_emplace(ref, std::move(owned)).second) {
+  // `pinned` keeps the bytes alive until the first retain adopts them into a
+  // lease; from then on only leases and owner tokens hold the chunk.
+  if (!state_->transientSources
+           .try_emplace(ref,
+                        State::TransientSource{.pinned = owned, .bytes = owned})
+           .second) {
     return refuse(IoErrorCode::Conflict);
   }
   return ref;
@@ -138,6 +198,7 @@ auto PayloadResolver::registerSource(const PayloadRef ref,
 auto PayloadResolver::retireSource(const PayloadRef ref) -> PayloadResolver * {
   const std::lock_guard lock(state_->mutex);
   state_->sources.erase(ref);
+  state_->transientSources.erase(ref);
   return this;
 }
 
@@ -210,7 +271,7 @@ auto PayloadResolver::resolveTransient(const PayloadRange range)
     return refuse(IoErrorCode::InvalidRequest);
   }
   const std::lock_guard lock(state_->mutex);
-  return state_->retain(range);
+  return state_->retainTransient(range);
 }
 
 auto PayloadResolver::resolveProxy(const ProxyRange range)
@@ -219,7 +280,7 @@ auto PayloadResolver::resolveProxy(const ProxyRange range)
     return refuse(IoErrorCode::InvalidRequest);
   }
   const std::lock_guard lock(state_->mutex);
-  return state_->retain(range.range);
+  return state_->retainTransient(range.range);
 }
 
 auto PayloadResolver::retain(const PayloadRange range)
@@ -352,6 +413,18 @@ auto PayloadResolver::requirePersistable(const PayloadLease &lease) const
 auto PayloadResolver::liveLeases() const -> std::size_t {
   const std::lock_guard lock(state_->mutex);
   return state_->leases.size();
+}
+
+auto PayloadResolver::liveSources() const -> std::size_t {
+  const std::lock_guard lock(state_->mutex);
+  std::size_t live = state_->sources.size();
+  for (const auto &[ref, source] : state_->transientSources) {
+    static_cast<void>(ref);
+    if (source.pinned || !source.bytes.expired()) {
+      ++live;
+    }
+  }
+  return live;
 }
 
 void PayloadResolver::release(const LeaseId lease) noexcept {

@@ -255,6 +255,56 @@ TEST(PayloadResolverTest, OwnerTokenHoldsItsOwnLeaseAndOutlivesResolver) {
   owner.reset();
 }
 
+TEST(PayloadResolverTest, TransientSourceRecyclesAfterLastLeaseReleases) {
+  PayloadResolver resolver;
+  const auto origin = transientRef(7);
+  ASSERT_TRUE(resolver.registerSource(origin, bytesOf("recycled bytes")));
+  // The registration pin keeps an unretained source live.
+  EXPECT_EQ(resolver.liveSources(), 1U);
+
+  const auto lease = resolver.resolveTransient({origin, 0, 14});
+  ASSERT_TRUE(lease);
+  EXPECT_EQ(resolver.liveSources(), 1U);
+
+  // Once the last lease releases, the weak registration expires: the
+  // source stops resolving and the resolver's live-source count recycles
+  // (plan §8.1 -- payload chunks must not accumulate forever).
+  resolver.release(lease->lease);
+  EXPECT_EQ(resolver.liveSources(), 0U);
+  EXPECT_EQ(resolver.resolveTransient({origin, 0, 14}).error().code,
+            IoErrorCode::Unresolved);
+  // The miss path swept the expired entry, so the origin can register
+  // again under fresh bytes.
+  ASSERT_TRUE(resolver.registerSource(origin, bytesOf("again")));
+  const auto fresh = resolver.resolveTransient({origin, 0, 5});
+  ASSERT_TRUE(fresh);
+  EXPECT_EQ(resolver.read(*fresh, 0, 5), bytesOf("again"));
+}
+
+TEST(PayloadResolverTest, OwnerTokenKeepsTransientSourceAlive) {
+  PayloadResolver resolver;
+  const auto origin = transientRef(8);
+  ASSERT_TRUE(resolver.registerSource(origin, bytesOf("pinned")));
+  const auto lease = resolver.resolveTransient({origin, 0, 6});
+  ASSERT_TRUE(lease);
+  auto retained = resolver.retainOwner(*lease);
+  ASSERT_TRUE(retained);
+  auto ownerToken = std::move(*retained);
+
+  resolver.release(lease->lease);
+  // The owner token still pins the chunk, so the source stays resolvable.
+  EXPECT_EQ(resolver.liveSources(), 1U);
+  const auto again = resolver.resolveTransient({origin, 0, 6});
+  ASSERT_TRUE(again);
+  EXPECT_EQ(resolver.read(*again, 0, 6), bytesOf("pinned"));
+
+  resolver.release(again->lease);
+  ownerToken.reset();
+  EXPECT_EQ(resolver.liveSources(), 0U);
+  EXPECT_EQ(resolver.resolveTransient({origin, 0, 6}).error().code,
+            IoErrorCode::Unresolved);
+}
+
 TEST(PayloadResolverTest, ArenaOwnerRefusesPromotionBeforeStoreMutation) {
   PayloadResolver resolver;
   const auto origin = transientRef(8);

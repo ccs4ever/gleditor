@@ -371,28 +371,35 @@ struct PayloadFixture {
                     .generation = 1,
                     .occurrence = 3};
   PayloadLease lease;
+  /// A second lease held for the fixture's whole life: transient sources
+  /// recycle once their last lease or owner token releases (plan §8.1),
+  /// and these tests exercise payload-CELL lease lifecycle, which needs
+  /// the source to stay resolvable. Every liveLeases() expectation below
+  /// counts this pin.
+  PayloadLease pin;
 
   PayloadFixture() {
     const std::array bytes{std::byte{0x00}, std::byte{0xfe}, std::byte{0x41}};
     resolver.registerSource(origin, bytes).value();
     lease = resolver.resolveTransient({origin, 0, bytes.size()}).value();
+    pin   = resolver.resolveTransient({origin, 0, bytes.size()}).value();
   }
 };
 
 TEST(IoCellsTest, payloadCellLeaseFollowsMarkReleaseOverwriteAndArena) {
   PayloadFixture p;
   Topology t;
-  ASSERT_EQ(p.resolver.liveLeases(), 1U);
+  ASSERT_EQ(p.resolver.liveLeases(), 2U); // lease + pin
 
   const auto mark    = t.arena.mark();
   const auto payload = makePayloadCell(t.arena, p.resolver, p.lease);
   ASSERT_TRUE(payload);
-  EXPECT_EQ(p.resolver.liveLeases(), 2U);
+  EXPECT_EQ(p.resolver.liveLeases(), 3U);
   EXPECT_EQ(payloadRangeOf(t.arena, *payload), p.lease.range);
   p.resolver.release(p.lease.lease);
-  EXPECT_EQ(p.resolver.liveLeases(), 1U);
+  EXPECT_EQ(p.resolver.liveLeases(), 2U);
   ASSERT_TRUE(t.arena.release(mark));
-  EXPECT_EQ(p.resolver.liveLeases(), 0U);
+  EXPECT_EQ(p.resolver.liveLeases(), 1U); // the pin alone remains
   EXPECT_FALSE(payloadRangeOf(t.arena, *payload));
 
   // Overwriting the cell's value releases the lease that followed it.
@@ -401,11 +408,11 @@ TEST(IoCellsTest, payloadCellLeaseFollowsMarkReleaseOverwriteAndArena) {
   const auto overwritten = makePayloadCell(t.arena, p.resolver, *relet);
   ASSERT_TRUE(overwritten);
   p.resolver.release(relet->lease);
-  EXPECT_EQ(p.resolver.liveLeases(), 1U);
+  EXPECT_EQ(p.resolver.liveLeases(), 2U);
   const auto text = t.arena.intern("replaced");
   ASSERT_TRUE(t.arena.setContent(
       overwritten->cell, std::span<const xanadu::PrimediaSpan>{&text, 1}));
-  EXPECT_EQ(p.resolver.liveLeases(), 0U);
+  EXPECT_EQ(p.resolver.liveLeases(), 1U);
 
   // Arena destruction releases the rest.
   {
@@ -414,9 +421,9 @@ TEST(IoCellsTest, payloadCellLeaseFollowsMarkReleaseOverwriteAndArena) {
     ASSERT_TRUE(again);
     ASSERT_TRUE(makePayloadCell(scoped.arena, p.resolver, *again));
     p.resolver.release(again->lease);
-    EXPECT_EQ(p.resolver.liveLeases(), 1U);
+    EXPECT_EQ(p.resolver.liveLeases(), 2U);
   }
-  EXPECT_EQ(p.resolver.liveLeases(), 0U);
+  EXPECT_EQ(p.resolver.liveLeases(), 1U);
 }
 
 TEST(IoCellsTest, stalePayloadLeaseIsRefusedAndArenaMayOutliveResolver) {
