@@ -38,14 +38,6 @@
 
 namespace xanadu::vortex {
 
-/// Declared capability a source endpoint offers for a read's consistency
-/// requirement. `Live` is the only thing a plain mutable file can promise:
-/// bytes observed are exactly what `pread` returned for one generation, with
-/// no claim that the file did not change around that call. `Stable` requires
-/// a backend-proven immutable snapshot (e.g. a content-addressed object);
-/// `FileSourceAdapter` never claims it for an ordinary path.
-enum class SourceConsistency : std::uint8_t { Live, Stable };
-
 /// A checked 64-bit byte range (plan §7.3). Never aliases `PayloadRange`,
 /// whose `offset`/`length` describe a slice of a resolved chunk rather than a
 /// raw source byte range.
@@ -61,11 +53,19 @@ struct MediaRange {
 /// the bytes are the backend's one immutable snapshot for `Live` sources, so
 /// callers must not collapse them by generation/range alone -- only an
 /// explicit `Stable` consistency (refused here) would license that.
+/// `range` records the ACTUAL bytes-read extent -- it may be shorter than
+/// the requested range at EOF -- and `payload` binds the observation to the
+/// exact retained bytes the read published.
 struct ReadObservation {
   std::uint64_t observationId{};
   std::uint64_t sourceGeneration{};
+  /// The actual bytes-read extent [offset, offset+length) of the source.
   MediaRange range;
+  std::string locator;
   SourceConsistency consistency{SourceConsistency::Live};
+  /// The retained bytes bound to this observation (the outcome payload's
+  /// range); absent for a zero-byte read.
+  std::optional<PayloadRange> payload;
 };
 
 /// A bounded lease over adapter-side decode/cache state (plan §7.3: "Encoded
@@ -82,13 +82,54 @@ struct DecodeLease {
   std::uint64_t sourceGeneration{};
 };
 
+/// Whether a file source's operations address the inode opened at open
+/// time or re-resolve the path on every operation (plan §7.2's "a locator
+/// plus declared capabilities, never an immutable identity" -- the identity
+/// question is which of the two the locator actually pins).
+enum class FileSourceIdentity : std::uint8_t {
+  /// Reads and writes stay on the inode the open() call returned: renaming
+  /// or replacing the path afterwards does not move them, and the
+  /// `stat`-derived generation is unaffected by the path's new inode.
+  /// `FileSourceAdapter` always reports this -- it holds one fd.
+  OpenedInode,
+  /// Each operation re-resolves the path, so a rename redirects later ops
+  /// to the new inode. Not offered by `FileSourceAdapter`; declared so a
+  /// future adapter can offer the distinction explicitly.
+  PathFollowing,
+};
+
 /// Declared endpoint capabilities returned by `open` (plan §7.2: "a locator
 /// plus declared capabilities, never an immutable identity").
 struct FileOpenCapabilities {
   std::string locator;
   SourceConsistency consistency{SourceConsistency::Live};
+  /// Which identity semantics the opened source has (see
+  /// FileSourceIdentity); FileSourceAdapter always opens the inode.
+  FileSourceIdentity identity{FileSourceIdentity::OpenedInode};
   std::uint64_t initialGeneration{};
   std::uint64_t sizeAtOpen{};
+};
+
+/// Rights bits for file endpoint `OpenSpec::requestedRights` /
+/// `OpenGrant::rights` (adapter-defined per plan §3.3): bit 0 read, bit 1
+/// write. An open always carries read; write additionally requires the
+/// bit and opens the descriptor O_RDWR.
+inline constexpr std::uint64_t fileRightRead  = 1ULL << 0;
+inline constexpr std::uint64_t fileRightWrite = 1ULL << 1;
+
+/// A bounded file operation for `stageAt`: the same frozen arguments
+/// `stageRead`/`stageWrite`/`stageStableRead` take, under a caller-chosen
+/// key (the minted spec cell's ref) for callers crossing an `IoCellStore`.
+struct FileOpSpec {
+  enum class Kind : std::uint8_t { Read, Write, StableRead } kind{Kind::Read};
+  /// Read/StableRead: the checked 64-bit source range. Write: `offset` is
+  /// the write offset (`length` is ignored; the byte count comes from
+  /// `writeBytes`).
+  MediaRange range{};
+  /// Write only: the frozen bytes to pwrite.
+  std::vector<std::byte> writeBytes;
+  /// Expected generation at staging time; 0 disables the check.
+  std::uint64_t expectedGeneration{};
 };
 
 /// A `d.io.kind` "file" source over one already-resolved filesystem path.
@@ -116,6 +157,14 @@ public:
   /// failure to open is reported by `probeCapabilities` returning nullopt and
   /// every subsequent `prepare` refusing `Unsupported`.
   explicit FileSourceAdapter(std::string path, bool writable = false);
+  /// Adopt an already-open descriptor: the file endpoint adapter performs
+  /// `open()` inside `execute` (off the owner thread, plan §7.2) and hands
+  /// the descriptor here so every later read/write stays on the inode that
+  /// was opened then -- never a path re-resolved later
+  /// (`FileSourceIdentity::OpenedInode`). A negative @p fd behaves like a
+  /// failed open: `probeCapabilities` reports nullopt and `prepare` refuses
+  /// `Unsupported`.
+  FileSourceAdapter(int fd, std::string path, bool writable);
   ~FileSourceAdapter() override;
   FileSourceAdapter(const FileSourceAdapter &)                     = delete;
   auto operator=(const FileSourceAdapter &) -> FileSourceAdapter & = delete;
@@ -144,6 +193,16 @@ public:
   /// through the normal admission path instead of being special-cased by
   /// callers.
   [[nodiscard]] std::uint32_t stageStableRead(MediaRange range);
+
+  /// Stage under a caller-chosen @p key (the minted spec cell's ref) -- the
+  /// `StagedLensSourceAdapter::stageAt` pattern for callers whose request
+  /// `specification` must name a live arena cell:
+  /// `ArenaIoCellStore::freezeRequest` refuses any OwnerCell with no
+  /// incarnation, so the key IS that cell and the adapter owns what it
+  /// means. Refuses key 0, an occupied key, or a full table; a write spec
+  /// is charged against the same staged-byte bound `stageWrite` enforces.
+  [[nodiscard]] std::expected<std::uint32_t, std::string>
+  stageAt(std::uint32_t key, FileOpSpec spec);
 
   /// Owner-thread: drop a staged op that will never reach `execute` (the
   /// submission was refused, or the caller abandoned it). The staging
@@ -188,12 +247,7 @@ public:
   void setMaxDecodeLeases(std::size_t value) noexcept;
 
 private:
-  struct StagedFileOp {
-    enum class Kind : std::uint8_t { Read, Write, StableRead } kind{};
-    MediaRange range;
-    std::vector<std::byte> writeBytes;
-    std::uint64_t expectedGeneration{};
-  };
+  using StagedFileOp = FileOpSpec;
 
   [[nodiscard]] std::uint64_t statGeneration() const noexcept;
   /// Next free auto stage key; caller holds mutex_.

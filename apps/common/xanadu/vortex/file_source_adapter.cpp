@@ -57,10 +57,11 @@ std::uint64_t generationFromStat(const struct stat &st) noexcept {
 } // namespace
 
 FileSourceAdapter::FileSourceAdapter(std::string path, bool writable)
-    : path_(std::move(path)), writable_(writable) {
-  const int flags = writable_ ? O_RDWR : O_RDONLY;
-  fd_             = ::open(path_.c_str(), flags);
-}
+    : FileSourceAdapter(::open(path.c_str(), writable ? O_RDWR : O_RDONLY),
+                        std::move(path), writable) {}
+
+FileSourceAdapter::FileSourceAdapter(int fd, std::string path, bool writable)
+    : fd_(fd), path_(std::move(path)), writable_(writable) {}
 
 FileSourceAdapter::~FileSourceAdapter() {
   if (fd_ >= 0) ::close(fd_);
@@ -82,8 +83,9 @@ auto FileSourceAdapter::probeCapabilities() const
   if (fd_ < 0) return std::nullopt;
   struct stat st{};
   if (::fstat(fd_, &st) != 0) return std::nullopt;
-  return FileOpenCapabilities{.locator           = path_,
-                              .consistency       = SourceConsistency::Live,
+  return FileOpenCapabilities{.locator     = path_,
+                              .consistency = SourceConsistency::Live,
+                              .identity    = FileSourceIdentity::OpenedInode,
                               .initialGeneration = generationFromStat(st),
                               .sizeAtOpen =
                                   static_cast<std::uint64_t>(st.st_size)};
@@ -123,6 +125,48 @@ std::uint32_t FileSourceAdapter::stageStableRead(MediaRange range) {
   if (staged_.size() >= maxStagedOps) return 0;
   const auto key = nextStageKeyLocked();
   staged_[key]   = StagedFileOp{StagedFileOp::Kind::StableRead, range, {}, 0};
+  return key;
+}
+
+std::expected<std::uint32_t, std::string>
+FileSourceAdapter::stageAt(std::uint32_t key, FileOpSpec spec) {
+  const std::lock_guard lock(mutex_);
+  // Key 0 is the table-full sentinel the stage* helpers report; an entry
+  // there would be found by a request whose specification names nothing.
+  if (key == 0) return std::unexpected("staging key 0 is reserved");
+  if (staged_.contains(key))
+    return std::unexpected("staging key already in use");
+  if (staged_.size() >= maxStagedOps)
+    return std::unexpected("staging table full");
+  StagedFileOp op;
+  switch (spec.kind) {
+  case FileOpSpec::Kind::Read:
+    if (!spec.writeBytes.empty())
+      return std::unexpected("read spec carries write bytes");
+    op = StagedFileOp{
+        StagedFileOp::Kind::Read, spec.range, {}, spec.expectedGeneration};
+    break;
+  case FileOpSpec::Kind::StableRead:
+    if (!spec.writeBytes.empty())
+      return std::unexpected("stable-read spec carries write bytes");
+    op = StagedFileOp{StagedFileOp::Kind::StableRead, spec.range, {}, 0};
+    break;
+  case FileOpSpec::Kind::Write: {
+    if (spec.writeBytes.size() > maxStagedWriteBytes - stagedWriteBytes_)
+      return std::unexpected("staged write byte bound exceeded");
+    const auto byteCount = spec.writeBytes.size();
+    op                   = StagedFileOp{
+        StagedFileOp::Kind::Write,
+        MediaRange{spec.range.offset, static_cast<std::uint64_t>(byteCount)},
+        spec.writeBytes, spec.expectedGeneration};
+    staged_[key] = std::move(op);
+    // Count only once the op is actually staged: a throwing map insert
+    // must not leave the byte ledger ahead of the table.
+    stagedWriteBytes_ += byteCount;
+    return key;
+  }
+  }
+  staged_[key] = std::move(op);
   return key;
 }
 
@@ -369,37 +413,67 @@ void FileSourceAdapter::execute(const BackendCommand &command,
                 } else if (out.empty() && op->range.length != 0) {
                   result = BackendResult{EndOfStream{progress}, {}};
                 } else {
-                  if (out.empty()) {
-                    result = BackendResult{
-                        Complete{{}, std::monostate{}, progress}, {}};
-                  } else {
-                    // Read bytes publish through the payload channel: the
-                    // outcome names the retained range and the lease reaches
-                    // terminalCandidate below.
+                  // Read bytes publish through the payload channel: the
+                  // outcome names the retained range and the lease reaches
+                  // terminalCandidate below. Publish BEFORE recording the
+                  // observation so the observation binds the exact retained
+                  // range; a publish failure is a Failed outcome and
+                  // records nothing.
+                  std::optional<PayloadRange> retainedRange;
+                  bool readPublished = true;
+                  if (!out.empty()) {
                     auto lease = publishTransientBytes(context.payloads, out);
                     if (!lease) {
                       result = failedResult({IoErrorCode::BackendFailure, 0});
+                      readPublished = false;
                     } else {
-                      payload = *lease;
-                      result  = BackendResult{
-                          Complete{lease->range, std::monostate{}, progress},
-                           {}};
+                      payload       = *lease;
+                      retainedRange = lease->range;
                     }
                   }
-                  // Record a distinct observation for every successful live
-                  // read (plan §7.2). Keyed by the generation observed around
-                  // this transfer, not the (possibly stale) one requested.
-                  const std::lock_guard lock(mutex_);
-                  const auto observationId = nextObservationId_++;
-                  // observations_ is a std::map keyed by the sequential id:
-                  // begin() is the oldest retained observation, so the cap
-                  // evicts in insertion (FIFO) order rather than whatever
-                  // hash bucket unordered_map happened to pick first.
-                  if (observations_.size() >= maxRetainedObservations_)
-                    observations_.erase(observations_.begin());
-                  observations_[observationId] =
-                      ReadObservation{observationId, statGeneration(),
-                                      op->range, SourceConsistency::Live};
+                  if (readPublished) {
+                    // Record a distinct observation for every successful
+                    // live read (plan §7.2), keyed by the generation
+                    // observed around this transfer and bound to the exact
+                    // retained bytes -- minted before the outcome so
+                    // ReadObservationResult names the same id.
+                    std::uint64_t observationId = 0;
+                    std::uint64_t observedGen   = 0;
+                    {
+                      const std::lock_guard lock(mutex_);
+                      observationId = nextObservationId_++;
+                      // observations_ is a std::map keyed by the sequential
+                      // id: begin() is the oldest retained observation, so
+                      // the cap evicts in insertion (FIFO) order rather
+                      // than whatever hash bucket unordered_map happened
+                      // to pick first.
+                      if (observations_.size() >= maxRetainedObservations_)
+                        observations_.erase(observations_.begin());
+                      observedGen                  = statGeneration();
+                      observations_[observationId] = ReadObservation{
+                          observationId,
+                          observedGen,
+                          MediaRange{op->range.offset,
+                                     static_cast<std::uint64_t>(out.size())},
+                          path_,
+                          SourceConsistency::Live,
+                          retainedRange};
+                    }
+                    const ReadObservationResult details{
+                        .observationId    = observationId,
+                        .sourceGeneration = observedGen,
+                        .readOffset       = op->range.offset,
+                        .readLength  = static_cast<std::uint64_t>(out.size()),
+                        .locator     = path_,
+                        .consistency = SourceConsistency::Live};
+                    if (retainedRange) {
+                      result = BackendResult{
+                          Complete{*retainedRange, details, progress}, {}};
+                    } else {
+                      result =
+                          BackendResult{Complete{{}, details, progress}, {}};
+                    }
+                  }
                 }
               }
             }
