@@ -8,6 +8,9 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 
+#include <sys/resource.h>
+
+#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -258,6 +261,191 @@ TEST(SegmentedOpsSpoolRangeTest, extendingAFileThatIsNotThereIsAMismatch) {
                 {.firstOpIndex = 2, .nodes = nodes, .priorTail = nodes.front()},
                 SegmentedOpsSpool::SegmentWriteMode::Extend, false),
             SegmentedOpsSpool::SegmentWriteResult::BaseMismatch);
+}
+
+// -- what was written is not what was fsynced -------------------------------
+
+TEST_F(StoreSnapshotTest, aBufferedSaveDoesNotLetALaterFsyncWriteSkipTheFsync) {
+  Store store(perma);
+  const auto one = store.insert(MicroversionId{}, 0, "durable claim");
+  // The commit's snapshot is taken first, then the owner (or recovery) saves
+  // the same directory through the ordinary Buffered path before the worker
+  // gets to write the snapshot.
+  const auto snapshot = store.saveSnapshot(path("dir"));
+  store.save(path("dir"));
+  ASSERT_EQ(store.saveSnapshot(path("dir")).baseOps(), store.opCount())
+      << "the buffered save advanced the count the way the bug needs";
+
+  SnapshotWriter::SnapshotSyncs syncs;
+  ASSERT_TRUE(
+      SnapshotWriter::write(snapshot, SnapshotDurability::Fsync, &syncs));
+  EXPECT_TRUE(syncs.ops) << "ops.nodes was only in the page cache";
+  EXPECT_TRUE(syncs.tables) << "so was store.tables";
+  EXPECT_TRUE(syncs.directory);
+  EXPECT_EQ(reloadedText(path("dir"), one), "durable claim");
+
+  // Having synced them once, an unchanged store's operations are not synced
+  // again: the record of what is on disk is exact, not merely conservative.
+  // (The first snapshot of a store seals its pending metadata as operations,
+  // so the settling write comes first.)
+  ASSERT_TRUE(SnapshotWriter::write(store.saveSnapshot(path("dir")),
+                                    SnapshotDurability::Fsync));
+  SnapshotWriter::SnapshotSyncs again;
+  ASSERT_TRUE(SnapshotWriter::write(store.saveSnapshot(path("dir")),
+                                    SnapshotDurability::Fsync, &again));
+  EXPECT_FALSE(again.ops);
+  EXPECT_TRUE(again.directory);
+}
+
+TEST_F(StoreSnapshotTest, aBufferedReplaceAfterAnFsyncWriteIsSyncedAgain) {
+  Store store(perma);
+  const auto one = store.insert(MicroversionId{}, 0, "first");
+  const auto two = store.insert(one, 5, " second");
+  store.insert(two, 12, " third");
+  ASSERT_TRUE(SnapshotWriter::write(store.saveSnapshot(path("dir")),
+                                    SnapshotDurability::Fsync));
+  // A shorter, different history replaces the file through a Buffered write:
+  // the new file has had no fsync, whatever the old one had.
+  Store other(perma);
+  other.insert(MicroversionId{}, 0, "short");
+  const auto snapshot = other.saveSnapshot(path("dir"));
+  ASSERT_EQ(snapshot.baseOps(), 0U);
+  ASSERT_TRUE(SnapshotWriter::write(snapshot, SnapshotDurability::Buffered));
+
+  SnapshotWriter::SnapshotSyncs syncs;
+  ASSERT_TRUE(SnapshotWriter::write(other.saveSnapshot(path("dir")),
+                                    SnapshotDurability::Fsync, &syncs));
+  EXPECT_TRUE(syncs.ops);
+  EXPECT_TRUE(syncs.tables);
+}
+
+// -- a Replace is atomic ------------------------------------------------------
+
+namespace {
+/// Makes a write that goes past @p limit bytes fail with a short write, the
+/// way a full disk or a killed process does halfway through a file.
+class FileSizeLimit {
+public:
+  explicit FileSizeLimit(const rlim_t limit) {
+    ::getrlimit(RLIMIT_FSIZE, &saved_);
+    previous_ = std::signal(SIGXFSZ, SIG_IGN);
+    const rlimit lowered{limit, saved_.rlim_max};
+    ::setrlimit(RLIMIT_FSIZE, &lowered);
+  }
+  ~FileSizeLimit() {
+    ::setrlimit(RLIMIT_FSIZE, &saved_);
+    std::signal(SIGXFSZ, previous_);
+  }
+  FileSizeLimit(const FileSizeLimit &)            = delete;
+  FileSizeLimit &operator=(const FileSizeLimit &) = delete;
+
+private:
+  rlimit saved_{};
+  void (*previous_)(int){};
+};
+} // namespace
+
+TEST(SegmentedOpsSpoolRangeTest, aReplaceThatDiesHalfwayLeavesTheOldFileWhole) {
+  const auto dir =
+      std::filesystem::temp_directory_path() / "xuzz-spool-replace-crash";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  const auto file = dir / "ops.nodes";
+
+  std::vector<CompactOpNode> before(3);
+  before[0].value = 1;
+  ASSERT_EQ(SegmentedOpsSpool::writeSegmentRange(
+                file, {.firstOpIndex = 1, .nodes = before},
+                SegmentedOpsSpool::SegmentWriteMode::Replace, true),
+            SegmentedOpsSpool::SegmentWriteResult::Written);
+  const auto held = slurp(file);
+
+  // A rewrite whose bytes stop after the first node: the process "dies"
+  // between the header and the last node. Truncating in place left this file
+  // short; a Replace written beside it leaves the old one untouched.
+  std::vector<CompactOpNode> after(9);
+  {
+    const FileSizeLimit limit(opsSegmentHeaderBytes + sizeof(CompactOpNode));
+    EXPECT_EQ(SegmentedOpsSpool::writeSegmentRange(
+                  file, {.firstOpIndex = 1, .nodes = after},
+                  SegmentedOpsSpool::SegmentWriteMode::Replace, true),
+              SegmentedOpsSpool::SegmentWriteResult::IoFailed);
+  }
+  EXPECT_EQ(slurp(file), held);
+  EXPECT_FALSE(std::filesystem::exists(dir / "ops.nodes.tmp"))
+      << "the half-written copy is not left behind";
+
+  // And with the limit gone the same rewrite lands.
+  EXPECT_EQ(SegmentedOpsSpool::writeSegmentRange(
+                file, {.firstOpIndex = 1, .nodes = after},
+                SegmentedOpsSpool::SegmentWriteMode::Replace, true),
+            SegmentedOpsSpool::SegmentWriteResult::Written);
+  EXPECT_NE(slurp(file), held);
+  std::filesystem::remove_all(dir);
+}
+
+TEST_F(StoreSnapshotTest,
+       aReplaceAfterARefusedExtensionKeepsTheOldFileOnFailure) {
+  Store store(perma);
+  store.insert(MicroversionId{}, 0, "committed capture");
+  store.save(path("dir"));
+  const auto held = slurp(root / "dir" / "ops.nodes");
+
+  // The directory's file is not the one the channel believed in, so the next
+  // snapshot is whole and goes out as a Replace.
+  Store other(perma);
+  other.insert(MicroversionId{}, 0, "foreign");
+  other.save(path("other"));
+  std::filesystem::copy_file(root / "other" / "ops.nodes",
+                             root / "dir" / "ops.nodes",
+                             std::filesystem::copy_options::overwrite_existing);
+  store.insert(store.latest(), 0, "more ");
+  ASSERT_FALSE(SnapshotWriter::write(store.saveSnapshot(path("dir"))));
+  const auto foreign = slurp(root / "dir" / "ops.nodes");
+  ASSERT_NE(foreign, held);
+
+  const auto whole = store.saveSnapshot(path("dir"));
+  ASSERT_EQ(whole.baseOps(), 0U);
+  {
+    const FileSizeLimit limit(opsSegmentHeaderBytes + sizeof(CompactOpNode));
+    EXPECT_THROW(static_cast<void>(SnapshotWriter::write(whole)),
+                 std::runtime_error);
+  }
+  EXPECT_EQ(slurp(root / "dir" / "ops.nodes"), foreign);
+  EXPECT_TRUE(SnapshotWriter::write(store.saveSnapshot(path("dir"))));
+}
+
+// -- one channel per directory ---------------------------------------------
+
+TEST_F(StoreSnapshotTest, twoSpellingsOfOneDirectoryShareOneChannel) {
+  Store store(perma);
+  store.insert(MicroversionId{}, 0, "shared");
+  store.save(path("real"));
+  const auto held = store.opCount();
+  std::filesystem::create_directory_symlink(root / "real", root / "alias");
+
+  store.insert(store.latest(), 0, "x");
+  // A path and a symlink to it are one directory, so the one durable count
+  // answers for both: a channel per spelling would copy the whole store and
+  // write it under a second mutex.
+  EXPECT_EQ(store.saveSnapshot(path("alias")).baseOps(), held);
+  EXPECT_EQ(store.saveSnapshot(path("real/../real")).baseOps(), held);
+}
+
+TEST_F(StoreSnapshotTest, twoStoresOfOneDirectoryTakeTheSameMutex) {
+  Store a(perma);
+  a.insert(MicroversionId{}, 0, "a");
+  ASSERT_TRUE(SnapshotWriter::write(a.saveSnapshot(path("dir"))));
+  const auto held = a.opCount();
+
+  // A second object over the same directory does not start from zero with a
+  // mutex of its own: it sees the count the directory durably holds.
+  Store b(perma);
+  b.insert(MicroversionId{}, 0, "bb");
+  b.insert(b.latest(), 0, "bb");
+  b.insert(b.latest(), 0, "bb");
+  ASSERT_GT(b.opCount(), held);
+  EXPECT_EQ(b.saveSnapshot(path("dir/.")).baseOps(), held);
 }
 
 } // namespace

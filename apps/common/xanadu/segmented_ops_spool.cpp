@@ -762,7 +762,15 @@ SegmentedOpsSpool::SegmentWriteResult SegmentedOpsSpool::writeSegmentRange(
   const auto before = static_cast<std::uint64_t>(range.firstOpIndex) - 1U;
   const auto bytes  = range.nodes.size_bytes();
 
-  const int fd = ::open(path.string().c_str(),
+  // A Replace is written beside the file and renamed over it: truncating the
+  // file in place meant a crash mid-rewrite left a short ops.nodes while the
+  // journal still claimed the captures it held, and a Replace is the normal
+  // road after a refused extension. The caller makes the directory entry
+  // durable (SnapshotWriter does, after the tables).
+  auto temp = path;
+  temp += ".tmp";
+  const auto &target = extend ? path : temp;
+  const int fd       = ::open(target.string().c_str(),
                         extend ? O_RDWR : (O_WRONLY | O_CREAT | O_TRUNC), 0644);
   if (fd < 0) {
     // An extension of a file that is not there is a wrong picture of the
@@ -772,6 +780,10 @@ SegmentedOpsSpool::SegmentWriteResult SegmentedOpsSpool::writeSegmentRange(
   }
   const auto fail = [&](const SegmentWriteResult why) {
     ::close(fd);
+    if (!extend) {
+      std::error_code ignored;
+      std::filesystem::remove(temp, ignored);
+    }
     return why;
   };
 
@@ -814,6 +826,14 @@ SegmentedOpsSpool::SegmentWriteResult SegmentedOpsSpool::writeSegmentRange(
     return fail(SegmentWriteResult::IoFailed);
   }
   ::close(fd);
+  if (!extend) {
+    std::error_code ec;
+    std::filesystem::rename(temp, path, ec);
+    if (ec) {
+      std::filesystem::remove(temp, ec);
+      return SegmentWriteResult::IoFailed;
+    }
+  }
   return SegmentWriteResult::Written;
 }
 

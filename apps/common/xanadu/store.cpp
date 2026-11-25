@@ -16,6 +16,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
 #include <tuple>
 #include <unistd.h>
 #include <unordered_map>
@@ -4180,6 +4181,13 @@ struct SnapshotChannel {
   std::atomic<std::uint32_t> durableOps;
   /// The sequence of the tables image the directory holds (guarded by mutex).
   std::uint64_t tablesSequence{0};
+  /// How much of that is on stable storage, apart from what was written: a
+  /// Buffered save advances durableOps and tablesSequence with bytes that are
+  /// only in the page cache, and a later Fsync snapshot must not mistake them
+  /// for synced (guarded by mutex). A Replace by a Buffered write resets
+  /// syncedOps because the new file has had no fsync at all.
+  std::uint32_t syncedOps{0};
+  std::uint64_t syncedTablesSequence{0};
   std::atomic<std::uint64_t> nextSequence{1};
 };
 
@@ -4199,12 +4207,28 @@ void syncDirectory(const std::filesystem::path &dir) {
 #endif
 }
 
-/// store.tables replaced atomically and durably: written beside it, fsynced,
+/// fsync a file that already exists, for the bytes a Buffered write left in
+/// the page cache and a later Fsync write is about to claim.
+void syncExistingFile(const std::filesystem::path &path) {
+#ifndef _WIN32
+  const int fd  = ::open(path.c_str(), O_RDONLY);
+  const bool ok = fd >= 0 && 0 == ::fsync(fd);
+  if (fd >= 0) ::close(fd);
+  if (!ok) {
+    throw std::runtime_error("cannot make " + path.string() + " durable");
+  }
+#else
+  static_cast<void>(path);
+#endif
+}
+
+/// store.tables replaced atomically: written beside it, optionally fsynced,
 /// renamed over it. The bytes are what writeStoreTables() writes -- one
 /// serializer -- but a crash can no longer leave the file half-written, which
-/// matters once the Committed record is allowed to claim it.
-void writeStoreTablesDurably(const std::filesystem::path &path,
-                             const StoreTables &tables) {
+/// matters once a Committed record is allowed to claim it and a later Buffered
+/// save must not be able to truncate what that record named.
+void writeStoreTablesAtomically(const std::filesystem::path &path,
+                                const StoreTables &tables, const bool sync) {
 #ifndef _WIN32
   const auto bytes = serializeStoreTables(tables);
   auto temp        = path;
@@ -4215,15 +4239,55 @@ void writeStoreTablesDurably(const std::filesystem::path &path,
   }
   const bool ok = ::write(fd, bytes.data(), bytes.size()) ==
                       static_cast<ssize_t>(bytes.size()) &&
-                  0 == ::fsync(fd);
+                  (!sync || 0 == ::fsync(fd));
   ::close(fd);
   if (!ok) {
     throw StoreTablesUnreadable("cannot write " + temp.string());
   }
   std::filesystem::rename(temp, path);
 #else
+  static_cast<void>(sync);
   writeStoreTables(path, tables);
 #endif
+}
+} // namespace
+
+namespace {
+/// The one channel of a directory, however many Store objects or spellings of
+/// its path name it: two channels meant two mutexes, and two writers (one
+/// extending, one replacing) interleaving on one ops.nodes. Keyed by the
+/// directory's identity (device and inode), not its path, so a symlink and its
+/// target agree; held weakly, so a directory nobody writes to is forgotten.
+/// The directory is created if absent -- an identity needs something to name,
+/// and the writer would create it first thing anyway.
+std::shared_ptr<SnapshotChannel>
+channelFor(const std::filesystem::path &directory) {
+  using Key = std::pair<std::uint64_t, std::uint64_t>;
+  static std::mutex registryMutex;
+  static std::map<Key, std::weak_ptr<SnapshotChannel>> registry;
+
+  // A directory that cannot be made keeps its key by path: the writer is
+  // where that is reported, as it always was.
+  std::error_code ignored;
+  std::filesystem::create_directories(directory, ignored);
+  Key key{0,
+          std::hash<std::string>{}(
+              std::filesystem::weakly_canonical(directory, ignored).string())};
+#ifndef _WIN32
+  struct stat st{};
+  if (0 == ::stat(directory.c_str(), &st)) {
+    key = {static_cast<std::uint64_t>(st.st_dev),
+           static_cast<std::uint64_t>(st.st_ino)};
+  }
+#endif
+  const std::lock_guard lock(registryMutex);
+  std::erase_if(registry,
+                [](const auto &entry) { return entry.second.expired(); });
+  auto &slot = registry[key];
+  if (auto channel = slot.lock()) return channel;
+  auto channel = std::make_shared<SnapshotChannel>(directory, 0);
+  slot         = channel;
+  return channel;
 }
 } // namespace
 
@@ -4235,10 +4299,11 @@ StoreSnapshot Store::saveSnapshot(const std::string &directory) const {
   // One channel per directory this store has been saved to. Another
   // directory shares nothing with the last one's bookkeeping: it holds none of
   // these operations, so the snapshot of it is the whole store.
-  if (!snapshotChannel_ || snapshotChannel_->directory != snapshot.directory_ ||
-      snapshotChannel_->durableOps.load() > opsSpool.size()) {
-    snapshotChannel_ =
-        std::make_shared<SnapshotChannel>(snapshot.directory_, 0);
+  snapshotChannel_ = channelFor(snapshot.directory_);
+  if (snapshotChannel_->durableOps.load() > opsSpool.size()) {
+    // Held by another history that is longer than this one: this store's
+    // save is a Replace, which the writer will do atomically.
+    snapshotChannel_->durableOps.store(0);
   }
   snapshot.channel_ = snapshotChannel_;
 
@@ -4259,11 +4324,13 @@ StoreSnapshot Store::saveSnapshot(const std::string &directory) const {
 }
 
 bool SnapshotWriter::write(const StoreSnapshot &snapshot,
-                           const SnapshotDurability durability) {
+                           const SnapshotDurability durability,
+                           SnapshotWriter::SnapshotSyncs *const syncs) {
   const bool fsync = SnapshotDurability::Fsync == durability;
   const auto &dir  = snapshot.directory_;
   auto &channel    = *snapshot.channel_;
   const std::lock_guard lock(channel.mutex);
+  SnapshotWriter::SnapshotSyncs done;
 
   std::filesystem::create_directories(dir);
 
@@ -4293,6 +4360,7 @@ bool SnapshotWriter::write(const StoreSnapshot &snapshot,
         size < opsSegmentHeaderBytes + static_cast<std::uintmax_t>(durable) *
                                            sizeof(CompactOpNode)) {
       channel.durableOps.store(0);
+      channel.syncedOps = 0;
       return false;
     }
   }
@@ -4320,6 +4388,7 @@ bool SnapshotWriter::write(const StoreSnapshot &snapshot,
         fsync);
     if (SegmentedOpsSpool::SegmentWriteResult::BaseMismatch == result) {
       channel.durableOps.store(0);
+      channel.syncedOps = 0;
       return false;
     }
     if (SegmentedOpsSpool::SegmentWriteResult::Written != result) {
@@ -4327,6 +4396,23 @@ bool SnapshotWriter::write(const StoreSnapshot &snapshot,
                                (dir / opsNodesFile).string());
     }
     channel.durableOps.store(snapshot.endOps());
+    if (fsync) {
+      channel.syncedOps = snapshot.endOps();
+      done.ops          = true;
+    } else if (0 == durable) {
+      // A Replace put a new file in place; nothing of it has been fsynced.
+      channel.syncedOps = 0;
+    }
+  }
+  // What a concurrent or earlier Buffered write left in the page cache is
+  // "durable" to the count and not to the disk. A Fsync write that finds the
+  // operations it needs already written still owes their fsync, or a
+  // Committed record would claim bytes a power cut can take.
+  if (fsync && 0 != snapshot.endOps() &&
+      channel.syncedOps < snapshot.endOps()) {
+    syncExistingFile(dir / opsNodesFile);
+    channel.syncedOps = channel.durableOps.load();
+    done.ops          = true;
   }
 
   // A later snapshot's tables describe a later store; an earlier one landing
@@ -4342,12 +4428,10 @@ bool SnapshotWriter::write(const StoreSnapshot &snapshot,
     // different times -- both are per-store side tables replayed at load --
     // and being plaintext was buying only that they could be read with `less`,
     // which tools/xudu-dump buys back. See R11 and store_tables.hpp.
-    if (fsync) {
-      writeStoreTablesDurably(dir / storeTablesName, snapshot.tables_);
-    } else {
-      writeStoreTables(dir / storeTablesName, snapshot.tables_);
-    }
-    channel.tablesSequence = snapshot.sequence_;
+    writeStoreTablesAtomically(dir / storeTablesName, snapshot.tables_, fsync);
+    channel.tablesSequence       = snapshot.sequence_;
+    channel.syncedTablesSequence = fsync ? snapshot.sequence_ : 0;
+    done.tables                  = fsync;
     // The files this container replaced, taken with it. Leaving them would
     // leave two answers to what the scrolls are, and load() refuses a
     // directory holding both rather than choosing.
@@ -4358,7 +4442,17 @@ bool SnapshotWriter::write(const StoreSnapshot &snapshot,
       std::filesystem::remove(dir / superseded, ignored);
     }
   }
-  if (fsync) syncDirectory(dir);
+  // A later snapshot's image may be on disk but only buffered.
+  if (fsync && channel.syncedTablesSequence < snapshot.sequence_) {
+    syncExistingFile(dir / storeTablesName);
+    channel.syncedTablesSequence = channel.tablesSequence;
+    done.tables                  = true;
+  }
+  if (fsync) {
+    syncDirectory(dir);
+    done.directory = true;
+  }
+  if (syncs != nullptr) *syncs = done;
   return true;
 }
 
@@ -4638,9 +4732,15 @@ void Store::load(const std::string &directory) {
     }
     // What the directory durably holds is what was just read from it, so the
     // next save of it writes only what is added after this.
-    snapshotChannel_ = std::make_shared<SnapshotChannel>(
-        std::filesystem::absolute(dir).lexically_normal(),
-        static_cast<std::uint32_t>(opsSpool.size()));
+    snapshotChannel_ =
+        channelFor(std::filesystem::absolute(dir).lexically_normal());
+    {
+      // Read from the directory, so held; but not known to be fsynced.
+      const std::lock_guard lock(snapshotChannel_->mutex);
+      snapshotChannel_->durableOps.store(
+          static_cast<std::uint32_t>(opsSpool.size()));
+      snapshotChannel_->syncedOps = 0;
+    }
   } else if (std::filesystem::exists(dir / opsExportFile)) {
     // What saveOsmicText() wrote: the operations in canonical OSMIC text.
     // Read back and written out as nodes by the next save().

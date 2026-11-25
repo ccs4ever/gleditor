@@ -198,6 +198,15 @@ private:
  */
 class SnapshotWriter {
 public:
+  /// What one Fsync write actually fsynced, so a test (or a caller that must
+  /// know) can tell "wrote and synced" from "found it written, and synced it"
+  /// from "trusted a count".
+  struct SnapshotSyncs {
+    bool ops{false};
+    bool tables{false};
+    bool directory{false};
+  };
+
   /**
    * @brief Make @p snapshot durable in its directory.
    *
@@ -214,7 +223,8 @@ public:
    * @throws std::runtime_error when the files cannot be written.
    */
   static bool write(const StoreSnapshot &snapshot,
-                    SnapshotDurability durability = SnapshotDurability::Fsync);
+                    SnapshotDurability durability = SnapshotDurability::Fsync,
+                    SnapshotSyncs *syncs          = nullptr);
 };
 
 /**
