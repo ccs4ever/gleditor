@@ -326,4 +326,60 @@ TEST(ConfigLensSourceAdapterTest,
   EXPECT_EQ(adapter.generation(), startGeneration);
 }
 
+TEST(ConfigLensSourceAdapterTest, MaterializeIsRefusedAtPrepareTime) {
+  // ConfigLens has no windowed materializePage: the refusal happens at
+  // prepare so no worker turn is spent reporting Unsupported.
+  auto lensResult = zigzag::ConfigLens::fromText("cfg.json", "{\"a\":1}");
+  ASSERT_TRUE(lensResult);
+  ConfigLensSourceAdapter adapter(**lensResult);
+  OwnerContext owner;
+
+  const auto key = adapter.stage(
+      LensOpSpec{.kind = LensOpKind::Materialize, .windowKey = "cfg:no-such"});
+  ASSERT_NE(key, 0U);
+  const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
+  ASSERT_FALSE(prepared.has_value());
+  EXPECT_EQ(prepared.error().code, IoErrorCode::Unsupported);
+}
+
+TEST(ConfigLensSourceAdapterTest,
+     StageAtKeySpaceSkipsReservedAndDuplicateKeys) {
+  auto lensResult = zigzag::ConfigLens::fromText("cfg.json", "{\"a\":1}");
+  ASSERT_TRUE(lensResult);
+  ConfigLensSourceAdapter adapter(**lensResult);
+  const LensOpSpec spec{.kind = LensOpKind::Probe};
+
+  // Key 0 is the table-full sentinel; an entry there would be found by a
+  // request whose specification names nothing.
+  EXPECT_FALSE(adapter.stageAt(0, spec).has_value());
+  const auto pinned = adapter.stageAt(1, spec);
+  ASSERT_TRUE(pinned.has_value());
+  EXPECT_EQ(*pinned, 1U);
+  // Silently overwriting a live key would redirect an in-flight request.
+  EXPECT_FALSE(adapter.stageAt(1, spec).has_value());
+
+  // Auto keys skip still-live stageAt'd keys rather than collide.
+  const auto autoKey = adapter.stage(spec);
+  EXPECT_NE(autoKey, 0U);
+  EXPECT_NE(autoKey, 1U);
+
+  OwnerContext owner;
+  EXPECT_TRUE(adapter.prepare(requestFor(logKey, 1), owner).has_value());
+  EXPECT_TRUE(adapter.prepare(requestFor(logKey, autoKey), owner).has_value());
+}
+
+TEST(ConfigLensSourceAdapterTest, AbandonedStageFailsPrepare) {
+  auto lensResult = zigzag::ConfigLens::fromText("cfg.json", "{\"a\":1}");
+  ASSERT_TRUE(lensResult);
+  ConfigLensSourceAdapter adapter(**lensResult);
+  OwnerContext owner;
+
+  const auto key = adapter.stage(LensOpSpec{.kind = LensOpKind::Probe});
+  ASSERT_NE(key, 0U);
+  adapter.abandon(key);
+  const auto prepared = adapter.prepare(requestFor(logKey, key), owner);
+  ASSERT_FALSE(prepared.has_value());
+  EXPECT_EQ(prepared.error().code, IoErrorCode::InvalidRequest);
+}
+
 } // namespace

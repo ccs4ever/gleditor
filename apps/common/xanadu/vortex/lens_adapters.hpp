@@ -119,6 +119,11 @@ public:
   /// unknown or already-consumed keys.
   void abandon(std::uint32_t key);
 
+  /// `IoAdapter` hook: the service calls this with the request's
+  /// `specification` when a submission is refused or its request reaches a
+  /// terminal state without `execute` consuming the staged entry.
+  void abandonStaged(OwnerCell specification) noexcept override;
+
   /// This adapter's own fetch generation (see file comment); exposed for
   /// tests exercising the Stale/Conflict split without a full `IoService`.
   [[nodiscard]] std::uint64_t generation() const noexcept;
@@ -132,6 +137,17 @@ protected:
   /// Off-owner: run the real fetch against the wrapped lens. Implementations
   /// must not touch any `CellRef`, `ArenaManifold` or `OwnerContext`.
   virtual LensOpOutcome perform(const LensOpSpec &spec) = 0;
+
+  /// Optional owner-thread pre-admission refusal, run by `prepare` after
+  /// the staged-spec lookup and generation gate (the
+  /// `StagedByteSourceAdapter::validateSpec` pattern). Return an
+  /// IoErrorInfo to refuse the request before admission; nullopt accepts.
+  /// Lets a lens refuse ops it cannot perform at prepare time instead of
+  /// spending a worker turn to report Unsupported.
+  [[nodiscard]] virtual std::optional<IoErrorInfo>
+  prepareRefusal(const LensOpSpec &) const {
+    return std::nullopt;
+  }
 
   /// Off-owner commit driver shared by every lens adapter (plan §6.4):
   /// applies each frozen edit through @ref applyEdit, recording
@@ -188,6 +204,8 @@ protected:
   LensOpOutcome perform(const LensOpSpec &spec) override;
   std::expected<zigzag::ExternalKey, std::string>
   applyEdit(const zigzag::ExternalKey &key, std::string_view text) override;
+  [[nodiscard]] std::optional<IoErrorInfo>
+  prepareRefusal(const LensOpSpec &spec) const override;
 
 private:
   zigzag::ConfigLens &lens_;

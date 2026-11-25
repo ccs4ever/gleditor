@@ -57,14 +57,20 @@ LensOpOutcome opRefused(std::string_view detail) {
 std::uint32_t StagedLensSourceAdapter::stage(LensOpSpec spec) {
   const std::lock_guard lock(mutex_);
   if (staged_.size() >= maxStagedSpecs) return 0;
-  const auto key = nextKey_++;
-  staged_[key]   = std::move(spec);
+  // Skip 0 (the table-full sentinel) and any stageAt'd key an auto key could
+  // otherwise overwrite; the table bound keeps the skip short.
+  auto key = nextKey_++;
+  while (key == 0 || staged_.contains(key)) key = nextKey_++;
+  staged_[key] = std::move(spec);
   return key;
 }
 
 std::expected<std::uint32_t, std::string>
 StagedLensSourceAdapter::stageAt(std::uint32_t key, LensOpSpec spec) {
   const std::lock_guard lock(mutex_);
+  // Key 0 is the table-full sentinel stage() reports; an entry there would
+  // be found by a request whose specification names nothing.
+  if (key == 0) return std::unexpected("staging key 0 is reserved");
   if (staged_.contains(key))
     return std::unexpected("staging key already in use");
   if (staged_.size() >= maxStagedSpecs)
@@ -76,6 +82,11 @@ StagedLensSourceAdapter::stageAt(std::uint32_t key, LensOpSpec spec) {
 void StagedLensSourceAdapter::abandon(const std::uint32_t key) {
   const std::lock_guard lock(mutex_);
   staged_.erase(key);
+}
+
+void StagedLensSourceAdapter::abandonStaged(
+    const OwnerCell specification) noexcept {
+  abandon(static_cast<std::uint32_t>(specification));
 }
 
 std::uint64_t StagedLensSourceAdapter::generation() const noexcept {
@@ -97,6 +108,8 @@ auto StagedLensSourceAdapter::prepare(const CellRequest &request,
   const auto current = generation_.load(std::memory_order_acquire);
   if (spec.expectedGeneration != 0 && spec.expectedGeneration != current)
     return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
+  if (const auto refused = prepareRefusal(spec))
+    return std::unexpected(*refused);
 
   std::vector<std::byte> bytes(sizeof(key));
   std::memcpy(bytes.data(), &key, sizeof(key));
@@ -277,6 +290,15 @@ std::expected<zigzag::ExternalKey, std::string>
 ConfigLensSourceAdapter::applyEdit(const zigzag::ExternalKey &key,
                                    std::string_view text) {
   return lens_.applyContentChange(key, text);
+}
+
+std::optional<IoErrorInfo>
+ConfigLensSourceAdapter::prepareRefusal(const LensOpSpec &spec) const {
+  // ConfigLens has no windowed materializePage; refuse at admission rather
+  // than spending a worker turn to report Unsupported (plan §3.1).
+  if (spec.kind == LensOpKind::Materialize)
+    return IoErrorInfo{IoErrorCode::Unsupported, 0};
+  return std::nullopt;
 }
 
 // -- GitLensSourceAdapter
