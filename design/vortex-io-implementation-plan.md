@@ -55,7 +55,7 @@ frontend contracts below; they are not current compiler syntax or an implemented
 | Layer              | Final planned API / symbols                                                                                                | Authority and lifetime                                                                            | Acceptance gate                                                                          |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | Payload resolution | `PayloadRef`, `PayloadRange`, `PayloadResolver::read/slice/retain`, `PayloadLease`; `ArenaManifold::incarnationOf/matches` | Cell-visible range; leases pin immutable chunks; native resolver owns storage                     | M0 resolver and stale-range tests                                                        |
-| Cell schema        | `d.io.*` dimensions; `IoCellTag`; `IoOutcomeTag`                                                                           | Managed graph authoritative; private service metadata only accelerates                            | M0 topology/persistence-refusal tests                                                    |
+| Cell schema        | `d.io.*` dimensions; `IoCellTag`; `IoOutcomeTag`                                                                           | Topology and tags in the graph; request, endpoint, capability and capture state native (§3.1)     | M0 topology/persistence-refusal tests                                                    |
 | Service            | `IoService::admitOpen/submit/poll/await/cancelWaiter/cancelRequest/close/pump/shutdown`                                    | Host owns service; request record survives arena marks while semantically owned or backend-active | M1 delayed backend/lifecycle tests                                                       |
 | VM boundary        | `ExecutionResult`, `PendingAwait`, `VortexVM::step(cursor)/run(cursor)/resumeAwait(cursor, continuation)`                  | VM owns continuation; host owns park/wakeup registration; no front-end branches                   | M2 mark/backtrack/resume tests                                                           |
 | Profile/host       | `IoExecutionProfile`, `IoHost::pump/submit/await`                                                                          | Immutable profile per run; actor restrictions checked before admission                            | M3 actor proof/replay tests                                                              |
@@ -87,14 +87,14 @@ sentinels: `Endpoint`, `Capability`, `Request`, `Payload`, `Progress`, `Outcome`
 `LeaseId`, and `CaptureId` are private opaque identifiers, never accepted from parsed cell text as
 authority.
 
-| Cell value       | Authoritative graph fields                                                                                     | Native sidecar role                                         |
+| Cell value       | Target graph fields (not met; see the reconciliation below)                                                    | Native sidecar role                                         |
 | ---------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | Endpoint         | kind, generation, state, supported operation/consistency capabilities, read/write queue occurrences            | OS/backend handle, current adapter binding                  |
 | Capability       | endpoint occurrence, endpoint generation, rights, byte/concurrency limits, consistency requirements            | Revocation/authority proof; never reconstructed from fields |
 | Request          | operation, immutable arguments, capability occurrence, endpoint generation, state, progress, outcome, deadline | Scheduling/index data and native cancellation token         |
 | Waiter           | request occurrence, owner/cursor registration, continuation reference, active state                            | Wake queue token resolved to one owner continuation         |
 | Payload          | source generation/occurrence, offset, length, provenance, lease association                                    | Chunk pointers and physical lease reference                 |
-| Outcome/Progress | outcome tag, typed error/cause, progress units, optional payload/result occurrence                             | Rebuildable cache only                                      |
+| Outcome/Progress | outcome tag, typed error/cause, progress units, optional payload/result occurrence                             | Native outcome record; the cells are a view of it           |
 | Capture          | selected source intervals, map reservation, append request occurrence, phase                                   | Journal sequence and recovery index                         |
 
 `OpenedEndpoint` contains only owner-created endpoint/capability cell references.
@@ -235,8 +235,9 @@ allocation incarnation is never reused, including after mark release. Base-manif
 tagged origin identity from their owning store/session and proxy generation. Overwrite preserves
 allocation incarnation but the lease sidecar follows the replaced value; release destroys that
 incarnation. Arena destruction invalidates all ephemeral incarnations and releases owner leases.
-Cell links/tags are semantic state; native sidecars may index them but must be rebuildable/validated
-against incarnation.
+Cell links and tags carry topology and schema; request, endpoint, capability and capture state is
+native and the cells are its inspectable view (§3.1 reconciliation). Native tables are validated
+against incarnation, never rebuilt from cells.
 
 The language-visible submission value is a managed tagged sum cell: `IoSubmissionValue::Admitted`
 links to a `RequestCell`, or `IoSubmissionValue::Refused` links to an `OutcomeCell`. These spellings
@@ -401,11 +402,11 @@ result; the scheduler supplies release acknowledgement only after OS handles, bu
 registrations are no longer in use. The service never synthesizes cancellation for running work
 before that acknowledgement.
 
-`IoCellStore` is the owner-only arena bridge held by IoService. Its mint methods create
-authoritative managed request/outcome/endpoint/capability graph values; waiters are owner-only
-transient cells. `mintWaiter(RequestCell, OwnerWaiterRegistration)` and `retireWaiter(WaiterCell)`
-are owner-only. `IoService::await` serializes with owner `pump`, checks terminal state and
-registers/mints within one critical section; duplicate
+`IoCellStore` is the owner-only arena bridge held by IoService. Its mint methods create the managed
+request/outcome/endpoint/capability cells (topology and tags; §3.1 says which state stays native);
+waiters are owner-only transient cells. `mintWaiter(RequestCell, OwnerWaiterRegistration)` and
+`retireWaiter(WaiterCell)` are owner-only. `IoService::await` serializes with owner `pump`, checks
+terminal state and registers/mints within one critical section; duplicate
 `(request incarnation, cursor incarnation, continuation)` registration is idempotent. A completion
 candidate queued by a worker is not terminal until owner pump applies it, so a waiter registered
 first is woken by that pump; if pump applied terminal state first, Await returns Ready without
@@ -1024,9 +1025,16 @@ M6 implementation notes and deliberate deferrals:
     sync) without the whole records of captures that are resolved and published, keeping what is
     unresolved (live, pinned, awaiting publication) and what survives a restart (a durable-origin
     capture). The `Identity` record carries the id floor, so ids are never reused. A long run past
-    the old ceilings is the test `CaptureStateIsReapedSoALongRunPastTheOldCeilingsWorks`. A
-    durable-origin capture's records are the one thing never retired, and they stay inside the
-    journal bound, which refuses explicitly.
+    the old ceilings is the test `CaptureStateIsReapedSoALongRunPastTheOldCeilingsWorks`. A durable
+    origin never dies, so its captures retire by eviction instead (review r2, R2-1): when the map or
+    the journal bound would refuse and nothing resolved is left to drop, the coordinator evicts
+    committed translations least recently hit first (a batch of one eighth of `maxMapEntries`, never
+    one the current `prepare` covers) and the next compaction drops the records of every durable
+    capture no committed translation still backs. A durable capture's records are therefore kept
+    only while their translation is, and the cost of an eviction is one repeated append of those
+    bytes, never a wrong reference. `stateCounts()` reports live slots, retained captures and what
+    was evicted, and a journal refusal logs them. The test is
+    `DurableCaptureStateIsEvictedSoALongRunPastBothBoundsWorks`.
   - Zero is no longer "unbounded": `CaptureJournal`, `CaptureCoordinator` and
     `BackendBudget::maxBytes` take `std::optional`, and 0 holds nothing. A zero-extended crash tail
     is cut like any other tear (both journals share the scan).
