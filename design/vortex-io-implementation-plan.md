@@ -1192,6 +1192,87 @@ Deferred, by design:
   token per active waiter and in-place outcome cells, and the harness proves only the single-request
   contract; the multi-position scan is `M7-VPL`'s test.
 
+M7-VQL implementation notes and deliberate deferrals:
+
+- Grammar. A new top-level statement, `IoEffectStatement`, spelled
+  `effect { let $s := submit($cap, read_bytes(off, max)); match $s { ... } }` with the arms
+  `admitted($q) => await($q)` and `refused($e) => $e` (in either order, both required, each arm
+  yielding the outcome). The capability is a `$variable`; the offset and bound are integer literals
+  or `$variables`. It is a `Statement` alternative and not an `ActionClause`, which is how it stays
+  out of row traversal: the parser refuses it, with `VQL_IO_QUERY_CONTEXT`, as the action of a
+  `for`/`let`/`where`/`if` block and inside a def, lambda, `watch` or `with perspective` body (a
+  flag set only for the top-level script body), and refuses `submit`, `await` and `read_bytes` as a
+  call name in any expression (those three are now reserved). `effect` itself is contextual (an
+  identifier followed by `{`), so no existing query changes meaning. Grammar and semantics are in
+  `vql-query-language.md` §4.13 and change-history entry 16.2.
+- Execution design. VQL runs as Vortex bytecode on `VortexVM`, and the VM has no `Submit` opcode, so
+  the action has no bytecode form. It is run by `ScriptRunner`
+  (`apps/common/xanadu/vql/script_runner.{hpp,cpp}`), which sits above `QueryExecutor`: it cuts the
+  script at each action, runs each stretch of ordinary statements through the unchanged executor
+  (same session, same VM), and runs the action through `FrontendBridge` (`submit`, `match`,
+  `awaitSubmission`, `resume`, status gate). A parked action returns `Parked{FrontendToken}` whose
+  `activation` is the suspended script (plan: `scriptActivation`), `position` the action's statement
+  index (`effectAction`) and `request` the request cell (`requestCell`); resuming re-awaits that
+  request and never submits. The plan's "`ExecutionBlock` result gains
+  `Completed{rows}`/`Parked{...}`" is realised as `ScriptRunResult = FrontendRunResult<rows>` over
+  the whole script, since an action is a statement and not a block; `QueryExecutor::execute` itself
+  keeps returning rows and refuses a script holding an action (`VQL_IO_EFFECT_NOT_COMPILABLE`) so it
+  can never be silently dropped, and `VQLCompiler::compile` (so `vqueryc` and `:asm`) refuses it the
+  same way. C++ rather than Vortex because it parks a native activation across a host pump and sits
+  on the owner-thread bridge; nothing in it is language policy that Vortex could express without the
+  missing opcode.
+- Values. The script's result is its final executed statement's rows, as before. An action's value
+  is the outcome cell, then one text cell with the retained bytes only when the shared status gate
+  exposes a payload. A refusal is a `Rejected` outcome row (nothing started) and the script goes on;
+  `EndOfStream`, `Failed`, `Cancelled`, `TimedOut`, `Unknown` and the rest are outcome rows. The
+  only failures are the script's own: a stretch that fails (`VQL_SCRIPT_FAILED`, position =
+  statement index) or an unusable capability, offset or bound (`VQL_IO_EFFECT_ARGUMENT`, raised
+  before any read is staged or submitted). Three codes were added to the built-in registry.
+- Real reads. `FileReadHost` (`vortex/file_read_host.{hpp,cpp}`) assembles the M4/M5 stack
+  (`FileEndpointAdapter`, `ArenaIoCellStore`, `BoundedIoScheduler`, `IoService`, `IoHost`,
+  `FrontendBridge`) over one arena and VM, opens a file asynchronously (read-only grant) and stages
+  a bounded read as a request specification; it is language-neutral so later frontends reuse it.
+  `fileScriptPorts` is the VQL adapter over it.
+- CLI audit. `vquery`: before this milestone it had no I/O at all (every query ran synchronously on
+  the VM and no `IoHost` existed). Now `--io-file NAME=PATH` and `:open NAME PATH` open a file
+  through `beginOpen`, polled with `openedCapability` between non-blocking `pumpIo` calls; a script
+  holding an action runs through `ScriptRunner` and `driveToCompletion`, which pumps, takes the
+  wake, resumes the same action and, when a pump woke nothing, rests for a named 1 ms interval. No
+  `read`, `fread` or `getline` of file data happens on the evaluation thread (the `getline` in the
+  REPL reads the user's own line input, as it always has); the scheduler's workers `pread`. There is
+  no synchronous fallback: a query path that cannot park is refused, not run blocking. One
+  `VortexVM` now serves the whole process because the core has a single write guard that a second VM
+  would null on destruction. `vqueryc` is compile-only and opens no file or endpoint; it refuses an
+  action with `VQL_IO_EFFECT_NOT_COMPILABLE`. The host is built lazily, so a plain query starts no
+  worker.
+- Harness. `ConformanceDriver` gained `collectWakes()` (default empty) and `pumpDriver`, because a
+  language whose runner is not the driver itself must forward the wakes its runner received; the M7a
+  drivers are unchanged. `VqlScriptConformance` instantiates all five checks with a driver that runs
+  the real parser and runner. The runner keeps the latest `$submission` sum until the next action or
+  its destruction, which is what the harness needs to prove a refusal cannot be awaited.
+
+Deferred, by design:
+
+- A Vortex `Submit` opcode and so a bytecode lowering of the action; `vqueryc` cannot compile one.
+  It needs the `vortex_vm` approval already noted under M7a.
+- Matching on an outcome's tag or fields inside the script (`outcome(complete($payload, ..), ..)` of
+  the examples document): the script sees the outcome cell and the gated payload text, and the host
+  inspects the tag. Binding the action's result to a variable for later statements is also absent,
+  so statements after an action cannot name its value.
+- Retiring the request: the outcome cell is the script's value, so the runner does not
+  `retireRequest`; the request index and outcome cells live until the host drops them, which a
+  one-shot CLI never notices and a long-lived host must handle.
+- Write, capture, `message` and frame modes, `stable` reads, and any action other than a bounded
+  read of one file capability; reads over a loop or per row (refused until an explicit later gate).
+- The runner needs a `VQLEngine` session (mounts and `let` bindings reach later stretches through
+  it), runs one stretch per cut and does not carry a stretch's local bindings across an action
+  except through the session; a script whose stretch declares a mount runs the declaration once
+  before the first action.
+- No overall timeout on a parked script: it waits for the backend's own deadline (open has one; a
+  read has none yet), and cancelling a request stays a separate explicit action.
+- `submit`, `await` and `read_bytes` are reserved call names; a user `def` of those names can no
+  longer be called.
+
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per
 repository policy. Run source-level focused tests while implementing and full `make -j$(nproc) test`
 before release; backend comparison only if graphics code is touched. Do not claim performance

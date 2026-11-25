@@ -85,6 +85,7 @@ ______________________________________________________________________
     - [Unified Shape Contracts: Coexistence of Typing and Destructuring][toc-49]
     - [Point-Free Topological Traversal Functors & Currying][toc-50]
     - [Systems Lowering: The 24-Byte CurriedMorphism and TRAVERSE_CURRIED_DIM][toc-51]
+  - [4.13 Script I/O actions (`effect`)][toc-52]
 - [5. Memory Management & Topological Garbage Collection][toc-06]
 - [6. Executable Conformance Corpus](#6-executable-conformance-corpus)
 - [7. Reconciliation with the Unified Store/Slice](#7-reconciliation-with-the-unified-storeslice)
@@ -246,9 +247,16 @@ Statement             ::= ExecutionBlock
                         | WatchStatement
                         | WeaveStatement
                         | PerspectiveBlock
+                        | IoEffectStatement   (* top-level script only, see 4.13 *)
                         | PathExpression
 
 PerspectiveBlock      ::= "with" "perspective" "(" ValueExpr ")" "{" ScriptBody "}"
+
+IoEffectStatement     ::= "effect" "{" "let" VariableRef ":=" "submit" "(" VariableRef "," "read_bytes" "(" IoOperand "," IoOperand ")" ")" ";"?
+                          "match" VariableRef "{" IoArm ( ","? IoArm )? ","? "}" ";"? "}"
+IoArm                 ::= "admitted" "(" VariableRef ")" "=>" "await" "(" VariableRef ")"
+                        | "refused" "(" VariableRef ")" "=>" VariableRef
+IoOperand             ::= IntegerLiteral | VariableRef
 
 WatchStatement        ::= "watch" PathExpression ( "as" ( VariableRef | DestructurePattern ) )? ( "since" VersionExpr )? ( "until" BooleanExpr )? "{" ScriptBody "}"
 
@@ -2300,6 +2308,59 @@ explicit refusals. The rulings below describe the intended semantics.
   enforcement and complete frontend/parallel parity remain open. Compiled execution never silently
   calls a direct evaluator.
 
+### 4.13 Script I/O actions (`effect`)
+
+A script can read bytes from a file endpoint without a query touching I/O. The form is a **script
+action**, a statement of its own, not a clause of a query:
+
+```vql
+effect {
+  let $s := submit($src, read_bytes(6, 5));
+  match $s {
+    admitted($q) => await($q),
+    refused($e)  => $e
+  }
+}
+```
+
+`$src` is a session variable bound by the host to one capability cell (vquery binds it from
+`--io-file src=PATH` or `:open src PATH`); the offset and bound are integer literals or session
+variables bound to one non-negative numeric cell. `submit` always yields the managed sum
+`Admitted{request}` or `Refused{outcome}`; the `match` must name both arms, and each arm yields the
+outcome cell, so a refusal is the script's value rather than an error and is never awaited. The
+spelling follows the I/O frontend contract in the
+[implementation plan](vortex-io-implementation-plan.md) §10; only this fixed shape is accepted, and
+matching on an outcome's tag and fields inside the script is not yet part of the grammar.
+
+**Where it may stand.** Only as a top-level statement of the query's own script body. It is refused
+with `VQL_IO_QUERY_CONTEXT`, at parse time and before anything runs, as the action of a
+`for`/`let`/`where`/`if` block, inside a `def`, lambda, `watch` or `with perspective` body, and the
+names `submit`, `await` and `read_bytes` cannot be called in any expression (a row, filter,
+projection or `return` value). Queries, rows, filters and projections stay pure: a script action
+cannot be reached once per row.
+
+**Multiplicity.** An action submits once each time execution reaches it. The runner cuts the script
+at its actions; every stretch of ordinary statements runs through the Vortex VM exactly as before,
+and a stretch that yields a thousand rows does not repeat the action. Two actions submit twice, in
+order. A script's result is that of its final executed statement: an action's value is its outcome
+cell, followed by the retained bytes as one text cell only when the outcome's terminal tag exposes a
+payload (`Complete`, or `Partial`, `Failed`, `Cancelled` or `TimedOut` that kept bytes).
+`EndOfStream`, `Rejected` and every other tag is an outcome row alone.
+
+**Pending.** A request that is not terminal parks the script: the runner returns a token (the
+suspended script, the action's statement index and the request) and the host wakes that token when
+the request is terminal. Resuming re-awaits the *same request* and never submits again. Pending is
+runner state, never a row, an empty result or a `QueryError`; a terminal outcome of any tag is a
+value, and so is a refusal. Only a script's own failure is an error: a query stretch that fails
+(`VQL_SCRIPT_FAILED`, with the statement index), or an action whose capability, offset or bound is
+not usable (`VQL_IO_EFFECT_ARGUMENT`), which stops the script before anything is submitted.
+
+**No bytecode form.** VQL compiles to Vortex bytecode and the VM has no `Submit` opcode, so a script
+holding an action has no compiled form: `QueryExecutor::execute` and `VQLCompiler::compile` refuse
+it with `VQL_IO_EFFECT_NOT_COMPILABLE`, and `vqueryc` therefore reports that code rather than
+dropping the action. There is no blocking stand-in. A program that runs such a script drives a
+`ScriptRunner` (`apps/common/xanadu/vql/script_runner.hpp`) over its I/O host.
+
 ______________________________________________________________________
 
 ## 5. Memory Management & Topological Garbage Collection
@@ -2563,6 +2624,7 @@ table.
 | 15.0    | `f1d7b71` | 2026-10-20 | **Federated Docuverse & Sovereign Discovery Anchors**: Sovereign discovery anchors (`btpk`, `topic`, `citing`, `find`, `btih`, `ledger`, `system`), federated hops `/##`, private dimension mounts `mount ... as +d.dim`, zero-copy transclusion `<~` with in-band transcopyright micropayments, perspective-preserving quantum clone ranks `@persp: ±d.dim => val`, "No Remote Mutation" invariant with `d.ctl` action cells, reactive `watch` via ZZ9P `Zwatch`, and $O(1)$ dynamic virtual lenses (`<=>`, `:=`, `(get:, put:)`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 15.1    | `current` | 2026-10-20 | **First-Class Stores, Slices, Root Step Selectors, Functional Lenses & UFCS**: Stores, Slices, and Xanadocs as first-class runtime types; functional generators (`current()`, `local()`, `topic()`, `btpk()`, etc.); Uniform Function Call Syntax (UFCS) context propagation (`$store/slices("name")` $\equiv$ `slices($store, "name")`); universal `lens(type, args...)` primitive returning `Stream<Slice>`; root operator step selectors on slice contexts (`$slice/#`, `$slice/##`, `$slice/^`, `$slice/^^`, `$slice/^NAME`, `$slice/^^NAME`); multi-slice stream cursor filtering (`$slices/^foo`); bidirectional Anything-to-ZigZag Lens architecture (`ProjectionLens` / `ProjectionSession`) with canonical generic dimensions (`d.contains`, `d.seq`, `d.ref`, `d.clone`), character-level span provenance, and bidirectional unprojection; hypertime version pinning (`@(v1, v2)`) streaming living manifold folds; cell-level version pinning (`##@(v1, v2)`); first-class `MicroversionId` literals (`@2a9`); stack-inline hypertime arithmetic (`+`, `-`, `/`, `..`); 16-byte `HyperHandle` in-register lowerings; and strict equality operator reconciliation (`=` for comparison, `:=` for assignment/def, `!=` for inequality). |
 | 16.0    | `current` | 2026-10-21 | **Structural Typing, Unified Shape Contracts & Topological Functors**: Gradual structural type system with atomic handles (`Cell`, `Dim`, `Store`, `Slice`, `Version`), `Dim` renaming; `Doc` unified into `Slice`; unified shape contracts enabling seamless coexistence of destructuring, type contracts, defaults, and parameter aliasing (`$v: Cell { +d.codec: $c: String }`); first-class point-free traversal functors (`/+d.parent / /+d.title`); proposed packed CurriedMorphism layout and specialized traversal lowering (unbuilt; no ABI or timing guarantee).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 16.2    | `current` | 2026-11-25 | **Script I/O actions (`effect`)**, milestone M7-VQL of the Vortex I/O plan: a top-level script statement `effect { let $s := submit($cap, read_bytes(off, max)); match $s { admitted($q) => await($q), refused($e) => $e } }` (4.13). A new statement, so no existing program changes meaning. It submits once per reached action, parks on Pending and resumes the same request, yields the outcome (and its payload where the status gate allows) as the script value, and is refused with `VQL_IO_QUERY_CONTEXT` as a row, block, def, lambda, watch or perspective action and as a call of `submit`/`await`/`read_bytes` in any expression. `submit`, `await` and `read_bytes` become reserved call names. A script holding an action has no bytecode form (`VQL_IO_EFFECT_NOT_COMPILABLE`).                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix
@@ -2606,3 +2668,4 @@ table.
 [toc-49]: #4122-unified-shape-contracts-coexistence-of-typing-and-destructuring
 [toc-50]: #4123-point-free-topological-traversal-functors--currying
 [toc-51]: #4124-systems-lowering-curriedmorphism-and-traverse_curried_dim-proposed
+[toc-52]: #413-script-io-actions-effect
