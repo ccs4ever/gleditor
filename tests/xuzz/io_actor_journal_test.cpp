@@ -4,6 +4,8 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
+#include <limits>
 #include <vector>
 
 #include <fcntl.h>
@@ -306,6 +308,176 @@ TEST_F(ActorIoJournalTest, InconsistentArgsLengthRefusesAsCorrupt) {
   restarted.markQuiescent();
   const auto restore = restarted.recover();
   EXPECT_EQ(restore.status, ActorRestoreStatus::Corrupt);
+}
+
+namespace {
+
+/// Append raw bytes to the journal file behind the live writer's back --
+/// the craft half of the restart-repair tests. What lands is exactly what
+/// a crash between writeAll and fsync leaves: bytes the format cannot
+/// prove complete.
+void appendRaw(const std::filesystem::path &path,
+               std::initializer_list<std::byte> bytes) {
+  const int fd = ::open(path.c_str(), O_WRONLY | O_APPEND);
+  ASSERT_GE(fd, 0);
+  std::vector<char> buffer;
+  buffer.reserve(bytes.size());
+  for (const auto byte : bytes) {
+    buffer.push_back(static_cast<char>(byte));
+  }
+  ASSERT_EQ(::write(fd, buffer.data(), buffer.size()),
+            static_cast<ssize_t>(buffer.size()));
+  ::close(fd);
+}
+
+} // namespace
+
+TEST_F(ActorIoJournalTest, TornTailIsTruncatedOnRestartAndLaterRecordsLand) {
+  {
+    ActorIoJournal journal(path_, 0);
+    ASSERT_TRUE(journal.stageIntent(intent(1)));
+    ASSERT_TRUE(journal.recordAdmission(1, 7, 100));
+    ASSERT_TRUE(journal.recordReceipt(1));
+    ASSERT_TRUE(journal.checkpoint(1));
+  }
+
+  // A torn tail: a plausible body length whose bytes never fully landed.
+  // kFixedRecordBytes is 53, so a declared 200-byte body with only 20
+  // bytes behind it cannot be a record the format wrote -- it is a tear.
+  const std::uint32_t bodyLen = 200;
+  appendRaw(path_, {std::byte{bodyLen & 0xFF}, std::byte{(bodyLen >> 8) & 0xFF},
+                    std::byte{(bodyLen >> 16) & 0xFF},
+                    std::byte{(bodyLen >> 24) & 0xFF}});
+  {
+    const int fd = ::open(path_.c_str(), O_WRONLY | O_APPEND);
+    ASSERT_GE(fd, 0);
+    char partial[20]{};
+    ASSERT_EQ(::write(fd, partial, sizeof(partial)),
+              static_cast<ssize_t>(sizeof(partial)));
+    ::close(fd);
+  }
+
+  // The restart must prove the boundary and truncate the remnant BEFORE
+  // any new append: the next record has to land on the clean prefix, not
+  // on top of bytes recovery would refuse to classify.
+  ActorIoJournal restarted(path_, 0);
+  ASSERT_TRUE(restarted.stageIntent(intent(2)));
+  ASSERT_TRUE(restarted.recordAdmission(2, 7, 101));
+  restarted.markQuiescent();
+
+  const auto restore = restarted.recover();
+  // Intent 1 resolved under its checkpoint; intent 2 was admitted with no
+  // receipt. If the torn bytes had survived, recover would have stopped
+  // at the malformed record and reported Clean over a hidden admission.
+  EXPECT_EQ(restore.status, ActorRestoreStatus::Unknown);
+  ASSERT_EQ(restore.unknownIntents.size(), 1U);
+  EXPECT_EQ(restore.unknownIntents.front(), 2U);
+}
+
+TEST_F(ActorIoJournalTest, MalformedTailPoisonsTheJournalOnRestart) {
+  {
+    ActorIoJournal journal(path_, 0);
+    ASSERT_TRUE(journal.stageIntent(intent(1)));
+    ASSERT_TRUE(journal.recordAdmission(1, 7, 100));
+  }
+
+  // Garbage that is not even a plausible length prefix: a declared body
+  // under the fixed record size is corruption, not a tear, and the
+  // restarted instance must refuse to append over it.
+  const std::uint32_t bodyLen = 10;
+  appendRaw(path_, {std::byte{bodyLen & 0xFF}, std::byte{(bodyLen >> 8) & 0xFF},
+                    std::byte{(bodyLen >> 16) & 0xFF},
+                    std::byte{(bodyLen >> 24) & 0xFF}});
+
+  ActorIoJournal restarted(path_, 0);
+  const auto refused = restarted.stageIntent(intent(2));
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error().code, IoErrorCode::BackendFailure);
+  restarted.markQuiescent();
+  const auto restore = restarted.recover();
+  EXPECT_EQ(restore.status, ActorRestoreStatus::Corrupt);
+}
+
+TEST_F(ActorIoJournalTest, PartialHeaderFilePoisonsInsteadOfAppending) {
+  // Fewer bytes than the 12-byte header: the file exists but its prefix
+  // cannot be proven, so the instance must poison rather than treat the
+  // remnant as an empty journal and append past it.
+  {
+    std::ofstream partial(path_, std::ios::binary);
+    partial.write("\x89XUD", 4);
+  }
+
+  ActorIoJournal journal(path_, 0);
+  const auto refused = journal.stageIntent(intent(1));
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error().code, IoErrorCode::BackendFailure);
+  journal.markQuiescent();
+  const auto restore = journal.recover();
+  EXPECT_EQ(restore.status, ActorRestoreStatus::Corrupt);
+}
+
+TEST_F(ActorIoJournalTest, DirectoryAtJournalPathRefusesAsCorrupt) {
+  // A path that exists but cannot be sized is not an empty journal: the
+  // constructor must poison it and recovery must say Corrupt, not Clean.
+  const auto dirPath = dir_ / "not-a-file";
+  std::filesystem::create_directories(dirPath);
+
+  ActorIoJournal journal(dirPath, 0);
+  journal.markQuiescent();
+  const auto restore = journal.recover();
+  EXPECT_EQ(restore.status, ActorRestoreStatus::Corrupt);
+}
+
+TEST_F(ActorIoJournalTest, RecoverOnVanishedFileIsCleanNotCorrupt) {
+  // ENOENT is the one open() failure that means "nothing was ever
+  // written": a quiesced journal whose file disappeared before recover
+  // reports Clean, not Corrupt.
+  {
+    ActorIoJournal journal(path_, 0);
+    ASSERT_TRUE(journal.stageIntent(intent(1)));
+    ASSERT_TRUE(journal.recordAdmission(1, 7, 100));
+    ASSERT_TRUE(journal.recordReceipt(1));
+  }
+  std::filesystem::remove(path_);
+
+  ActorIoJournal restarted(path_, 0);
+  restarted.markQuiescent();
+  const auto restore = restarted.recover();
+  EXPECT_EQ(restore.status, ActorRestoreStatus::Clean);
+}
+
+TEST_F(ActorIoJournalTest, RecoverOnUnopenablePathIsCorruptNotClean) {
+  ActorIoJournal journal(path_, 0);
+  ASSERT_TRUE(journal.stageIntent(intent(1)));
+  ASSERT_TRUE(journal.recordAdmission(1, 7, 100));
+
+  // Swap the journal file for a self-referential symlink: recover()'s own
+  // open() now fails ELOOP. Every open() failure except ENOENT means the
+  // contents cannot be examined, so the answer is Corrupt -- never Clean
+  // over missing evidence.
+  std::filesystem::remove(path_);
+  std::filesystem::create_symlink(path_, path_);
+
+  journal.markQuiescent();
+  const auto restore = journal.recover();
+  EXPECT_EQ(restore.status, ActorRestoreStatus::Corrupt);
+}
+
+TEST_F(ActorIoJournalTest, ReserveRefusesRecordBytesThatWouldTruncateU32) {
+  // The on-disk length prefix is u32; a reservation whose total framed
+  // size overflows it must be refused as InvalidRequest, not silently
+  // truncated into a record recovery cannot parse.
+  ActorIoJournal journal(path_, 0);
+  const auto refused =
+      journal.reserve(std::numeric_limits<std::uint32_t>::max());
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error().code, IoErrorCode::InvalidRequest);
+
+  // Just under the ceiling stays admissible: the guard is on the framed
+  // total, not on the payload alone.
+  const auto allowed =
+      journal.reserve(std::numeric_limits<std::uint32_t>::max() - 60);
+  EXPECT_TRUE(allowed.has_value());
 }
 
 } // namespace

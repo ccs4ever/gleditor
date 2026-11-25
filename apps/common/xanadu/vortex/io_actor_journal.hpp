@@ -78,7 +78,13 @@ struct ActorRestoreResult {
 /// Crash-injection seams. Each is invoked, if set, at the named point and
 /// may throw to simulate the process dying mid-operation; the journal
 /// guarantees that whatever was durably flushed before the throw is what
-/// `recover()` on a fresh instance over the same file will see.
+/// `recover()` on a fresh instance over the same file will see. A throwing
+/// hook ends this instance's usable life in-process — model the restart
+/// with a fresh `ActorIoJournal` over the same path, whose constructor
+/// scans and repairs any torn tail before appending. `beforeFlush` throws
+/// before fsync, so its record is rolled back and never counts durable;
+/// `afterFlush` throws after fsync and bookkeeping, so its record is
+/// durable and counted.
 struct ActorJournalCrashPoints {
   std::function<void()> beforeFlush;
   std::function<void()> afterFlush;
@@ -158,16 +164,21 @@ public:
 private:
   auto appendRecord(const ActorIntentRecord &, const ActorJournalCrashPoints &)
       -> std::expected<void, IoErrorInfo>;
+  /// Constructor-time pass over an existing file: scans to the last
+  /// complete record, cuts a proven crash-torn tail with ftruncate, and
+  /// poisons the journal when the boundary cannot be proven or repaired.
+  void repairTornTail();
 
   std::filesystem::path path_;
   std::size_t maxBytes_;
   std::size_t writtenBytes_{};
   bool quiescent_{false};
   bool wroteHeader_{false};
-  /// Set when a failed append could not prove the file still ends on a
-  /// record boundary (the rollback truncate itself failed). Every later
-  /// append refuses and recover() reports Corrupt rather than risk
-  /// parsing records hidden behind a tolerated trailing remnant.
+  /// Set when the append boundary cannot be proven: a failed append's
+  /// rollback could not be proven, the constructor found a file it cannot
+  /// classify or repair, or the file is too short to ever hold a header.
+  /// Every later append refuses and recover() reports Corrupt rather than
+  /// risk parsing records hidden behind a tolerated trailing remnant.
   bool poisoned_{false};
 };
 
