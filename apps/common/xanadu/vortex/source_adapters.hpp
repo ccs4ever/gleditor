@@ -240,6 +240,20 @@ private:
 /// `execute`/`publish` dispatch to the same member without re-running
 /// `select` or touching any other member -- one caller submission still
 /// produces exactly one `prepare`/`execute`/`publish` call, on one member.
+///
+/// Staged-key requirement: `abandonStaged` receives only the request's
+/// `specification` cell, never the request, so `stagedRoute_` can hold
+/// exactly one member per spec key. Members MUST therefore present
+/// disjoint staged-key spaces for concurrently in-flight requests -- a
+/// spec key staged on one member must not equal a spec key staged on
+/// another while both requests are live, or the last `prepare` wins the
+/// route and the earlier request's abandon drops the *other* member's
+/// live staged entry. `StagedLensSourceAdapter` members mint globally
+/// unique spec cells and satisfy this; raw `StagedByteSourceAdapter`
+/// members each number their own key space from 1 and CAN collide --
+/// compose them only when at most one staged member is in flight, or
+/// accept the documented M4 limit that the collision fails the victim's
+/// request as InvalidRequest rather than silently corrupting it.
 class UnionSourceAdapter final : public IoAdapter {
 public:
   using Selector = std::function<std::size_t(const CellRequest &)>;

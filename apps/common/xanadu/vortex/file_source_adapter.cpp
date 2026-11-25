@@ -288,9 +288,18 @@ void FileSourceAdapter::execute(const BackendCommand &command,
               const auto maxBytes = static_cast<std::uint64_t>(
                   context.budget.maxBytes > 0 ? context.budget.maxBytes
                                               : op->range.length);
-              const auto toRead = op->range.length == 0
-                                      ? 0
-                                      : std::min(op->range.length, maxBytes);
+              auto toRead = op->range.length == 0
+                                ? 0
+                                : std::min(op->range.length, maxBytes);
+              // A stat-able file bounds the read by what is actually
+              // there: range.length or an unbounded budget can name far
+              // more than the file holds past offset, and the vector
+              // below would allocate the whole request before the first
+              // pread discovers the EOF (a 100GB range on a 1KB file).
+              // offset < size is already proven by the EndOfStream branch.
+              if (statOk) {
+                toRead = std::min(toRead, size - op->range.offset);
+              }
               // offset+got must stay inside off_t for every pread call.
               if (toRead > maxOffT ||
                   static_cast<std::uint64_t>(offset) > maxOffT - toRead) {

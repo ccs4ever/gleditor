@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <sys/socket.h>
 #include <thread>
@@ -482,6 +483,33 @@ TEST(UnionSourceAdapterTest, UnknownMemberIndexRefusesBeforeAdmission) {
   ASSERT_FALSE(prepared);
   EXPECT_EQ(prepared.error().code, IoErrorCode::InvalidRequest);
   EXPECT_EQ(only.prepareCalls, 0U);
+}
+
+TEST(UnionSourceAdapterTest,
+     OutOfRangeMemberIndexRejectsWithTypedTerminalAndRelease) {
+  CountingAdapter only;
+  UnionSourceAdapter adapterUnion(
+      {&only}, [](const CellRequest &) { return static_cast<std::size_t>(0); });
+  PayloadResolver payloads;
+  auto context = makeContext(payloads);
+  CapturingSink sink{&payloads};
+
+  // A command whose decoded member index names no member: execute must
+  // still emit the typed terminal + release acknowledgement the reserved
+  // scheduler slot needs -- never run a member, never drop the release.
+  std::vector<std::byte> opBytes(sizeof(std::uint32_t) + 2, std::byte{0});
+  const std::uint32_t badIndex = 99;
+  std::memcpy(opBytes.data(), &badIndex, sizeof(badIndex));
+  adapterUnion.execute(
+      BackendCommand{{7}, PreparedOperation{streamKey, std::move(opBytes)}},
+      context, sink);
+
+  ASSERT_TRUE(sink.candidate);
+  const auto *failed = std::get_if<Failed>(&sink.candidate->outcome);
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::InvalidRequest);
+  ASSERT_TRUE(sink.released.has_value());
+  EXPECT_EQ(only.executeCalls, 0U);
 }
 
 class FakeCells final : public IoCellStore {

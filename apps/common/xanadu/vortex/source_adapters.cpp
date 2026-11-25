@@ -480,14 +480,6 @@ auto UnionSourceAdapter::prepare(const CellRequest &request,
   auto memberPrepared = members_[index]->prepare(request, context);
   if (!memberPrepared) return std::unexpected(memberPrepared.error());
 
-  // Record the route so abandonStaged can forward to this member alone:
-  // route_ is keyed by token (unknown until enqueue) and publish may
-  // already have consumed it by the time a terminal abandon runs.
-  {
-    const std::lock_guard lock(routeMutex_);
-    stagedRoute_[static_cast<std::uint32_t>(request.specification)] = index;
-  }
-
   const auto memberIndex = static_cast<std::uint32_t>(index);
   std::vector<std::byte> bytes(sizeof(memberIndex) +
                                memberPrepared->bytes.size());
@@ -495,31 +487,53 @@ auto UnionSourceAdapter::prepare(const CellRequest &request,
   if (!memberPrepared->bytes.empty())
     std::memcpy(bytes.data() + sizeof(memberIndex),
                 memberPrepared->bytes.data(), memberPrepared->bytes.size());
+
+  // Record the route so abandonStaged can forward to this member alone:
+  // route_ is keyed by token (unknown until enqueue) and publish may
+  // already have consumed it by the time a terminal abandon runs. The
+  // record lands only after the operation is fully built -- a throw in
+  // the bytes build above must not leave a route for a prepare that never
+  // produced one (the service's refusal path then broadcasts, the
+  // documented fallback).
+  {
+    const std::lock_guard lock(routeMutex_);
+    stagedRoute_[static_cast<std::uint32_t>(request.specification)] = index;
+  }
   return PreparedOperation{request.key, std::move(bytes)};
 }
 
 void UnionSourceAdapter::execute(const BackendCommand &command,
                                  BackendContext &context,
                                  CompletionSink &sink) noexcept {
-  std::uint32_t index{};
-  std::vector<std::byte> memberBytes;
-  if (command.operation.bytes.size() >= sizeof(index)) {
-    std::memcpy(&index, command.operation.bytes.data(), sizeof(index));
-    memberBytes.assign(command.operation.bytes.begin() + sizeof(index),
-                       command.operation.bytes.end());
-  }
-  if (index >= members_.size() || members_[index] == nullptr) {
+  // Every terminal this adapter reports carries the same shape: a typed
+  // Failed outcome plus the release acknowledgement the reserved slot
+  // needs, exactly like the member adapters' own execute paths.
+  const auto reject = [&sink, &command](const IoErrorInfo error) {
     sink.terminalCandidate(
         command.token,
-        BackendResult{Failed{{IoErrorCode::InvalidRequest, 0},
-                             {},
-                             IoProgress{.phase = IoPhase::Terminal}},
+        BackendResult{Failed{error, {}, IoProgress{.phase = IoPhase::Terminal}},
                       {}},
         {});
-    // The request was already admitted, so the reserved terminal slot
-    // needs its release acknowledgement or the completion never
-    // materializes (same contract every other adapter's execute keeps).
     sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
+  };
+
+  std::uint32_t index{};
+  std::vector<std::byte> memberBytes;
+  try {
+    if (command.operation.bytes.size() >= sizeof(index)) {
+      std::memcpy(&index, command.operation.bytes.data(), sizeof(index));
+      memberBytes.assign(command.operation.bytes.begin() + sizeof(index),
+                         command.operation.bytes.end());
+    }
+  } catch (...) {
+    // memberBytes.assign allocates; execute is noexcept, so a bad_alloc
+    // here must surface as the typed terminal + release ack every other
+    // failure path emits rather than terminate the worker.
+    reject({IoErrorCode::BackendFailure, 0});
+    return;
+  }
+  if (index >= members_.size() || members_[index] == nullptr) {
+    reject({IoErrorCode::InvalidRequest, 0});
     return;
   }
   {

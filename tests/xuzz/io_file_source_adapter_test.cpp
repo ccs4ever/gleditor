@@ -193,6 +193,32 @@ TEST_F(FileSourceAdapterTest, ReadBeyondBudgetIsBounded) {
   EXPECT_LE(bytes->size(), 16U);
 }
 
+TEST_F(FileSourceAdapterTest,
+       OversizedRangeClampsToFileSizeInsteadOfAllocatingIt) {
+  writeFile("hello");
+  FileSourceAdapter adapter(path_);
+  OwnerContext owner;
+  PayloadResolver payloads;
+  // maxBytes == 0 reads as unbounded: without the file-size clamp the
+  // staging vector would try to allocate the full 1 TiB range before the
+  // first pread ever saw the EOF.
+  BackendContext context{
+      .stop = {}, .payloads = payloads, .budget = BackendBudget{0}};
+
+  const auto key = adapter.stageRead(MediaRange{0, std::uint64_t{1} << 40}, 0);
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  ASSERT_TRUE(sink.candidate);
+  const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
+  ASSERT_NE(complete, nullptr);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
+  EXPECT_EQ(textOf(*bytes), "hello");
+}
+
 // -- in-place mutation / external writer -------------------------------------
 
 TEST_F(FileSourceAdapterTest,
