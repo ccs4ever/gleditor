@@ -16,6 +16,14 @@ namespace {
 /// rather than evicting an entry an in-flight request still names.
 constexpr std::size_t maxStagedOps = 4096;
 
+/// Total frozen write bytes the staging table may hold across all live
+/// ops. The entry cap alone lets 4096 staged writes pin unbounded memory
+/// (each carries its own byte vector); the bound sits well above the
+/// scheduler's default 16 MiB per-op backend budget so legitimate
+/// multi-op staging still fits, while a stage past it fails as key 0
+/// exactly like a full table.
+constexpr std::size_t maxStagedWriteBytes = 64U * 1024U * 1024U;
+
 /// Largest offset+pwrite length `off_t` can address; staged ranges are
 /// checked against it before any pread/pwrite offset arithmetic.
 constexpr std::uint64_t maxOffT =
@@ -95,12 +103,18 @@ std::uint32_t FileSourceAdapter::stageWrite(std::uint64_t offset,
                                             std::vector<std::byte> bytes,
                                             std::uint64_t expectedGeneration) {
   const std::lock_guard lock(mutex_);
-  if (staged_.size() >= maxStagedOps) return 0;
-  const auto key = nextStageKeyLocked();
+  if (staged_.size() >= maxStagedOps ||
+      bytes.size() > maxStagedWriteBytes - stagedWriteBytes_)
+    return 0;
+  const auto key       = nextStageKeyLocked();
+  const auto byteCount = bytes.size();
   staged_[key] =
       StagedFileOp{StagedFileOp::Kind::Write,
-                   MediaRange{offset, static_cast<std::uint64_t>(bytes.size())},
+                   MediaRange{offset, static_cast<std::uint64_t>(byteCount)},
                    std::move(bytes), expectedGeneration};
+  // Count only once the op is actually staged: a throwing map insert must
+  // not leave the byte ledger ahead of the table.
+  stagedWriteBytes_ += byteCount;
   return key;
 }
 
@@ -122,6 +136,8 @@ std::uint32_t FileSourceAdapter::nextStageKeyLocked() {
 
 void FileSourceAdapter::abandon(const std::uint32_t key) {
   const std::lock_guard lock(mutex_);
+  const auto it = staged_.find(key);
+  if (it != staged_.end()) stagedWriteBytes_ -= it->second.writeBytes.size();
   staged_.erase(key);
 }
 
@@ -190,6 +206,7 @@ void FileSourceAdapter::execute(const BackendCommand &command,
       const std::lock_guard lock(mutex_);
       const auto it = staged_.find(key);
       if (it != staged_.end()) {
+        stagedWriteBytes_ -= it->second.writeBytes.size();
         op = std::move(it->second);
         staged_.erase(it);
       }
@@ -200,10 +217,16 @@ void FileSourceAdapter::execute(const BackendCommand &command,
     } else {
       // Re-check the generation at transfer time: the file may have moved
       // between a successful `prepare` and this worker turn (plan §7.2's
-      // Conflict path, mirrored from `StagedByteSourceAdapter`).
+      // Conflict path, mirrored from `StagedByteSourceAdapter`). A failed
+      // `stat` cannot verify the staged expectation either -- prepare()
+      // refuses that same unverifiable case as Unsupported, and bypassing
+      // the CAS here would silently accept a request the caller expected
+      // to be checked.
       const auto observedBefore = statGeneration();
-      if (op->expectedGeneration != 0 && observedBefore != 0 &&
-          op->expectedGeneration != observedBefore) {
+      if (op->expectedGeneration != 0 && observedBefore == 0) {
+        result = failedResult({IoErrorCode::Unsupported, 0});
+      } else if (op->expectedGeneration != 0 &&
+                 op->expectedGeneration != observedBefore) {
         result = BackendResult{Conflict{Generation{op->expectedGeneration},
                                         Generation{observedBefore},
                                         IoProgress{.phase = IoPhase::Terminal}},
@@ -368,6 +391,10 @@ void FileSourceAdapter::execute(const BackendCommand &command,
                   // this transfer, not the (possibly stale) one requested.
                   const std::lock_guard lock(mutex_);
                   const auto observationId = nextObservationId_++;
+                  // observations_ is a std::map keyed by the sequential id:
+                  // begin() is the oldest retained observation, so the cap
+                  // evicts in insertion (FIFO) order rather than whatever
+                  // hash bucket unordered_map happened to pick first.
                   if (observations_.size() >= maxRetainedObservations_)
                     observations_.erase(observations_.begin());
                   observations_[observationId] =

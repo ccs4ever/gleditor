@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -205,8 +206,13 @@ private:
   mutable std::mutex mutex_;
   std::unordered_map<std::uint32_t, StagedFileOp> staged_;
   std::uint32_t nextStageKey_{1};
+  /// Sum of writeBytes held across staged_ (guarded by mutex_); the byte
+  /// half of the staging bound the entry count alone cannot express.
+  std::size_t stagedWriteBytes_{};
 
-  std::unordered_map<std::uint64_t, ReadObservation> observations_;
+  /// Ordered by observationId so the retention cap evicts the oldest
+  /// (smallest id) first -- ids mint sequentially from nextObservationId_.
+  std::map<std::uint64_t, ReadObservation> observations_;
   std::uint64_t nextObservationId_{1};
   static constexpr std::size_t maxRetainedObservations_ = 4096;
 

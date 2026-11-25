@@ -464,6 +464,34 @@ TEST_F(FileSourceAdapterTest, WriteToReadOnlyAdapterIsRefused) {
   EXPECT_EQ(prepared.error().code, IoErrorCode::Unsupported);
 }
 
+TEST_F(FileSourceAdapterTest, StageWriteByteBoundRefusesBeforeEntryCap) {
+  writeFile("x");
+  FileSourceAdapter adapter(path_, /*writable=*/true);
+
+  // Each staged write carries its whole byte vector: the 4096-entry cap
+  // alone would let the table pin unbounded memory, so stageWrite() also
+  // bounds the total staged bytes and fails as key 0 past it.
+  std::vector<std::uint32_t> keys;
+  const auto chunk = std::vector<std::byte>(8U * 1024U * 1024U);
+  for (int i = 0; i < 4096; ++i) {
+    const auto key = adapter.stageWrite(0, chunk, 0);
+    if (key == 0) break;
+    keys.push_back(key);
+  }
+  EXPECT_FALSE(keys.empty());
+  EXPECT_LT(keys.size(), 4096U); // refused on bytes, not on entries
+
+  // Byte-free ops are unaffected by the write-byte bound.
+  const auto readKey = adapter.stageRead(MediaRange{0, 1}, 0);
+  EXPECT_NE(readKey, 0U);
+
+  // Abandoning a staged write returns its bytes to the budget.
+  adapter.abandon(keys.back());
+  keys.pop_back();
+  const auto again = adapter.stageWrite(0, chunk, 0);
+  EXPECT_NE(again, 0U);
+}
+
 TEST_F(FileSourceAdapterTest, WritableAdapterWritesAndBumpsGeneration) {
   writeFile("0123456789");
   FileSourceAdapter adapter(path_, /*writable=*/true);
@@ -531,6 +559,33 @@ TEST_F(FileSourceAdapterTest, DecodeLeaseRecordsGenerationAtAcquisitionTime) {
   // §7.2's "prior observations remain readable" rule, applied to a decode
   // product rather than the raw bytes).
   EXPECT_NE(adapter.currentGeneration(), lease->sourceGeneration);
+}
+
+TEST_F(FileSourceAdapterTest, ObservationCapEvictsOldestFirst) {
+  writeFile("x");
+  FileSourceAdapter adapter(path_);
+  OwnerContext owner;
+  PayloadResolver payloads;
+  auto context = makeContext(payloads);
+
+  // maxRetainedObservations_ is 4096: one read past the cap must evict
+  // the OLDEST observation (id 1), not an arbitrary map entry -- the
+  // retention promise is "recent reads stay readable," so eviction order
+  // is part of the contract.
+  for (std::uint64_t i = 0; i < 4097; ++i) {
+    const auto key      = adapter.stageRead(MediaRange{0, 0}, 0);
+    const auto prepared = adapter.prepare(requestFor(key), owner);
+    ASSERT_TRUE(prepared);
+    CapturingSink sink{&payloads};
+    adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+    ASSERT_TRUE(sink.candidate);
+    ASSERT_TRUE(std::holds_alternative<Complete>(sink.candidate->outcome));
+  }
+
+  EXPECT_FALSE(adapter.observation(1).has_value());
+  EXPECT_TRUE(adapter.observation(2).has_value());
+  EXPECT_TRUE(adapter.observation(4096).has_value());
+  EXPECT_TRUE(adapter.observation(4097).has_value());
 }
 
 } // namespace
