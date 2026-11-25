@@ -60,7 +60,17 @@ inline constexpr std::string_view tokenStale = "IO_TOKEN_STALE";
 /// The arena refused to mint or link the managed submission value.
 inline constexpr std::string_view cellRefused = "IO_CELL_REFUSED";
 /// The language-owned codes of §10 and §14.
-inline constexpr std::string_view vqlQueryContext  = "VQL_IO_QUERY_CONTEXT";
+inline constexpr std::string_view vqlQueryContext = "VQL_IO_QUERY_CONTEXT";
+/// A script action's capability, offset or bound is not a usable value; the
+/// script stops before anything is submitted.
+inline constexpr std::string_view vqlEffectArgument = "VQL_IO_EFFECT_ARGUMENT";
+/// The query was asked to compile to bytecode (or run without an I/O host),
+/// but a script I/O action has no bytecode lowering and no blocking fallback.
+inline constexpr std::string_view vqlEffectNotCompilable =
+    "VQL_IO_EFFECT_NOT_COMPILABLE";
+/// A query segment of a script failed (the QueryError category and message
+/// ride in the diagnostic's message).
+inline constexpr std::string_view vqlScriptFailed  = "VQL_SCRIPT_FAILED";
 inline constexpr std::string_view vplShapeMismatch = "VPL_IO_SHAPE_MISMATCH";
 inline constexpr std::string_view prologEffectContext =
     "PROLOG_IO_EFFECT_CONTEXT";

@@ -3,7 +3,9 @@
  * @brief Implementation of VQL Compiler translating AST to Vortex bytecode.
  */
 #include "common/xanadu/vql/compiler.hpp"
+
 #include "common/xanadu/vortex/assembly_transaction.hpp"
+#include "common/xanadu/vortex/frontend_diagnostics.hpp"
 #include "common/xanadu/vql/dynamic_view_registry.hpp"
 #include "common/xanadu/vql/invocation.hpp"
 
@@ -653,6 +655,17 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
   }
   if (!query.mounts.empty() || !query.namespaceDeclarations.empty())
     compileMountDeclarations(query);
+  for (const auto &statement : query.body.statements) {
+    // No bytecode lowering exists for a script I/O action (the VM has no
+    // Submit opcode) and no blocking stand-in is allowed, so the whole query
+    // is refused before any of it compiles.
+    if (std::holds_alternative<IoEffectStatement>(statement))
+      throw QueryRefusal(
+          QueryErrorCategory::Unsupported,
+          std::string{vortex::frontend_codes::vqlEffectNotCompilable} +
+              ": a script I/O action runs only through the vquery script "
+              "runner, which parks and resumes it; it has no bytecode form");
+  }
   if (!query.body.statements.empty()) {
     std::optional<CellRef> result;
     for (const auto &statement : query.body.statements) {

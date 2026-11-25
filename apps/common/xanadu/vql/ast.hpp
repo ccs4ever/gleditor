@@ -524,8 +524,28 @@ struct WeaveStatement {
   EffectClause effect;
 };
 
-struct Statement : std::variant<ExecutionBlock, WatchStatement, WeaveStatement,
-                                PerspectiveBlock, PathExpression> {
+/// A byte count or offset of a script I/O action: an integer literal, or the
+/// name of a session variable bound to a numeric cell.
+using IoOperand = std::variant<std::int64_t, std::string>;
+
+/// `effect { let $s := submit($cap, read_bytes(off, max));
+///           match $s { admitted($q) => await($q), refused($e) => $e } }`
+/// A script action (plan §10, M7-VQL): it exists only as a top-level script
+/// statement, so it is reached once per script run, never per row. The match
+/// is fixed in shape -- both arms, each yielding the outcome -- because a
+/// refusal is a value the script keeps, not a failure.
+struct IoEffectStatement {
+  std::string submissionVar;
+  std::string capabilityVar;
+  IoOperand offset{std::int64_t{0}};
+  IoOperand maxBytes{std::int64_t{0}};
+  std::string requestVar;
+  std::string refusalVar;
+};
+
+struct Statement
+    : std::variant<ExecutionBlock, WatchStatement, WeaveStatement,
+                   PerspectiveBlock, PathExpression, IoEffectStatement> {
   using variant::variant;
 };
 

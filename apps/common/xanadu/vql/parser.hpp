@@ -55,6 +55,9 @@ public:
   /// Parses a weave statement.
   WeaveStatement parseWeaveStatement();
 
+  /// Parses a script I/O action: `effect { ... }` (top-level script only).
+  IoEffectStatement parseIoEffectStatement();
+
   /// Parses a store anchor.
   StoreAnchor parseStoreAnchor();
 
@@ -109,6 +112,13 @@ private:
   std::vector<LambdaParam> parseLambdaParams();
   PathLambda parsePathLambda();
   bool isBlockBody();
+  [[nodiscard]] bool atIoEffect();
+  [[nodiscard]] bool checkWord(std::string_view word) const;
+  void consumeWord(std::string_view word);
+  Token consumeVariable(std::string_view what);
+  IoOperand parseIoOperand();
+  /// Refuse a script I/O name in a row or query expression.
+  void refuseIoCall(const Token &name) const;
 
   // Token stream navigation
   Token currentToken();
@@ -121,6 +131,10 @@ private:
 
   Lexer lexer_;
   Token current_;
+  /// Set by parseQuery for the one script body that may hold `effect`
+  /// actions: the top-level body, not a def, watch, perspective or lambda.
+  bool nextBodyIsScript_{false};
+  bool effectsAllowed_{false};
   bool hasLookahead_{false};
   Token lookahead_;
 };

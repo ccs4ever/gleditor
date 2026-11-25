@@ -8,6 +8,7 @@
  * creation/update, and ASCII art visualization for terminal debugging.
  */
 #include <argparse/argparse.hpp>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -16,6 +17,7 @@
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <unistd.h>
 #include <utility>
@@ -28,6 +30,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_stream.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/file_read_host.hpp"
 #include "common/xanadu/vortex/mesh_cli.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
@@ -35,11 +38,19 @@
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/execution.hpp"
 #include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/vql/script_runner.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/lens_repl.hpp"
 #include "protected_credential_prompt.hpp"
 
 namespace {
+
+/// How long the script driver rests when a pump produced no wake. The pump is
+/// non-blocking, so this only bounds how hot a parked script spins; a script
+/// action's own latency is the backend's, not this interval.
+constexpr std::chrono::milliseconds ioIdleSleep{1};
+/// Work one pump may do: completions published plus waiters checked.
+constexpr std::size_t ioPumpBudget = 16;
 
 std::string extractStoreLabel(const std::string &path) {
   std::filesystem::path p(path);
@@ -119,6 +130,9 @@ void printHelpREPL() {
       << "  :ascii                Toggle ASCII art output mode\n"
       << "  :engine vortex        Select the Vortex VM execution engine\n"
       << "  :store <label> <path> Load additional xanadoc/slice store\n"
+      << "  :open <name> <path>   Open a file read-only; bind its capability "
+         "to "
+         "$name for `effect { ... }` script I/O\n"
       << "  :stores               List currently loaded stores\n"
       << "  :save <path>          Save the last query rows as a result slice\n"
       << zigzag::LensRepl::helpText
@@ -173,10 +187,11 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
   options.emplace_back(argv[0]);
 
   const std::vector<std::string> valueOptions = {
-      "-e",       "--eval",   "-f",
-      "--file",   "-o",       "--output-store",
-      "--engine", "--format", "--permascroll",
-      "-d",       "--dims",   "--view-dims"};
+      "-e",         "--eval",   "-f",
+      "--file",     "-o",       "--output-store",
+      "--engine",   "--format", "--permascroll",
+      "--io-file",  "-d",       "--dims",
+      "--view-dims"};
 
   bool pastDoubleDash = false;
   for (int i = 1; i < argc; ++i) {
@@ -296,6 +311,13 @@ int main(int argc, char *argv[]) {
   program.add_argument("--permascroll")
       .help("Path to permascroll storage directory")
       .default_value(std::string(""));
+
+  program.add_argument("--io-file")
+      .help("Open a file read-only for script I/O actions and bind its "
+            "capability to $NAME (NAME=PATH); may be repeated. The open runs "
+            "asynchronously; read it with an `effect { ... }` script action")
+      .append()
+      .default_value(std::vector<std::string>{});
 
   program.add_argument("--dump-ast")
       .help("Print formatted AST before execution")
@@ -466,6 +488,62 @@ int main(int argc, char *argv[]) {
   // What the last query found: what -o and :save write.
   std::vector<zigzag::CellRef> lastResults;
   xanadu::vql::VQLEngine engine(coordinator);
+  // One VM for the process: the core has a single write guard, and the I/O
+  // host parks script actions on this VM's cursors.
+  zigzag::vortex::VortexVM vm(coordinator.core());
+  // Script I/O is built on first use, so a plain query never starts workers.
+  std::unique_ptr<xanadu::vortex::FileReadHost> io;
+  const auto ioHost = [&]() -> xanadu::vortex::FileReadHost & {
+    if (!io)
+      io = std::make_unique<xanadu::vortex::FileReadHost>(vm,
+                                                          coordinator.arena());
+    return *io;
+  };
+  // Open @p path through the host and bind its capability to $name. The open
+  // is admitted and then polled through the pump; nothing here reads a file.
+  const auto bindFile = [&](const std::string &name,
+                            const std::string &path) -> bool {
+    auto &host      = ioHost();
+    const auto open = host.beginOpen(path);
+    if (!open) {
+      std::cerr << "Open failed: " << open.error().code << ": "
+                << open.error().message << "\n";
+      return false;
+    }
+    while (true) {
+      if (const auto opened = host.openedCapability(*open)) {
+        if (!*opened) {
+          std::cerr << "Open failed: " << path << ": "
+                    << opened->error().message << "\n";
+          return false;
+        }
+        engine.setVariable(name, (*opened)->cell);
+        return true;
+      }
+      host.pump(ioPumpBudget);
+      std::this_thread::sleep_for(ioIdleSleep);
+    }
+  };
+  for (const auto &spec : program.get<std::vector<std::string>>("--io-file")) {
+    const auto split = spec.find('=');
+    if (split == std::string::npos || split == 0 || split + 1 == spec.size()) {
+      std::cerr << "Error: --io-file expects NAME=PATH, got '" << spec << "'\n";
+      return 1;
+    }
+    if (!bindFile(spec.substr(0, split), spec.substr(split + 1))) return 1;
+  }
+  // Run a script holding I/O actions: the runner parks at an unfinished
+  // await and the driver pumps the host until it wakes the same action.
+  const auto runIoScript = [&](xanadu::vql::QueryExpression ast)
+      -> std::expected<std::vector<zigzag::CellRef>,
+                       xanadu::vortex::FrontendDiagnostic> {
+    auto &host = ioHost();
+    xanadu::vql::ScriptRunner runner(engine, vm,
+                                     xanadu::vql::fileScriptPorts(host));
+    return xanadu::vql::driveToCompletion(
+        runner, runner.run(std::move(ast)), [&] { host.pump(ioPumpBudget); },
+        [] { std::this_thread::sleep_for(ioIdleSleep); });
+  };
   // Query Execution Helper
   bool hasResults = false;
   auto runQuery   = [&](std::string_view qStr) -> bool {
@@ -484,19 +562,29 @@ int main(int argc, char *argv[]) {
     }
 
     if (const auto root = lensRepl.root()) engine.setVariable("lens", *root);
-    zigzag::vortex::VortexVM vm(coordinator.core());
-    xanadu::vql::QueryExecutionOptions executionOptions;
-    executionOptions.mode = xanadu::vql::QueryExecutionMode::Vortex;
-    xanadu::vql::QueryExecutor executor(engine, vm, executionOptions);
-    const auto execution = executor.execute(ast);
-    if (dumpAsm &&
-        executionOptions.mode == xanadu::vql::QueryExecutionMode::Vortex)
-      std::cout << executor.disassembly() << "\n";
-    if (!execution) {
-      std::cerr << "Query failed: " << execution.error().message << "\n";
-      return false;
+    std::vector<zigzag::CellRef> results;
+    if (xanadu::vql::hasIoEffect(ast)) {
+      auto rows = runIoScript(std::move(ast));
+      if (!rows) {
+        std::cerr << "Query failed: " << rows.error().code << ": "
+                  << rows.error().message << "\n";
+        return false;
+      }
+      results = *std::move(rows);
+    } else {
+      xanadu::vql::QueryExecutionOptions executionOptions;
+      executionOptions.mode = xanadu::vql::QueryExecutionMode::Vortex;
+      xanadu::vql::QueryExecutor executor(engine, vm, executionOptions);
+      const auto execution = executor.execute(ast);
+      if (dumpAsm &&
+          executionOptions.mode == xanadu::vql::QueryExecutionMode::Vortex)
+        std::cout << executor.disassembly() << "\n";
+      if (!execution) {
+        std::cerr << "Query failed: " << execution.error().message << "\n";
+        return false;
+      }
+      results = *execution;
     }
-    const auto &results = *execution;
 
     lastResults = results;
     hasResults  = true;
@@ -692,6 +780,15 @@ int main(int argc, char *argv[]) {
       }
     } else if (zigzag::LensRepl::handles(line)) {
       lensRepl.run(line, std::cout, lensMeta);
+    } else if (line.starts_with(":open ")) {
+      std::istringstream iss(line);
+      std::string cmd, name, path;
+      iss >> cmd >> name >> path;
+      if (name.empty() || path.empty()) {
+        std::cout << "Usage: :open <name> <path>\n";
+      } else if (bindFile(name, path)) {
+        std::cout << "Opened " << path << " as $" << name << "\n";
+      }
     } else if (line == ":stores") {
       std::cout << "Registered stores on ##/d.stores rank:\n";
       for (const auto &s : coordinator.stores()) {
@@ -749,7 +846,6 @@ int main(int argc, char *argv[]) {
     } else if (line.starts_with(":asm ")) {
       std::string q = line.substr(5);
       try {
-        zigzag::vortex::VortexVM vm(coordinator.core());
         xanadu::vql::VQLCompiler comp(coordinator.core(), vm);
         auto res = comp.compile(q);
         if (res.success) {

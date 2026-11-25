@@ -14,11 +14,13 @@
 #include <utility>
 
 #include "common/xanadu/multi_store.hpp"
+#include "common/xanadu/vortex/frontend_diagnostics.hpp"
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/frame_eligibility.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/prose_hits.hpp"
+#include "common/xanadu/vql/script_runner.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
@@ -129,6 +131,13 @@ QueryExecutor::execute(const QueryExpression &query,
         .category = QueryExecutionError::Category::Runtime,
         .message  = "VQL executor engines must share one VortexCore",
     });
+  }
+  if (hasIoEffect(query)) {
+    return std::unexpected(QueryExecutionError{
+        .category = QueryExecutionError::Category::Unsupported,
+        .message = std::string{vortex::frontend_codes::vqlEffectNotCompilable} +
+                   ": a script I/O action parks and resumes; run the script "
+                   "through ScriptRunner, which never blocks"});
   }
   QueryExpression effectiveQuery = query;
   if (session_ != nullptr) {

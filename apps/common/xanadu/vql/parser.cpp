@@ -9,6 +9,8 @@
 #include <format>
 #include <utility>
 
+#include "common/xanadu/vortex/frontend_diagnostics.hpp"
+
 namespace xanadu::vql {
 
 namespace {
@@ -116,7 +118,8 @@ QueryExpression Parser::parseQuery() {
     }
   }
 
-  ScriptBody body = parseScriptBody();
+  nextBodyIsScript_ = true;
+  ScriptBody body   = parseScriptBody();
   consume(TokenKind::EndOfFile, "Expected end of query");
 
   std::variant<ExecutionBlock, PathExpression> expr;
@@ -143,6 +146,15 @@ QueryExpression Parser::parseQuery() {
 }
 
 ScriptBody Parser::parseScriptBody() {
+  // Only the body parseQuery marked may hold script I/O actions; a nested
+  // body (def, watch, perspective, lambda) restores the outer flag on exit.
+  const bool outerAllowed =
+      std::exchange(effectsAllowed_, std::exchange(nextBodyIsScript_, false));
+  struct Restore {
+    bool &flag;
+    bool value;
+    ~Restore() { flag = value; }
+  } const restore{effectsAllowed_, outerAllowed};
   ScriptBody body;
   while (!check(TokenKind::CloseBrace) && !check(TokenKind::EndOfFile)) {
     while (match(TokenKind::Semicolon)) {
@@ -157,6 +169,17 @@ ScriptBody Parser::parseScriptBody() {
 }
 
 Statement Parser::parseStatement() {
+  if (atIoEffect()) {
+    if (!effectsAllowed_) {
+      throw ParseError(
+          std::format("{}: an I/O script action ('effect') is allowed only as "
+                      "a top-level script statement, not inside a def, watch, "
+                      "perspective or lambda body",
+                      vortex::frontend_codes::vqlQueryContext),
+          current_.loc);
+    }
+    return parseIoEffectStatement();
+  }
   if (check(TokenKind::KwWatch)) {
     return parseWatchStatement();
   }
@@ -1278,6 +1301,14 @@ WhereClause Parser::parseWhereClause() {
 }
 
 ActionClause Parser::parseActionClause() {
+  if (atIoEffect()) {
+    throw ParseError(
+        std::format("{}: an I/O script action ('effect') cannot be the action "
+                    "of a for/let/where/if block; it runs once per script, "
+                    "never per row",
+                    vortex::frontend_codes::vqlQueryContext),
+        current_.loc);
+  }
   if (check(TokenKind::KwReturn)) {
     return ActionClause{.clause = parseReturnClause()};
   }
@@ -1641,6 +1672,7 @@ ValueExpr Parser::parseValueOrComparisonExpr() {
 
 FunctionInvocation Parser::parseFunctionInvocation() {
   Token nameTok = advance();
+  refuseIoCall(nameTok);
   consume(TokenKind::OpenParen, "Expected '(' after function name");
   std::vector<ValueExpr> args;
   std::vector<std::string> names;
@@ -1939,6 +1971,13 @@ bool Parser::isBlockBody() {
       next.is(TokenKind::KwBreak)) {
     return true;
   }
+  if (next.is(TokenKind::Identifier) && next.text == "effect") {
+    // `{ effect { ...` can only be a script body holding an I/O action; it is
+    // parsed as one so the placement refusal names VQL_IO_QUERY_CONTEXT
+    // instead of failing as a shape literal.
+    Lexer probe = lexer_;
+    if (probe.nextToken().is(TokenKind::OpenBrace)) return true;
+  }
   Lexer tempLexer = lexer_;
   Token cur       = next;
   int braceDepth  = 1;
@@ -2190,6 +2229,133 @@ VersionPin Parser::parseVersionPin() {
 
   consume(TokenKind::CloseParen, "Expected ')' after version pin list");
   return VersionPin{.versions = std::move(versions), .isRange = isRange};
+}
+
+bool Parser::atIoEffect() {
+  return check(TokenKind::Identifier) && current_.text == "effect" &&
+         peekToken().is(TokenKind::OpenBrace);
+}
+
+bool Parser::checkWord(const std::string_view word) const {
+  return check(TokenKind::Identifier) && current_.text == word;
+}
+
+void Parser::consumeWord(const std::string_view word) {
+  if (!checkWord(word)) {
+    throw ParseError(std::format("Expected '{}' in an I/O script action", word),
+                     current_.loc);
+  }
+  advance();
+}
+
+Token Parser::consumeVariable(const std::string_view what) {
+  if (!check(TokenKind::Variable)) {
+    throw ParseError(std::format("Expected {} ($name)", what), current_.loc);
+  }
+  return advance();
+}
+
+IoOperand Parser::parseIoOperand() {
+  if (check(TokenKind::IntegerLiteral)) {
+    return IoOperand{std::in_place_index<0>, advance().intValue};
+  }
+  if (check(TokenKind::Variable)) {
+    return IoOperand{std::in_place_index<1>, advance().stringValue};
+  }
+  throw ParseError("An I/O action offset and bound are an integer literal or "
+                   "a $variable",
+                   current_.loc);
+}
+
+void Parser::refuseIoCall(const Token &name) const {
+  if (name.text == "submit" || name.text == "await" ||
+      name.text == "read_bytes") {
+    throw ParseError(
+        std::format("{}: '{}' is an I/O script action name and cannot be "
+                    "called in a query, row, filter or projection expression",
+                    vortex::frontend_codes::vqlQueryContext, name.text),
+        name.loc);
+  }
+}
+
+IoEffectStatement Parser::parseIoEffectStatement() {
+  consumeWord("effect");
+  consume(TokenKind::OpenBrace, "Expected '{' after 'effect'");
+  IoEffectStatement effect;
+  consume(TokenKind::KwLet, "Expected 'let' to bind the submission");
+  effect.submissionVar = consumeVariable("a submission variable").stringValue;
+  consume(TokenKind::Assign, "Expected ':=' after the submission variable");
+  consumeWord("submit");
+  consume(TokenKind::OpenParen, "Expected '(' after 'submit'");
+  effect.capabilityVar = consumeVariable("a capability variable").stringValue;
+  consume(TokenKind::Comma, "Expected ',' after the capability");
+  consumeWord("read_bytes");
+  consume(TokenKind::OpenParen, "Expected '(' after 'read_bytes'");
+  effect.offset = parseIoOperand();
+  consume(TokenKind::Comma, "Expected ',' between the offset and the bound");
+  effect.maxBytes = parseIoOperand();
+  consume(TokenKind::CloseParen, "Expected ')' after read_bytes arguments");
+  consume(TokenKind::CloseParen, "Expected ')' after submit arguments");
+  match(TokenKind::Semicolon);
+
+  consumeWord("match");
+  const auto matched = consumeVariable("the submission variable");
+  if (matched.stringValue != effect.submissionVar) {
+    throw ParseError("An I/O action matches the submission it just bound",
+                     matched.loc);
+  }
+  consume(TokenKind::OpenBrace, "Expected '{' to open the match arms");
+  bool sawAdmitted = false;
+  bool sawRefused  = false;
+  while (!check(TokenKind::CloseBrace)) {
+    if (checkWord("admitted")) {
+      if (sawAdmitted) {
+        throw ParseError("Duplicate 'admitted' arm", current_.loc);
+      }
+      sawAdmitted = true;
+      advance();
+      consume(TokenKind::OpenParen, "Expected '(' after 'admitted'");
+      effect.requestVar = consumeVariable("a request variable").stringValue;
+      consume(TokenKind::CloseParen, "Expected ')' after the request variable");
+      consume(TokenKind::Arrow, "Expected '=>' after the admitted pattern");
+      consumeWord("await");
+      consume(TokenKind::OpenParen, "Expected '(' after 'await'");
+      const auto awaited = consumeVariable("the admitted request");
+      if (awaited.stringValue != effect.requestVar) {
+        throw ParseError("'await' takes the request the arm bound",
+                         awaited.loc);
+      }
+      consume(TokenKind::CloseParen, "Expected ')' after 'await' argument");
+    } else if (checkWord("refused")) {
+      if (sawRefused) {
+        throw ParseError("Duplicate 'refused' arm", current_.loc);
+      }
+      sawRefused = true;
+      advance();
+      consume(TokenKind::OpenParen, "Expected '(' after 'refused'");
+      effect.refusalVar = consumeVariable("a refusal variable").stringValue;
+      consume(TokenKind::CloseParen, "Expected ')' after the refusal variable");
+      consume(TokenKind::Arrow, "Expected '=>' after the refused pattern");
+      const auto kept = consumeVariable("the refusal");
+      if (kept.stringValue != effect.refusalVar) {
+        throw ParseError("The 'refused' arm keeps the refusal it bound",
+                         kept.loc);
+      }
+    } else {
+      throw ParseError("Expected an 'admitted' or 'refused' match arm",
+                       current_.loc);
+    }
+    match(TokenKind::Comma);
+  }
+  if (!sawAdmitted || !sawRefused) {
+    throw ParseError("An I/O action matches both 'admitted' and 'refused'; a "
+                     "refusal is a value, not a failure",
+                     current_.loc);
+  }
+  consume(TokenKind::CloseBrace, "Expected '}' to close the match");
+  match(TokenKind::Semicolon);
+  consume(TokenKind::CloseBrace, "Expected '}' to close 'effect'");
+  return effect;
 }
 
 } // namespace xanadu::vql
