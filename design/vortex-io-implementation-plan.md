@@ -973,17 +973,18 @@ M6 implementation notes and deliberate deferrals:
   that appended them. No change to `store.hpp`, `ops.hpp`, `CompactOpNode`, `store.tables` or any
   OpKind was needed.
 - Crash ordering (decision): `Appended` (after the permascroll sync, fsynced) -> publish into the
-  Store -> `Store::save` -> `Committed` -> in-process translations. `Committed` therefore proves the
-  bytes, the references and their durability. Publication is idempotent keyed by `CaptureId` (a walk
-  of the receipt rank, never a content hash). Death after `Appended` and before the save: recovery
-  finds no receipt, publishes once, saves, writes `Committed`. Death after the save and before
-  `Committed`: recovery finds the receipt, mints nothing, writes `Committed`. A `Committed` capture
-  whose Store lost its receipt is republished the same way. A refused publish or save fails `commit`
-  with `PersistenceRefusal` and leaves the capture retriable; the retry cannot double-publish. If
-  recovery cannot finish a publication the entry reports `PublicationIncomplete`, translations are
-  rebuilt, nothing is pinned, and `resumePublications()` retries. Publication runs on
-  `store.latest()`, so the Store must be single-writer while a coordinator uses it. With no
-  publisher attached a `Committed` record proves only the journal and the map, as before.
+  Store -> Store snapshot written and fsynced (formerly `Store::save`) -> `Committed` -> in-process
+  translations. `Committed` therefore proves the bytes, the references and their durability.
+  Publication is idempotent keyed by `CaptureId` (a walk of the receipt rank, never a content hash).
+  Death after `Appended` and before the save: recovery finds no receipt, publishes once, saves,
+  writes `Committed`. Death after the save and before `Committed`: recovery finds the receipt, mints
+  nothing, writes `Committed`. A `Committed` capture whose Store lost its receipt is republished the
+  same way. A refused publish or save fails `commit` with `PersistenceRefusal` and leaves the
+  capture retriable; the retry cannot double-publish. If recovery cannot finish a publication the
+  entry reports `PublicationIncomplete`, translations are rebuilt, nothing is pinned, and
+  `resumePublications()` retries. Publication runs on `store.latest()`, so the Store must be
+  single-writer while a coordinator uses it. With no publisher attached a `Committed` record proves
+  only the journal and the map, as before.
 - Explicit reconciliation: `reconcile(CaptureId, ReconcileRelease | ReconcilePromote{span?})`
   resolves a pinned capture (open intent, uncertain abort, `SpanBeyondPermascroll`, ambiguous
   order). Promote never searches for bytes: the owner names the span (or the journal's `Appended`
@@ -1038,19 +1039,31 @@ M6 implementation notes and deliberate deferrals:
   - Zero is no longer "unbounded": `CaptureJournal`, `CaptureCoordinator` and
     `BackendBudget::maxBytes` take `std::optional`, and 0 holds nothing. A zero-extended crash tail
     is cut like any other tear (both journals share the scan).
-  - **Deviation from §14, not fixed:** `commit()` runs the permascroll `sync()`, two journal fsyncs
-    and the whole-Store `Store::save` on the owner thread, and `appendRequest()` journals its intent
-    with an fsync there too. §14's "any path that blocks the evaluation/UI thread" is therefore
-    broken by the capture commit. The journal and sink steps can move to a worker adapter with an
-    owner-side continuation without touching the crash order; `Store::save` cannot, because it reads
-    the whole Store the owner mutates. Moving it needs a snapshot or incremental save in
-    `store.hpp`, a core change recorded as proposal P3 in the round-1 disposition.
+  - **P3 resolved the §14 deviation for the commit** (details and tests in
+    [`p3-implementation.md`](projects/vortex-io-implementation-review/m1-m6/p3-implementation.md)).
+    `commit()` no longer syncs, fsyncs or saves on the owner. It validates and submits a
+    `CaptureDurable` request (same adapter key as the append) and returns `CommitPending`; the
+    permascroll sync and the fsynced `Appended` record run on a scheduler worker; the owner's
+    `continueCommit()` then publishes into the Store in memory and takes a `StoreSnapshot` in O(new
+    operations) (`Store::saveSnapshot`); a second worker step writes and fsyncs the snapshot
+    (`SnapshotWriter`, through `SegmentedOpsSpool::writeSegmentRange`, the one writer of
+    `ops.nodes`) and the fsynced `Committed` record; a last `continueCommit()` commits the
+    translations. The durable order on disk is unchanged: `Appended` after the sink sync, then the
+    save, then `Committed`. A step that threw (a crash point) is rethrown by `continueCommit()`; a
+    step that failed refuses it and leaves the capture retriable.
+  - What still blocks the owner, by design: `appendRequest()` journals its `Append` intent with an
+    fsync (the intent is what recovery's state machine and the certain-abort path read as "durable
+    before submit", and moving it into the append's worker turn would make an admission refusal an
+    `Aborted` record with no intent); the `Aborted` records of the failure paths; journal compaction
+    under bound pressure; and `recover()`, `reconcile()` and `resumePublications()`, which run at
+    open or on an explicit owner decision with nothing else in flight and save through the same
+    snapshot writer on the calling thread. None of these is on a commit's happy path.
 - Remaining, deliberately: moving the `capture_defaults` bounds into `system://settings` (M8); there
   is no UI or keymap command invoking `reconcile` yet (it is an owner API); an ambiguous journal
   order is reconcilable only by the same promote/release decisions, with no tool that explains why
-  it was ambiguous; the Store is saved whole per commit (`Store::save` is not incremental per
-  capture, so a commit's cost grows with the store); and source chunks are not pinned by the map, so
-  a capture of a transient origin whose last lease dropped is refused `Unresolved` by design (the
+  it was ambiguous; a commit's snapshot copies and writes only the operations the directory lacks,
+  but `store.tables` is rewritten whole each time; and source chunks are not pinned by the map, so a
+  capture of a transient origin whose last lease dropped is refused `Unresolved` by design (the
   tests hold a standing lease).
 
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per

@@ -37,7 +37,8 @@ translation and not the oldest.
 ## Proposal register
 
 - **P3 (approved, not part of this change):** off-owner Store snapshot save for capture commit. A
-  separate agent implements it after this round.
+  separate agent implements it after this round. Implemented: see
+  [`p3-implementation.md`](p3-implementation.md).
 - **P4 (not applied; core file):** per-cell release in `ArenaManifold` (or a request-scoped mark) so
   reaped request graphs free their cells; today only truncation to a mark frees cells. It would also
   let `detachFromRank` relink before it unlinks.
