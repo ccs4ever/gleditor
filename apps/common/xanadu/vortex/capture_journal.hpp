@@ -1,0 +1,205 @@
+#ifndef XANADU_VORTEX_CAPTURE_JOURNAL_HPP
+#define XANADU_VORTEX_CAPTURE_JOURNAL_HPP
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <functional>
+#include <optional>
+#include <vector>
+
+#include "common/xanadu/spool.hpp"
+#include "common/xanadu/vortex/io_error.hpp"
+#include "common/xanadu/vortex/payload_resolver.hpp"
+
+// design/vortex-io-implementation-plan.md §8.2, capture journal format:
+// `capture.journal`, signature \x89XUDCAP, version 1, append-only
+// length-delimited records carrying record kind, sequence, CaptureId,
+// source interval, permascroll span, append digest and checksum. Records
+// are metadata only -- never transient bytes. A journal entry is fsynced
+// before Structure publication; the completion record follows publication.
+// Unknown signature/version, checksum failure, a truncated record or a
+// sequence gap is a typed refusal naming the record/error. This journal is
+// distinct from `actor-io.journal` (\x89XUDACT): capture durability is a
+// per-user transaction ledger, not an actor effect outbox.
+
+namespace xanadu::vortex {
+
+inline constexpr char kCaptureJournalSignature[8]     = {'\x89', 'X', 'U', 'D',
+                                                         'C',    'A', 'P', '\n'};
+inline constexpr std::uint32_t kCaptureJournalVersion = 1;
+
+/// Private opaque capture identity, minted monotonically by the owning
+/// CaptureCoordinator and never reused (including across restarts: recovery
+/// seeds the counter past the journal's maximum).
+using CaptureId = std::uint64_t;
+
+enum class CaptureJournalRecordKind : std::uint8_t {
+  /// Append intent: the CaptureAppend request was admitted and the
+  /// translation intent (source intervals + append digest) is durable.
+  /// Written before the append is submitted so a crash can never leave
+  /// permascroll bytes with no journal trace.
+  Append,
+  /// Append completion: the terminal append outcome was a validated
+  /// success and the allocated permascroll span plus the full translation
+  /// intent is durable. Fsynced before Structure publication.
+  Appended,
+  /// Completion: Structure publication finished; the capture's
+  /// translations are final. Follows publication.
+  Committed,
+  /// The append resolved without publication: admission was refused
+  /// (certain: no bytes can exist) or the terminal outcome was not a
+  /// successful Complete (uncertain flag reports whether bytes may have
+  /// landed anyway).
+  Aborted,
+};
+
+/// One source interval's translation intent: the logical source address
+/// (kind/source/generation/occurrence + offset/length, plan §8.1) and the
+/// offset its bytes occupy inside the single appended byte string. At
+/// Appended time the destination permascroll span is `span.start +
+/// dstOffset` for `srcLength` bytes.
+struct CaptureSourceInterval {
+  PayloadSourceKind sourceKind{};
+  std::uint64_t source{};
+  std::uint64_t generation{};
+  std::uint64_t occurrence{};
+  std::uint64_t srcOffset{};
+  std::uint64_t srcLength{};
+  std::uint64_t dstOffset{};
+  friend bool operator==(const CaptureSourceInterval &,
+                         const CaptureSourceInterval &) = default;
+};
+
+/// One durable ledger entry. `sequence` and `captureId` are stamped by the
+/// journal/coordinator; `sequence` is assigned by the journal at append
+/// time and verified gapless on recovery. Fields meaningful per kind:
+/// Append/Appended carry appendDigest, appendLength and intervals;
+/// Appended additionally carries span; Committed carries neither;
+/// Aborted carries abortReason/abortUncertain.
+struct CaptureJournalRecord {
+  CaptureJournalRecordKind kind{CaptureJournalRecordKind::Append};
+  CaptureId captureId{};
+  std::uint64_t sequence{};
+  /// BLAKE3-256 of the appended byte string; integrity only, never
+  /// identity (plan §1.6/§9.1: hashes validate, they do not select).
+  std::array<std::byte, 32> appendDigest{};
+  std::uint64_t appendLength{};
+  std::vector<CaptureSourceInterval> intervals;
+  xanadu::PrimediaSpan span{};
+  /// Aborted only: IoErrorCode of the refusal/failure, for diagnostics.
+  std::uint8_t abortReason{};
+  /// Aborted only: true when the append may have written bytes anyway
+  /// (a non-Complete terminal outcome cannot prove the permascroll
+  /// append did not partially land).
+  bool abortUncertain{};
+  friend bool operator==(const CaptureJournalRecord &,
+                         const CaptureJournalRecord &) = default;
+};
+
+enum class CaptureJournalStatus : std::uint8_t {
+  /// Every complete record parsed; sequences are gapless from 1.
+  Clean,
+  /// Signature/version mismatch, checksum failure, malformed record or
+  /// sequence gap. `refusal` names the record index and detail.
+  Corrupt,
+};
+
+struct CaptureJournalRecovery {
+  CaptureJournalStatus status{CaptureJournalStatus::Corrupt};
+  /// Well-formed complete records only, in journal order.
+  std::vector<CaptureJournalRecord> records;
+  /// The sequence the next appended record must carry.
+  std::uint64_t nextSequence{1};
+  /// Highest CaptureId seen; the coordinator seeds its counter past it.
+  CaptureId maxCaptureId{0};
+  /// Set when status is Corrupt: PersistenceRefusal with stableDetail
+  /// naming the failing record's 1-based position (0 = header/scan).
+  std::optional<IoErrorInfo> refusal;
+};
+
+/// Crash-injection seams, mirroring ActorJournalCrashPoints: each hook,
+/// when set, is invoked at the named point and may throw to simulate the
+/// process dying mid-operation. `beforeFlush` throws before fsync so its
+/// record is rolled back and never counts durable; `afterFlush` throws
+/// after fsync and bookkeeping so its record is durable and counted. A
+/// throwing hook ends this instance's usable life in-process; model the
+/// restart with a fresh CaptureJournal over the same path.
+struct CaptureJournalCrashPoints {
+  std::function<void()> beforeFlush;
+  std::function<void()> afterFlush;
+};
+
+/// Per-user append-only durable ledger backing capture transactions
+/// (§8.2). The owning CaptureCoordinator holds one instance; it never runs
+/// on a worker thread.
+class CaptureJournal {
+public:
+  CaptureJournal(std::filesystem::path path, std::size_t maxBytes);
+  ~CaptureJournal();
+  CaptureJournal(const CaptureJournal &)                     = delete;
+  auto operator=(const CaptureJournal &) -> CaptureJournal & = delete;
+
+  /// Reserve capacity before any capture work is staged. §8.1/§8.2:
+  /// "prepare reserves bounded interval-map/journal capacity ... otherwise
+  /// refuses without append" — callers check this before submitting the
+  /// CaptureAppend, not after a failed append.
+  [[nodiscard]] auto reserve(std::size_t recordBytes) const
+      -> std::expected<void, IoErrorInfo>;
+
+  /// Append one record of @p kind for @p captureId. The journal stamps
+  /// `sequence` (returned in the stamped record on success). Kind-specific
+  /// payload fields must already be filled; fields that do not apply to
+  /// @p kind are ignored on encode. A failed append rolls the file back
+  /// to the last proven record boundary; when even that cannot be proven
+  /// the journal poisons and every later append refuses.
+  [[nodiscard]] auto appendRecord(CaptureJournalRecordKind kind,
+                                  CaptureId captureId,
+                                  const CaptureJournalRecord &payload,
+                                  const CaptureJournalCrashPoints & = {})
+      -> std::expected<CaptureJournalRecord, IoErrorInfo>;
+
+  /// Parses every complete record currently on disk, verifies header,
+  /// per-record checksums and sequence gaplessness, and reports the
+  /// recovery view. Never resubmits, acknowledges or mutates anything;
+  /// classification is the coordinator's job. A file left by a crashed
+  /// writer keeps its proven prefix: the constructor already cut a
+  /// crash-torn tail, and a trailing incomplete record is tolerated here
+  /// exactly as the constructor's repair tolerates it.
+  [[nodiscard]] auto recover() const -> CaptureJournalRecovery;
+
+  [[nodiscard]] auto path() const -> const std::filesystem::path &;
+  [[nodiscard]] auto sizeBytes() const -> std::size_t;
+
+private:
+  auto appendEncoded(const CaptureJournalRecord &record,
+                     const CaptureJournalCrashPoints &)
+      -> std::expected<CaptureJournalRecord, IoErrorInfo>;
+  /// Constructor-time pass over an existing file: scans to the last
+  /// complete, checksum-valid, gapless record, cuts a proven crash-torn
+  /// tail with ftruncate, restores nextSequence_/maxCaptureId, and poisons
+  /// the journal when the boundary cannot be proven or repaired.
+  void repairTornTail();
+
+  std::filesystem::path path_;
+  std::size_t maxBytes_;
+  std::size_t writtenBytes_{};
+  std::uint64_t nextSequence_{1};
+  CaptureId maxCaptureId_{};
+  bool wroteHeader_{};
+  /// Set when the append boundary cannot be proven: a failed append's
+  /// rollback could not be proven, the constructor found a file it cannot
+  /// classify or repair, or the file is too short to ever hold a header.
+  /// Every later append refuses and recover() reports Corrupt rather than
+  /// risk parsing records hidden behind a tolerated trailing remnant.
+  bool poisoned_{};
+  /// The failing record's 1-based position when poisoning came from a
+  /// corrupt scan (0 otherwise); recover() reports it as the refusal detail.
+  std::uint32_t poisonDetail_{};
+};
+
+} // namespace xanadu::vortex
+
+#endif

@@ -41,6 +41,11 @@ enum class IoCellTag : std::uint8_t {
   ReadObservation,
   CaptureReceipt,
   Waiter,
+  /// A capture transaction's owner-only cell (plan §3.1 "Capture"): the
+  /// selected source intervals, map reservation, append request
+  /// occurrence and phase live in its graph and in the coordinator's
+  /// pending record.
+  Capture,
 };
 
 enum class IoOutcomeTag : std::uint8_t {
@@ -93,6 +98,8 @@ using PayloadCell         = IoCellHandle<IoCellTag::Payload>;
 using OutcomeCell         = IoCellHandle<IoCellTag::Outcome>;
 using ReadObservationCell = IoCellHandle<IoCellTag::ReadObservation>;
 using WaiterCell          = IoCellHandle<IoCellTag::Waiter>;
+using CaptureCell         = IoCellHandle<IoCellTag::Capture>;
+using CaptureReceiptCell  = IoCellHandle<IoCellTag::CaptureReceipt>;
 
 /// A private, untagged structural cell: a field occurrence, clone view or
 /// queue head.

@@ -21,9 +21,9 @@ constexpr std::array<std::string_view, ioDimensionCount> dimensionNames{
     "d.io.waiter",  "d.io.occurrence", "d.io.queue",      "d.io.clone",
     "d.io.source",  "d.io.range",      "d.io.provenance", "d.io.lease"};
 
-constexpr std::array<std::string_view, 9> cellTagNames{
+constexpr std::array<std::string_view, 10> cellTagNames{
     "Endpoint", "Capability",      "Request",        "Payload", "Progress",
-    "Outcome",  "ReadObservation", "CaptureReceipt", "Waiter"};
+    "Outcome",  "ReadObservation", "CaptureReceipt", "Waiter",  "Capture"};
 
 constexpr std::array<std::string_view, 12> outcomeTagNames{
     "Rejected",        "Complete",  "EndOfStream", "Partial",
