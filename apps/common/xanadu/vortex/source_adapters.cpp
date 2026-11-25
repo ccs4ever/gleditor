@@ -216,7 +216,12 @@ auto InMemoryStreamAdapter::perform(const StreamOpSpec &spec,
   auto toRead = std::min(spec.length, available);
   if (context.budget.maxBytes != 0)
     toRead = std::min<std::uint64_t>(toRead, context.budget.maxBytes);
-  if (toRead == 0) return BackendResult{EndOfStream{terminalProgress(0)}, {}};
+  // length == 0 asks for zero bytes: complete trivially exactly as the
+  // file adapter does -- EndOfStream would claim the source is exhausted
+  // when the request simply named no bytes.
+  if (toRead == 0)
+    return BackendResult{Complete{{}, std::monostate{}, terminalProgress(0)},
+                         {}};
   std::vector<std::byte> out(
       content_.begin() +
           static_cast<std::vector<std::byte>::difference_type>(spec.offset),
@@ -251,6 +256,12 @@ auto ProcessIoAdapter::perform(const StreamOpSpec &spec,
   if (spec.kind != StreamOpKind::Read)
     return failedResult({IoErrorCode::Unsupported, 0});
   if (spec.offset != 0) return failedResult({IoErrorCode::InvalidRequest, 0});
+  // length == 0 asks for zero bytes: complete trivially rather than
+  // spawning a process to fill a default chunk the spec never named.
+  if (spec.length == 0) {
+    return BackendResult{Complete{{}, std::monostate{}, terminalProgress(0)},
+                         {}};
+  }
 
   FILE *pipe = ::popen(command_.c_str(), "r");
   if (pipe == nullptr) return failedResult({IoErrorCode::BackendFailure, 0});
@@ -317,6 +328,16 @@ auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context,
   const std::lock_guard ioLock(ioMutex_);
 
   if (spec.kind == StreamOpKind::Write) {
+    // The same bound the read clamp and the in-memory/file adapters
+    // enforce: maxBytes == 0 reads as unbounded (BackendBudget's
+    // convention), a nonzero cap must cover the whole frozen write -- a
+    // partial send would misreport progress and leave a half-written
+    // stream the caller cannot distinguish from a completed one.
+    if (context.budget.maxBytes != 0 &&
+        spec.writeBytes.size() > context.budget.maxBytes) {
+      return failedResult({IoErrorCode::BudgetExceeded, 0},
+                          terminalProgress(0));
+    }
     std::size_t sent{};
     while (sent < spec.writeBytes.size()) {
       if (context.stop.stop_requested())
@@ -363,6 +384,13 @@ auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context,
       sent += static_cast<std::size_t>(result);
     }
     return BackendResult{Complete{{}, std::monostate{}, terminalProgress(sent)},
+                         {}};
+  }
+
+  // length == 0 asks for zero bytes: complete trivially rather than
+  // inventing a default chunk the frozen spec never named.
+  if (spec.length == 0) {
+    return BackendResult{Complete{{}, std::monostate{}, terminalProgress(0)},
                          {}};
   }
 
@@ -452,6 +480,14 @@ auto UnionSourceAdapter::prepare(const CellRequest &request,
   auto memberPrepared = members_[index]->prepare(request, context);
   if (!memberPrepared) return std::unexpected(memberPrepared.error());
 
+  // Record the route so abandonStaged can forward to this member alone:
+  // route_ is keyed by token (unknown until enqueue) and publish may
+  // already have consumed it by the time a terminal abandon runs.
+  {
+    const std::lock_guard lock(routeMutex_);
+    stagedRoute_[static_cast<std::uint32_t>(request.specification)] = index;
+  }
+
   const auto memberIndex = static_cast<std::uint32_t>(index);
   std::vector<std::byte> bytes(sizeof(memberIndex) +
                                memberPrepared->bytes.size());
@@ -518,6 +554,23 @@ auto UnionSourceAdapter::publish(const NativeCompletion &completion,
 }
 
 void UnionSourceAdapter::abandonStaged(const OwnerCell specification) noexcept {
+  const auto key = static_cast<std::uint32_t>(specification);
+  std::optional<std::size_t> routed;
+  {
+    const std::lock_guard lock(routeMutex_);
+    if (const auto it = stagedRoute_.find(key); it != stagedRoute_.end()) {
+      routed = it->second;
+      stagedRoute_.erase(it);
+    }
+  }
+  if (routed && *routed < members_.size() && members_[*routed] != nullptr) {
+    members_[*routed]->abandonStaged(specification);
+    return;
+  }
+  // No recorded route: the spec never prepared through this union (a
+  // pre-prepare refusal, or a spec staged on a member directly). Broadcast
+  // is the only option left -- each member's abandon is a no-op for keys
+  // it never held.
   for (auto *member : members_) {
     if (member != nullptr) member->abandonStaged(specification);
   }

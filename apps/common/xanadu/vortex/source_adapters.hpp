@@ -42,6 +42,10 @@ enum class StreamOpKind : std::uint8_t { Read, Write };
 struct StreamOpSpec {
   StreamOpKind kind{StreamOpKind::Read};
   std::uint64_t offset{};
+  /// Read bound in bytes. 0 requests zero bytes: every adapter completes
+  /// trivially with an empty `Complete` rather than inventing a default
+  /// chunk the spec never named or reporting `EndOfStream` for a request
+  /// that asked for nothing.
   std::uint64_t length{};
   std::vector<std::byte> writeBytes;
   std::uint64_t expectedGeneration{};
@@ -249,12 +253,13 @@ public:
                CompletionSink &sink) noexcept override;
   auto publish(const NativeCompletion &completion, OwnerContext &context)
       -> std::expected<OwnerPublication, IoErrorInfo> override;
-  /// Forwards the abandonment to every member: only the selected member's
-  /// staging table actually held the entry, but the union cannot recover
-  /// the selection here (route_ is keyed by token, publish may already have
-  /// consumed it). Documented M4 limit: members share one 32-bit staged-key
-  /// space, so a same-key entry staged on a *different* member for an
-  /// unrelated in-flight request could be dropped early -- it then fails
+  /// Forwards the abandonment to the member `prepare` routed this
+  /// specification to (recorded in stagedRoute_). A spec that never
+  /// prepared through the union -- a pre-prepare refusal, or one staged on
+  /// a member directly -- still broadcasts to every member: the documented
+  /// M4 limit, since members share one 32-bit staged-key space and a
+  /// same-key entry staged on a *different* member for an unrelated
+  /// in-flight request could be dropped early. It then fails
   /// `prepare`/`execute` as InvalidRequest, a typed refusal, never silent
   /// corruption.
   void abandonStaged(OwnerCell specification) noexcept override;
@@ -264,6 +269,9 @@ private:
   Selector select_;
   mutable std::mutex routeMutex_;
   std::unordered_map<std::uint64_t, std::size_t> route_;
+  /// specification key -> member index, recorded at prepare() so
+  /// abandonStaged can forward precisely; erased on first abandon.
+  std::unordered_map<std::uint32_t, std::size_t> stagedRoute_;
 };
 
 } // namespace xanadu::vortex

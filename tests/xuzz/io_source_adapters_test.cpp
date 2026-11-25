@@ -178,6 +178,30 @@ TEST(StreamSourceAdapterTest, EndOfStreamIsDistinctFromCompleteZeroBytes) {
   EXPECT_TRUE(std::holds_alternative<EndOfStream>(sink.candidate->outcome));
 }
 
+TEST(StreamSourceAdapterTest, ZeroLengthReadCompletesEmptyNotEndOfStream) {
+  InMemoryStreamAdapter adapter;
+  adapter.setContent(bytesOf("ab"));
+  OwnerContext owner;
+  PayloadResolver payloads;
+
+  // length == 0 asks for zero bytes: every adapter completes trivially
+  // with an empty Complete -- EndOfStream would claim the source is
+  // exhausted when the request simply named no bytes.
+  const auto key = adapter.stage(
+      StreamOpSpec{.kind = StreamOpKind::Read, .offset = 0, .length = 0});
+  const auto prepared = adapter.prepare(requestFor(streamKey, key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+  auto context = makeContext(payloads);
+  static_cast<IoAdapter &>(adapter).execute(BackendCommand{{4}, *prepared},
+                                            context, sink);
+  ASSERT_TRUE(sink.candidate);
+  const auto *complete = std::get_if<Complete>(&sink.candidate->outcome);
+  ASSERT_NE(complete, nullptr);
+  EXPECT_FALSE(complete->payload.has_value());
+  EXPECT_FALSE(sink.payloadLease.has_value());
+}
+
 // -- process adapter (real host I/O moved onto the worker path) -------------
 
 TEST(ProcessIoAdapterTest, CapturesBoundedChildStdout) {
@@ -200,6 +224,24 @@ TEST(ProcessIoAdapterTest, CapturesBoundedChildStdout) {
   const auto bytes = readPayload(payloads, *sink.payloadLease);
   ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "hello");
+}
+
+TEST(ProcessIoAdapterTest, ZeroLengthReadCompletesWithoutSpawning) {
+  ProcessIoAdapter adapter("printf hello");
+  OwnerContext owner;
+  PayloadResolver payloads;
+  const auto key =
+      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 0});
+  const auto prepared =
+      adapter.prepare(requestFor(AdapterKey{2, 1}, key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+  auto context = makeContext(payloads);
+  static_cast<IoAdapter &>(adapter).execute(BackendCommand{{2}, *prepared},
+                                            context, sink);
+  ASSERT_TRUE(sink.candidate);
+  EXPECT_TRUE(std::holds_alternative<Complete>(sink.candidate->outcome));
+  EXPECT_FALSE(sink.payloadLease.has_value());
 }
 
 TEST(ProcessIoAdapterTest, WriteAndOffsetSpecsAreRefusedAtPrepare) {
@@ -287,6 +329,72 @@ TEST(NetIoAdapterTest, RoundTripsBytesOverAConnectedSocketPair) {
   const auto bytes = readPayload(payloads, *readSink.payloadLease);
   ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "ping");
+}
+
+TEST(NetIoAdapterTest, WriteBeyondByteBudgetRefusesBeforeSending) {
+  SocketPair pair;
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair.fds), 0);
+  NetIoAdapter writer(pair.fds[0]);
+  NetIoAdapter reader(pair.fds[1]);
+  OwnerContext owner;
+  PayloadResolver payloads;
+
+  // The frozen write is bigger than the declared byte budget: the send
+  // loop must refuse BudgetExceeded up front, the way the read clamp and
+  // the file/in-memory adapters bound their transfers -- not stream a
+  // partial write and misreport it.
+  const auto writeKey = writer.stage(StreamOpSpec{
+      .kind = StreamOpKind::Write, .writeBytes = bytesOf("0123456789abcdef")});
+  const auto preparedWrite =
+      writer.prepare(requestFor(AdapterKey{3, 1}, writeKey), owner);
+  ASSERT_TRUE(preparedWrite);
+  CapturingSink writeSink{&payloads};
+  BackendContext context = makeContext(payloads);
+  context.budget         = BackendBudget{.maxBytes = 4};
+  static_cast<IoAdapter &>(writer).execute(BackendCommand{{1}, *preparedWrite},
+                                           context, writeSink);
+  ASSERT_TRUE(writeSink.candidate);
+  const auto *failed = std::get_if<Failed>(&writeSink.candidate->outcome);
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::BudgetExceeded);
+
+  // Nothing reached the peer: the write was refused before a single byte
+  // was sent, so a following read sees an open-but-silent socket -- a
+  // poll timeout, never a truncated prefix of the refused buffer.
+  const auto readKey =
+      reader.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 16});
+  const auto preparedRead =
+      reader.prepare(requestFor(AdapterKey{3, 1}, readKey), owner);
+  ASSERT_TRUE(preparedRead);
+  CapturingSink readSink{&payloads};
+  static_cast<IoAdapter &>(reader).execute(BackendCommand{{2}, *preparedRead},
+                                           context, readSink);
+  ASSERT_TRUE(readSink.candidate);
+  EXPECT_TRUE(std::holds_alternative<TimedOut>(readSink.candidate->outcome));
+}
+
+TEST(NetIoAdapterTest, ZeroLengthReadCompletesWithoutPolling) {
+  SocketPair pair;
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair.fds), 0);
+  NetIoAdapter adapter(pair.fds[0]);
+  OwnerContext owner;
+  PayloadResolver payloads;
+
+  // length == 0 asks for zero bytes: the adapter completes trivially
+  // instead of inventing a default chunk the frozen spec never named --
+  // and without ever polling the descriptor.
+  const auto key =
+      adapter.stage(StreamOpSpec{.kind = StreamOpKind::Read, .length = 0});
+  const auto prepared =
+      adapter.prepare(requestFor(AdapterKey{3, 1}, key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+  auto context = makeContext(payloads);
+  static_cast<IoAdapter &>(adapter).execute(BackendCommand{{1}, *prepared},
+                                            context, sink);
+  ASSERT_TRUE(sink.candidate);
+  EXPECT_TRUE(std::holds_alternative<Complete>(sink.candidate->outcome));
+  EXPECT_FALSE(sink.payloadLease.has_value());
 }
 
 // -- Router/Union composition does not resubmit -----------------------------
@@ -421,7 +529,8 @@ public:
     return OpenedEndpoint{EndpointCell{nextCell++, 1},
                           CapabilityCell{nextCell++, 1}};
   }
-  auto mintWaiter(RequestCell, OwnerWaiterRegistration) -> WaiterCell override {
+  auto mintWaiter(RequestCell, OwnerWaiterRegistration)
+      -> std::expected<WaiterCell, IoErrorInfo> override {
     return WaiterCell{nextCell++, 1};
   }
   void retireWaiter(WaiterCell) noexcept override {}
