@@ -10,6 +10,8 @@
 #include <tuple>
 #include <utility>
 
+#include <gleditor/logging.hpp>
+
 #include "common/xanadu/segmented_primedia_spool.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 
@@ -20,6 +22,22 @@ using zigzag::ArenaManifold;
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::DimVector;
+
+constexpr const char *kLog = "vortex.io.capture";
+
+constexpr std::string_view kindName(const CaptureJournalRecordKind kind) {
+  switch (kind) {
+  case CaptureJournalRecordKind::Append:
+    return "Append";
+  case CaptureJournalRecordKind::Appended:
+    return "Appended";
+  case CaptureJournalRecordKind::Committed:
+    return "Committed";
+  case CaptureJournalRecordKind::Aborted:
+    return "Aborted";
+  }
+  return "Unknown";
+}
 
 constexpr IoDimension kRequestDim = IoDimension::Request;
 constexpr IoDimension kOutcomeDim = IoDimension::Outcome;
@@ -195,6 +213,12 @@ auto UserPermascrollCaptureSink::append(const std::span<const std::byte> bytes)
       reinterpret_cast<const char *>(bytes.data()), bytes.size()));
 }
 
+auto UserPermascrollCaptureSink::sync() -> bool { return permascroll_.flush(); }
+
+auto UserPermascrollCaptureSink::highWaterBytes() const -> std::uint64_t {
+  return permascroll_.size();
+}
+
 SegmentedPrimediaCaptureSink::SegmentedPrimediaCaptureSink(
     xanadu::SegmentedPrimediaSpool &spool)
     : spool_(spool) {}
@@ -203,6 +227,12 @@ auto SegmentedPrimediaCaptureSink::append(
     const std::span<const std::byte> bytes) -> xanadu::PrimediaSpan {
   return spool_.append(std::span<const std::uint8_t>(
       reinterpret_cast<const std::uint8_t *>(bytes.data()), bytes.size()));
+}
+
+auto SegmentedPrimediaCaptureSink::sync() -> bool { return spool_.flush(); }
+
+auto SegmentedPrimediaCaptureSink::highWaterBytes() const -> std::uint64_t {
+  return spool_.size();
 }
 
 // -- CaptureAppendAdapter ----------------------------------------------------
@@ -261,6 +291,19 @@ auto CaptureAppendAdapter::wasExecuted(const std::uint32_t key) const noexcept
     -> bool {
   const std::lock_guard lock(mutex_);
   return executed_.contains(key);
+}
+
+auto CaptureAppendAdapter::syncSink() noexcept -> bool {
+  try {
+    const std::lock_guard performLock(performMutex_);
+    return sink_.sync();
+  } catch (...) {
+    return false;
+  }
+}
+
+auto CaptureAppendAdapter::sinkHighWater() const -> std::uint64_t {
+  return sink_.highWaterBytes();
 }
 
 auto CaptureAppendAdapter::prepare(const CellRequest &request, OwnerContext &)
@@ -369,7 +412,10 @@ CaptureCoordinator::CaptureCoordinator(
     const CaptureCoordinatorLimits limits)
     : arena_(arena), schema_(schema), payloads_(payloads), service_(service),
       journal_(std::move(journalPath), journalMaxBytes), adapter_(sink),
-      limits_(limits) {}
+      limits_(limits),
+      // Identities are never reused: seed past everything the journal
+      // already names, before any prepare() can mint one.
+      nextCaptureId_(journal_.maxCaptureId() + 1) {}
 
 auto CaptureCoordinator::appendAdapter() noexcept -> CaptureAppendAdapter & {
   return adapter_;
@@ -383,22 +429,126 @@ auto CaptureCoordinator::journal() noexcept -> CaptureJournal & {
   return journal_;
 }
 
+auto CaptureCoordinator::setJournalCrashPoints(CaptureJournalCrashPoints points)
+    -> CaptureCoordinator * {
+  crashPoints_ = std::move(points);
+  return this;
+}
+
+auto CaptureCoordinator::recovered() const noexcept -> bool {
+  return recoveryReport_.has_value();
+}
+
+auto CaptureCoordinator::translationFor(const PayloadRange &range) const
+    -> std::optional<xanadu::PrimediaSpan> {
+  if (range.length == 0 || range.offset + range.length < range.offset) {
+    return std::nullopt;
+  }
+  const auto found = translations_.find(range.origin);
+  if (found == translations_.end()) return std::nullopt;
+  const auto &slots = found->second;
+  auto slot         = slots.upper_bound(range.offset);
+  if (slot == slots.begin()) return std::nullopt;
+  --slot;
+  const auto &entry = slot->second;
+  if (entry.kind != TranslationSlot::Kind::Committed ||
+      range.offset + range.length > entry.srcOffset + entry.srcLength) {
+    return std::nullopt;
+  }
+  return xanadu::PrimediaSpan{.scroll = entry.dst.scroll,
+                              .start  = entry.dst.start +
+                                       (range.offset - entry.srcOffset),
+                              .length = range.length};
+}
+
 void CaptureCoordinator::sweepDead() {
   for (auto it = pending_.begin(); it != pending_.end();) {
     if (arena_.matches(it->first.first, it->first.second)) {
       ++it;
       continue;
     }
-    // The capture cell's allocation is gone: its uncommitted interval
-    // reservations must not pin the origin forever, its staged append
-    // spec is dead weight, and its leases are the last byte pins.
-    erasePendingSlots(it->second.captureId);
-    if (it->second.hasSpec) {
-      adapter_.complete(static_cast<std::uint32_t>(it->second.specCell));
-    }
-    releaseLeases(it->second);
-    it = pending_.erase(it);
+    // The capture cell's allocation is gone. A capture whose append was
+    // requested may still have landed bytes with no outcome record, so its
+    // intervals stay pinned (recovery would pin the same open intent);
+    // an unsubmitted one just frees its reservations.
+    const bool maybeAppended =
+        it->second.phase == PendingPhase::AppendRequested;
+    GLEDITOR_LOG_DEBUG(kLog, "capture {} swept: cell died in phase {}",
+                       it->second.captureId,
+                       static_cast<unsigned>(it->second.phase));
+    auto next = std::next(it);
+    retire(it, maybeAppended);
+    it = next;
   }
+}
+
+void CaptureCoordinator::retire(
+    const std::map<PendingKey, PendingCapture>::iterator it,
+    const bool uncertain) {
+  auto &pending = it->second;
+  if (uncertain) {
+    pinPendingSlots(pending.captureId);
+    GLEDITOR_LOG_WARN(kLog, "capture {} retired uncertain: intervals pinned",
+                      pending.captureId);
+  } else {
+    erasePendingSlots(pending.captureId);
+  }
+  if (pending.spec) {
+    adapter_.complete(static_cast<std::uint32_t>(pending.spec->cell));
+  }
+  releaseLeases(pending);
+  journal_.unhold(pending.heldJournalBytes);
+  pending_.erase(it);
+}
+
+void CaptureCoordinator::pinPendingSlots(const CaptureId captureId) {
+  for (auto &entry : translations_) {
+    for (auto &[offset, slot] : entry.second) {
+      (void)offset;
+      if (slot.kind == TranslationSlot::Kind::Pending &&
+          slot.pendingCapture == captureId) {
+        slot.kind = TranslationSlot::Kind::Pinned;
+      }
+    }
+  }
+}
+
+auto CaptureCoordinator::appendJournal(PendingCapture &pending,
+                                       const CaptureJournalRecordKind kind,
+                                       const CaptureJournalRecord &payload)
+    -> std::expected<CaptureJournalRecord, IoErrorInfo> {
+  auto written =
+      journal_.appendRecord(kind, pending.captureId, payload, crashPoints_);
+  if (!written) {
+    GLEDITOR_LOG_WARN(
+        kLog, "capture {} journal {} record refused: code {} detail {}",
+        pending.captureId, kindName(kind), toString(written.error().code),
+        written.error().stableDetail);
+    return written;
+  }
+  const auto framed = captureJournalFramedBytes(kind, payload.intervals.size());
+  const auto consumed = std::min(pending.heldJournalBytes, framed);
+  pending.heldJournalBytes -= consumed;
+  journal_.unhold(consumed);
+  return written;
+}
+
+auto CaptureCoordinator::worstCaseJournalBytes(const std::size_t pieces)
+    -> std::size_t {
+  return captureJournalFramedBytes(CaptureJournalRecordKind::Append, pieces) +
+         captureJournalFramedBytes(CaptureJournalRecordKind::Appended, pieces) +
+         captureJournalFramedBytes(CaptureJournalRecordKind::Committed) +
+         captureJournalFramedBytes(CaptureJournalRecordKind::Aborted);
+}
+
+auto CaptureCoordinator::topUpHold(PendingCapture &pending)
+    -> std::expected<void, IoErrorInfo> {
+  const auto needed = worstCaseJournalBytes(pending.pieces.size());
+  if (pending.heldJournalBytes >= needed) return {};
+  const auto delta = needed - pending.heldJournalBytes;
+  if (const auto ok = journal_.hold(delta); !ok) return ok;
+  pending.heldJournalBytes += delta;
+  return {};
 }
 
 void CaptureCoordinator::releaseLeases(PendingCapture &pending) {
@@ -439,14 +589,20 @@ auto CaptureCoordinator::uncoveredPieces(
     std::vector<CapturePiece> &pieces, std::uint64_t &appendBytes,
     const std::size_t leaseIndex) -> std::expected<void, IoErrorInfo> {
   const std::uint64_t end = offset + length;
-  const auto found        = translations_.find(origin);
-  if (found == translations_.end()) {
+  // Never emits a zero-length piece: a zero-length Pending slot would make a
+  // later emplace at the same offset a silent no-op.
+  const auto emit = [&](const std::uint64_t from, const std::uint64_t to) {
+    if (from >= to) return;
     pieces.push_back(CapturePiece{.origin     = origin,
-                                  .srcOffset  = offset,
-                                  .srcLength  = length,
+                                  .srcOffset  = from,
+                                  .srcLength  = to - from,
                                   .dstOffset  = appendBytes,
                                   .leaseIndex = leaseIndex});
-    appendBytes += length;
+    appendBytes += to - from;
+  };
+  const auto found = translations_.find(origin);
+  if (found == translations_.end()) {
+    emit(offset, end);
     return {};
   }
 
@@ -469,43 +625,38 @@ auto CaptureCoordinator::uncoveredPieces(
       // cannot independently append the same uncovered origin.
       return std::unexpected(IoErrorInfo{IoErrorCode::Conflict, 2});
     }
-    const auto coverStart = std::max(offset, slot.srcOffset);
-    if (cursor < coverStart) {
-      pieces.push_back(CapturePiece{.origin     = origin,
-                                    .srcOffset  = cursor,
-                                    .srcLength  = coverStart - cursor,
-                                    .dstOffset  = appendBytes,
-                                    .leaseIndex = leaseIndex});
-      appendBytes += coverStart - cursor;
-    }
+    emit(cursor, std::max(offset, slot.srcOffset));
     cursor = std::max(cursor, std::min(end, slotEnd));
     if (cursor >= end) break;
   }
-  if (cursor < end) {
-    pieces.push_back(CapturePiece{.origin     = origin,
-                                  .srcOffset  = cursor,
-                                  .srcLength  = end - cursor,
-                                  .dstOffset  = appendBytes,
-                                  .leaseIndex = leaseIndex});
-    appendBytes += end - cursor;
-  }
+  emit(cursor, end);
   return {};
 }
 
-void CaptureCoordinator::insertPendingSlots(
+auto CaptureCoordinator::insertPendingSlots(
     const CaptureId captureId, const std::vector<CapturePiece> &pieces,
-    const std::size_t begin, const std::size_t end) {
+    const std::size_t begin, const std::size_t end)
+    -> std::expected<void, IoErrorInfo> {
   for (std::size_t i = begin; i < end; ++i) {
     const auto &piece = pieces[i];
     auto &slots       = translations_[piece.origin];
-    // The piece is a computed gap: no slot may already cover its start.
-    slots.emplace(piece.srcOffset,
-                  TranslationSlot{.kind      = TranslationSlot::Kind::Pending,
-                                  .srcOffset = piece.srcOffset,
-                                  .srcLength = piece.srcLength,
-                                  .pendingCapture = captureId});
+    // The piece is a computed gap: no slot may already cover its start. A
+    // refused emplace means that invariant broke; refusing the capture is
+    // the only safe answer (the caller erases what was inserted).
+    const auto [slot, inserted] = slots.emplace(
+        piece.srcOffset, TranslationSlot{.kind = TranslationSlot::Kind::Pending,
+                                         .srcOffset      = piece.srcOffset,
+                                         .srcLength      = piece.srcLength,
+                                         .pendingCapture = captureId});
+    (void)slot;
+    if (!inserted) {
+      GLEDITOR_LOG_ERROR(kLog, "capture {}: pending slot collided at offset {}",
+                         captureId, piece.srcOffset);
+      return std::unexpected(IoErrorInfo{IoErrorCode::Conflict, 4});
+    }
     ++translationSlots_;
   }
+  return {};
 }
 
 void CaptureCoordinator::coalesceOrigin(OriginMap &slots) {
@@ -519,6 +670,7 @@ void CaptureCoordinator::coalesceOrigin(OriginMap &slots) {
         it->second.kind != TranslationSlot::Kind::Committed ||
         next->second.kind != TranslationSlot::Kind::Committed ||
         it->second.srcOffset + it->second.srcLength != next->first ||
+        it->second.dst.scroll != next->second.dst.scroll ||
         it->second.dst.start + it->second.dst.length !=
             next->second.dst.start) {
       ++it;
@@ -566,20 +718,6 @@ PayloadRef originOf(const CaptureSourceInterval &interval) {
                     .occurrence = interval.occurrence};
 }
 
-/// The worst-case journal bytes one capture can write: an Append and an
-/// Appended record carrying every piece, plus a Committed and an Aborted.
-std::size_t journalReserveBytes(const std::size_t pieces) {
-  constexpr std::size_t fixed = 25; // kFixedBodyBytes in capture_journal.cpp
-  constexpr std::size_t appendFixed = 44;
-  constexpr std::size_t spanBytes   = 20;
-  constexpr std::size_t interval    = 49;
-  constexpr std::size_t frame       = 4;
-  const auto appendPayload          = appendFixed + pieces * interval;
-  const auto appendedPayload        = appendPayload + spanBytes;
-  return 2 * frame + fixed + appendPayload + fixed + appendedPayload +
-         2 * (frame + fixed + 27);
-}
-
 } // namespace
 
 auto CaptureCoordinator::journalIntervals(
@@ -604,10 +742,25 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
     -> CapturePrepareResult {
   sweepDead();
   const auto refuse = [&](const IoErrorInfo error) {
+    GLEDITOR_LOG_DEBUG(kLog, "prepare refused: code {} detail {}",
+                       toString(error.code), error.stableDetail);
     return CapturePrepareResult{Refused{service_.refuse(error)}};
   };
 
+  if (!recovered()) {
+    // Ids and the translation map are only meaningful once the journal is
+    // reconciled; capturing before that could alias unreconciled bytes.
+    return refuse({IoErrorCode::Stale, 5});
+  }
   if (selection.empty()) return refuse({IoErrorCode::InvalidRequest, 0});
+  for (const auto &range : selection) {
+    // A zero-length range selects nothing and would mint an empty slot;
+    // offset + length must also not wrap.
+    if (range.length == 0) return refuse({IoErrorCode::InvalidRequest, 5});
+    if (range.offset + range.length < range.offset) {
+      return refuse({IoErrorCode::InvalidRequest, 6});
+    }
+  }
   if (selection.size() > policy.maxIntervals) {
     return refuse({IoErrorCode::BudgetExceeded, 1});
   }
@@ -635,7 +788,8 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
   std::vector<CapturePiece> pieces;
   std::uint64_t appendBytes = 0;
   IoErrorInfo failure{IoErrorCode::BackendFailure, 0};
-  bool failed = false;
+  bool failed          = false;
+  std::size_t heldHere = 0;
 
   for (std::size_t i = 0; i < selection.size() && !failed; ++i) {
     const auto &range = selection[i];
@@ -655,13 +809,20 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
         failed  = true;
         break;
       }
-      insertPendingSlots(captureId, pieces, before, pieces.size());
+      if (const auto inserted =
+              insertPendingSlots(captureId, pieces, before, pieces.size());
+          !inserted) {
+        failure = inserted.error();
+        failed  = true;
+        break;
+      }
     }
   }
 
   const auto rollback = [&] {
     erasePendingSlots(captureId);
     releaseAll();
+    journal_.unhold(heldHere);
   };
 
   if (failed) {
@@ -672,12 +833,15 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
     rollback();
     return refuse({IoErrorCode::BudgetExceeded, 4});
   }
-  if (const auto reserved =
-          journal_.reserve(journalReserveBytes(pieces.size()));
+  // Hold the journal budget for every record this capture may write NOW:
+  // a bare size check would let maxPendingCaptures captures all pass and
+  // then exhaust the file after their bytes landed.
+  if (const auto reserved = journal_.hold(worstCaseJournalBytes(pieces.size()));
       !reserved) {
     rollback();
     return refuse(reserved.error());
   }
+  heldHere = worstCaseJournalBytes(pieces.size());
 
   // Materialize the uncovered bytes through the leases: chunks are
   // immutable, so what is read here is exactly what the append writes.
@@ -738,17 +902,21 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
   const CaptureCell captureCell{.cell        = cell->cell,
                                 .incarnation = cell->incarnation};
   PendingCapture pending;
-  pending.captureId    = captureId;
-  pending.cell         = captureCell;
-  pending.phase        = PendingPhase::Prepared;
-  pending.leases       = std::move(leases);
-  pending.pieces       = std::move(pieces);
-  pending.appendBytes  = std::move(bytes);
-  pending.appendLength = appendBytes;
-  pending.appendDigest = digestOf(pending.appendBytes);
+  pending.captureId        = captureId;
+  pending.cell             = captureCell;
+  pending.phase            = PendingPhase::Prepared;
+  pending.leases           = std::move(leases);
+  const auto pieceCount    = pieces.size();
+  pending.pieces           = std::move(pieces);
+  pending.appendBytes      = std::move(bytes);
+  pending.appendLength     = appendBytes;
+  pending.appendDigest     = digestOf(pending.appendBytes);
+  pending.heldJournalBytes = heldHere;
   pending_.emplace(PendingKey{cell->cell, cell->incarnation},
                    std::move(pending));
   ++nextCaptureId_;
+  GLEDITOR_LOG_DEBUG(kLog, "capture {} prepared: {} pieces, {} append bytes",
+                     captureId, pieceCount, appendBytes);
   return CapturePrepareResult{Prepared{captureCell}};
 }
 
@@ -757,22 +925,23 @@ auto CaptureCoordinator::decodeAppendRequest(const CapabilityCell capability,
     -> std::optional<CellRequest> {
   for (const auto &[key, pending] : pending_) {
     (void)key;
-    if (!pending.hasSpec || pending.specCell != specification ||
+    if (!pending.spec || pending.spec->cell != specification ||
         pending.phase != PendingPhase::Prepared ||
-        !arena_.matches(specification, pending.specIncarnation)) {
+        !arena_.matches(specification, pending.spec->incarnation)) {
       continue;
     }
     // The spec cell names a live capture append awaiting admission. The
     // endpoint stays unset: ArenaIoCellStore::freezeRequest fills it from
     // the capability's canonical binding, and the request's specification
     // must echo the exact owner cell the service was handed.
-    return CellRequest{.key                  = appendKey_,
-                       .capability           = capability,
-                       .completionBoundBytes = 256,
-                       .payloadBoundBytes    = 0,
-                       .closeOperation       = false,
-                       .direction            = CellRequest::Direction::Write,
-                       .specification        = specification};
+    return CellRequest{.key        = appendKey_,
+                       .capability = capability,
+                       .completionBoundBytes =
+                           capture_defaults::completionBoundBytes,
+                       .payloadBoundBytes = 0,
+                       .closeOperation    = false,
+                       .direction         = CellRequest::Direction::Write,
+                       .specification     = specification};
   }
   return std::nullopt;
 }
@@ -781,6 +950,8 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
     -> CaptureAppend {
   sweepDead();
   const auto submitRefusal = [&](const IoErrorInfo error) {
+    GLEDITOR_LOG_DEBUG(kLog, "appendRequest refused: code {} detail {}",
+                       toString(error.code), error.stableDetail);
     return CaptureAppend{
         SubmitResult{.value = Refused{service_.refuse(error)}}};
   };
@@ -791,6 +962,12 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
   }
   auto &pending             = it->second;
   const CaptureId captureId = pending.captureId;
+  // A retry after a refused admission has spent part of its hold on the
+  // earlier Append/Aborted pair; refuse here, before any append, when the
+  // budget cannot cover another attempt.
+  if (const auto held = topUpHold(pending); !held) {
+    return submitRefusal(held.error());
+  }
 
   // Mint a fresh endpoint, capability and spec cell per append: each
   // CaptureAppend is a distinct request, and per-request cells cannot be
@@ -815,9 +992,8 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
   // Publish the spec linkage BEFORE submit: the request decoder runs
   // inside service_.submit and must already see this spec cell as a live
   // capture append awaiting admission.
-  pending.specCell        = specCell;
-  pending.specIncarnation = *specInc;
-  pending.hasSpec         = true;
+  pending.spec =
+      PendingCapture::SpecLink{.cell = specCell, .incarnation = *specInc};
 
   // The append intent is durable BEFORE the request is submitted: a crash
   // can then never leave permascroll bytes with no journal trace.
@@ -825,11 +1001,11 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
   intent.appendDigest = pending.appendDigest;
   intent.appendLength = pending.appendLength;
   intent.intervals    = journalIntervals(pending.pieces);
-  auto stamped        = journal_.appendRecord(CaptureJournalRecordKind::Append,
-                                              captureId, intent);
+  auto stamped =
+      appendJournal(pending, CaptureJournalRecordKind::Append, intent);
   if (!stamped) {
     adapter_.abandon(specKey);
-    pending.hasSpec = false;
+    pending.spec.reset();
     return submitRefusal(stamped.error());
   }
 
@@ -840,10 +1016,12 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
     // staged entry is dropped here too: a freezeRequest-level refusal
     // never reaches the service's abandonStaged path.
     adapter_.abandon(specKey);
-    pending.hasSpec = false;
+    pending.spec.reset();
+    // Failure is logged by appendJournal; recovery reads a missing Aborted
+    // as an open intent and pins, which is the safe direction.
     static_cast<void>(
-        journal_.appendRecord(CaptureJournalRecordKind::Aborted, captureId,
-                              abortPayload(IoOutcomeTag::Rejected, false)));
+        appendJournal(pending, CaptureJournalRecordKind::Aborted,
+                      abortPayload(IoOutcomeTag::Rejected, false)));
     return CaptureAppend{std::move(admitted)};
   }
   const auto &request = std::get<Admitted>(admitted.value).request;
@@ -873,14 +1051,15 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
     // uncertain and recovery will pin the intervals.
     static_cast<void>(service_.cancelRequest(request));
     static_cast<void>(
-        journal_.appendRecord(CaptureJournalRecordKind::Aborted, captureId,
-                              abortPayload(IoOutcomeTag::Rejected, true)));
-    pending.phase = PendingPhase::Aborted;
+        appendJournal(pending, CaptureJournalRecordKind::Aborted,
+                      abortPayload(IoOutcomeTag::Rejected, true)));
+    retire(it, true);
     return submitRefusal({IoErrorCode::BackendFailure, 2});
   }
 
   pending.appendRequest = request;
   pending.phase         = PendingPhase::AppendRequested;
+  GLEDITOR_LOG_DEBUG(kLog, "capture {} append requested", captureId);
   return CaptureAppend{std::move(admitted)};
 }
 
@@ -889,6 +1068,8 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
     -> CaptureCommitResult {
   sweepDead();
   const auto refuse = [&](const IoErrorInfo error) {
+    GLEDITOR_LOG_DEBUG(kLog, "commit refused: code {} detail {}",
+                       toString(error.code), error.stableDetail);
     return CaptureCommitResult{Refused{service_.refuse(error)}};
   };
 
@@ -934,22 +1115,23 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
   if (*outcomeTag != IoOutcomeTag::Complete) {
     // A valid terminal outcome that is not a successful append: the
     // capture cannot publish translations. Whether bytes may have landed
-    // depends on whether execute() ever attempted the sink append.
+    // depends on whether execute() ever attempted the sink append. A
+    // certain abort frees its slots and leases so the range can be retried;
+    // an uncertain one keeps its intervals pinned.
     const bool uncertain =
-        pending.hasSpec &&
-        adapter_.wasExecuted(static_cast<std::uint32_t>(pending.specCell));
-    static_cast<void>(journal_.appendRecord(
-        CaptureJournalRecordKind::Aborted, pending.captureId,
-        abortPayload(*outcomeTag, uncertain)));
-    if (pending.hasSpec) {
-      adapter_.complete(static_cast<std::uint32_t>(pending.specCell));
-    }
-    pending.phase = PendingPhase::Aborted;
+        pending.spec &&
+        adapter_.wasExecuted(static_cast<std::uint32_t>(pending.spec->cell));
+    static_cast<void>(appendJournal(pending, CaptureJournalRecordKind::Aborted,
+                                    abortPayload(*outcomeTag, uncertain)));
+    GLEDITOR_LOG_WARN(kLog, "capture {} aborted: outcome {} uncertain {}",
+                      pending.captureId, static_cast<unsigned>(*outcomeTag),
+                      uncertain);
+    retire(it, uncertain);
     return refuse({IoErrorCode::InvalidRequest, 7});
   }
 
-  if (!pending.hasSpec) return refuse({IoErrorCode::BackendFailure, 3});
-  const auto specKey = static_cast<std::uint32_t>(pending.specCell);
+  if (!pending.spec) return refuse({IoErrorCode::BackendFailure, 3});
+  const auto specKey = static_cast<std::uint32_t>(pending.spec->cell);
   const auto receipt = adapter_.receiptFor(specKey);
   if (!receipt || receipt->length != pending.appendLength) {
     // A Complete outcome with no matching receipt is an adapter
@@ -959,27 +1141,34 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
 
   // The Appended record -- span plus full translation intent -- is fsynced
   // BEFORE Structure publication.
-  if (!pending.appendedRecorded) {
+  if (!pending.appendedSequence) {
+    // The bytes must be durable BEFORE the record that promises them: a
+    // durable Appended naming bytes a crash then loses is a translation to
+    // nothing.
+    if (!adapter_.syncSink()) {
+      GLEDITOR_LOG_WARN(kLog, "capture {}: permascroll sync failed",
+                        pending.captureId);
+      return refuse({IoErrorCode::PersistenceRefusal, 2});
+    }
     CaptureJournalRecord appended;
     appended.appendDigest = pending.appendDigest;
     appended.appendLength = pending.appendLength;
     appended.intervals    = journalIntervals(pending.pieces);
     appended.span         = *receipt;
-    auto stamped = journal_.appendRecord(CaptureJournalRecordKind::Appended,
-                                         pending.captureId, appended);
+    auto stamped =
+        appendJournal(pending, CaptureJournalRecordKind::Appended, appended);
     if (!stamped) return refuse(stamped.error());
-    pending.appendedRecorded = true;
     pending.appendedSequence = stamped->sequence;
   }
 
   // Publish the receipt cell and the capture->receipt link under one
   // owner mark.
-  if (!pending.publishedReceipt) {
+  if (!pending.receiptCell) {
     const auto rankDim      = schema_.dim(kFieldRank);
     const auto valueDim     = schema_.dim(kFieldValue);
     const auto outcomeD     = schema_.dim(kOutcomeDim);
     const auto cid          = pending.captureId;
-    const auto seq          = pending.appendedSequence;
+    const auto seq          = *pending.appendedSequence;
     const auto span         = *receipt;
     const auto appendLength = pending.appendLength;
     const auto digest       = pending.appendDigest;
@@ -1039,14 +1228,12 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
                                              .incarnation = minted->incarnation};
         });
     if (!published) return refuse(cellErrorToIoLocal(published.error()));
-    pending.receiptCell      = *published;
-    pending.publishedReceipt = true;
+    pending.receiptCell = *published;
   }
 
   // The completion record follows publication.
   if (!pending.committedRecorded) {
-    auto done = journal_.appendRecord(CaptureJournalRecordKind::Committed,
-                                      pending.captureId, {});
+    auto done = appendJournal(pending, CaptureJournalRecordKind::Committed, {});
     if (!done) return refuse(done.error());
     pending.committedRecorded = true;
   }
@@ -1054,48 +1241,93 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
   // Commit the interval translations and retire the byte pins: durable
   // captured spans remain valid after the capture cell's retirement.
   finalizeTranslations(pending, *receipt);
-  pending.phase = PendingPhase::Committed;
-  releaseLeases(pending);
-  pending.appendBytes.clear();
-  pending.appendBytes.shrink_to_fit();
-  // The append's outcome is journaled; its receipt and executed mark are
-  // spent evidence.
-  adapter_.complete(specKey);
-  return CaptureCommitResult{Committed{*pending.receiptCell}};
+  const auto receiptCell = *pending.receiptCell;
+  GLEDITOR_LOG_DEBUG(kLog, "capture {} committed at scroll {} start {} len {}",
+                     pending.captureId, receipt->scroll, receipt->start,
+                     receipt->length);
+  // Terminal: the append's outcome is journaled, its receipt and executed
+  // mark are spent evidence, and the committed capture must not hold one of
+  // the maxPendingCaptures slots until its cell happens to die. Translations
+  // are durable map entries now; only leases, hold and spec are dropped.
+  retire(it, false);
+  return CaptureCommitResult{Committed{receiptCell}};
 }
 
 // -- recovery -----------------------------------------------------------------
 
-void CaptureCoordinator::rebuildFromAppended(const CaptureJournalRecord &record,
-                                             bool &conflict) {
+auto CaptureCoordinator::rebuildFromAppended(const CaptureJournalRecord &record)
+    -> std::optional<CaptureRecoveryReason> {
   // Rebuild the committed translation entries an Appended record proves:
   // interval i's permanent span is record.span.start + dstOffset for
-  // srcLength bytes. Identical existing entries dedupe; any disagreement
-  // is a conflict the caller reports as NeedsReconciliation.
+  // srcLength bytes. Nothing is inserted unless every interval is
+  // consistent with the span and with the map: an exactly identical slot is
+  // a harmless duplicate, any other overlap (including a partial one) is a
+  // conflict.
+  const auto fitsSpan = [&](const CaptureSourceInterval &interval) {
+    return interval.srcLength > 0 &&
+           interval.srcOffset + interval.srcLength >= interval.srcOffset &&
+           interval.dstOffset <= record.span.length &&
+           interval.srcLength <= record.span.length - interval.dstOffset;
+  };
+  struct Inserted {
+    OriginMap *slots;
+    std::uint64_t key;
+  };
+  std::vector<Inserted> inserted;
+  const auto undo = [&] {
+    for (const auto &entry : inserted) {
+      entry.slots->erase(entry.key);
+      --translationSlots_;
+    }
+  };
   for (const auto &interval : record.intervals) {
+    if (!fitsSpan(interval)) {
+      undo();
+      return CaptureRecoveryReason::InvalidTranslation;
+    }
     const auto origin = originOf(interval);
     const auto dst =
         xanadu::PrimediaSpan{.scroll = record.span.scroll,
                              .start  = record.span.start + interval.dstOffset,
                              .length = interval.srcLength};
-    auto &slots = translations_[origin];
-    auto [it, inserted] =
+    auto &slots             = translations_[origin];
+    const std::uint64_t end = interval.srcOffset + interval.srcLength;
+    bool duplicate          = false;
+    auto sit                = slots.lower_bound(interval.srcOffset);
+    if (sit != slots.begin()) --sit;
+    for (; sit != slots.end() && sit->first < end; ++sit) {
+      const auto &existing = sit->second;
+      if (existing.srcOffset + existing.srcLength <= interval.srcOffset) {
+        continue;
+      }
+      const bool same = existing.kind == TranslationSlot::Kind::Committed &&
+                        existing.srcOffset == interval.srcOffset &&
+                        existing.srcLength == interval.srcLength &&
+                        sameSpan(existing.dst, dst);
+      if (!same) {
+        undo();
+        return CaptureRecoveryReason::MapConflict;
+      }
+      duplicate = true;
+    }
+    if (duplicate) continue;
+    const auto [slot, added] =
         slots.emplace(interval.srcOffset,
                       TranslationSlot{.kind = TranslationSlot::Kind::Committed,
                                       .srcOffset = interval.srcOffset,
                                       .srcLength = interval.srcLength,
                                       .dst       = dst});
-    if (inserted) {
-      ++translationSlots_;
-      continue;
+    (void)slot;
+    if (!added) {
+      undo();
+      return CaptureRecoveryReason::MapConflict;
     }
-    const auto &existing = it->second;
-    const bool same      = existing.kind == TranslationSlot::Kind::Committed &&
-                      existing.srcOffset == interval.srcOffset &&
-                      existing.srcLength == interval.srcLength &&
-                      sameSpan(existing.dst, dst);
-    if (!same) conflict = true;
+    ++translationSlots_;
+    inserted.push_back({&slots, interval.srcOffset});
   }
+  // Coalesce only the origins this record touched, after all inserts.
+  for (const auto &entry : inserted) coalesceOrigin(*entry.slots);
+  return std::nullopt;
 }
 
 void CaptureCoordinator::pinFromRecord(const CaptureJournalRecord &record) {
@@ -1142,30 +1374,28 @@ void CaptureCoordinator::pinFromRecord(const CaptureJournalRecord &record) {
   }
 }
 
-auto CaptureCoordinator::liveCaptureIds() const
-    -> std::unordered_set<CaptureId> {
-  std::unordered_set<CaptureId> live;
-  live.reserve(pending_.size());
-  for (const auto &[key, pending] : pending_) {
-    (void)key;
-    live.insert(pending.captureId);
-  }
-  return live;
-}
-
 auto CaptureCoordinator::recover()
     -> std::expected<CaptureRecoveryReport, IoErrorInfo> {
+  if (recoveryReport_) {
+    // Already reconciled: live commits may since have coalesced slots, and
+    // re-inserting a record's intervals inside a merged slot would break
+    // the map's non-overlap invariant.
+    GLEDITOR_LOG_DEBUG(kLog, "recover(): already reconciled, returning cache");
+    return *recoveryReport_;
+  }
   sweepDead();
   auto journalView = journal_.recover();
   if (journalView.status == CaptureJournalStatus::Corrupt) {
-    return std::unexpected(journalView.refusal.value_or(
-        IoErrorInfo{IoErrorCode::PersistenceRefusal, 0}));
+    const auto refusal = journalView.refusal.value_or(
+        IoErrorInfo{IoErrorCode::PersistenceRefusal, 0});
+    GLEDITOR_LOG_ERROR(kLog, "recover(): journal corrupt at record {}",
+                       refusal.stableDetail);
+    return std::unexpected(refusal);
   }
   // The journal's maximum CaptureId is authoritative across restarts:
   // identities are never reused, including after a crash.
-  nextCaptureId_ = std::max(nextCaptureId_, journalView.maxCaptureId + 1);
-
-  const auto live = liveCaptureIds();
+  nextCaptureId_       = std::max(nextCaptureId_, journalView.maxCaptureId + 1);
+  const auto highWater = adapter_.sinkHighWater();
 
   // Per-capture attempt state machine over the journal's record order.
   // Legitimate attempt shapes: Append then one of {Appended->Committed,
@@ -1183,14 +1413,11 @@ auto CaptureCoordinator::recover()
     AttemptPhase phase{AttemptPhase::None};
     bool ambiguous{};
     bool abortedUncertain{};
-    CaptureJournalRecord intent;
-    CaptureJournalRecord appended;
-    bool hasIntent{};
-    bool hasAppended{};
+    std::optional<CaptureJournalRecord> intent;
+    std::optional<CaptureJournalRecord> appended;
   };
   std::map<CaptureId, Attempt> attempts;
   for (const auto &record : journalView.records) {
-    if (live.contains(record.captureId)) continue; // live pending capture
     auto &attempt = attempts[record.captureId];
     switch (record.kind) {
     case CaptureJournalRecordKind::Append:
@@ -1201,7 +1428,6 @@ auto CaptureCoordinator::recover()
       }
       attempt.phase            = AttemptPhase::Intent;
       attempt.intent           = record;
-      attempt.hasIntent        = true;
       attempt.abortedUncertain = false;
       break;
     case CaptureJournalRecordKind::Appended:
@@ -1210,8 +1436,7 @@ auto CaptureCoordinator::recover()
       } else {
         attempt.phase = AttemptPhase::AwaitingCommit;
       }
-      attempt.appended    = record;
-      attempt.hasAppended = true;
+      attempt.appended = record;
       break;
     case CaptureJournalRecordKind::Committed:
       if (attempt.phase != AttemptPhase::AwaitingCommit) {
@@ -1237,43 +1462,67 @@ auto CaptureCoordinator::recover()
   }
 
   CaptureRecoveryReport report;
+  const auto needsReconciliation = [&](const CaptureId id,
+                                       const CaptureRecoveryReason reason,
+                                       const CaptureJournalRecord &record,
+                                       const bool countOrphans) {
+    pinFromRecord(record);
+    if (countOrphans) report.orphanBytes += record.appendLength;
+    report.entries.push_back(
+        CaptureRecoveryEntry{.capture = id,
+                             .state = CaptureRecoveryState::NeedsReconciliation,
+                             .reason = reason});
+    GLEDITOR_LOG_WARN(kLog,
+                      "recover(): capture {} needs reconciliation "
+                      "(reason {}), {} possible orphan bytes",
+                      id, static_cast<unsigned>(reason),
+                      countOrphans ? record.appendLength : 0);
+  };
   for (auto &[captureId, attempt] : attempts) {
     if (attempt.ambiguous) {
       // Ordering could not be proven: pin whatever intervals the latest
       // records name and report the possible orphan bytes. The capture
       // stays NeedsReconciliation until explicit reconciliation.
       const auto &record =
-          attempt.hasAppended ? attempt.appended : attempt.intent;
-      pinFromRecord(record);
-      if (attempt.hasIntent || attempt.hasAppended) {
-        report.orphanBytes += attempt.hasAppended
-                                  ? attempt.appended.appendLength
-                                  : attempt.intent.appendLength;
-      }
-      report.entries.push_back(CaptureRecoveryEntry{
-          .capture = captureId,
-          .state   = CaptureRecoveryState::NeedsReconciliation});
+          attempt.appended ? *attempt.appended
+                           : attempt.intent.value_or(CaptureJournalRecord{});
+      needsReconciliation(captureId, CaptureRecoveryReason::AmbiguousJournal,
+                          record, attempt.appended || attempt.intent);
       continue;
     }
     switch (attempt.phase) {
     case AttemptPhase::Committed:
     case AttemptPhase::AwaitingCommit: {
-      // Both phases prove the append landed and its span+translations are
-      // durable: rebuild the map, and for the still-open attempt write
-      // the completion record now (best effort -- a failure leaves the
-      // Appended record for the next recover() to retry).
-      bool conflict = false;
-      rebuildFromAppended(attempt.appended, conflict);
-      if (conflict) {
-        pinFromRecord(attempt.appended);
-        report.entries.push_back(CaptureRecoveryEntry{
-            .capture = captureId,
-            .state   = CaptureRecoveryState::NeedsReconciliation});
+      // Both phases claim the append landed and its span+translations are
+      // durable. Trust that only if the permascroll still holds the bytes:
+      // the Appended record was written after the sink was synced, so a
+      // span beyond the durable size means loss, and a translation to
+      // missing bytes is worse than none.
+      const auto &appended = *attempt.appended;
+      if (appended.span.scroll != xanadu::localScroll ||
+          appended.span.length != appended.appendLength ||
+          appended.span.start + appended.span.length < appended.span.start ||
+          appended.span.start + appended.span.length > highWater) {
+        needsReconciliation(captureId,
+                            CaptureRecoveryReason::SpanBeyondPermascroll,
+                            appended, true);
+        break;
+      }
+      if (const auto problem = rebuildFromAppended(appended)) {
+        needsReconciliation(captureId, *problem, appended, false);
         break;
       }
       if (attempt.phase == AttemptPhase::AwaitingCommit) {
-        static_cast<void>(journal_.appendRecord(
-            CaptureJournalRecordKind::Committed, captureId, {}));
+        // Best effort: a failure (logged by the journal path) leaves the
+        // Appended record for the next process to close.
+        const auto framed = journal_.appendRecord(
+            CaptureJournalRecordKind::Committed, captureId, {}, crashPoints_);
+        if (!framed) {
+          GLEDITOR_LOG_WARN(kLog,
+                            "recover(): capture {} completion record "
+                            "refused: code {}",
+                            captureId, toString(framed.error().code));
+        }
       }
       report.entries.push_back(CaptureRecoveryEntry{
           .capture = captureId, .state = CaptureRecoveryState::Reconciled});
@@ -1284,11 +1533,8 @@ auto CaptureCoordinator::recover()
         // A non-Complete outcome after the append was attempted: bytes
         // may exist at an unknown span. Pin the intent's intervals and
         // report the possible orphans.
-        pinFromRecord(attempt.intent);
-        report.orphanBytes += attempt.intent.appendLength;
-        report.entries.push_back(CaptureRecoveryEntry{
-            .capture = captureId,
-            .state   = CaptureRecoveryState::NeedsReconciliation});
+        needsReconciliation(captureId, CaptureRecoveryReason::UncertainAbort,
+                            *attempt.intent, true);
       } else {
         // Certain abort (admission refusal): no bytes can exist.
         report.entries.push_back(CaptureRecoveryEntry{
@@ -1299,16 +1545,17 @@ auto CaptureCoordinator::recover()
       // The append intent is durable but no outcome record followed: the
       // append may have run. Pin the intent's intervals, report the
       // possible orphan bytes, never resubmit.
-      pinFromRecord(attempt.intent);
-      report.orphanBytes += attempt.intent.appendLength;
-      report.entries.push_back(CaptureRecoveryEntry{
-          .capture = captureId,
-          .state   = CaptureRecoveryState::NeedsReconciliation});
+      needsReconciliation(captureId, CaptureRecoveryReason::OpenIntent,
+                          *attempt.intent, true);
       break;
     case AttemptPhase::None:
       break;
     }
   }
+  GLEDITOR_LOG_DEBUG(kLog,
+                     "recover(): {} captures, {} orphan bytes, next id {}",
+                     report.entries.size(), report.orphanBytes, nextCaptureId_);
+  recoveryReport_ = report;
   return report;
 }
 

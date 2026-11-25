@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <gleditor/logging.hpp>
 #include <limits>
 #include <span>
 #include <sys/stat.h>
@@ -14,20 +15,16 @@ namespace xanadu::vortex {
 
 namespace {
 
-constexpr std::size_t kHeaderBytes =
-    sizeof(kCaptureJournalSignature) + sizeof(std::uint32_t);
-// kind(1) + sequence(8) + captureId(8) + checksum(8)
-constexpr std::size_t kFixedBodyBytes = 1 + 8 + 8 + 8;
-constexpr std::size_t kChecksumOffset = 1 + 8 + 8;
-// sourceKind(1) + source, generation, occurrence, srcOffset, srcLength,
-// dstOffset (8 each)
-constexpr std::size_t kIntervalBytes = 1 + 6 * 8;
-// appendDigest(32) + appendLength(8) + intervalCount(4)
-constexpr std::size_t kAppendFixedBytes = 32 + 8 + 4;
-// scroll(4) + start(8) + length(8)
-constexpr std::size_t kSpanBytes = 4 + 8 + 8;
-// abortReason(1) + abortUncertain(1)
-constexpr std::size_t kAbortedBytes = 1 + 1;
+constexpr std::size_t kHeaderBytes      = kCaptureJournalHeaderBytes;
+constexpr std::size_t kFixedBodyBytes   = kCaptureJournalFixedBodyBytes;
+constexpr std::size_t kChecksumOffset   = 1 + 8 + 8;
+constexpr std::size_t kIntervalBytes    = kCaptureJournalIntervalBytes;
+constexpr std::size_t kAppendFixedBytes = kCaptureJournalAppendFixedBytes;
+constexpr std::size_t kSpanBytes        = kCaptureJournalSpanBytes;
+constexpr std::size_t kAbortedBytes     = kCaptureJournalAbortedBytes;
+// Where intervalCount sits in an Append/Appended body: after the fixed
+// header, the digest and the append length.
+constexpr std::size_t kIntervalCountOffset = kFixedBodyBytes + 32 + 8;
 constexpr std::size_t kMaxKindValue =
     static_cast<std::size_t>(CaptureJournalRecordKind::Aborted);
 
@@ -295,6 +292,54 @@ struct CaptureJournalScan {
   CaptureId maxCaptureId{};
 };
 
+/// Whether @p partial (the bytes present after a length prefix announcing
+/// @p bodyLen) can be the start of one genuine, interrupted record: its kind
+/// is known, the announced length is one that kind can have, its sequence (once
+/// present) is the next expected, and an interval count (once present)
+/// agrees with the announced length. A checksum cannot be checked on a
+/// prefix, so this is the strongest honest test; anything it rejects is
+/// refused as corruption rather than cut.
+bool tornTailPlausible(const std::span<const std::byte> partial,
+                       const std::size_t bodyLen,
+                       const std::uint64_t expectedSeq) {
+  if (partial.empty()) return true;
+  const auto kind = static_cast<std::uint8_t>(partial[0]);
+  if (kind > kMaxKindValue) return false;
+  const auto recordKind       = static_cast<CaptureJournalRecordKind>(kind);
+  const auto matchesIntervals = [&](const std::size_t tail,
+                                    const std::size_t count) {
+    return bodyLen ==
+           kFixedBodyBytes + kAppendFixedBytes + tail + count * kIntervalBytes;
+  };
+  switch (recordKind) {
+  case CaptureJournalRecordKind::Committed:
+    if (bodyLen != kFixedBodyBytes) return false;
+    break;
+  case CaptureJournalRecordKind::Aborted:
+    if (bodyLen != kFixedBodyBytes + kAbortedBytes) return false;
+    break;
+  case CaptureJournalRecordKind::Append:
+  case CaptureJournalRecordKind::Appended: {
+    const std::size_t tail =
+        recordKind == CaptureJournalRecordKind::Appended ? kSpanBytes : 0;
+    const auto base = kFixedBodyBytes + kAppendFixedBytes + tail;
+    if (bodyLen < base || (bodyLen - base) % kIntervalBytes != 0) return false;
+    if (partial.size() >= kIntervalCountOffset + sizeof(std::uint32_t)) {
+      std::uint32_t count{};
+      std::memcpy(&count, partial.data() + kIntervalCountOffset, sizeof(count));
+      if (!matchesIntervals(tail, count)) return false;
+    }
+    break;
+  }
+  }
+  if (partial.size() >= 1 + sizeof(std::uint64_t)) {
+    std::uint64_t sequence{};
+    std::memcpy(&sequence, partial.data() + 1, sizeof(sequence));
+    if (sequence != expectedSeq) return false;
+  }
+  return true;
+}
+
 /// Scan a journal image: verify header, then walk records validating
 /// kind, exact per-kind length, checksum, interval count consistency and
 /// gapless sequence. A trailing *incomplete* record is a tolerated tear
@@ -333,8 +378,21 @@ CaptureJournalScan scanJournalImage(const std::span<const std::byte> bytes) {
       scan.errorRecord = recordOrdinal + 1;
       return scan;
     }
-    // recordEnd may run past the file: that is the tolerated tear.
-    if (bodyLen > bytes.size() - cursor - sizeof(std::uint32_t)) break;
+    // A claimed body that runs past the file is a tear only when what
+    // is present is the self-consistent start of the very record the
+    // length announces. Anything else -- a corrupt length mid-file -- must
+    // refuse: cutting there would silently delete the valid records after
+    // it.
+    const auto available = bytes.size() - cursor - sizeof(std::uint32_t);
+    if (bodyLen > available) {
+      if (tornTailPlausible(bytes.subspan(cursor + sizeof(std::uint32_t)),
+                            bodyLen, expectedSeq)) {
+        break;
+      }
+      scan.corrupt     = true;
+      scan.errorRecord = recordOrdinal + 1;
+      return scan;
+    }
     const std::byte *body = bytes.data() + cursor + sizeof(std::uint32_t);
     ++recordOrdinal;
     const auto record = decodeBody(body, bodyLen);
@@ -371,14 +429,54 @@ CaptureJournal::CaptureJournal(std::filesystem::path path,
   }
   writtenBytes_ = static_cast<std::size_t>(size);
   if (writtenBytes_ == 0) return; // empty: the first append writes header
-  wroteHeader_ = writtenBytes_ >= kHeaderBytes;
   if (writtenBytes_ < kHeaderBytes) {
-    // 1..kHeaderBytes-1 bytes can never become a journal: the first
-    // append would O_APPEND its header *behind* them. Poison now.
+    // 1..kHeaderBytes-1 bytes: either the start of the very header a crash
+    // interrupted (the first record is written with its header in one
+    // write, so nothing can follow) or foreign bytes. Only the former is a
+    // fresh journal; it is cut back to empty. Anything else would have the
+    // first append land its header *behind* the remnant, so poison.
+    repairTornHeader();
+    return;
+  }
+  wroteHeader_ = true;
+  repairTornTail();
+}
+
+void CaptureJournal::repairTornHeader() {
+  const int fd = ::open(path_.c_str(), O_RDWR);
+  if (fd < 0) {
     poisoned_ = true;
     return;
   }
-  repairTornTail();
+  const FdGuard guard{fd};
+  std::byte remnant[kHeaderBytes]{};
+  std::size_t have = 0;
+  while (have < writtenBytes_) {
+    const auto n = ::read(fd, remnant + have, writtenBytes_ - have);
+    if (n < 0 && errno == EINTR) continue;
+    if (n <= 0) {
+      poisoned_ = true;
+      return;
+    }
+    have += static_cast<std::size_t>(n);
+  }
+  std::byte expected[kHeaderBytes]{};
+  std::memcpy(expected, kCaptureJournalSignature,
+              sizeof(kCaptureJournalSignature));
+  std::memcpy(expected + sizeof(kCaptureJournalSignature),
+              &kCaptureJournalVersion, sizeof(kCaptureJournalVersion));
+  if (std::memcmp(remnant, expected, writtenBytes_) != 0) {
+    poisoned_ = true;
+    return;
+  }
+  if (::ftruncate(fd, 0) != 0) {
+    poisoned_ = true;
+    return;
+  }
+  writtenBytes_ = 0;
+  GLEDITOR_LOG_WARN("vortex.io.capture",
+                    "capture journal: cut torn header remnant, journal is "
+                    "fresh");
 }
 
 void CaptureJournal::repairTornTail() {
@@ -421,6 +519,10 @@ void CaptureJournal::repairTornTail() {
     // Poison so appends refuse and recover() reports the same Corrupt.
     poisoned_     = true;
     poisonDetail_ = static_cast<std::uint32_t>(scan.errorRecord);
+    GLEDITOR_LOG_ERROR("vortex.io.capture",
+                       "capture journal corrupt at record {}: refusing to "
+                       "truncate",
+                       scan.errorRecord);
     return;
   }
   writtenBytes_ = scan.boundary;
@@ -432,9 +534,23 @@ void CaptureJournal::repairTornTail() {
     poisoned_ = true;
     return;
   }
+  GLEDITOR_LOG_WARN("vortex.io.capture",
+                    "capture journal: cut {} torn tail bytes after record "
+                    "boundary {}",
+                    bytes.size() - scan.boundary, scan.boundary);
 }
 
 CaptureJournal::~CaptureJournal() = default;
+
+void CaptureJournal::syncParentDirectory() const noexcept {
+  auto dir = path_.parent_path();
+  if (dir.empty()) dir = ".";
+  const int fd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY);
+  if (fd < 0) return;
+  const FdGuard guard{fd};
+  while (::fsync(fd) != 0 && errno == EINTR) {
+  }
+}
 
 auto CaptureJournal::path() const -> const std::filesystem::path & {
   return path_;
@@ -442,21 +558,42 @@ auto CaptureJournal::path() const -> const std::filesystem::path & {
 
 auto CaptureJournal::sizeBytes() const -> std::size_t { return writtenBytes_; }
 
-auto CaptureJournal::reserve(const std::size_t recordBytes) const
+auto CaptureJournal::fits(const std::size_t framedBytes,
+                          const bool countHolds) const
     -> std::expected<void, IoErrorInfo> {
   // The on-disk body length is u32: a payload that cannot be represented
   // is refused here, before appendRecord ever encodes.
-  if (recordBytes >
-      std::numeric_limits<std::uint32_t>::max() - kFixedBodyBytes) {
+  if (framedBytes > std::numeric_limits<std::uint32_t>::max()) {
     return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest, 0});
   }
   const std::size_t header = wroteHeader_ ? 0 : kHeaderBytes;
-  const std::size_t framed =
-      sizeof(std::uint32_t) + kFixedBodyBytes + recordBytes;
-  if (maxBytes_ != 0 && writtenBytes_ + header + framed > maxBytes_) {
+  const std::size_t held   = countHolds ? heldBytes_ : 0;
+  if (maxBytes_ != 0 &&
+      writtenBytes_ + header + held + framedBytes > maxBytes_) {
     return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded, 0});
   }
   return {};
+}
+
+auto CaptureJournal::hold(const std::size_t framedBytes)
+    -> std::expected<void, IoErrorInfo> {
+  if (const auto ok = fits(framedBytes, true); !ok) return ok;
+  heldBytes_ += framedBytes;
+  return {};
+}
+
+auto CaptureJournal::unhold(const std::size_t framedBytes) noexcept
+    -> CaptureJournal * {
+  heldBytes_ -= std::min(heldBytes_, framedBytes);
+  return this;
+}
+
+auto CaptureJournal::heldBytes() const noexcept -> std::size_t {
+  return heldBytes_;
+}
+
+auto CaptureJournal::maxCaptureId() const noexcept -> CaptureId {
+  return maxCaptureId_;
 }
 
 auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
@@ -479,11 +616,25 @@ auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
   if (!payloadBytes) {
     return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest, 0});
   }
-  if (const auto ok = reserve(*payloadBytes); !ok) {
+  const auto body = encodeBody(record);
+  auto framed     = frameBody(body);
+  if (const auto ok = fits(framed.size(), false); !ok) {
     return std::unexpected(ok.error());
   }
-  const auto body   = encodeBody(record);
-  const auto framed = frameBody(body);
+  // The first record travels with the header in one write: a crash can
+  // then leave only a header prefix (repairTornHeader's case), never a
+  // header followed by a torn first record that repair could not tell
+  // from corruption.
+  const bool creating = !wroteHeader_;
+  if (creating) {
+    std::vector<std::byte> withHeader;
+    withHeader.reserve(kHeaderBytes + framed.size());
+    appendBytes(withHeader, kCaptureJournalSignature,
+                sizeof(kCaptureJournalSignature));
+    appendValue(withHeader, kCaptureJournalVersion);
+    withHeader.insert(withHeader.end(), framed.begin(), framed.end());
+    framed = std::move(withHeader);
+  }
 
   // writtenBytes_ is the offset of the last byte this journal knows is a
   // complete, valid record (the header counts once flushed): the
@@ -518,14 +669,7 @@ auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
     return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
   };
 
-  bool ok = true;
-  if (!wroteHeader_) {
-    ok = ok && writeAll(fd, kCaptureJournalSignature,
-                        sizeof(kCaptureJournalSignature));
-    ok = ok &&
-         writeAll(fd, &kCaptureJournalVersion, sizeof(kCaptureJournalVersion));
-  }
-  ok = ok && writeAll(fd, framed.data(), framed.size());
+  const bool ok = writeAll(fd, framed.data(), framed.size());
 
   if (!ok) return failAppend();
 
@@ -547,8 +691,10 @@ auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
   // that BEFORE afterFlush can throw -- otherwise a throwing afterFlush
   // leaves writtenBytes_/nextSequence_ behind a record recover() already
   // counts, and a later failAppend ftruncate could erase durable bytes.
-  if (!wroteHeader_) {
-    writtenBytes_ += kHeaderBytes;
+  if (creating) {
+    // The file's directory entry is part of the journal's durability: a
+    // created file whose entry was never fsynced can vanish whole.
+    syncParentDirectory();
     wroteHeader_ = true;
   }
   writtenBytes_ += framed.size();

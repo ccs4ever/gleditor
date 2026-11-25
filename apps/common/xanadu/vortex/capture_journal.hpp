@@ -31,6 +31,23 @@ inline constexpr char kCaptureJournalSignature[8]     = {'\x89', 'X', 'U', 'D',
                                                          'C',    'A', 'P', '\n'};
 inline constexpr std::uint32_t kCaptureJournalVersion = 1;
 
+// On-disk frame sizes, exported so reservations are computed from the format
+// and cannot drift from it. Every record is u32 bodyLen + body.
+inline constexpr std::size_t kCaptureJournalHeaderBytes =
+    sizeof(kCaptureJournalSignature) + sizeof(std::uint32_t);
+inline constexpr std::size_t kCaptureJournalFrameBytes = sizeof(std::uint32_t);
+/// kind(1) + sequence(8) + captureId(8) + checksum(8)
+inline constexpr std::size_t kCaptureJournalFixedBodyBytes = 1 + 8 + 8 + 8;
+/// sourceKind(1) + source, generation, occurrence, srcOffset, srcLength,
+/// dstOffset (8 each)
+inline constexpr std::size_t kCaptureJournalIntervalBytes = 1 + 6 * 8;
+/// appendDigest(32) + appendLength(8) + intervalCount(4)
+inline constexpr std::size_t kCaptureJournalAppendFixedBytes = 32 + 8 + 4;
+/// scroll(4) + start(8) + length(8)
+inline constexpr std::size_t kCaptureJournalSpanBytes = 4 + 8 + 8;
+/// abortReason(1) + abortUncertain(1)
+inline constexpr std::size_t kCaptureJournalAbortedBytes = 1 + 1;
+
 /// Private opaque capture identity, minted monotonically by the owning
 /// CaptureCoordinator and never reused (including across restarts: recovery
 /// seeds the counter past the journal's maximum).
@@ -55,6 +72,32 @@ enum class CaptureJournalRecordKind : std::uint8_t {
   /// landed anyway).
   Aborted,
 };
+
+/// Bytes one record of @p kind carrying @p intervalCount intervals occupies
+/// on disk, frame included (the file header is separate).
+[[nodiscard]] constexpr auto
+captureJournalFramedBytes(const CaptureJournalRecordKind kind,
+                          const std::size_t intervalCount = 0) noexcept
+    -> std::size_t {
+  std::size_t payload = 0;
+  switch (kind) {
+  case CaptureJournalRecordKind::Append:
+    payload = kCaptureJournalAppendFixedBytes +
+              intervalCount * kCaptureJournalIntervalBytes;
+    break;
+  case CaptureJournalRecordKind::Appended:
+    payload = kCaptureJournalAppendFixedBytes +
+              intervalCount * kCaptureJournalIntervalBytes +
+              kCaptureJournalSpanBytes;
+    break;
+  case CaptureJournalRecordKind::Committed:
+    break;
+  case CaptureJournalRecordKind::Aborted:
+    payload = kCaptureJournalAbortedBytes;
+    break;
+  }
+  return kCaptureJournalFrameBytes + kCaptureJournalFixedBodyBytes + payload;
+}
 
 /// One source interval's translation intent: the logical source address
 /// (kind/source/generation/occurrence + offset/length, plan §8.1) and the
@@ -142,12 +185,19 @@ public:
   CaptureJournal(const CaptureJournal &)                     = delete;
   auto operator=(const CaptureJournal &) -> CaptureJournal & = delete;
 
-  /// Reserve capacity before any capture work is staged. §8.1/§8.2:
-  /// "prepare reserves bounded interval-map/journal capacity ... otherwise
-  /// refuses without append" — callers check this before submitting the
-  /// CaptureAppend, not after a failed append.
-  [[nodiscard]] auto reserve(std::size_t recordBytes) const
+  /// Hold @p framedBytes of the file budget for records a capture has yet
+  /// to write (§8.1/§8.2: "prepare reserves bounded interval-map/journal
+  /// capacity ... otherwise refuses without append"). Holds sum: the check
+  /// is against written + held + @p framedBytes, so N pending captures can
+  /// never jointly exhaust a budget each saw as free. The owner returns the
+  /// hold with unhold() as its records land or the capture dies. Holds never
+  /// block appendRecord itself -- they are the owner's promise, already
+  /// checked.
+  [[nodiscard]] auto hold(std::size_t framedBytes)
       -> std::expected<void, IoErrorInfo>;
+  /// Return up to @p framedBytes of previously held budget.
+  auto unhold(std::size_t framedBytes) noexcept -> CaptureJournal *;
+  [[nodiscard]] auto heldBytes() const noexcept -> std::size_t;
 
   /// Append one record of @p kind for @p captureId. The journal stamps
   /// `sequence` (returned in the stamped record on success). Kind-specific
@@ -170,6 +220,11 @@ public:
   /// exactly as the constructor's repair tolerates it.
   [[nodiscard]] auto recover() const -> CaptureJournalRecovery;
 
+  /// Highest CaptureId the journal knew at construction or has appended
+  /// since; the coordinator seeds its counter past it so ids are never
+  /// reused across restarts.
+  [[nodiscard]] auto maxCaptureId() const noexcept -> CaptureId;
+
   [[nodiscard]] auto path() const -> const std::filesystem::path &;
   [[nodiscard]] auto sizeBytes() const -> std::size_t;
 
@@ -182,10 +237,19 @@ private:
   /// tail with ftruncate, restores nextSequence_/maxCaptureId, and poisons
   /// the journal when the boundary cannot be proven or repaired.
   void repairTornTail();
+  /// A file of 1..header-1 bytes: cut it to empty when it is the start of
+  /// our own header, poison otherwise.
+  void repairTornHeader();
+  void syncParentDirectory() const noexcept;
+  /// Whether @p framedBytes more fit in the budget on top of what is
+  /// written, optionally counting holds.
+  [[nodiscard]] auto fits(std::size_t framedBytes, bool countHolds) const
+      -> std::expected<void, IoErrorInfo>;
 
   std::filesystem::path path_;
   std::size_t maxBytes_;
   std::size_t writtenBytes_{};
+  std::size_t heldBytes_{};
   std::uint64_t nextSequence_{1};
   CaptureId maxCaptureId_{};
   bool wroteHeader_{};

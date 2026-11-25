@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "common/xanadu/spool.hpp"
+#include "common/xanadu/vortex/capture_constants.hpp"
 #include "common/xanadu/vortex/capture_journal.hpp"
 #include "common/xanadu/vortex/io_cells.hpp"
 #include "common/xanadu/vortex/io_protocol.hpp"
@@ -55,7 +56,18 @@ namespace xanadu::vortex {
 class CaptureByteSink {
 public:
   virtual xanadu::PrimediaSpan append(std::span<const std::byte> bytes) = 0;
-  virtual ~CaptureByteSink() = default;
+  /// Make every byte appended so far survive a crash (for the permascroll:
+  /// write the tail to the active segment file and fsync it). The
+  /// coordinator calls this before the Appended journal record is written:
+  /// that record promises the span exists, so the bytes must be durable
+  /// first or a crash leaves a durable record naming bytes that are gone.
+  /// Returns false when durability could not be established.
+  [[nodiscard]] virtual bool sync() = 0;
+  /// Bytes the target holds. Read on restart, it is the durable high-water
+  /// mark recovery reconciles journal spans against (§8.2): a span that
+  /// ends past it names bytes that were lost and must not be trusted.
+  [[nodiscard]] virtual std::uint64_t highWaterBytes() const = 0;
+  virtual ~CaptureByteSink()                                 = default;
 };
 
 /// CaptureByteSink over the author's UserPermascroll (the production
@@ -66,6 +78,8 @@ public:
   explicit UserPermascrollCaptureSink(xanadu::UserPermascroll &permascroll);
   auto append(std::span<const std::byte> bytes)
       -> xanadu::PrimediaSpan override;
+  [[nodiscard]] auto sync() -> bool override;
+  [[nodiscard]] auto highWaterBytes() const -> std::uint64_t override;
 
 private:
   xanadu::UserPermascroll &permascroll_;
@@ -79,6 +93,8 @@ public:
   explicit SegmentedPrimediaCaptureSink(xanadu::SegmentedPrimediaSpool &spool);
   auto append(std::span<const std::byte> bytes)
       -> xanadu::PrimediaSpan override;
+  [[nodiscard]] auto sync() -> bool override;
+  [[nodiscard]] auto highWaterBytes() const -> std::uint64_t override;
 
 private:
   xanadu::SegmentedPrimediaSpool &spool_;
@@ -136,6 +152,10 @@ public:
   /// append was attempted and bytes may have landed even on a non-Complete
   /// outcome.
   [[nodiscard]] auto wasExecuted(std::uint32_t key) const noexcept -> bool;
+  /// CaptureByteSink::sync() under the append serialization, so a flush
+  /// never interleaves with a worker's append on a single-appender sink.
+  [[nodiscard]] auto syncSink() noexcept -> bool;
+  [[nodiscard]] auto sinkHighWater() const -> std::uint64_t;
 
   auto prepare(const CellRequest &, OwnerContext &)
       -> std::expected<PreparedOperation, IoErrorInfo> override;
@@ -160,21 +180,21 @@ private:
 /// map/journal limits.
 struct CapturePolicy {
   /// Selected PayloadRanges accepted per capture.
-  std::size_t maxIntervals{128};
+  std::size_t maxIntervals{capture_defaults::maxIntervals};
   /// Uncovered bytes accepted per capture (the append payload bound).
-  std::size_t maxAppendBytes{1u << 20};
+  std::size_t maxAppendBytes{capture_defaults::maxAppendBytes};
   /// Uncovered pieces accepted per capture (each becomes a translation
   /// entry and a journal interval record).
-  std::size_t maxPieces{1024};
+  std::size_t maxPieces{capture_defaults::maxPieces};
 };
 
 /// Bounds the coordinator's own state: live pending captures, live
 /// translation-map slots (committed + pending + pinned) and the journal
 /// file's byte budget.
 struct CaptureCoordinatorLimits {
-  std::size_t maxPendingCaptures{32};
-  std::size_t maxMapEntries{8192};
-  std::size_t journalMaxBytes{4u << 20};
+  std::size_t maxPendingCaptures{capture_defaults::maxPendingCaptures};
+  std::size_t maxMapEntries{capture_defaults::maxMapEntries};
+  std::size_t journalMaxBytes{capture_defaults::journalMaxBytes};
 };
 
 /// prepare() success: the owner-only capture cell naming this transaction.
@@ -210,9 +230,30 @@ enum class CaptureRecoveryState : std::uint8_t {
   NeedsReconciliation,
 };
 
+/// Why a capture needs reconciliation (None when Reconciled); diagnostics
+/// and tests, not control flow.
+enum class CaptureRecoveryReason : std::uint8_t {
+  None,
+  /// An Append intent with no outcome record: the append may have run.
+  OpenIntent,
+  /// A non-Complete outcome after the append was attempted.
+  UncertainAbort,
+  /// Record order the attempt state machine does not allow.
+  AmbiguousJournal,
+  /// An Appended span ends past the permascroll's durable size: its bytes
+  /// were lost (or never became durable) and must not be trusted.
+  SpanBeyondPermascroll,
+  /// An Appended record's intervals are inconsistent with its span or
+  /// with each other.
+  InvalidTranslation,
+  /// The rebuilt translation overlaps an existing slot differently.
+  MapConflict,
+};
+
 struct CaptureRecoveryEntry {
   CaptureId capture;
   CaptureRecoveryState state;
+  CaptureRecoveryReason reason{CaptureRecoveryReason::None};
 };
 
 struct CaptureRecoveryReport {
@@ -234,11 +275,12 @@ public:
   /// The host must register appendAdapter() with the IoService under
   /// appendKey() and route its RequestDecoder through
   /// decodeAppendRequest() for capture spec cells.
-  CaptureCoordinator(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
-                     PayloadResolver &payloads, IoService &service,
-                     CaptureByteSink &sink, std::filesystem::path journalPath,
-                     std::size_t journalMaxBytes     = 4u << 20,
-                     CaptureCoordinatorLimits limits = {});
+  CaptureCoordinator(
+      zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+      PayloadResolver &payloads, IoService &service, CaptureByteSink &sink,
+      std::filesystem::path journalPath,
+      std::size_t journalMaxBytes     = capture_defaults::journalMaxBytes,
+      CaptureCoordinatorLimits limits = {});
   ~CaptureCoordinator()                                              = default;
   CaptureCoordinator(const CaptureCoordinator &)                     = delete;
   auto operator=(const CaptureCoordinator &) -> CaptureCoordinator & = delete;
@@ -246,6 +288,20 @@ public:
   [[nodiscard]] auto appendAdapter() noexcept -> CaptureAppendAdapter &;
   [[nodiscard]] auto appendKey() const noexcept -> AdapterKey;
   [[nodiscard]] auto journal() noexcept -> CaptureJournal &;
+  /// Crash-injection seam: @p points is handed to every journal write this
+  /// coordinator makes. A hook that throws propagates out of the public
+  /// method that wrote; model the restart with a fresh coordinator.
+  auto setJournalCrashPoints(CaptureJournalCrashPoints points)
+      -> CaptureCoordinator *;
+  /// Whether recover() has succeeded: prepare() refuses until it has.
+  [[nodiscard]] auto recovered() const noexcept -> bool;
+
+  /// The permanent span @p range maps to, when the whole range lies inside
+  /// one committed translation (offsets inside a coalesced slot map
+  /// linearly). std::nullopt when any part is uncovered, pending, pinned or
+  /// spread over translations that are not contiguous in the permascroll.
+  [[nodiscard]] auto translationFor(const PayloadRange &range) const
+      -> std::optional<xanadu::PrimediaSpan>;
 
   /// RequestDecoder hook: when @p specification names the live spec cell
   /// of a capture append awaiting admission, returns the frozen
@@ -255,12 +311,15 @@ public:
                                          OwnerCell specification)
       -> std::optional<CellRequest>;
 
-  /// Freeze @p selection against the translation map and reserve bounded
-  /// map/journal capacity, then mint the CaptureCell. Covered intervals
-  /// reuse their committed or same-capture-pending translations; only
-  /// uncovered bytes are appended. Refuses -- minting nothing durable --
-  /// on an unresolvable range, a pinned (needs-reconciliation) overlap,
-  /// another capture's pending overlap, or any bound exceeded.
+  /// Refuses with Stale until recover() has run: ids and the translation
+  /// map are only trustworthy once the journal is reconciled. Zero-length
+  /// ranges are refused (InvalidRequest). Freeze @p selection against the
+  /// translation map and reserve bounded map/journal capacity, then mint the
+  /// CaptureCell. Covered intervals reuse their committed or
+  /// same-capture-pending translations; only uncovered bytes are appended.
+  /// Refuses -- minting nothing durable -- on an unresolvable range, a pinned
+  /// (needs-reconciliation) overlap, another capture's pending overlap, or any
+  /// bound exceeded.
   [[nodiscard]] auto prepare(std::span<const PayloadRange> selection,
                              const CapturePolicy &policy = {})
       -> CapturePrepareResult;
@@ -294,6 +353,10 @@ public:
   /// potential orphan bytes. A journal that fails its format checks is a
   /// typed PersistenceRefusal. Never resubmits an append and never
   /// guesses ambiguous overlap into identity.
+  /// Idempotent: the first successful call reconciles and caches its
+  /// report, later calls return that report without touching the map or the
+  /// journal, so a second call can never re-insert inside slots that live
+  /// commits have since coalesced.
   [[nodiscard]] auto recover()
       -> std::expected<CaptureRecoveryReport, IoErrorInfo>;
 
@@ -328,15 +391,18 @@ private:
     std::uint64_t appendLength{};
     std::array<std::byte, 32> appendDigest{};
     // Append-request linkage, set by appendRequest():
-    zigzag::CellRef specCell{};
-    AllocationIncarnation specIncarnation{};
-    bool hasSpec{};
+    struct SpecLink {
+      zigzag::CellRef cell;
+      AllocationIncarnation incarnation;
+    };
+    std::optional<SpecLink> spec;
     std::optional<RequestCell> appendRequest;
-    std::uint64_t appendedSequence{};
-    bool appendedRecorded{};
-    bool publishedReceipt{};
+    /// Journal sequence of the durable Appended record, once written.
+    std::optional<std::uint64_t> appendedSequence;
     std::optional<CaptureReceiptCell> receiptCell;
     bool committedRecorded{};
+    /// Journal file budget still held for this capture's records.
+    std::size_t heldJournalBytes{};
   };
 
   /// One interval-map slot. Committed slots name the permanent span;
@@ -384,15 +450,38 @@ private:
                   std::uint64_t length, CaptureId selfCapture,
                   std::vector<CapturePiece> &pieces, std::uint64_t &appendBytes,
                   std::size_t leaseIndex) -> std::expected<void, IoErrorInfo>;
-  void insertPendingSlots(CaptureId captureId,
-                          const std::vector<CapturePiece> &pieces,
-                          std::size_t begin, std::size_t end);
+  [[nodiscard]] auto insertPendingSlots(CaptureId captureId,
+                                        const std::vector<CapturePiece> &pieces,
+                                        std::size_t begin, std::size_t end)
+      -> std::expected<void, IoErrorInfo>;
+  /// Turn @p captureId's Pending slots into Pinned ones: its append may
+  /// have landed, so overlapping capture must keep refusing in this process
+  /// exactly as recovery would after a restart.
+  void pinPendingSlots(CaptureId captureId);
+  /// A capture reached a terminal state: drop its slots (pinned when
+  /// @p uncertain, erased otherwise), leases and journal hold, free its
+  /// pending-capture slot, and drop the adapter's spent evidence.
+  void retire(std::map<PendingKey, PendingCapture>::iterator it,
+              bool uncertain);
+  /// Write one journal record for @p pending, logging a refusal and
+  /// consuming the held budget the record accounts for.
+  auto appendJournal(PendingCapture &pending, CaptureJournalRecordKind kind,
+                     const CaptureJournalRecord &payload)
+      -> std::expected<CaptureJournalRecord, IoErrorInfo>;
+  /// Hold enough journal budget for every record @p pending may still
+  /// write in one attempt.
+  [[nodiscard]] auto topUpHold(PendingCapture &pending)
+      -> std::expected<void, IoErrorInfo>;
+  [[nodiscard]] static auto worstCaseJournalBytes(std::size_t pieces)
+      -> std::size_t;
   void finalizeTranslations(PendingCapture &pending,
                             const xanadu::PrimediaSpan &span);
   void coalesceOrigin(OriginMap &slots);
-  void rebuildFromAppended(const CaptureJournalRecord &record, bool &conflict);
+  /// All-or-nothing: inserts nothing and returns the reason when the
+  /// record's intervals are inconsistent or overlap an existing slot.
+  [[nodiscard]] auto rebuildFromAppended(const CaptureJournalRecord &record)
+      -> std::optional<CaptureRecoveryReason>;
   void pinFromRecord(const CaptureJournalRecord &record);
-  [[nodiscard]] auto liveCaptureIds() const -> std::unordered_set<CaptureId>;
   /// Pieces -> journal intervals: the translation intent each Append and
   /// Appended record carries (private CapturePiece needs member access).
   [[nodiscard]] static auto
@@ -405,6 +494,8 @@ private:
   IoService &service_;
   CaptureJournal journal_;
   CaptureAppendAdapter adapter_;
+  CaptureJournalCrashPoints crashPoints_;
+  std::optional<CaptureRecoveryReport> recoveryReport_;
   AdapterKey appendKey_{captureAppendAdapterKey};
   CaptureCoordinatorLimits limits_;
   std::map<PendingKey, PendingCapture> pending_;
