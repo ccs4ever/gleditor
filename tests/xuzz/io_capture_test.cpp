@@ -1762,6 +1762,91 @@ TEST_F(IoCaptureTest, CaptureStateIsReapedSoALongRunPastTheOldCeilingsWorks) {
   EXPECT_EQ(after.maxCaptureId(), captures + 1);
 }
 
+TEST_F(IoCaptureTest,
+       DurableCaptureStateIsEvictedSoALongRunPastBothBoundsWorks) {
+  // A durable origin is reachable forever, so nothing resolves its captures;
+  // only evicting the least recently hit translations (and their records)
+  // keeps a long run of distinct ranges from refusing for good.
+  CaptureCoordinatorLimits limits;
+  limits.maxMapEntries = 4;
+  const auto roomForFour =
+      kCaptureJournalHeaderBytes +
+      captureJournalFramedBytes(CaptureJournalRecordKind::Identity) +
+      3 * (captureJournalFramedBytes(CaptureJournalRecordKind::Append, 1) +
+           captureJournalFramedBytes(CaptureJournalRecordKind::Appended, 1) +
+           captureJournalFramedBytes(CaptureJournalRecordKind::Committed));
+  constexpr std::uint64_t captures = 60;
+  constexpr std::uint64_t stride   = 8; // a gap between ranges: no coalescing
+  constexpr std::uint64_t width    = 4;
+  const std::vector<std::byte> source((captures + 30) * stride, std::byte{'x'});
+  RecordingSink sink;
+  {
+    auto world = boot(sink, journalPath_, roomForFour, 1u << 20, true, limits);
+    ASSERT_TRUE(world);
+    auto registered = registerPinned(*world, durableRef(1), source);
+    ASSERT_TRUE(registered.has_value());
+    for (std::uint64_t i = 0; i < captures; ++i) {
+      const PayloadRange selection[]{rangeOf(*registered, i * stride, width)};
+      ASSERT_TRUE(captureCommit(*world, selection).has_value())
+          << "capture " << i << " refused";
+    }
+    EXPECT_EQ(sink.bytes_.size(), captures * width);
+    const auto counts = world->coordinator->stateCounts();
+    EXPECT_LE(counts.translationSlots, limits.maxMapEntries);
+    EXPECT_GT(counts.evictedTranslations, 0U);
+    EXPECT_GT(counts.evictedCaptures, 0U)
+        << "compaction must drop the records of evicted durable captures";
+    EXPECT_LE(std::filesystem::file_size(journalPath_), roomForFour);
+    // The newest range is still a translation; the oldest was evicted.
+    EXPECT_TRUE(world->coordinator->translationFor(
+        rangeOf(*registered, (captures - 1) * stride, width)));
+    EXPECT_FALSE(
+        world->coordinator->translationFor(rangeOf(*registered, 0, width)));
+  }
+  // The restart reads the compacted journal and keeps going past the bounds.
+  auto restarted =
+      boot(sink, journalPath_, roomForFour, 1u << 20, true, limits);
+  ASSERT_TRUE(restarted);
+  auto registered = registerPinned(*restarted, durableRef(1), source);
+  ASSERT_TRUE(registered.has_value());
+  EXPECT_TRUE(restarted->coordinator->translationFor(
+      rangeOf(*registered, (captures - 1) * stride, width)))
+      << "a retained durable translation is rebuilt from the journal";
+  EXPECT_FALSE(
+      restarted->coordinator->translationFor(rangeOf(*registered, 0, width)));
+  for (std::uint64_t i = captures; i < captures + 30; ++i) {
+    const PayloadRange selection[]{rangeOf(*registered, i * stride, width)};
+    ASSERT_TRUE(captureCommit(*restarted, selection).has_value())
+        << "capture " << i << " refused after a restart";
+  }
+  CaptureJournal after(journalPath_, std::nullopt);
+  EXPECT_EQ(after.recover().status, CaptureJournalStatus::Clean);
+  EXPECT_EQ(after.maxCaptureId(), captures + 30);
+}
+
+TEST_F(IoCaptureTest, EvictionNeverTakesCoverageThePrepareRelies) {
+  CaptureCoordinatorLimits limits;
+  limits.maxMapEntries = 3;
+  RecordingSink sink;
+  auto world = boot(sink, journalPath_, 4u << 20, 1u << 20, true, limits);
+  ASSERT_TRUE(world);
+  const std::vector<std::byte> source(256, std::byte{'y'});
+  auto registered = registerPinned(*world, durableRef(1), source);
+  ASSERT_TRUE(registered.has_value());
+  for (std::uint64_t i = 0; i < 3; ++i) {
+    const PayloadRange selection[]{rangeOf(*registered, i * 8, 4)};
+    ASSERT_TRUE(captureCommit(*world, selection).has_value());
+  }
+  // Range 0 is the coldest committed slot but this prepare covers it, so the
+  // one new piece must evict another: offset 8, not offset 0.
+  const PayloadRange selection[]{rangeOf(*registered, 0, 4),
+                                 rangeOf(*registered, 100, 4)};
+  ASSERT_TRUE(captureCommit(*world, selection).has_value());
+  EXPECT_TRUE(world->coordinator->translationFor(rangeOf(*registered, 0, 4)));
+  EXPECT_FALSE(world->coordinator->translationFor(rangeOf(*registered, 8, 4)));
+  EXPECT_EQ(world->coordinator->stateCounts().evictedTranslations, 1U);
+}
+
 TEST_F(IoCaptureTest, CompactionKeepsWhatIsUnresolvedAndWhatSurvivesARestart) {
   RecordingSink sink;
   {

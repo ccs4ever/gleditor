@@ -353,6 +353,24 @@ public:
   [[nodiscard]] auto translationFor(const PayloadRange &range) const
       -> std::optional<xanadu::PrimediaSpan>;
 
+  /// What the coordinator is holding and what it has let go, so a refusal
+  /// that names a bound can be told apart from another.
+  struct StateCounts {
+    /// Committed + pending + pinned translation slots now.
+    std::size_t translationSlots{};
+    /// Distinct captures whose records the journal kept at its last
+    /// compaction.
+    std::size_t retainedCaptures{};
+    /// Committed translations evicted (least recently hit first) because a
+    /// bound would otherwise have refused; each costs at most a repeated
+    /// append.
+    std::size_t evictedTranslations{};
+    /// Durable-origin captures whose journal records compaction dropped
+    /// because every translation they backed had been evicted.
+    std::size_t evictedCaptures{};
+  };
+  [[nodiscard]] auto stateCounts() const noexcept -> StateCounts;
+
   /// RequestDecoder hook: when @p specification names the live spec cell
   /// of a capture append awaiting admission, returns the frozen
   /// CellRequest for captureAppendAdapterKey; std::nullopt otherwise so
@@ -497,6 +515,9 @@ private:
     std::uint64_t srcLength{};
     xanadu::PrimediaSpan dst{};
     CaptureId pendingCapture{};
+    /// Recency of the last commit or covering hit (hitClock_ tick), the
+    /// order in which a full map gives committed translations up.
+    std::uint64_t lastHit{};
   };
   /// Per-origin non-overlapping slots keyed by srcOffset.
   using OriginMap = std::map<std::uint64_t, TranslationSlot>;
@@ -518,7 +539,20 @@ private:
   /// any more, and rewrite the journal without the records of captures that
   /// are resolved and published.
   void reapUnreachableSlots();
+  /// Evict at least @p wanted committed translations, least recently hit
+  /// first, skipping any hit at or after tick @p protectFrom (the current
+  /// prepare's own coverage). Evicts nothing, and returns 0, when fewer than
+  /// @p wanted are eligible: a partial eviction would lose cache for no
+  /// room. The translation map is a dedup cache over journal-proven spans
+  /// (plan §8.2), so what is evicted costs a repeated append, never a wrong
+  /// reference, and the Store's published receipts do not depend on it.
+  auto evictColdTranslations(std::size_t wanted, std::uint64_t protectFrom)
+      -> std::size_t;
   [[nodiscard]] auto compactJournal() -> std::expected<void, IoErrorInfo>;
+  /// Whether a committed translation still covers any part of @p interval's
+  /// origin range, which is what keeps a durable capture's records.
+  [[nodiscard]] auto
+  hasCommittedSlotOver(const CaptureSourceInterval &interval) const -> bool;
   void releaseLeases(PendingCapture &pending);
   void erasePendingSlots(CaptureId captureId);
   [[nodiscard]] auto pendingFor(CaptureCell capture)
@@ -618,6 +652,10 @@ private:
   std::map<CaptureId, UnpublishedCapture> unpublished_;
   TranslationMap translations_;
   std::size_t translationSlots_{};
+  std::uint64_t hitClock_{};
+  std::size_t retainedCaptures_{};
+  std::size_t evictedTranslations_{};
+  std::size_t evictedCaptures_{};
   CaptureId nextCaptureId_{1};
 };
 

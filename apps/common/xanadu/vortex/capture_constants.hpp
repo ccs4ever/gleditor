@@ -30,6 +30,11 @@ inline constexpr std::size_t maxPendingCaptures = 32;
 /// Live translation slots (committed + pending + pinned). Slots are 56-byte
 /// map nodes; 8192 keeps the map under about half a megabyte.
 inline constexpr std::size_t maxMapEntries = 8192;
+/// Fraction of the translation map evicted at once when it is full of
+/// committed translations nothing has hit lately: a one-eighth batch makes
+/// each eviction pass (a sort of the committed slots) cost O(1) amortised
+/// per capture instead of one pass per refused prepare.
+inline constexpr std::size_t evictionBatchDivisor = 8;
 /// Journal file budget. The journal stores metadata only, so 4 MiB holds
 /// tens of thousands of captures; exhaustion refuses prepare before any
 /// append (plan §8.2) rather than after bytes landed.

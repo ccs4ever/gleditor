@@ -438,6 +438,7 @@ auto PayloadResolver::liveLeases() const -> std::size_t {
 }
 
 auto PayloadResolver::sourceReachable(const PayloadRef &ref) const -> bool {
+  // See the header: reachable by address, not necessarily retainable.
   if (ref.kind == PayloadSourceKind::Durable) return true;
   const std::lock_guard lock(state_->mutex);
   if (const auto transient = state_->transientSources.find(ref);

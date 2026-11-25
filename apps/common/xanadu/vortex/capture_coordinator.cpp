@@ -43,6 +43,9 @@ constexpr std::string_view kindName(const CaptureJournalRecordKind kind) {
   return "Unknown";
 }
 
+/// compactJournal's stableDetail when nothing in the journal can retire.
+constexpr std::uint32_t kDetailNothingRetires = 5;
+
 constexpr IoDimension kOutcomeDim = IoDimension::Outcome;
 constexpr IoDimension kFieldRank  = IoDimension::Occurrence;
 constexpr IoDimension kFieldValue = IoDimension::State;
@@ -527,6 +530,13 @@ auto CaptureCoordinator::translationFor(const PayloadRange &range) const
                               .length = range.length};
 }
 
+auto CaptureCoordinator::stateCounts() const noexcept -> StateCounts {
+  return StateCounts{.translationSlots    = translationSlots_,
+                     .retainedCaptures    = retainedCaptures_,
+                     .evictedTranslations = evictedTranslations_,
+                     .evictedCaptures     = evictedCaptures_};
+}
+
 void CaptureCoordinator::sweepDead() {
   for (auto it = pending_.begin(); it != pending_.end();) {
     if (arena_.matches(it->first.first, it->first.second)) {
@@ -602,6 +612,69 @@ void CaptureCoordinator::reapUnreachableSlots() {
   }
 }
 
+auto CaptureCoordinator::evictColdTranslations(const std::size_t wanted,
+                                               const std::uint64_t protectFrom)
+    -> std::size_t {
+  struct Candidate {
+    std::uint64_t lastHit;
+    OriginMap *slots;
+    std::uint64_t key;
+  };
+  std::vector<Candidate> eligible;
+  for (auto &[origin, slots] : translations_) {
+    static_cast<void>(origin);
+    for (auto &[key, slot] : slots) {
+      if (slot.kind == TranslationSlot::Kind::Committed &&
+          slot.lastHit < protectFrom) {
+        eligible.push_back({slot.lastHit, &slots, key});
+      }
+    }
+  }
+  if (wanted == 0 || eligible.size() < wanted) return 0;
+  const auto batch = std::min(
+      eligible.size(),
+      std::max(wanted, std::max<std::size_t>(
+                           1, limits_.maxMapEntries /
+                                  capture_defaults::evictionBatchDivisor)));
+  std::ranges::partial_sort(
+      eligible, eligible.begin() + static_cast<std::ptrdiff_t>(batch),
+      [](const Candidate &a, const Candidate &b) {
+        return a.lastHit < b.lastHit;
+      });
+  for (std::size_t i = 0; i < batch; ++i) {
+    eligible[i].slots->erase(eligible[i].key);
+    --translationSlots_;
+  }
+  std::erase_if(translations_,
+                [](const auto &entry) { return entry.second.empty(); });
+  evictedTranslations_ += batch;
+  GLEDITOR_LOG_INFO(kLog,
+                    "evicted {} cold committed translations ({} slots left)",
+                    batch, translationSlots_);
+  return batch;
+}
+
+auto CaptureCoordinator::hasCommittedSlotOver(
+    const CaptureSourceInterval &interval) const -> bool {
+  const auto found =
+      translations_.find(PayloadRef{.kind       = interval.sourceKind,
+                                    .source     = interval.source,
+                                    .generation = interval.generation,
+                                    .occurrence = interval.occurrence});
+  if (found == translations_.end()) return false;
+  const auto &slots       = found->second;
+  const std::uint64_t end = interval.srcOffset + interval.srcLength;
+  auto slot               = slots.lower_bound(interval.srcOffset);
+  if (slot != slots.begin()) --slot;
+  for (; slot != slots.end() && slot->first < end; ++slot) {
+    if (slot->second.kind == TranslationSlot::Kind::Committed &&
+        slot->second.srcOffset + slot->second.srcLength > interval.srcOffset) {
+      return true;
+    }
+  }
+  return false;
+}
+
 auto CaptureCoordinator::compactJournal() -> std::expected<void, IoErrorInfo> {
   const auto view = journal_.recover();
   if (view.status != CaptureJournalStatus::Clean) {
@@ -622,13 +695,24 @@ auto CaptureCoordinator::compactJournal() -> std::expected<void, IoErrorInfo> {
   }
   for (const auto &entry : pinned_) live.insert(entry.first);
   for (const auto &entry : unpublished_) live.insert(entry.first);
+  // A durable capture is kept only while a committed translation still
+  // backs it: a durable origin is reachable by address forever, so what
+  // retires its records is eviction of the translation, not the source's
+  // death. Records whose translations were all evicted drop whole.
   std::unordered_set<CaptureId> restartStable;
+  std::unordered_set<CaptureId> evictedDurable;
   for (const auto &record : view.records) {
     if (record.kind != CaptureJournalRecordKind::Appended) continue;
-    if (std::ranges::any_of(record.intervals, [](const auto &interval) {
-          return interval.sourceKind == PayloadSourceKind::Durable;
+    const auto durable = [](const auto &interval) {
+      return interval.sourceKind == PayloadSourceKind::Durable;
+    };
+    if (!std::ranges::any_of(record.intervals, durable)) continue;
+    if (std::ranges::any_of(record.intervals, [&](const auto &interval) {
+          return durable(interval) && hasCommittedSlotOver(interval);
         })) {
       restartStable.insert(record.captureId);
+    } else if (!live.contains(record.captureId)) {
+      evictedDurable.insert(record.captureId);
     }
   }
   std::vector<CaptureJournalRecord> keep;
@@ -638,9 +722,13 @@ auto CaptureCoordinator::compactJournal() -> std::expected<void, IoErrorInfo> {
       keep.push_back(record);
     }
   }
+  std::unordered_set<CaptureId> kept;
+  for (const auto &record : keep) kept.insert(record.captureId);
+  retainedCaptures_ = kept.size();
   if (keep.size() == view.records.size()) {
     // Nothing retires: a rewrite would only churn the disk.
-    return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded, 5});
+    return std::unexpected(
+        IoErrorInfo{IoErrorCode::BudgetExceeded, kDetailNothingRetires});
   }
   auto compacted = journal_.compact(keep);
   if (!compacted) {
@@ -648,8 +736,11 @@ auto CaptureCoordinator::compactJournal() -> std::expected<void, IoErrorInfo> {
                       toString(compacted.error().code));
     return compacted;
   }
-  GLEDITOR_LOG_INFO(kLog, "journal compacted: {} of {} records kept",
-                    keep.size(), view.records.size());
+  evictedCaptures_ += evictedDurable.size();
+  GLEDITOR_LOG_INFO(kLog,
+                    "journal compacted: {} of {} records kept, {} evicted "
+                    "durable captures dropped",
+                    keep.size(), view.records.size(), evictedDurable.size());
   return {};
 }
 
@@ -777,6 +868,9 @@ auto CaptureCoordinator::uncoveredPieces(
       // cannot independently append the same uncovered origin.
       return std::unexpected(IoErrorInfo{IoErrorCode::Conflict, 2});
     }
+    if (slot.kind == TranslationSlot::Kind::Committed) {
+      sit->second.lastHit = ++hitClock_;
+    }
     emit(cursor, std::max(offset, slot.srcOffset));
     cursor = std::max(cursor, std::min(end, slotEnd));
     if (cursor >= end) break;
@@ -828,6 +922,7 @@ void CaptureCoordinator::coalesceOrigin(OriginMap &slots) {
       ++it;
       continue;
     }
+    it->second.lastHit = std::max(it->second.lastHit, next->second.lastHit);
     it->second.srcLength += next->second.srcLength;
     it->second.dst.length += next->second.dst.length;
     slots.erase(next);
@@ -847,7 +942,8 @@ void CaptureCoordinator::finalizeTranslations(
         slot->second.pendingCapture != pending.captureId) {
       continue; // invariant violation: leave the reservation, stay safe
     }
-    slot->second.kind = TranslationSlot::Kind::Committed;
+    slot->second.kind    = TranslationSlot::Kind::Committed;
+    slot->second.lastHit = ++hitClock_;
     slot->second.dst =
         xanadu::PrimediaSpan{.scroll = span.scroll,
                              .start  = span.start + piece.dstOffset,
@@ -937,6 +1033,9 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
   }
 
   const CaptureId captureId = nextCaptureId_;
+  // Translations this prepare covers are stamped after this tick, and an
+  // eviction it triggers must not take the coverage it already relies on.
+  const std::uint64_t protectFrom = hitClock_ + 1;
   std::vector<CapturePiece> pieces;
   std::uint64_t appendBytes = 0;
   IoErrorInfo failure{IoErrorCode::BackendFailure, 0};
@@ -957,6 +1056,10 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
     if (added > 0) {
       if (translationSlots_ + added > limits_.maxMapEntries) {
         reapUnreachableSlots();
+      }
+      if (translationSlots_ + added > limits_.maxMapEntries) {
+        evictColdTranslations(translationSlots_ + added - limits_.maxMapEntries,
+                              protectFrom);
       }
       if (translationSlots_ + added > limits_.maxMapEntries ||
           pieces.size() > policy.maxPieces) {
@@ -996,11 +1099,29 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
     // Full means full of records still needed, not of history: drop what
     // resolved captures no longer need and ask once more.
     reapUnreachableSlots();
-    if (compactJournal()) {
-      reserved = journal_.hold(worstCaseJournalBytes(pieces.size()));
+    auto compacted = compactJournal();
+    // Nothing resolved is left to drop: give up the least recently hit
+    // durable translations (and with them their captures' records) rather
+    // than refuse until the user deletes the journal. Each pass evicts a
+    // batch; it stops when the hold fits or nothing is left to evict.
+    for (;;) {
+      if (compacted) {
+        reserved = journal_.hold(worstCaseJournalBytes(pieces.size()));
+        if (reserved) break;
+      } else if (compacted.error().stableDetail != kDetailNothingRetires) {
+        break;
+      }
+      if (evictColdTranslations(1, protectFrom) == 0) break;
+      compacted = compactJournal();
     }
   }
   if (!reserved) {
+    GLEDITOR_LOG_WARN(kLog,
+                      "journal bound refuses prepare: {} slots, {} retained "
+                      "captures, {} translations and {} captures evicted so "
+                      "far",
+                      translationSlots_, retainedCaptures_,
+                      evictedTranslations_, evictedCaptures_);
     rollback();
     return refuse(reserved.error());
   }
@@ -1494,7 +1615,8 @@ auto CaptureCoordinator::rebuildFromAppended(const CaptureJournalRecord &record)
                       TranslationSlot{.kind = TranslationSlot::Kind::Committed,
                                       .srcOffset = interval.srcOffset,
                                       .srcLength = interval.srcLength,
-                                      .dst       = dst});
+                                      .dst       = dst,
+                                      .lastHit   = ++hitClock_});
     (void)slot;
     if (!added) {
       undo();

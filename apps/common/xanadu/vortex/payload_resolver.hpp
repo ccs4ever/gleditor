@@ -105,7 +105,9 @@ public:
       -> std::expected<PayloadLease, IoError>;
   auto resolveProxy(ProxyRange range) -> std::expected<PayloadLease, IoError>;
 
-  /// Retain any registered origin, dispatched on range.origin.kind.
+  /// Retain any registered origin, dispatched on range.origin.kind. A durable
+  /// origin is retainable only while a lease or owner token still holds its
+  /// chunk; afterwards resolveDurable must read it again.
   auto retain(PayloadRange range) -> std::expected<PayloadLease, IoError>;
   /// A sub-range of @p lease under a new lease; the origin is preserved.
   auto slice(const PayloadLease &lease, std::uint64_t offset,
@@ -127,16 +129,22 @@ public:
   [[nodiscard]] auto requirePersistable(const PayloadLease &lease) const
       -> std::expected<xanadu::PrimediaSpan, IoError>;
 
-  /// Whether @p ref's bytes can still be retained: a durable origin always
-  /// (the permascroll holds them), any other only while a registration pin,
-  /// lease or owner token keeps its chunk. The capture map asks this to
-  /// forget translations of sources nothing can read any more.
+  /// Whether a committed translation of @p ref's bytes can still be hit. A
+  /// durable origin always can: its address is permanent, and resolving the
+  /// same span again registers the chunk anew. That is not the same as being
+  /// retainable now -- retain() of a durable PayloadRange held by value
+  /// returns Unresolved once no lease or owner token keeps its chunk, so a
+  /// caller must hold a lease (or re-resolve) rather than keep the range. Any
+  /// other origin is reachable only while a registration pin, lease or owner
+  /// token keeps its chunk, and the capture map forgets the translations of
+  /// the rest.
   [[nodiscard]] auto sourceReachable(const PayloadRef &ref) const -> bool;
   [[nodiscard]] auto liveLeases() const -> std::size_t;
-  /// Sources whose bytes are still reachable: every durable origin plus each
-  /// transient/proxy origin with a live registration pin, lease or owner
-  /// token. Expired transient entries awaiting a sweep are not counted, so a
-  /// falling count is the observable proof a chunk was recycled (§8.1).
+  /// Sources whose chunk is alive right now: each durable origin with a
+  /// lease or token on its chunk plus each transient/proxy origin with a
+  /// live registration pin, lease or owner token. Expired entries awaiting a
+  /// sweep are not counted, so a falling count is the observable proof a
+  /// chunk was recycled (§8.1).
   [[nodiscard]] auto liveSources() const -> std::size_t;
   void release(LeaseId lease) noexcept;
 
