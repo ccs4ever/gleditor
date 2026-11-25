@@ -826,8 +826,8 @@ M5 implementation notes and deliberate deferrals:
   metadata: `FileSourceAdapter::execute` publishes the retained bytes first, then records the
   observation against the actual bytes-read extent, and `ArenaIoCellStore::publishTerminal` mints
   the cell off the outcome's `d.io.source` field when a `Complete` carries `ReadObservationResult`,
-  binding the same `PayloadRange` through its own owner lease.
-  `outcomeCellReadObservation` is the owner-side reader.
+  binding the same `PayloadRange` through its own owner lease. `outcomeCellReadObservation` is the
+  owner-side reader.
 - File endpoints are served by `FileEndpointAdapter` (`fileOpenAdapterKey`/`fileDataAdapterKey`,
   `d.io.kind` "file"): `admitOpen` runs `::open` inside `execute` on the scheduler worker (§7.2's
   off-owner-thread rule) and adopts the descriptor in a per-locator `FileSourceAdapter`, so every
@@ -839,19 +839,61 @@ M5 implementation notes and deliberate deferrals:
   `OpenSpec`/`OpenGrant::consistency`, and `FileSourceAdapter` offers `Live` only — a `Stable`
   request is refused before admission because a plain POSIX file proves no snapshot/CAS.
 - §7.1's framing/message/cursor vocabulary is deferred wholesale until the consumer milestone that
-  needs it: `BufferPolicy` (`Raw`/`Fixed`/`Line`/`Message`), `OversizePolicy`, `EncodingPolicy`,
-  the `Sequential`/`AtOffset`/`Reset` cursor modes, and the `ReadFrame`/`ReceiveMessage`/
+  needs it: `BufferPolicy` (`Raw`/`Fixed`/`Line`/`Message`), `OversizePolicy`, `EncodingPolicy`, the
+  `Sequential`/`AtOffset`/`Reset` cursor modes, and the `ReadFrame`/`ReceiveMessage`/
   `SendMessage`/`FlushAfter`/`Seek`/`DecodeRange` operations have no adapter or cell-schema
-  representation yet. File/media M5 ships `ReadBytes`/`WriteBytes`-equivalent transfers only;
-  §14's "unsupported framing/message semantics" refusal stands until then.
+  representation yet. File/media M5 ships `ReadBytes`/`WriteBytes`-equivalent transfers only; §14's
+  "unsupported framing/message semantics" refusal stands until then.
 - `FileSourceAdapter`'s `DecodeLease` pool (`acquireDecodeLease`/`releaseDecodeLease`,
   `maxDecodeLeases` bound) is a placeholder accounting seam: no decoder or derived-product cache
   exists behind it, so leases record source range + generation but retain no decoded bytes. It
   exists so the lease/budget class is settled before a real decoder lands.
-- `generationFromStat` (size + mtime + inode) detects an uncertain write but cannot see a
-  same-size, same-timestamp in-place rewrite — proven by
-  `SameSizeRewriteWithRestoredMtimeSharesTheGeneration`. That blind spot is why `Stable`/CAS is
-  refused rather than synthesized from the generation value.
+- `generationFromStat` (size + mtime + inode) detects an uncertain write but cannot see a same-size,
+  same-timestamp in-place rewrite — proven by `SameSizeRewriteWithRestoredMtimeSharesTheGeneration`.
+  That blind spot is why `Stable`/CAS is refused rather than synthesized from the generation value.
+
+M6 implementation notes and deliberate deferrals:
+
+- `CaptureCoordinator` (`capture_coordinator.{hpp,cpp}`) owns the per-user interval translation map
+  (per-origin non-overlapping `Committed`/`Pending`/`Pinned` slots keyed by source offset), the
+  `capture.journal` and a `CaptureAppendAdapter` (`captureAppendAdapterKey`, source kind 5). The
+  append is an ordinary `IoService` request: `appendRequest` returns the common `SubmitResult`, and
+  the receipt (the allocated `PrimediaSpan`) is held by the adapter and correlated by `commit`,
+  never carried on the outcome's payload channel.
+- Overlap is computed per origin as uncovered gaps; `[0,10)` then `[5,15)` appends only the
+  `[10,15)` suffix, a fully covered selection appends zero bytes, and a discontiguous selection
+  becomes separate pieces inside one append. Adjacency coalesces only when source and destination
+  are both contiguous. The map key is the logical `PayloadRef` (kind/source/generation/occurrence);
+  the BLAKE3 `appendDigest` in the journal is an integrity field only, and two identical byte
+  strings from different sources never share a translation.
+- `commit` follows the append request occurrence stored in the exact `CaptureCell`, checks its
+  allocation incarnation, and requires `successfulAppend` to be linked from that request as a
+  terminal `Complete`; another capture's outcome, a stale incarnation, a nonterminal request or a
+  non-`Complete` outcome returns `Refused` with no journal record, cell or translation published.
+- Journal records are `Append` (intent, before submission), `Appended` (span plus full translation
+  intent, fsynced before the receipt cell is minted), `Committed` (after publication) and `Aborted`
+  (with an uncertain flag). `recover()` rebuilds translations from `Appended`/`Committed`, pins the
+  source intervals of open intents and uncertain aborts (`NeedsReconciliation`, overlapping prepare
+  then refuses with `Conflict`), and reports `orphanBytes` as the sum of append lengths that may
+  have landed without a proven commit. It never resubmits. Corruption, bad signature/version and
+  sequence gaps are `PersistenceRefusal` naming the 1-based record; a torn tail is cut by the
+  constructor.
+- The prior draft encoded 49-byte intervals but declared 41, so every journal read as corrupt; the
+  size is now `1 + 6 * 8`. `journalReserveBytes` in the coordinator still hardcodes the journal's
+  frame sizes and must change with the format.
+- Crash injection is covered two ways: restart tests tear the whole world down after each durable
+  step (intent, append executed, `Appended`, `Committed`, certain and uncertain abort) and boot a
+  fresh coordinator over the same journal and sink; `CaptureJournalCrashPoints` is exercised on the
+  journal directly (`beforeFlush` rolls back, `afterFlush` keeps the record).
+- Deferred: `commit` mints the receipt cell with span fields in the owner arena only; it does not
+  yet emit Structure operations into a `Store` (the plan's "translated Structure spans"), so no
+  durable slice references a captured span. The coordinator does not thread
+  `CaptureJournalCrashPoints`, so failures between journal write and fsync are tested at journal
+  level only. `UserPermascrollCaptureSink` and `SegmentedPrimediaCaptureSink` have no test of their
+  own (tests use an in-memory sink). Explicit reconciliation of `Pinned` intervals is not built:
+  they stay refused until restart policy changes. Source chunks are not pinned by the map, so a
+  capture of a transient origin whose last lease dropped is refused `Unresolved` by design (the
+  tests hold a standing lease).
 
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per
 repository policy. Run source-level focused tests while implementing and full `make -j$(nproc) test`
