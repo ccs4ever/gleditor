@@ -437,6 +437,17 @@ auto PayloadResolver::liveLeases() const -> std::size_t {
   return state_->leases.size();
 }
 
+auto PayloadResolver::sourceReachable(const PayloadRef &ref) const -> bool {
+  if (ref.kind == PayloadSourceKind::Durable) return true;
+  const std::lock_guard lock(state_->mutex);
+  if (const auto transient = state_->transientSources.find(ref);
+      transient != state_->transientSources.end()) {
+    return transient->second.pinned || !transient->second.bytes.expired();
+  }
+  const auto found = state_->sources.find(ref);
+  return found != state_->sources.end() && !found->second.expired();
+}
+
 auto PayloadResolver::liveSources() const -> std::size_t {
   const std::lock_guard lock(state_->mutex);
   std::size_t live = 0;

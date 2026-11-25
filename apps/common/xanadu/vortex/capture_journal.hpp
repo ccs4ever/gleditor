@@ -17,7 +17,7 @@
 #include "common/xanadu/vortex/payload_resolver.hpp"
 
 // design/vortex-io-implementation-plan.md §8.2, capture journal format:
-// `capture.journal`, signature \x89XUDCAP, version 1, append-only
+// `capture.journal`, signature \x89XUDCAP, version 3, append-only
 // length-delimited records carrying record kind, sequence, CaptureId,
 // source interval, permascroll span, append digest and checksum. Records
 // are metadata only -- never transient bytes. A journal entry is fsynced
@@ -31,7 +31,7 @@ namespace xanadu::vortex {
 
 inline constexpr char kCaptureJournalSignature[8]     = {'\x89', 'X', 'U', 'D',
                                                          'C',    'A', 'P', '\n'};
-inline constexpr std::uint32_t kCaptureJournalVersion = 2;
+inline constexpr std::uint32_t kCaptureJournalVersion = 3;
 
 // On-disk frame sizes, exported so reservations are computed from the format
 // and cannot drift from it. Every record is u32 bodyLen + body.
@@ -52,6 +52,8 @@ inline constexpr std::size_t kCaptureJournalAbortedBytes = 1 + 1;
 /// promoted(1) + span(scroll, start, length)
 inline constexpr std::size_t kCaptureJournalReconciledBytes =
     1 + kCaptureJournalSpanBytes;
+/// journalId(8); the record's captureId field carries the id floor
+inline constexpr std::size_t kCaptureJournalIdentityBytes = 8;
 
 /// Private opaque capture identity, minted monotonically by the owning
 /// CaptureCoordinator and never reused (including across restarts: recovery
@@ -83,6 +85,12 @@ enum class CaptureJournalRecordKind : std::uint8_t {
   /// intervals are unpinned and its bytes, if any, stay unreachable. Version
   /// 2 of the journal; version 1 had no such record and is refused.
   Reconciled,
+  /// Always the first record (version 3): the journal's own identity, minted
+  /// once at creation, and the highest CaptureId minted so far (carried in
+  /// the record's captureId) so compaction can drop records without letting
+  /// an id be reused. A CaptureId is unique only within one journal; the pair
+  /// (journalId, CaptureId) is what a Store's receipt is keyed by.
+  Identity,
 };
 
 /// Bytes one record of @p kind carrying @p intervalCount intervals occupies
@@ -109,6 +117,9 @@ captureJournalFramedBytes(const CaptureJournalRecordKind kind,
     break;
   case CaptureJournalRecordKind::Reconciled:
     payload = kCaptureJournalReconciledBytes;
+    break;
+  case CaptureJournalRecordKind::Identity:
+    payload = kCaptureJournalIdentityBytes;
     break;
   }
   return kCaptureJournalFrameBytes + kCaptureJournalFixedBodyBytes + payload;
@@ -157,6 +168,8 @@ struct CaptureJournalRecord {
   /// Reconciled only: true when the owner promoted the capture at `span`,
   /// false when it released the pinned intervals (span is then unused).
   bool reconciledPromoted{};
+  /// Identity only: the journal's identity (captureId is the id floor).
+  std::uint64_t journalId{};
   friend bool operator==(const CaptureJournalRecord &,
                          const CaptureJournalRecord &) = default;
 };
@@ -171,8 +184,12 @@ enum class CaptureJournalStatus : std::uint8_t {
 
 struct CaptureJournalRecovery {
   CaptureJournalStatus status{CaptureJournalStatus::Corrupt};
-  /// Well-formed complete records only, in journal order.
+  /// Well-formed complete records only, in journal order, the Identity
+  /// record excluded (it is journalId below).
   std::vector<CaptureJournalRecord> records;
+  /// The journal's identity (the first record's), or the one a fresh journal
+  /// will write.
+  std::uint64_t journalId{};
   /// The sequence the next appended record must carry.
   std::uint64_t nextSequence{1};
   /// Highest CaptureId seen; the coordinator seeds its counter past it.
@@ -199,7 +216,10 @@ struct CaptureJournalCrashPoints {
 /// on a worker thread.
 class CaptureJournal {
 public:
-  CaptureJournal(std::filesystem::path path, std::size_t maxBytes);
+  /// @p maxBytes bounds the file; std::nullopt is the explicit unbounded
+  /// choice and 0 holds nothing.
+  CaptureJournal(std::filesystem::path path,
+                 std::optional<std::size_t> maxBytes);
   ~CaptureJournal();
   CaptureJournal(const CaptureJournal &)                     = delete;
   auto operator=(const CaptureJournal &) -> CaptureJournal & = delete;
@@ -243,6 +263,19 @@ public:
   /// since; the coordinator seeds its counter past it so ids are never
   /// reused across restarts.
   [[nodiscard]] auto maxCaptureId() const noexcept -> CaptureId;
+  /// This journal's identity: read from its Identity record, or minted at
+  /// construction for a journal not yet written (it becomes durable with the
+  /// first record).
+  [[nodiscard]] auto journalId() const noexcept -> std::uint64_t;
+
+  /// Retire records (plan §9: records retire once their capture is
+  /// resolved). Atomically replaces the file with a fresh Identity record
+  /// (carrying the current id floor) followed by @p keep, renumbered gapless;
+  /// a crash before the rename leaves the old journal whole. Holds are
+  /// untouched. Refuses when the file is poisoned or the rewrite would not
+  /// fit the journal's own budget.
+  [[nodiscard]] auto compact(std::span<const CaptureJournalRecord> keep)
+      -> std::expected<void, IoErrorInfo>;
 
   [[nodiscard]] auto path() const -> const std::filesystem::path &;
   [[nodiscard]] auto sizeBytes() const -> std::size_t;
@@ -256,7 +289,11 @@ private:
   /// length, gapless sequence) and judge whether a partial tail is the start
   /// of the very record its length prefix announces.
   static auto scanImage(std::span<const std::byte> bytes, CaptureId &maxId,
-                        std::uint64_t &nextSequence) -> FramedLogScan;
+                        std::uint64_t &nextSequence, std::uint64_t &journalId)
+      -> FramedLogScan;
+  /// Bytes the Identity record will add to a journal not yet written.
+  [[nodiscard]] auto pendingIdentityBytes() const noexcept -> std::size_t;
+  [[nodiscard]] auto identityRecord() const -> CaptureJournalRecord;
 
   /// File mechanics shared with ActorIoJournal: header, torn-tail repair,
   /// fsynced appends with rollback, directory durability.
@@ -264,6 +301,9 @@ private:
   std::size_t heldBytes_{};
   std::uint64_t nextSequence_{1};
   CaptureId maxCaptureId_{};
+  std::uint64_t journalId_{};
+  /// The file already holds an Identity record: appends need not write one.
+  bool identityWritten_{};
 };
 
 } // namespace xanadu::vortex

@@ -13,6 +13,11 @@
  * cells hanging off a private queue occurrence. Tags live in the arena's
  * incarnation-keyed runtime tag, so cell text cannot forge one, and every
  * I/O cell is runtime-only, so Structure refuses to persist it.
+ *
+ * The graph is the topology and the tags, an inspectable owner-thread view
+ * of native state: request operation, state and arguments, endpoint state
+ * and capability rights live in IoService and the adapters, and nothing
+ * rebuilds them from cells (plan §3.1, reconciliation paragraph).
  */
 
 #include <array>
@@ -41,10 +46,10 @@ enum class IoCellTag : std::uint8_t {
   ReadObservation,
   CaptureReceipt,
   Waiter,
-  /// A capture transaction's owner-only cell (plan §3.1 "Capture"): the
-  /// selected source intervals, map reservation, append request
-  /// occurrence and phase live in its graph and in the coordinator's
-  /// pending record.
+  /// A capture transaction's owner-only cell (plan §3.1 "Capture"). Its
+  /// graph holds the append request and receipt links; the selected source
+  /// intervals, map reservation and phase live in the coordinator's pending
+  /// record and the journal, and the cell's decimal fields only mirror them.
   Capture,
 };
 

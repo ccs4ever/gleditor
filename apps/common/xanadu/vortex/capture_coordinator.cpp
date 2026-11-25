@@ -37,6 +37,8 @@ constexpr std::string_view kindName(const CaptureJournalRecordKind kind) {
     return "Aborted";
   case CaptureJournalRecordKind::Reconciled:
     return "Reconciled";
+  case CaptureJournalRecordKind::Identity:
+    return "Identity";
   }
   return "Unknown";
 }
@@ -303,6 +305,14 @@ void CaptureAppendAdapter::abandon(const std::uint32_t key) noexcept {
 void CaptureAppendAdapter::complete(const std::uint32_t key) noexcept {
   const std::lock_guard lock(mutex_);
   staged_.erase(key);
+  if (running_.contains(key)) {
+    // A swept capture can be retired while its worker turn is still inside
+    // the sink append. Erasing now would let the turn re-create the entries
+    // afterwards and leak them under a key a later spec cell may reuse; the
+    // turn erases them as it ends.
+    completeAfterTurn_.insert(key);
+    return;
+  }
   receipts_.erase(key);
   executed_.erase(key);
 }
@@ -374,8 +384,17 @@ void CaptureAppendAdapter::execute(const BackendCommand &command,
     if (it != staged_.end()) {
       spec = std::move(it->second);
       staged_.erase(it);
+      running_.insert(key);
     }
   }
+  // Ends the turn: a complete() that arrived meanwhile takes effect now.
+  const auto endTurn = [&] {
+    const std::lock_guard lock(mutex_);
+    if (running_.erase(key) != 0 && completeAfterTurn_.erase(key) != 0) {
+      receipts_.erase(key);
+      executed_.erase(key);
+    }
+  };
 
   // Everything past the table lookup can throw (spec access, the sink
   // append, map inserts): execute is noexcept, so an escaped exception
@@ -392,8 +411,8 @@ void CaptureAppendAdapter::execute(const BackendCommand &command,
       // exist, so the key is deliberately NOT marked executed.
       result = BackendResult{
           Cancelled{{}, IoProgress{.phase = IoPhase::Terminal}, false}, {}};
-    } else if (context.budget.maxBytes != 0 &&
-               spec->bytes.size() > context.budget.maxBytes) {
+    } else if (context.budget.maxBytes &&
+               spec->bytes.size() > *context.budget.maxBytes) {
       // Refused before the sink saw the bytes: also certain no append.
       result = BackendResult{Failed{{IoErrorCode::BudgetExceeded, 0},
                                     {},
@@ -432,6 +451,7 @@ void CaptureAppendAdapter::execute(const BackendCommand &command,
                                   IoProgress{.phase = IoPhase::Terminal}},
                            {}};
   }
+  endTurn();
   sink.terminalCandidate(command.token, std::move(result), {});
   sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
 }
@@ -447,7 +467,8 @@ auto CaptureAppendAdapter::publish(const NativeCompletion &completion,
 CaptureCoordinator::CaptureCoordinator(
     ArenaManifold &arena, const IoCellSchema &schema, PayloadResolver &payloads,
     IoService &service, CaptureByteSink &sink,
-    std::filesystem::path journalPath, const std::size_t journalMaxBytes,
+    std::filesystem::path journalPath,
+    const std::optional<std::size_t> journalMaxBytes,
     const CaptureCoordinatorLimits limits)
     : arena_(arena), schema_(schema), payloads_(payloads), service_(service),
       journal_(std::move(journalPath), journalMaxBytes), adapter_(sink),
@@ -557,6 +578,79 @@ void CaptureCoordinator::retire(
     detachClonedField(arena_, schema_, pending.cell.cell, IoDimension::Request);
   }
   pending_.erase(it);
+}
+
+void CaptureCoordinator::reapUnreachableSlots() {
+  for (auto origin = translations_.begin(); origin != translations_.end();) {
+    if (payloads_.sourceReachable(origin->first)) {
+      ++origin;
+      continue;
+    }
+    // Nothing can read these bytes again, so a committed translation of
+    // them can never be hit; pending and pinned slots are live state and
+    // stay.
+    auto &slots = origin->second;
+    for (auto slot = slots.begin(); slot != slots.end();) {
+      if (slot->second.kind == TranslationSlot::Kind::Committed) {
+        slot = slots.erase(slot);
+        --translationSlots_;
+      } else {
+        ++slot;
+      }
+    }
+    origin = slots.empty() ? translations_.erase(origin) : std::next(origin);
+  }
+}
+
+auto CaptureCoordinator::compactJournal() -> std::expected<void, IoErrorInfo> {
+  const auto view = journal_.recover();
+  if (view.status != CaptureJournalStatus::Clean) {
+    return std::unexpected(
+        view.refusal.value_or(IoErrorInfo{IoErrorCode::PersistenceRefusal, 0}));
+  }
+  // A capture's records are kept whole or not at all, so recovery sees the
+  // same attempt it saw before. Kept: anything not yet resolved (live,
+  // pinned, awaiting publication) and a capture whose translations survive a
+  // restart, which only a durable origin's can (a process-local source id
+  // means nothing to the next process). Dropped: resolved and published
+  // captures, certain aborts and released pins -- plan §9, records retire
+  // once their capture is resolved.
+  std::unordered_set<CaptureId> live;
+  for (const auto &[key, pending] : pending_) {
+    static_cast<void>(key);
+    live.insert(pending.captureId);
+  }
+  for (const auto &entry : pinned_) live.insert(entry.first);
+  for (const auto &entry : unpublished_) live.insert(entry.first);
+  std::unordered_set<CaptureId> restartStable;
+  for (const auto &record : view.records) {
+    if (record.kind != CaptureJournalRecordKind::Appended) continue;
+    if (std::ranges::any_of(record.intervals, [](const auto &interval) {
+          return interval.sourceKind == PayloadSourceKind::Durable;
+        })) {
+      restartStable.insert(record.captureId);
+    }
+  }
+  std::vector<CaptureJournalRecord> keep;
+  for (const auto &record : view.records) {
+    if (live.contains(record.captureId) ||
+        restartStable.contains(record.captureId)) {
+      keep.push_back(record);
+    }
+  }
+  if (keep.size() == view.records.size()) {
+    // Nothing retires: a rewrite would only churn the disk.
+    return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded, 5});
+  }
+  auto compacted = journal_.compact(keep);
+  if (!compacted) {
+    GLEDITOR_LOG_WARN(kLog, "journal compaction refused: code {}",
+                      toString(compacted.error().code));
+    return compacted;
+  }
+  GLEDITOR_LOG_INFO(kLog, "journal compacted: {} of {} records kept",
+                    keep.size(), view.records.size());
+  return {};
 }
 
 void CaptureCoordinator::pinPendingSlots(const CaptureId captureId) {
@@ -861,6 +955,9 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
     }
     const auto added = pieces.size() - before;
     if (added > 0) {
+      if (translationSlots_ + added > limits_.maxMapEntries) {
+        reapUnreachableSlots();
+      }
       if (translationSlots_ + added > limits_.maxMapEntries ||
           pieces.size() > policy.maxPieces) {
         failure = {IoErrorCode::BudgetExceeded, 3};
@@ -894,8 +991,16 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
   // Hold the journal budget for every record this capture may write NOW:
   // a bare size check would let maxPendingCaptures captures all pass and
   // then exhaust the file after their bytes landed.
-  if (const auto reserved = journal_.hold(worstCaseJournalBytes(pieces.size()));
-      !reserved) {
+  auto reserved = journal_.hold(worstCaseJournalBytes(pieces.size()));
+  if (!reserved && reserved.error().code == IoErrorCode::BudgetExceeded) {
+    // Full means full of records still needed, not of history: drop what
+    // resolved captures no longer need and ask once more.
+    reapUnreachableSlots();
+    if (compactJournal()) {
+      reserved = journal_.hold(worstCaseJournalBytes(pieces.size()));
+    }
+  }
+  if (!reserved) {
     rollback();
     return refuse(reserved.error());
   }
@@ -945,9 +1050,6 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
           return std::unexpected(ok.error());
         }
         if (const auto ok = field("appendBytes", number(appendBytes)); !ok) {
-          return std::unexpected(ok.error());
-        }
-        if (const auto ok = field("phase", "Prepared"); !ok) {
           return std::unexpected(ok.error());
         }
         return minted;
@@ -1221,7 +1323,9 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
     appended.span         = *receipt;
     const auto pieces     = publishedPieces(appended);
     const auto stored     = publisher_->publish(
-        CapturePublication{.captureId = pending.captureId, .pieces = pieces});
+        CapturePublication{.journalId = journal_.journalId(),
+                               .captureId = pending.captureId,
+                               .pieces    = pieces});
     if (!stored) return refuse(stored.error());
     if (const auto saved = publisher_->save(); !saved) {
       return refuse(saved.error());
@@ -1358,6 +1462,12 @@ auto CaptureCoordinator::rebuildFromAppended(const CaptureJournalRecord &record)
         xanadu::PrimediaSpan{.scroll = record.span.scroll,
                              .start  = record.span.start + interval.dstOffset,
                              .length = interval.srcLength};
+    // A transient, scratch or proxy origin names a source of the process
+    // that wrote the record: its ids restart with every process, so a
+    // recovered slot would swallow an unrelated source's bytes (a later
+    // session's source 1 is not this one's). The record still proves its
+    // span and is published; only the in-process dedup map is not rebuilt.
+    if (interval.sourceKind != PayloadSourceKind::Durable) continue;
     auto &slots             = translations_[origin];
     const std::uint64_t end = interval.srcOffset + interval.srcLength;
     bool duplicate          = false;
@@ -1404,6 +1514,11 @@ void CaptureCoordinator::pinFromRecord(const CaptureJournalRecord &record) {
   // map's non-overlap invariant holds and already-committed mappings are
   // never shadowed. prepare() refuses any new capture overlapping them.
   for (const auto &interval : record.intervals) {
+    // Process-local origins are never pinned across a restart, for the
+    // reason rebuildFromAppended() leaves them out: the pin would refuse an
+    // unrelated source that reused the id. The capture stays reportable and
+    // reconcilable by id.
+    if (interval.sourceKind != PayloadSourceKind::Durable) continue;
     const auto origin       = originOf(interval);
     const std::uint64_t end = interval.srcOffset + interval.srcLength;
     auto found              = translations_.find(origin);
@@ -1553,6 +1668,9 @@ auto CaptureCoordinator::recover()
       attempt.phase    = AttemptPhase::AwaitingCommit;
       break;
     }
+    case CaptureJournalRecordKind::Identity:
+      // Never in the recovery view: the journal reports it as journalId.
+      break;
     }
   }
 
@@ -1719,12 +1837,18 @@ auto CaptureCoordinator::completePublications()
   // With no Structure target a Committed record proves only the journal and
   // the map; the publish and save steps are skipped, the record still lands.
   if (publisher_) {
-    const auto present = publisher_->publishedIds();
+    const auto present = publisher_->publishedKeys();
+    if (!present) return std::unexpected(present.error());
     for (const auto &[id, entry] : unpublished_) {
-      if (present.contains(id)) continue;
+      if (present->contains(PublicationKey{.journalId = journal_.journalId(),
+                                           .captureId = id})) {
+        continue;
+      }
       const auto pieces = publishedPieces(entry.appended);
       const auto stored = publisher_->publish(
-          CapturePublication{.captureId = id, .pieces = pieces});
+          CapturePublication{.journalId = journal_.journalId(),
+                             .captureId = id,
+                             .pieces    = pieces});
       if (!stored) return std::unexpected(stored.error());
     }
     // One save covers every publication above. It also runs when the Store

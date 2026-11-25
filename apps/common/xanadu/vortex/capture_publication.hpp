@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -28,8 +29,11 @@
 //                  LAST: being on the rank is the seal, so a receipt that
 //                  is reachable is a publication that is complete.
 //   receipt        a scalar cell whose canonical int64 bits are the
-//                  CaptureId. Idempotence is keyed by that id, never by a
-//                  content hash.
+//                  CaptureId, with the journal's identity as a scalar cell on
+//                  its d.io.provenance rank. A CaptureId is unique only within
+//                  one capture.journal while a Store may be shared, so
+//                  idempotence is keyed by the pair (journalId, CaptureId),
+//                  never by a content hash.
 //   d.io.range     receipt -> one cell per appended piece, in append order;
 //                  each cell's content IS the permanent permascroll span.
 //   d.io.provenance  piece -> source kind, source, generation, occurrence
@@ -59,8 +63,24 @@ struct PublishedPiece {
                          const PublishedPiece &) = default;
 };
 
+/// What names one publication: the journal that issued the id, and the id.
+struct PublicationKey {
+  std::uint64_t journalId{};
+  CaptureId captureId{};
+  friend bool operator==(const PublicationKey &,
+                         const PublicationKey &) = default;
+};
+struct PublicationKeyHash {
+  [[nodiscard]] auto operator()(const PublicationKey &key) const noexcept
+      -> std::size_t {
+    return std::hash<std::uint64_t>{}(key.journalId * 0x9e3779b97f4a7c15ULL ^
+                                      key.captureId);
+  }
+};
+
 /// What publish() is asked to make durable-by-reference.
 struct CapturePublication {
+  std::uint64_t journalId{};
   CaptureId captureId{};
   std::span<const PublishedPiece> pieces;
 };
@@ -89,10 +109,20 @@ public:
   /// permascroll the captured spans live in).
   [[nodiscard]] auto save() const -> std::expected<void, IoErrorInfo>;
 
-  /// The sealed publication for @p captureId, when the Store holds one.
+  /// The sealed publication for @p key, when the Store holds one. A receipt
+  /// the reader cannot parse (short provenance chain, a non-scalar, an
+  /// unknown source kind) is a PersistenceRefusal, never a default.
+  [[nodiscard]] auto published(const PublicationKey &key) const
+      -> std::expected<std::optional<PublishedCapture>, IoErrorInfo>;
+  /// The sealed publication for @p captureId under any journal (the first
+  /// on the rank): for a Store a single journal writes, and for diagnostics.
   [[nodiscard]] auto published(CaptureId captureId) const
       -> std::optional<PublishedCapture>;
-  /// Every CaptureId with a sealed receipt: one walk of the receipt rank.
+  /// Every key with a sealed receipt: one walk of the receipt rank.
+  [[nodiscard]] auto publishedKeys() const
+      -> std::expected<std::unordered_set<PublicationKey, PublicationKeyHash>,
+                       IoErrorInfo>;
+  /// Every CaptureId with a sealed receipt, across journals.
   [[nodiscard]] auto publishedIds() const -> std::unordered_set<CaptureId>;
 
   [[nodiscard]] auto store() noexcept -> xanadu::Store & { return store_; }

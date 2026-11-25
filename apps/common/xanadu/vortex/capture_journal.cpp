@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <random>
 #include <span>
 
 namespace xanadu::vortex {
@@ -17,11 +18,12 @@ constexpr std::size_t kAppendFixedBytes = kCaptureJournalAppendFixedBytes;
 constexpr std::size_t kSpanBytes        = kCaptureJournalSpanBytes;
 constexpr std::size_t kAbortedBytes     = kCaptureJournalAbortedBytes;
 constexpr std::size_t kReconciledBytes  = kCaptureJournalReconciledBytes;
+constexpr std::size_t kIdentityBytes    = kCaptureJournalIdentityBytes;
 // Where intervalCount sits in an Append/Appended body: after the fixed
 // header, the digest and the append length.
 constexpr std::size_t kIntervalCountOffset = kFixedBodyBytes + 32 + 8;
 constexpr std::size_t kMaxKindValue =
-    static_cast<std::size_t>(CaptureJournalRecordKind::Reconciled);
+    static_cast<std::size_t>(CaptureJournalRecordKind::Identity);
 
 /// The kind-specific payload size an honest encode produces, or
 /// std::nullopt when the record cannot be represented (interval count
@@ -48,6 +50,8 @@ std::optional<std::size_t> payloadBytesFor(const CaptureJournalRecordKind kind,
     return kAbortedBytes;
   case CaptureJournalRecordKind::Reconciled:
     return kReconciledBytes;
+  case CaptureJournalRecordKind::Identity:
+    return kIdentityBytes;
   }
   return std::nullopt;
 }
@@ -102,6 +106,9 @@ std::vector<std::byte> encodeBody(const CaptureJournalRecord &record) {
     appendValue(body, record.span.scroll);
     appendValue(body, record.span.start);
     appendValue(body, record.span.length);
+    break;
+  case CaptureJournalRecordKind::Identity:
+    appendValue(body, record.journalId);
     break;
   }
 
@@ -232,6 +239,10 @@ std::optional<CaptureJournalRecord> decodeBody(const std::byte *body,
     offset += sizeof(record.span.length);
     break;
   }
+  case CaptureJournalRecordKind::Identity:
+    if (bodyLen != kFixedBodyBytes + kIdentityBytes) return std::nullopt;
+    std::memcpy(&record.journalId, body + offset, sizeof(record.journalId));
+    break;
   }
   return record;
 }
@@ -265,6 +276,9 @@ bool tornTailPlausible(const std::span<const std::byte> partial,
   case CaptureJournalRecordKind::Reconciled:
     if (bodyLen != kFixedBodyBytes + kReconciledBytes) return false;
     break;
+  case CaptureJournalRecordKind::Identity:
+    if (bodyLen != kFixedBodyBytes + kIdentityBytes) return false;
+    break;
   case CaptureJournalRecordKind::Append:
   case CaptureJournalRecordKind::Appended: {
     const std::size_t tail =
@@ -293,11 +307,12 @@ constexpr FramedLogFormat kFormat{kCaptureJournalSignature,
 } // namespace
 
 auto CaptureJournal::scanImage(const std::span<const std::byte> bytes,
-                               CaptureId &maxId, std::uint64_t &nextSequence)
-    -> FramedLogScan {
+                               CaptureId &maxId, std::uint64_t &nextSequence,
+                               std::uint64_t &journalId) -> FramedLogScan {
   CaptureId seenMax{};
   std::uint64_t seenNext = 1;
-  const auto scan        = scanFramedLog(
+  std::uint64_t seenId{};
+  const auto scan = scanFramedLog(
       kFormat, bytes,
       [](const std::span<const std::byte> partial, const std::size_t bodyLen,
          const std::size_t ordinal) {
@@ -307,24 +322,56 @@ auto CaptureJournal::scanImage(const std::span<const std::byte> bytes,
           const std::size_t ordinal) {
         const auto record = decodeBody(body, bodyLen);
         if (!record || record->sequence != ordinal + 1) return false;
+        // The Identity record is the first record and only the first.
+        if ((record->kind == CaptureJournalRecordKind::Identity) !=
+            (ordinal == 0)) {
+          return false;
+        }
+        if (ordinal == 0) seenId = record->journalId;
         seenMax  = std::max(seenMax, record->captureId);
         seenNext = record->sequence + 1;
         return true;
       });
   maxId        = seenMax;
   nextSequence = seenNext;
+  journalId    = seenId;
   return scan;
 }
 
 CaptureJournal::CaptureJournal(std::filesystem::path path,
-                               const std::size_t maxBytes)
-    // 0 meaning "unbounded" is a sentinel the capture coordinator still
-    // passes; the actor journal already takes an explicit optional.
-    : log_(std::move(path), kFormat,
-           maxBytes == 0 ? std::nullopt : std::optional{maxBytes}) {
+                               const std::optional<std::size_t> maxBytes)
+    : log_(std::move(path), kFormat, maxBytes) {
   log_.open([this](const std::span<const std::byte> bytes) {
-    return scanImage(bytes, maxCaptureId_, nextSequence_);
+    return scanImage(bytes, maxCaptureId_, nextSequence_, journalId_);
   });
+  identityWritten_ = log_.wroteHeader() && nextSequence_ > 1;
+  if (!identityWritten_) {
+    // A journal not yet written (or just repaired to nothing) names itself
+    // on its first record. The identity only has to differ between journals
+    // sharing one Store, so a random 64 bits suffices; it is never an
+    // address and never derived from content.
+    std::random_device entropy;
+    journalId_    = (static_cast<std::uint64_t>(entropy()) << 32U) ^ entropy();
+    nextSequence_ = 1;
+  }
+}
+
+auto CaptureJournal::journalId() const noexcept -> std::uint64_t {
+  return journalId_;
+}
+
+auto CaptureJournal::identityRecord() const -> CaptureJournalRecord {
+  CaptureJournalRecord record;
+  record.kind      = CaptureJournalRecordKind::Identity;
+  record.captureId = maxCaptureId_;
+  record.journalId = journalId_;
+  return record;
+}
+
+auto CaptureJournal::pendingIdentityBytes() const noexcept -> std::size_t {
+  return identityWritten_
+             ? std::size_t{0}
+             : captureJournalFramedBytes(CaptureJournalRecordKind::Identity);
 }
 
 CaptureJournal::~CaptureJournal() = default;
@@ -340,7 +387,8 @@ auto CaptureJournal::sizeBytes() const -> std::size_t {
 auto CaptureJournal::fits(const std::size_t framedBytes,
                           const bool countHolds) const
     -> std::expected<void, IoErrorInfo> {
-  return log_.fits(framedBytes, countHolds ? heldBytes_ : 0);
+  return log_.fits(framedBytes + pendingIdentityBytes(),
+                   countHolds ? heldBytes_ : 0);
 }
 
 auto CaptureJournal::hold(const std::size_t framedBytes)
@@ -374,18 +422,36 @@ auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
     // boundary; refuse rather than deepen the tear.
     return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
   }
+  if (kind == CaptureJournalRecordKind::Identity) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest, 1});
+  }
   CaptureJournalRecord record = payload;
   record.kind                 = kind;
   record.captureId            = captureId;
-  record.sequence             = nextSequence_;
   const auto payloadBytes     = payloadBytesFor(kind, record.intervals.size());
   if (!payloadBytes) {
     return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest, 0});
   }
-  const auto framed = frameBody(encodeBody(record));
-  if (const auto ok = fits(framed.size(), false); !ok) {
+  if (const auto ok =
+          fits(captureJournalFramedBytes(kind, record.intervals.size()), false);
+      !ok) {
     return std::unexpected(ok.error());
   }
+  if (!identityWritten_) {
+    // The first record of a journal names the journal. It is its own durable
+    // write: a crash between it and the record leaves a valid journal that
+    // holds only its identity.
+    auto identity     = identityRecord();
+    identity.sequence = nextSequence_;
+    if (const auto ok = log_.append(frameBody(encodeBody(identity)), {}, [] {});
+        !ok) {
+      return std::unexpected(ok.error());
+    }
+    ++nextSequence_;
+    identityWritten_ = true;
+  }
+  record.sequence   = nextSequence_;
+  const auto framed = frameBody(encodeBody(record));
   // Bookkeeping that follows durability runs inside the afterFlush slot of
   // the shared append, ahead of the caller's own hook, so a throwing hook
   // still leaves a durable record counted.
@@ -413,7 +479,8 @@ auto CaptureJournal::recover() const -> CaptureJournalRecovery {
     return recovery;
   }
 
-  const auto image = log_.readImage();
+  recovery.journalId = journalId_;
+  const auto image   = log_.readImage();
   if (!image) {
     recovery.status  = CaptureJournalStatus::Corrupt;
     recovery.refusal = image.error();
@@ -430,7 +497,8 @@ auto CaptureJournal::recover() const -> CaptureJournalRecovery {
   // scan proves the boundary so recover() and repair can never disagree.
   CaptureId maxId{};
   std::uint64_t nextSequence{1};
-  const auto scan = scanImage(bytes, maxId, nextSequence);
+  std::uint64_t scannedId{};
+  const auto scan = scanImage(bytes, maxId, nextSequence, scannedId);
   if (scan.corrupt) {
     recovery.status = CaptureJournalStatus::Corrupt;
     recovery.refusal =
@@ -447,15 +515,43 @@ auto CaptureJournal::recover() const -> CaptureJournalRecovery {
     std::uint32_t bodyLen{};
     std::memcpy(&bodyLen, bytes.data() + cursor, sizeof(bodyLen));
     const std::byte *body = bytes.data() + cursor + sizeof(std::uint32_t);
-    if (const auto record = decodeBody(body, bodyLen)) {
+    if (const auto record = decodeBody(body, bodyLen);
+        record && record->kind != CaptureJournalRecordKind::Identity) {
       recovery.records.push_back(*record);
     }
     cursor += sizeof(std::uint32_t) + bodyLen;
   }
+  recovery.journalId    = scannedId;
   recovery.nextSequence = nextSequence;
   recovery.maxCaptureId = maxId;
   recovery.status       = CaptureJournalStatus::Clean;
   return recovery;
+}
+
+auto CaptureJournal::compact(const std::span<const CaptureJournalRecord> keep)
+    -> std::expected<void, IoErrorInfo> {
+  if (log_.poisoned()) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
+  }
+  std::vector<std::byte> image;
+  std::uint64_t sequence = 1;
+  const auto add         = [&](CaptureJournalRecord record) {
+    record.sequence   = sequence++;
+    const auto framed = frameBody(encodeBody(record));
+    image.insert(image.end(), framed.begin(), framed.end());
+  };
+  add(identityRecord());
+  for (const auto &record : keep) {
+    if (record.kind != CaptureJournalRecordKind::Identity) add(record);
+  }
+  if (log_.maxBytes() &&
+      kCaptureJournalHeaderBytes + image.size() > *log_.maxBytes()) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded, 4});
+  }
+  if (const auto ok = log_.replaceRecords(image); !ok) return ok;
+  identityWritten_ = true;
+  nextSequence_    = sequence;
+  return {};
 }
 
 } // namespace xanadu::vortex

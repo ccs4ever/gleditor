@@ -184,6 +184,10 @@ private:
   std::unordered_map<std::uint32_t, CaptureAppendSpec> staged_;
   std::unordered_map<std::uint32_t, xanadu::PrimediaSpan> receipts_;
   std::unordered_set<std::uint32_t> executed_;
+  /// Keys whose worker turn is inside execute(): complete() must not erase
+  /// what that turn is about to write, so it defers to the turn's end.
+  std::unordered_set<std::uint32_t> running_;
+  std::unordered_set<std::uint32_t> completeAfterTurn_;
   /// Serializes sink_.append across worker turns: CaptureByteSink
   /// implementations are not required to be internally locked.
   mutable std::mutex performMutex_;
@@ -316,16 +320,17 @@ struct CaptureReconcileResult {
 class CaptureCoordinator {
 public:
   /// @p journalPath names the user's capture.journal; @p journalMaxBytes
-  /// bounds it (0 = unbounded, matching the journal's own convention).
+  /// bounds it (std::nullopt is the explicit unbounded choice, 0 holds
+  /// nothing).
   /// The host must register appendAdapter() with the IoService under
   /// appendKey() and route its RequestDecoder through
   /// decodeAppendRequest() for capture spec cells.
-  CaptureCoordinator(
-      zigzag::ArenaManifold &arena, const IoCellSchema &schema,
-      PayloadResolver &payloads, IoService &service, CaptureByteSink &sink,
-      std::filesystem::path journalPath,
-      std::size_t journalMaxBytes     = capture_defaults::journalMaxBytes,
-      CaptureCoordinatorLimits limits = {});
+  CaptureCoordinator(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+                     PayloadResolver &payloads, IoService &service,
+                     CaptureByteSink &sink, std::filesystem::path journalPath,
+                     std::optional<std::size_t> journalMaxBytes =
+                         capture_defaults::journalMaxBytes,
+                     CaptureCoordinatorLimits limits = {});
   ~CaptureCoordinator()                                              = default;
   CaptureCoordinator(const CaptureCoordinator &)                     = delete;
   auto operator=(const CaptureCoordinator &) -> CaptureCoordinator & = delete;
@@ -413,13 +418,14 @@ public:
   /// Ordering, one capture: Appended (fsynced, after the permascroll sync)
   /// -> publish into the Store -> Store save -> Committed. A crash between
   /// any two leaves a state recovery completes without re-appending or
-  /// double-publishing: publication is idempotent keyed by CaptureId, found
-  /// by walking the Store's receipt rank.
+  /// double-publishing: publication is idempotent keyed by (journalId,
+  /// CaptureId), found by walking the Store's receipt rank.
   auto setPublisher(CapturePublisher *publisher) -> CaptureCoordinator *;
   /// Complete publications recovery or reconcile() found proven but not
-  /// finished (idempotent by CaptureId): publish what the Store lacks, save
-  /// once, then write the Committed records. Returns how many captures were
-  /// completed. Any refusal leaves the remainder queued for a retry.
+  /// finished (idempotent by (journalId, CaptureId)): publish what the Store
+  /// lacks, save once, then write the Committed records. Returns how many
+  /// captures were completed. Any refusal leaves the remainder queued for a
+  /// retry.
   [[nodiscard]] auto resumePublications()
       -> std::expected<std::size_t, IoErrorInfo>;
 
@@ -506,6 +512,13 @@ private:
   using PendingKey = std::pair<zigzag::CellRef, AllocationIncarnation>;
 
   void sweepDead();
+  /// Make room when a bound is about to refuse (plan §14: no unbounded
+  /// capture maps, and no ceiling a user works around by deleting the
+  /// journal): forget committed translations of origins nothing can read
+  /// any more, and rewrite the journal without the records of captures that
+  /// are resolved and published.
+  void reapUnreachableSlots();
+  [[nodiscard]] auto compactJournal() -> std::expected<void, IoErrorInfo>;
   void releaseLeases(PendingCapture &pending);
   void erasePendingSlots(CaptureId captureId);
   [[nodiscard]] auto pendingFor(CaptureCell capture)

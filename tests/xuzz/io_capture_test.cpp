@@ -4,16 +4,19 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include "common/xanadu/segmented_primedia_spool.hpp"
@@ -49,12 +52,35 @@ std::string textOf(const std::span<const std::byte> bytes) {
   return out;
 }
 
-PayloadRef transientRef(const std::uint64_t source) {
+[[maybe_unused]] PayloadRef transientRef(const std::uint64_t source) {
   return PayloadRef{.kind       = PayloadSourceKind::Transient,
                     .source     = source,
                     .generation = 1,
                     .occurrence = 1};
 }
+
+/// The origin the recovery tests capture from. Only a durable origin has an
+/// identity that outlives its process, which is what a restart test needs;
+/// transient origins have their own tests below.
+PayloadRef durableRef(const std::uint64_t id) {
+  return PayloadRef{.kind       = PayloadSourceKind::Durable,
+                    .source     = xanadu::localScroll,
+                    .generation = 0,
+                    .occurrence = id};
+}
+
+/// A SpanReader over a fixed byte string, whatever span is asked for.
+class FixedBytesReader final : public xanadu::SpanReader {
+public:
+  explicit FixedBytesReader(const std::span<const std::byte> bytes)
+      : text_(textOf(bytes)) {}
+  [[nodiscard]] std::string read(const xanadu::PrimediaSpan &) const override {
+    return text_;
+  }
+
+private:
+  std::string text_;
+};
 
 PayloadRange rangeOf(const PayloadRef &origin, const std::uint64_t offset,
                      const std::uint64_t length) {
@@ -199,6 +225,17 @@ struct World {
 auto registerPinned(World &world, const PayloadRef ref,
                     const std::span<const std::byte> bytes)
     -> std::expected<PayloadRef, IoError> {
+  if (ref.kind == PayloadSourceKind::Durable) {
+    const FixedBytesReader reader(bytes);
+    auto pin = world.payloads.resolveDurable(
+        reader, xanadu::PrimediaSpan{
+                    .scroll = static_cast<xanadu::ScrollId>(ref.source),
+                    .start  = ref.occurrence,
+                    .length = bytes.size()});
+    if (!pin) return std::unexpected(pin.error());
+    world.pins.push_back(*pin);
+    return pin->range.origin;
+  }
   auto origin = world.payloads.registerSource(ref, bytes);
   if (!origin) return origin;
   auto pin = world.payloads.retain(rangeOf(*origin, 0, bytes.size()));
@@ -349,7 +386,7 @@ TEST_F(IoCaptureTest, PrepareAppendCommitPublishesReceiptAndSpan) {
   ASSERT_TRUE(world);
 
   const auto sourceBytes = bytesOf("the quick brown fox");
-  auto origin            = registerPinned(*world, transientRef(1), sourceBytes);
+  auto origin            = registerPinned(*world, durableRef(1), sourceBytes);
   ASSERT_TRUE(origin.has_value());
 
   const PayloadRange selection[]{rangeOf(*origin, 4, 5)}; // "quick"
@@ -363,7 +400,7 @@ TEST_F(IoCaptureTest, PrepareAppendCommitPublishesReceiptAndSpan) {
   EXPECT_EQ(textOf(sink.bytes_), "quick");
 
   // Journal order: Append intent, Appended (span+intent), Committed.
-  CaptureJournal journal(journalPath_, 0);
+  CaptureJournal journal(journalPath_, std::nullopt);
   const auto view = journal.recover();
   ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
   ASSERT_EQ(view.records.size(), 3U);
@@ -400,7 +437,7 @@ TEST_F(IoCaptureTest, AwaitingTheAppendRequestDoesNotEvictTheCaptureLink) {
   RecordingSink sink;
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
-  auto origin = registerPinned(*world, transientRef(1), bytesOf("abcdefgh"));
+  auto origin = registerPinned(*world, durableRef(1), bytesOf("abcdefgh"));
   ASSERT_TRUE(origin.has_value());
   const PayloadRange selection[]{rangeOf(*origin, 0, 4)};
   auto prepared = world->coordinator->prepare(selection);
@@ -451,7 +488,7 @@ TEST_F(IoCaptureTest, OverlappingLaterSelectionReusesCommittedSpan) {
   ASSERT_TRUE(world);
 
   const auto sourceBytes = bytesOf("abcdefghijklmnop"); // 16 bytes
-  auto origin            = registerPinned(*world, transientRef(2), sourceBytes);
+  auto origin            = registerPinned(*world, durableRef(2), sourceBytes);
   ASSERT_TRUE(origin.has_value());
 
   // First capture: [0,10) -> appends all ten bytes.
@@ -506,7 +543,7 @@ TEST_F(IoCaptureTest, DiscontiguousSelectionSplitsAndLaterOverlapReuses) {
   ASSERT_TRUE(world);
 
   const auto sourceBytes = bytesOf("0123456789abcdef");
-  auto origin            = registerPinned(*world, transientRef(3), sourceBytes);
+  auto origin            = registerPinned(*world, durableRef(3), sourceBytes);
   ASSERT_TRUE(origin.has_value());
 
   // One capture over two disjoint ranges: [0,5) and [10,15).
@@ -519,7 +556,7 @@ TEST_F(IoCaptureTest, DiscontiguousSelectionSplitsAndLaterOverlapReuses) {
 
   // The journal's Appended record carries two intervals whose dstOffsets
   // tile the single append payload.
-  CaptureJournal journal(journalPath_, 0);
+  CaptureJournal journal(journalPath_, std::nullopt);
   const auto view = journal.recover();
   ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
   const auto &appended = view.records[1];
@@ -547,8 +584,8 @@ TEST_F(IoCaptureTest, CommitRejectsAnotherCapturesOutcomeAndNothingPublishes) {
   ASSERT_TRUE(world);
 
   const auto sourceBytes = bytesOf("abcdefghijkl");
-  auto originA = registerPinned(*world, transientRef(10), sourceBytes);
-  auto originB = registerPinned(*world, transientRef(11), sourceBytes);
+  auto originA           = registerPinned(*world, durableRef(10), sourceBytes);
+  auto originB           = registerPinned(*world, durableRef(11), sourceBytes);
   ASSERT_TRUE(originA && originB);
 
   const PayloadRange selA[]{rangeOf(*originA, 0, 4)};
@@ -603,7 +640,7 @@ TEST_F(IoCaptureTest, CommitBeforeOutcomeIsPublishedRefuses) {
   ASSERT_TRUE(world);
 
   const auto sourceBytes = bytesOf("xyz");
-  auto origin = registerPinned(*world, transientRef(12), sourceBytes);
+  auto origin            = registerPinned(*world, durableRef(12), sourceBytes);
   ASSERT_TRUE(origin.has_value());
   const PayloadRange selection[]{rangeOf(*origin, 0, 3)};
   auto prepared = world->coordinator->prepare(selection);
@@ -643,7 +680,7 @@ TEST_F(IoCaptureTest, RestartAfterAppendIntentPinsAndReportsOrphanBytes) {
     auto world = boot(sink, journalPath_);
     ASSERT_TRUE(world);
     const auto sourceBytes = bytesOf("persistent source bytes");
-    auto registered = registerPinned(*world, transientRef(20), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(20), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     origin = *registered;
 
@@ -668,7 +705,7 @@ TEST_F(IoCaptureTest, RestartAfterAppendIntentPinsAndReportsOrphanBytes) {
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("persistent source bytes");
-  auto registered = registerPinned(*world, transientRef(20), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(20), sourceBytes);
   ASSERT_TRUE(registered.has_value());
   ASSERT_EQ(*registered, origin);
 
@@ -698,7 +735,7 @@ TEST_F(IoCaptureTest, RestartAfterAppendExecutedLeavesBytesUnaliased) {
     auto world = boot(sink, journalPath_);
     ASSERT_TRUE(world);
     const auto sourceBytes = bytesOf("bytes that may be orphaned");
-    auto registered = registerPinned(*world, transientRef(21), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(21), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     origin = *registered;
 
@@ -717,7 +754,7 @@ TEST_F(IoCaptureTest, RestartAfterAppendExecutedLeavesBytesUnaliased) {
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("bytes that may be orphaned");
-  auto registered = registerPinned(*world, transientRef(21), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(21), sourceBytes);
   ASSERT_TRUE(registered.has_value());
 
   auto report = world->coordinator->recover();
@@ -745,7 +782,7 @@ TEST_F(IoCaptureTest, RestartAfterAppendedRecordRebuildsTranslations) {
     auto world = boot(sink, journalPath_);
     ASSERT_TRUE(world);
     const auto sourceBytes = bytesOf("appended then crashed");
-    auto registered = registerPinned(*world, transientRef(22), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(22), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     origin = *registered;
 
@@ -784,7 +821,7 @@ TEST_F(IoCaptureTest, RestartAfterAppendedRecordRebuildsTranslations) {
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("appended then crashed");
-  auto registered = registerPinned(*world, transientRef(22), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(22), sourceBytes);
   ASSERT_TRUE(registered.has_value());
 
   auto report = world->coordinator->recover();
@@ -811,7 +848,7 @@ TEST_F(IoCaptureTest, RestartAfterCommittedRecordReconcilesAndReuses) {
     auto world = boot(sink, journalPath_);
     ASSERT_TRUE(world);
     const auto sourceBytes = bytesOf("committed before restart");
-    auto registered = registerPinned(*world, transientRef(23), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(23), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     origin = *registered;
     const PayloadRange selection[]{rangeOf(origin, 0, 10)};
@@ -823,7 +860,7 @@ TEST_F(IoCaptureTest, RestartAfterCommittedRecordReconcilesAndReuses) {
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("committed before restart");
-  auto registered = registerPinned(*world, transientRef(23), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(23), sourceBytes);
   ASSERT_TRUE(registered.has_value());
 
   auto report = world->coordinator->recover();
@@ -848,7 +885,7 @@ TEST_F(IoCaptureTest, CertainAbortReconcilesWithoutPinsOrOrphans) {
     auto world = boot(sink, journalPath_);
     ASSERT_TRUE(world);
     const auto sourceBytes = bytesOf("cancelled append");
-    auto registered = registerPinned(*world, transientRef(24), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(24), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     origin = *registered;
 
@@ -874,7 +911,7 @@ TEST_F(IoCaptureTest, CertainAbortReconcilesWithoutPinsOrOrphans) {
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("cancelled append");
-  auto registered = registerPinned(*world, transientRef(24), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(24), sourceBytes);
   ASSERT_TRUE(registered.has_value());
   auto report = world->coordinator->recover();
   ASSERT_TRUE(report.has_value());
@@ -895,7 +932,7 @@ TEST_F(IoCaptureTest, UncertainAbortPinsIntervalsAndReportsPossibleOrphans) {
     auto world = boot(sink, journalPath_);
     ASSERT_TRUE(world);
     const auto sourceBytes = bytesOf("sink fails mid-append");
-    auto registered = registerPinned(*world, transientRef(25), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(25), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     origin = *registered;
 
@@ -922,7 +959,7 @@ TEST_F(IoCaptureTest, UncertainAbortPinsIntervalsAndReportsPossibleOrphans) {
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("sink fails mid-append");
-  auto registered = registerPinned(*world, transientRef(25), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(25), sourceBytes);
   ASSERT_TRUE(registered.has_value());
   auto report = world->coordinator->recover();
   ASSERT_TRUE(report.has_value());
@@ -944,8 +981,8 @@ TEST_F(IoCaptureTest, IdenticalBytesNeverShareCaptureIdentity) {
   ASSERT_TRUE(world);
 
   const auto sourceBytes = bytesOf("same bytes, different captures");
-  auto originA = registerPinned(*world, transientRef(30), sourceBytes);
-  auto originB = registerPinned(*world, transientRef(31), sourceBytes);
+  auto originA           = registerPinned(*world, durableRef(30), sourceBytes);
+  auto originB           = registerPinned(*world, durableRef(31), sourceBytes);
   ASSERT_TRUE(originA && originB);
 
   const PayloadRange selA[]{rangeOf(*originA, 0, 8)};
@@ -957,7 +994,7 @@ TEST_F(IoCaptureTest, IdenticalBytesNeverShareCaptureIdentity) {
   // Hashes validate integrity only: equal bytes digest equal yet the two
   // captures landed at distinct permanent spans -- identity is the span,
   // never the digest.
-  CaptureJournal journal(journalPath_, 0);
+  CaptureJournal journal(journalPath_, std::nullopt);
   const auto view = journal.recover();
   ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
   // Records: A{Append,Appended,Committed} then B{Append,Appended,Committed}.
@@ -976,7 +1013,7 @@ TEST_F(IoCaptureTest, TornTailIsRepairedAndCorruptionIsTypedRefusal) {
   // is then truncated inside the second.
   std::uint64_t firstRecordEnd = 0;
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     CaptureJournalRecord payload;
     payload.appendLength = 3;
     ASSERT_TRUE(
@@ -991,7 +1028,7 @@ TEST_F(IoCaptureTest, TornTailIsRepairedAndCorruptionIsTypedRefusal) {
     std::filesystem::resize_file(journalPath_, firstRecordEnd + 5);
   }
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     const auto view = journal.recover();
     EXPECT_EQ(view.status, CaptureJournalStatus::Clean);
     ASSERT_EQ(view.records.size(), 1U);
@@ -1019,7 +1056,7 @@ TEST_F(IoCaptureTest, JournalCrashPointsRollBackBeforeFlushAndKeepAfterFlush) {
   CaptureJournalRecord payload;
   payload.appendLength = 1;
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     ASSERT_TRUE(
         journal.appendRecord(CaptureJournalRecordKind::Append, 1, payload)
             .has_value());
@@ -1030,7 +1067,7 @@ TEST_F(IoCaptureTest, JournalCrashPointsRollBackBeforeFlushAndKeepAfterFlush) {
                  std::runtime_error);
   }
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     const auto view = journal.recover();
     ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
     ASSERT_EQ(view.records.size(), 1U);
@@ -1040,17 +1077,18 @@ TEST_F(IoCaptureTest, JournalCrashPointsRollBackBeforeFlushAndKeepAfterFlush) {
                      {.afterFlush = [] { throw std::runtime_error("die"); }})),
                  std::runtime_error);
   }
-  CaptureJournal journal(journalPath_, 0);
+  CaptureJournal journal(journalPath_, std::nullopt);
   const auto view = journal.recover();
   ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
   ASSERT_EQ(view.records.size(), 2U);
   EXPECT_EQ(view.records[1].kind, CaptureJournalRecordKind::Committed);
-  EXPECT_EQ(view.nextSequence, std::uint64_t{3});
+  // Sequence 1 is the Identity record every journal opens with.
+  EXPECT_EQ(view.nextSequence, std::uint64_t{4});
 }
 
 TEST_F(IoCaptureTest, JournalChecksumFailureIsTypedRefusalNamingTheRecord) {
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     CaptureJournalRecord payload;
     for (CaptureId id = 1; id <= 2; ++id) {
       ASSERT_TRUE(
@@ -1065,12 +1103,13 @@ TEST_F(IoCaptureTest, JournalChecksumFailureIsTypedRefusalNamingTheRecord) {
     const char flipped = '\x5a';
     file.write(&flipped, 1);
   }
-  CaptureJournal journal(journalPath_, 0);
+  CaptureJournal journal(journalPath_, std::nullopt);
   const auto view = journal.recover();
   EXPECT_EQ(view.status, CaptureJournalStatus::Corrupt);
   ASSERT_TRUE(view.refusal.has_value());
   EXPECT_EQ(view.refusal->code, IoErrorCode::PersistenceRefusal);
-  EXPECT_EQ(view.refusal->stableDetail, 2U);
+  // Record 1 is the Identity record; the flipped byte is in the third.
+  EXPECT_EQ(view.refusal->stableDetail, 3U);
 }
 
 // -- review fixes (M6 review)
@@ -1081,7 +1120,7 @@ TEST_F(IoCaptureTest, CommitSyncsPermascrollBeforeAppendedRecordIsWritten) {
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("durable before promised");
-  auto origin = registerPinned(*world, transientRef(40), sourceBytes);
+  auto origin            = registerPinned(*world, durableRef(40), sourceBytes);
   ASSERT_TRUE(origin.has_value());
   const PayloadRange selection[]{rangeOf(*origin, 0, 9)};
   auto prepared = world->coordinator->prepare(selection);
@@ -1096,7 +1135,7 @@ TEST_F(IoCaptureTest, CommitSyncsPermascrollBeforeAppendedRecordIsWritten) {
   EXPECT_TRUE(std::holds_alternative<Refused>(
       world->coordinator->commit(capture, *outcome)));
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     const auto view = journal.recover();
     ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
     ASSERT_EQ(view.records.size(), 1U);
@@ -1114,7 +1153,7 @@ TEST_F(IoCaptureTest, CommittedBytesSurviveSimulatedCrash) {
     auto world = boot(sink, journalPath_);
     ASSERT_TRUE(world);
     const auto sourceBytes = bytesOf("survives the crash");
-    auto registered = registerPinned(*world, transientRef(41), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(41), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     origin = *registered;
     const PayloadRange selection[]{rangeOf(origin, 0, 8)};
@@ -1140,7 +1179,7 @@ TEST_F(IoCaptureTest, RecoveryDistrustsSpanBeyondPermascrollHighWater) {
     auto world = boot(sink, journalPath_);
     ASSERT_TRUE(world);
     const auto sourceBytes = bytesOf("bytes later lost");
-    auto registered = registerPinned(*world, transientRef(42), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(42), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     origin = *registered;
     const PayloadRange selection[]{rangeOf(origin, 0, 10)};
@@ -1160,7 +1199,7 @@ TEST_F(IoCaptureTest, RecoveryDistrustsSpanBeyondPermascrollHighWater) {
   // Never a valid translation; overlap is pinned.
   EXPECT_FALSE(world->coordinator->translationFor(rangeOf(origin, 0, 10)));
   const auto sourceBytes = bytesOf("bytes later lost");
-  auto registered = registerPinned(*world, transientRef(42), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(42), sourceBytes);
   ASSERT_TRUE(registered.has_value());
   const PayloadRange overlap[]{rangeOf(*registered, 0, 10)};
   EXPECT_TRUE(
@@ -1169,7 +1208,7 @@ TEST_F(IoCaptureTest, RecoveryDistrustsSpanBeyondPermascrollHighWater) {
 
 TEST_F(IoCaptureTest, PrepareRefusesUntilRecoveredAndIdsSeedFromJournal) {
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     CaptureJournalRecord record;
     ASSERT_TRUE(
         journal.appendRecord(CaptureJournalRecordKind::Append, 41, record)
@@ -1183,7 +1222,7 @@ TEST_F(IoCaptureTest, PrepareRefusesUntilRecoveredAndIdsSeedFromJournal) {
   ASSERT_TRUE(world);
   EXPECT_FALSE(world->coordinator->recovered());
   const auto sourceBytes = bytesOf("recover first");
-  auto origin = registerPinned(*world, transientRef(43), sourceBytes);
+  auto origin            = registerPinned(*world, durableRef(43), sourceBytes);
   ASSERT_TRUE(origin.has_value());
   const PayloadRange selection[]{rangeOf(*origin, 0, 5)};
   auto early = world->coordinator->prepare(selection);
@@ -1193,7 +1232,7 @@ TEST_F(IoCaptureTest, PrepareRefusesUntilRecoveredAndIdsSeedFromJournal) {
   EXPECT_TRUE(world->coordinator->recovered());
   ASSERT_TRUE(captureCommit(*world, selection).has_value());
 
-  CaptureJournal journal(journalPath_, 0);
+  CaptureJournal journal(journalPath_, std::nullopt);
   const auto view = journal.recover();
   ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
   // The new capture's id is past the journal's maximum, never reusing 41.
@@ -1208,13 +1247,15 @@ TEST_F(IoCaptureTest,
       captureJournalFramedBytes(CaptureJournalRecordKind::Committed) +
       captureJournalFramedBytes(CaptureJournalRecordKind::Aborted);
   // Room for exactly one capture's full record set, not two.
-  const auto budget = kCaptureJournalHeaderBytes + worst + 8;
+  const auto budget =
+      kCaptureJournalHeaderBytes +
+      captureJournalFramedBytes(CaptureJournalRecordKind::Identity) + worst + 8;
   RecordingSink sink;
   auto world = boot(sink, journalPath_, budget);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("held budget");
-  auto originA = registerPinned(*world, transientRef(44), sourceBytes);
-  auto originB = registerPinned(*world, transientRef(45), sourceBytes);
+  auto originA           = registerPinned(*world, durableRef(44), sourceBytes);
+  auto originB           = registerPinned(*world, durableRef(45), sourceBytes);
   ASSERT_TRUE(originA && originB);
 
   const PayloadRange selA[]{rangeOf(*originA, 0, 4)};
@@ -1243,7 +1284,7 @@ TEST_F(IoCaptureTest, TornHeaderRemnantIsAFreshJournalButForeignBytesPoison) {
     file.write(kCaptureJournalSignature, 5);
   }
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     EXPECT_EQ(journal.sizeBytes(), 0U);
     CaptureJournalRecord record;
     ASSERT_TRUE(
@@ -1251,7 +1292,7 @@ TEST_F(IoCaptureTest, TornHeaderRemnantIsAFreshJournalButForeignBytesPoison) {
             .has_value());
   }
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     const auto view = journal.recover();
     EXPECT_EQ(view.status, CaptureJournalStatus::Clean);
     EXPECT_EQ(view.records.size(), 1U);
@@ -1261,7 +1302,7 @@ TEST_F(IoCaptureTest, TornHeaderRemnantIsAFreshJournalButForeignBytesPoison) {
     std::ofstream file(foreign, std::ios::binary);
     file << "XYZ";
   }
-  CaptureJournal journal(foreign, 0);
+  CaptureJournal journal(foreign, std::nullopt);
   CaptureJournalRecord record;
   EXPECT_FALSE(journal.appendRecord(CaptureJournalRecordKind::Append, 1, record)
                    .has_value());
@@ -1272,7 +1313,7 @@ TEST_F(IoCaptureTest, CorruptLengthMidFileRefusesInsteadOfTruncating) {
   std::uintmax_t fullSize       = 0;
   std::size_t secondRecordStart = 0;
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     CaptureJournalRecord record;
     ASSERT_TRUE(
         journal.appendRecord(CaptureJournalRecordKind::Append, 1, record)
@@ -1295,22 +1336,22 @@ TEST_F(IoCaptureTest, CorruptLengthMidFileRefusesInsteadOfTruncating) {
     const std::uint32_t huge = 1u << 20;
     file.write(reinterpret_cast<const char *>(&huge), sizeof(huge));
   }
-  CaptureJournal journal(journalPath_, 0);
+  CaptureJournal journal(journalPath_, std::nullopt);
   EXPECT_EQ(std::filesystem::file_size(journalPath_), fullSize);
   const auto view = journal.recover();
   EXPECT_EQ(view.status, CaptureJournalStatus::Corrupt);
   ASSERT_TRUE(view.refusal.has_value());
-  EXPECT_EQ(view.refusal->stableDetail, 2U);
+  EXPECT_EQ(view.refusal->stableDetail, 3U);
   CaptureJournalRecord record;
   EXPECT_FALSE(journal.appendRecord(CaptureJournalRecordKind::Append, 3, record)
                    .has_value());
 }
 
 TEST_F(IoCaptureTest, GenuineTornTailOfAnIntervalRecordIsStillCut) {
-  PayloadRef origin    = transientRef(50);
+  PayloadRef origin    = durableRef(50);
   std::size_t firstEnd = 0;
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     CaptureJournalRecord record;
     ASSERT_TRUE(
         journal.appendRecord(CaptureJournalRecordKind::Append, 1, record)
@@ -1325,7 +1366,7 @@ TEST_F(IoCaptureTest, GenuineTornTailOfAnIntervalRecordIsStillCut) {
   }
   // Cut well inside the second record's interval array.
   std::filesystem::resize_file(journalPath_, firstEnd + 4 + 90);
-  CaptureJournal journal(journalPath_, 0);
+  CaptureJournal journal(journalPath_, std::nullopt);
   EXPECT_EQ(journal.sizeBytes(), firstEnd);
   EXPECT_EQ(std::filesystem::file_size(journalPath_), firstEnd);
   EXPECT_EQ(journal.recover().records.size(), 1U);
@@ -1336,7 +1377,7 @@ TEST_F(IoCaptureTest, ZeroLengthSelectionRefusedAndTouchingIntervalsCoalesce) {
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("0123456789abcdefghijklmnop");
-  auto origin = registerPinned(*world, transientRef(46), sourceBytes);
+  auto origin            = registerPinned(*world, durableRef(46), sourceBytes);
   ASSERT_TRUE(origin.has_value());
 
   const PayloadRange empty[]{rangeOf(*origin, 4, 0)};
@@ -1365,7 +1406,7 @@ TEST_F(IoCaptureTest, RecoverIsIdempotentAndSafeAfterLiveCommits) {
   {
     auto world             = boot(sink, journalPath_);
     const auto sourceBytes = bytesOf("0123456789abcdefghijklmnop");
-    auto registered = registerPinned(*world, transientRef(47), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(47), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     origin = *registered;
     const PayloadRange first[]{rangeOf(origin, 0, 10)};
@@ -1376,7 +1417,7 @@ TEST_F(IoCaptureTest, RecoverIsIdempotentAndSafeAfterLiveCommits) {
   ASSERT_TRUE(first.has_value());
   const PayloadRange second[]{rangeOf(origin, 10, 10)};
   const auto sourceBytes = bytesOf("0123456789abcdefghijklmnop");
-  auto registered = registerPinned(*world, transientRef(47), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(47), sourceBytes);
   ASSERT_TRUE(registered.has_value());
   ASSERT_TRUE(captureCommit(*world, second).has_value()); // coalesces [0,20)
 
@@ -1394,11 +1435,11 @@ TEST_F(IoCaptureTest, RecoverIsIdempotentAndSafeAfterLiveCommits) {
 }
 
 TEST_F(IoCaptureTest, RecoveryDetectsPartialOverlapAndInconsistentSpans) {
-  const auto origin = transientRef(48);
+  const auto origin = durableRef(48);
   RecordingSink sink;
   sink.bytes_.resize(64);
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     // Capture 1: [0,10) at span [0,10). Capture 2 overlaps it partially.
     writeAttempt(journal, 1, {intervalOf(origin, 0, 10, 0)}, 10,
                  localSpan(0, 10));
@@ -1423,11 +1464,11 @@ TEST_F(IoCaptureTest, RecoveryDetectsPartialOverlapAndInconsistentSpans) {
 }
 
 TEST_F(IoCaptureTest, AbortedAfterAppendedIsAmbiguousAndPinned) {
-  const auto origin = transientRef(49);
+  const auto origin = durableRef(49);
   RecordingSink sink;
   sink.bytes_.resize(16);
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     writeAttempt(journal, 1, {intervalOf(origin, 0, 8, 0)}, 8, localSpan(0, 8));
     CaptureJournalRecord aborted;
     aborted.abortUncertain = false;
@@ -1451,7 +1492,7 @@ TEST_F(IoCaptureTest, CertainAbortReleasesSlotsAndLeasesSoTheRangeCanRetry) {
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("cancel then retry");
-  auto origin = registerPinned(*world, transientRef(51), sourceBytes);
+  auto origin            = registerPinned(*world, durableRef(51), sourceBytes);
   ASSERT_TRUE(origin.has_value());
   const auto leasesBefore = world->payloads.liveLeases();
 
@@ -1478,7 +1519,7 @@ TEST_F(IoCaptureTest, CertainAbortReleasesSlotsAndLeasesSoTheRangeCanRetry) {
   ASSERT_TRUE(retried.has_value());
   EXPECT_EQ(sink.bytes_.size(), 8U);
 
-  CaptureJournal journal(journalPath_, 0);
+  CaptureJournal journal(journalPath_, std::nullopt);
   const auto view = journal.recover();
   ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
   ASSERT_GE(view.records.size(), 2U);
@@ -1491,7 +1532,7 @@ TEST_F(IoCaptureTest, UncertainAbortKeepsPinsInProcessButReleasesLeases) {
   auto world = boot(sink, journalPath_);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("sink fails after writing");
-  auto origin = registerPinned(*world, transientRef(52), sourceBytes);
+  auto origin            = registerPinned(*world, durableRef(52), sourceBytes);
   ASSERT_TRUE(origin.has_value());
   const auto leasesBefore = world->payloads.liveLeases();
 
@@ -1526,7 +1567,7 @@ TEST_F(IoCaptureTest, CommittedCaptureFreesItsPendingCaptureSlot) {
   auto world = boot(sink, journalPath_, 4u << 20, 1u << 20, true, limits);
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("one slot at a time");
-  auto origin = registerPinned(*world, transientRef(53), sourceBytes);
+  auto origin            = registerPinned(*world, durableRef(53), sourceBytes);
   ASSERT_TRUE(origin.has_value());
   const PayloadRange a[]{rangeOf(*origin, 0, 4)};
   const PayloadRange b[]{rangeOf(*origin, 6, 4)};
@@ -1551,7 +1592,7 @@ TEST_F(IoCaptureTest, CoordinatorJournalCrashPointsBracketTheAppendedFsync) {
                                  const bool before) {
     auto world             = boot(sink, journalPath_);
     const auto sourceBytes = bytesOf("crash around fsync");
-    auto registered = registerPinned(*world, transientRef(source), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(source), sourceBytes);
     origin          = *registered;
     world->coordinator->setJournalCrashPoints(crashOnSecondWrite(before));
     const PayloadRange selection[]{rangeOf(origin, 0, 8)};
@@ -1594,6 +1635,262 @@ TEST_F(IoCaptureTest, CoordinatorJournalCrashPointsBracketTheAppendedFsync) {
     ASSERT_TRUE(span.has_value());
     EXPECT_EQ(span->start, std::uint64_t{0});
   }
+}
+
+// -- review r1 (fixer B): identity, retention, tears -------------------------
+
+/// Forget a source for good: its pin goes and nothing can retain it again.
+void dropSource(World &world, const PayloadRef &origin) {
+  for (auto &pin : world.pins) {
+    if (pin.range.origin == origin) world.payloads.release(pin.lease);
+  }
+  std::erase_if(world.pins, [&](const PayloadLease &pin) {
+    return pin.range.origin == origin;
+  });
+  world.payloads.retireSource(origin);
+}
+
+TEST_F(IoCaptureTest,
+       ARestartedProcessReusingATransientIdIsNotAliasedToTheOld) {
+  RecordingSink sink;
+  PayloadRef first;
+  {
+    auto world = boot(sink, journalPath_);
+    ASSERT_TRUE(world);
+    auto registered = registerPinned(*world, transientRef(1), bytesOf("AAAA"));
+    ASSERT_TRUE(registered.has_value());
+    first = *registered;
+    const PayloadRange selection[]{rangeOf(first, 0, 4)};
+    ASSERT_TRUE(captureCommit(*world, selection).has_value());
+  }
+  ASSERT_EQ(textOf(sink.bytes_), "AAAA");
+  // A new process hands out source 1 again, for different bytes.
+  auto world = boot(sink, journalPath_);
+  ASSERT_TRUE(world);
+  auto registered = registerPinned(*world, transientRef(1), bytesOf("BBBB"));
+  ASSERT_TRUE(registered.has_value());
+  ASSERT_EQ(*registered, first);
+  const PayloadRange selection[]{rangeOf(*registered, 0, 4)};
+  // Nothing about the old session's source 1 is known: the bytes are new.
+  EXPECT_FALSE(world->coordinator->translationFor(selection[0]).has_value());
+  ASSERT_TRUE(captureCommit(*world, selection).has_value());
+  EXPECT_EQ(textOf(sink.bytes_), "AAAABBBB");
+  EXPECT_EQ(world->coordinator->translationFor(selection[0]),
+            std::optional{localSpan(4, 4)});
+}
+
+TEST_F(IoCaptureTest, AnOpenIntentOnATransientSourceDoesNotPinTheNextSession) {
+  RecordingSink sink;
+  {
+    CaptureJournal journal(journalPath_, std::nullopt);
+    writeAttempt(journal, 1, {intervalOf(transientRef(9), 0, 4, 0)}, 4,
+                 std::nullopt);
+  }
+  auto world        = boot(sink, journalPath_);
+  const auto report = world->coordinator->recover();
+  ASSERT_TRUE(report.has_value());
+  // Still reported and reconcilable by id, so the possible orphan bytes are
+  // not lost ...
+  ASSERT_EQ(report->entries.size(), 1U);
+  EXPECT_EQ(report->entries[0].state,
+            CaptureRecoveryState::NeedsReconciliation);
+  EXPECT_EQ(report->orphanBytes, std::uint64_t{4});
+  // ... but an unrelated source that reuses id 9 is not refused for it.
+  auto registered = registerPinned(*world, transientRef(9), bytesOf("WXYZ"));
+  ASSERT_TRUE(registered.has_value());
+  const PayloadRange selection[]{rangeOf(*registered, 0, 4)};
+  EXPECT_TRUE(captureCommit(*world, selection).has_value());
+}
+
+TEST_F(IoCaptureTest, AJournalKeepsItsIdentityAndIdsAcrossAReopen) {
+  std::uint64_t id = 0;
+  {
+    CaptureJournal journal(journalPath_, std::nullopt);
+    id = journal.journalId();
+    CaptureJournalRecord record;
+    ASSERT_TRUE(
+        journal.appendRecord(CaptureJournalRecordKind::Append, 7, record)
+            .has_value());
+  }
+  CaptureJournal reopened(journalPath_, std::nullopt);
+  EXPECT_EQ(reopened.journalId(), id);
+  EXPECT_EQ(reopened.recover().journalId, id);
+  EXPECT_EQ(reopened.maxCaptureId(), CaptureId{7});
+  // A file without the version-3 Identity record is refused by number.
+  CaptureJournal fresh(dir_ / "other.journal", std::nullopt);
+  EXPECT_NE(fresh.journalId(), id);
+}
+
+TEST_F(IoCaptureTest, CaptureStateIsReapedSoALongRunPastTheOldCeilingsWorks) {
+  // Bounds a few captures deep: both the translation map and the journal
+  // would have refused for good after a handful of origins before.
+  CaptureCoordinatorLimits limits;
+  limits.maxMapEntries = 4;
+  const auto roomForFour =
+      kCaptureJournalHeaderBytes +
+      captureJournalFramedBytes(CaptureJournalRecordKind::Identity) +
+      3 * (captureJournalFramedBytes(CaptureJournalRecordKind::Append, 1) +
+           captureJournalFramedBytes(CaptureJournalRecordKind::Appended, 1) +
+           captureJournalFramedBytes(CaptureJournalRecordKind::Committed));
+  RecordingSink sink;
+  auto world = boot(sink, journalPath_, roomForFour, 1u << 20, true, limits);
+  ASSERT_TRUE(world);
+  constexpr std::uint64_t captures = 60;
+  for (std::uint64_t i = 1; i <= captures; ++i) {
+    auto registered = registerPinned(*world, transientRef(i), bytesOf("data"));
+    ASSERT_TRUE(registered.has_value());
+    const PayloadRange selection[]{rangeOf(*registered, 0, 4)};
+    ASSERT_TRUE(captureCommit(*world, selection).has_value())
+        << "capture " << i << " refused";
+    // The source dies with its last reader: its translation is dead weight.
+    dropSource(*world, *registered);
+  }
+  EXPECT_EQ(sink.bytes_.size(), captures * 4);
+  // Compaction kept the journal inside its bound and a restart reads it.
+  EXPECT_LE(std::filesystem::file_size(journalPath_), roomForFour);
+  CaptureJournal reopened(journalPath_, roomForFour);
+  EXPECT_EQ(reopened.recover().status, CaptureJournalStatus::Clean);
+  EXPECT_EQ(reopened.maxCaptureId(), captures);
+  // Ids never repeat across a compaction.
+  auto restarted = boot(sink, journalPath_, roomForFour);
+  auto next      = registerPinned(*restarted, transientRef(1), bytesOf("more"));
+  const PayloadRange selection[]{rangeOf(*next, 0, 4)};
+  ASSERT_TRUE(captureCommit(*restarted, selection).has_value());
+  CaptureJournal after(journalPath_, std::nullopt);
+  EXPECT_EQ(after.maxCaptureId(), captures + 1);
+}
+
+TEST_F(IoCaptureTest, CompactionKeepsWhatIsUnresolvedAndWhatSurvivesARestart) {
+  RecordingSink sink;
+  {
+    CaptureJournal journal(journalPath_, std::nullopt);
+    // 1: committed on a process-local source (droppable). 2: committed on a
+    // durable one (its translation outlives the process). 3: an open intent.
+    writeAttempt(journal, 1, {intervalOf(transientRef(5), 0, 3, 0)}, 3,
+                 localSpan(0, 3));
+    ASSERT_TRUE(journal.appendRecord(CaptureJournalRecordKind::Committed, 1, {})
+                    .has_value());
+    writeAttempt(journal, 2, {intervalOf(durableRef(6), 0, 3, 0)}, 3,
+                 localSpan(3, 3));
+    ASSERT_TRUE(journal.appendRecord(CaptureJournalRecordKind::Committed, 2, {})
+                    .has_value());
+    writeAttempt(journal, 3, {intervalOf(durableRef(7), 0, 3, 0)}, 3,
+                 std::nullopt);
+    sink.bytes_.resize(6);
+  }
+  auto world = boot(sink, journalPath_);
+  ASSERT_TRUE(world->coordinator->recover().has_value());
+  // So little room that a new capture cannot be held until the resolved
+  // process-local capture's records are rewritten away.
+  const auto used = std::filesystem::file_size(journalPath_);
+  auto tight      = boot(sink, journalPath_, used + 40, 1u << 20, false);
+  ASSERT_TRUE(tight->coordinator->recover().has_value());
+  auto registered = registerPinned(*tight, transientRef(8), bytesOf("abc"));
+  const PayloadRange selection[]{rangeOf(*registered, 0, 3)};
+  ASSERT_TRUE(captureCommit(*tight, selection).has_value());
+
+  CaptureJournal after(journalPath_, std::nullopt);
+  const auto view = after.recover();
+  ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
+  std::set<CaptureId> ids;
+  for (const auto &record : view.records) ids.insert(record.captureId);
+  EXPECT_FALSE(ids.contains(1)) << "a resolved process-local capture retires";
+  EXPECT_TRUE(ids.contains(2)) << "a durable-origin translation survives";
+  EXPECT_TRUE(ids.contains(3)) << "an open intent is never dropped";
+  EXPECT_EQ(view.maxCaptureId, CaptureId{4});
+}
+
+TEST_F(IoCaptureTest, ABoundOfZeroHoldsNothingAndNulloptIsUnbounded) {
+  {
+    CaptureJournal none(dir_ / "zero.journal", std::size_t{0});
+    CaptureJournalRecord record;
+    const auto refused =
+        none.appendRecord(CaptureJournalRecordKind::Append, 1, record);
+    ASSERT_FALSE(refused.has_value());
+    EXPECT_EQ(refused.error().code, IoErrorCode::BudgetExceeded);
+    EXPECT_FALSE(none.hold(1).has_value());
+  }
+  CaptureJournal unbounded(dir_ / "all.journal", std::nullopt);
+  CaptureJournalRecord record;
+  EXPECT_TRUE(
+      unbounded.appendRecord(CaptureJournalRecordKind::Append, 1, record)
+          .has_value());
+}
+
+TEST_F(IoCaptureTest, AZeroExtendedCrashTailIsCutNotRefused) {
+  {
+    CaptureJournal journal(journalPath_, std::nullopt);
+    CaptureJournalRecord record;
+    ASSERT_TRUE(
+        journal.appendRecord(CaptureJournalRecordKind::Append, 1, record)
+            .has_value());
+  }
+  const auto boundary = std::filesystem::file_size(journalPath_);
+  {
+    // A size update that reached the disk ahead of the data.
+    std::ofstream file(journalPath_, std::ios::binary | std::ios::app);
+    const std::string zeros(97, '\0');
+    file.write(zeros.data(), static_cast<std::streamsize>(zeros.size()));
+  }
+  CaptureJournal journal(journalPath_, std::nullopt);
+  EXPECT_EQ(std::filesystem::file_size(journalPath_), boundary);
+  const auto view = journal.recover();
+  EXPECT_EQ(view.status, CaptureJournalStatus::Clean);
+  EXPECT_EQ(view.records.size(), 1U);
+  CaptureJournalRecord record;
+  EXPECT_TRUE(journal.appendRecord(CaptureJournalRecordKind::Append, 2, record)
+                  .has_value());
+}
+
+/// A sink whose append blocks until released, to hold a worker turn open.
+class GatedSink final : public CaptureByteSink {
+public:
+  auto append(const std::span<const std::byte> bytes)
+      -> xanadu::PrimediaSpan override {
+    entered.store(true);
+    while (!open.load()) std::this_thread::yield();
+    return xanadu::PrimediaSpan{
+        .scroll = xanadu::localScroll, .start = 0, .length = bytes.size()};
+  }
+  auto sync() -> bool override { return true; }
+  auto highWaterBytes() const -> std::uint64_t override { return 0; }
+  auto read(const xanadu::PrimediaSpan &) const
+      -> std::optional<std::vector<std::byte>> override {
+    return std::nullopt;
+  }
+  std::atomic<bool> entered{false};
+  std::atomic<bool> open{false};
+};
+
+class StubCompletionSink final : public CompletionSink {
+public:
+  void progress(const PrivateRequestToken, const IoProgress) noexcept override {
+  }
+  void terminalCandidate(const PrivateRequestToken, BackendResult,
+                         std::optional<PayloadLease>) noexcept override {}
+  void releaseAcknowledged(const BackendReleaseAck) noexcept override {}
+};
+
+TEST_F(IoCaptureTest, CompleteDuringAWorkerTurnLeavesNoStaleReceipt) {
+  GatedSink sink;
+  CaptureAppendAdapter adapter(sink);
+  constexpr std::uint32_t key = 77;
+  ASSERT_TRUE(adapter.stageAt(key, CaptureAppendSpec{bytesOf("late"), 1}));
+  std::vector<std::byte> bytes(sizeof(key));
+  std::memcpy(bytes.data(), &key, sizeof(key));
+  BackendCommand command{};
+  command.operation.bytes = std::move(bytes);
+  PayloadResolver payloads;
+  BackendContext context{.stop = {}, .payloads = payloads, .budget = {}};
+  StubCompletionSink completion;
+  std::thread worker([&] { adapter.execute(command, context, completion); });
+  while (!sink.entered.load()) std::this_thread::yield();
+  // The capture is swept dead while the append is still running.
+  adapter.complete(key);
+  sink.open.store(true);
+  worker.join();
+  EXPECT_FALSE(adapter.receiptFor(key).has_value());
+  EXPECT_FALSE(adapter.wasExecuted(key));
 }
 
 // -- Structure publication (M6, plan §8.2)
@@ -1640,7 +1937,7 @@ std::string permascrollText(const Durable &durable,
 
 std::vector<CaptureJournalRecordKind>
 journalKinds(const std::filesystem::path &path) {
-  CaptureJournal journal(path, 0);
+  CaptureJournal journal(path, std::nullopt);
   std::vector<CaptureJournalRecordKind> kinds;
   for (const auto &record : journal.recover().records) {
     kinds.push_back(record.kind);
@@ -1654,13 +1951,68 @@ std::size_t countKind(const std::filesystem::path &path,
   return static_cast<std::size_t>(std::ranges::count(kinds, kind));
 }
 
+TEST_F(IoCaptureTest, TwoJournalsOverOneStoreNeverTakeEachOthersReceipt) {
+  auto durable               = openDurable(dir_);
+  const auto bytes           = bytesOf("shared store");
+  std::uint64_t firstJournal = 0;
+  {
+    auto world = boot(*durable->sink, dir_ / "a.journal", 4u << 20, 1u << 20,
+                      true, {}, durable->publisher.get());
+    auto registered = registerPinned(*world, transientRef(1), bytes);
+    const PayloadRange selection[]{rangeOf(*registered, 0, 6)};
+    ASSERT_TRUE(captureCommit(*world, selection).has_value());
+    firstJournal = world->coordinator->journal().journalId();
+  }
+  {
+    // A fresh journal restarts CaptureId at 1 over the same Store.
+    auto world = boot(*durable->sink, dir_ / "b.journal", 4u << 20, 1u << 20,
+                      true, {}, durable->publisher.get());
+    EXPECT_NE(world->coordinator->journal().journalId(), firstJournal);
+    auto registered = registerPinned(*world, transientRef(2), bytes);
+    const PayloadRange selection[]{rangeOf(*registered, 7, 5)};
+    ASSERT_TRUE(captureCommit(*world, selection).has_value());
+    const auto key = PublicationKey{
+        .journalId = world->coordinator->journal().journalId(), .captureId = 1};
+    const auto published = durable->publisher->published(key);
+    ASSERT_TRUE(published.has_value());
+    ASSERT_TRUE(published->has_value());
+    ASSERT_EQ((*published)->pieces.size(), 1U);
+    EXPECT_EQ(permascrollText(*durable, (*published)->pieces[0].span), "store");
+  }
+  const auto keys = durable->publisher->publishedKeys();
+  ASSERT_TRUE(keys.has_value());
+  EXPECT_EQ(keys->size(), 2U);
+}
+
+TEST_F(IoCaptureTest, PublishingOneKeyWithOtherPiecesRefusesInsteadOfSkipping) {
+  auto durable = openDurable(dir_);
+  const std::array first{PublishedPiece{
+      .origin = transientRef(1), .srcOffset = 0, .span = localSpan(0, 4)}};
+  const std::array other{PublishedPiece{
+      .origin = transientRef(1), .srcOffset = 0, .span = localSpan(9, 4)}};
+  const CapturePublication one{.journalId = 5, .captureId = 1, .pieces = first};
+  ASSERT_TRUE(durable->publisher->publish(one).has_value());
+  // The same publication again is the idempotent no-op ...
+  EXPECT_TRUE(durable->publisher->publish(one).has_value());
+  // ... another journal's id 1 is a different publication ...
+  const CapturePublication elsewhere{
+      .journalId = 6, .captureId = 1, .pieces = other};
+  EXPECT_TRUE(durable->publisher->publish(elsewhere).has_value());
+  // ... and the same key naming other content is refused, not skipped.
+  const CapturePublication clash{
+      .journalId = 5, .captureId = 1, .pieces = other};
+  const auto refused = durable->publisher->publish(clash);
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error().code, IoErrorCode::PersistenceRefusal);
+}
+
 TEST_F(IoCaptureTest, CommitPublishesTranslatedSpansAndReceiptIntoTheStore) {
   auto durable = openDurable(dir_);
   auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
                     durable->publisher.get());
   ASSERT_TRUE(world);
   const auto sourceBytes = bytesOf("hello world");
-  auto registered = registerPinned(*world, transientRef(70), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(70), sourceBytes);
   ASSERT_TRUE(registered.has_value());
 
   const PayloadRange first[]{rangeOf(*registered, 0, 5)};
@@ -1705,7 +2057,7 @@ TEST_F(IoCaptureTest, PublicationRoundTripsThroughStoreSaveAndReload) {
     auto durable = openDurable(dir_);
     auto world   = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
                         {}, durable->publisher.get());
-    auto registered = registerPinned(*world, transientRef(71), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(71), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     const PayloadRange selection[]{rangeOf(*registered, 0, 10)};
     ASSERT_TRUE(captureCommit(*world, selection).has_value());
@@ -1719,7 +2071,7 @@ TEST_F(IoCaptureTest, PublicationRoundTripsThroughStoreSaveAndReload) {
   ASSERT_EQ(reloaded->pieces.size(), 1U);
   EXPECT_EQ(reloaded->pieces[0].span, span);
   EXPECT_EQ(permascrollText(*durable, reloaded->pieces[0].span), "round trip");
-  EXPECT_EQ(reloaded->pieces[0].origin.source, std::uint64_t{71});
+  EXPECT_EQ(reloaded->pieces[0].origin.occurrence, std::uint64_t{71});
 }
 
 /// Throws on the Nth journal write of the coordinator it is installed in,
@@ -1742,7 +2094,7 @@ TEST_F(IoCaptureTest,
     auto durable = openDurable(dir_);
     auto world   = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
                         {}, durable->publisher.get());
-    auto registered = registerPinned(*world, transientRef(72), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(72), sourceBytes);
     origin          = *registered;
     // Writes this coordinator makes: 1 Append, 2 Appended, 3 Committed.
     world->coordinator->setJournalCrashPoints(crashOnWrite(3, true));
@@ -1765,7 +2117,7 @@ TEST_F(IoCaptureTest,
   const auto before = durable->store->latest();
   auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
                     durable->publisher.get());
-  auto registered = registerPinned(*world, transientRef(72), sourceBytes);
+  auto registered = registerPinned(*world, durableRef(72), sourceBytes);
   ASSERT_TRUE(registered.has_value());
   const auto report = world->coordinator->recover();
   ASSERT_TRUE(report.has_value());
@@ -1788,7 +2140,7 @@ TEST_F(IoCaptureTest, CrashBetweenAppendedAndPublicationPublishesExactlyOnce) {
     auto durable = openDurable(dir_);
     auto world   = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
                         {}, durable->publisher.get());
-    auto registered = registerPinned(*world, transientRef(73), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(73), sourceBytes);
     // Die right after the Appended record is durable, before publication.
     world->coordinator->setJournalCrashPoints(crashOnWrite(2, false));
     const PayloadRange selection[]{rangeOf(*registered, 0, 8)};
@@ -1839,7 +2191,7 @@ TEST_F(IoCaptureTest, CommitRetryAfterRefusedStoreSaveNeverPublishesTwice) {
   auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
                     durable->publisher.get());
   const auto sourceBytes = bytesOf("retry me");
-  auto registered = registerPinned(*world, transientRef(74), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(74), sourceBytes);
   const PayloadRange selection[]{rangeOf(*registered, 0, 8)};
   auto prepared = world->coordinator->prepare(selection);
   ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
@@ -1926,7 +2278,7 @@ TEST_F(IoCaptureTest, CaptureThroughRealPermascrollSinkEndToEnd) {
   auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
                     durable->publisher.get());
   const auto sourceBytes = bytesOf("end to end through the real sink");
-  auto registered = registerPinned(*world, transientRef(75), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(75), sourceBytes);
   const PayloadRange selection[]{rangeOf(*registered, 4, 6)};
   ASSERT_TRUE(captureCommit(*world, selection).has_value());
   const auto span = world->coordinator->translationFor(selection[0]);
@@ -1952,9 +2304,8 @@ AbortedCapture uncertainAbort(RecordingSink &sink,
   AbortedCapture out;
   out.world              = boot(sink, journalPath);
   const auto sourceBytes = bytesOf(text);
-  auto registered =
-      registerPinned(*out.world, transientRef(source), sourceBytes);
-  out.origin = *registered;
+  auto registered = registerPinned(*out.world, durableRef(source), sourceBytes);
+  out.origin      = *registered;
   const PayloadRange selection[]{rangeOf(out.origin, 0, length)};
   auto prepared = out.world->coordinator->prepare(selection);
   EXPECT_TRUE(std::holds_alternative<Prepared>(prepared));
@@ -2044,7 +2395,7 @@ TEST_F(IoCaptureTest, ReconcileAfterRestartResolvesRecoveredPins) {
   {
     auto world             = boot(sink, journalPath_);
     const auto sourceBytes = bytesOf("pinned over restart");
-    auto registered = registerPinned(*world, transientRef(82), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(82), sourceBytes);
     ASSERT_TRUE(registered.has_value());
     EXPECT_EQ(world->coordinator->pinnedCaptures(), std::vector<CaptureId>{1});
     const auto promoted =
@@ -2076,7 +2427,7 @@ TEST_F(IoCaptureTest,
   {
     auto world             = boot(sink, journalPath_);
     const auto sourceBytes = bytesOf("die mid reconcile");
-    ASSERT_TRUE(registerPinned(*world, transientRef(83), sourceBytes));
+    ASSERT_TRUE(registerPinned(*world, durableRef(83), sourceBytes));
     // Writes from here: 1 Reconciled, 2 Committed -- die before the second.
     world->coordinator->setJournalCrashPoints(crashOnWrite(2, true));
     EXPECT_THROW(static_cast<void>(world->coordinator->reconcile(
@@ -2108,7 +2459,7 @@ TEST_F(IoCaptureTest, ReconcileReleaseSurvivesRestart) {
   }
   auto world             = boot(sink, journalPath_);
   const auto sourceBytes = bytesOf("release and restart");
-  auto registered = registerPinned(*world, transientRef(84), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(84), sourceBytes);
   ASSERT_TRUE(registered.has_value());
   EXPECT_TRUE(world->coordinator->pinnedCaptures().empty());
   const auto report = world->coordinator->recover();
@@ -2127,7 +2478,7 @@ TEST_F(IoCaptureTest,
   {
     auto world             = boot(sink, journalPath_);
     const auto sourceBytes = bytesOf("bytes later lost");
-    auto registered = registerPinned(*world, transientRef(85), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(85), sourceBytes);
     origin          = *registered;
     const PayloadRange selection[]{rangeOf(origin, 0, 10)};
     ASSERT_TRUE(captureCommit(*world, selection).has_value());
@@ -2136,7 +2487,7 @@ TEST_F(IoCaptureTest,
   sink.bytes_.resize(4);
   auto world             = boot(sink, journalPath_);
   const auto sourceBytes = bytesOf("bytes later lost");
-  ASSERT_TRUE(registerPinned(*world, transientRef(85), sourceBytes));
+  ASSERT_TRUE(registerPinned(*world, durableRef(85), sourceBytes));
   auto &coordinator = *world->coordinator;
   ASSERT_EQ(coordinator.pinnedCaptures(), std::vector<CaptureId>{1});
   // The journal names the span, but the permascroll no longer holds it.
@@ -2157,14 +2508,14 @@ TEST_F(IoCaptureTest, ReconcileReleaseOfALostSpanFreesTheRangeForRecapture) {
   {
     auto world             = boot(sink, journalPath_);
     const auto sourceBytes = bytesOf("bytes truly lost");
-    auto registered = registerPinned(*world, transientRef(86), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(86), sourceBytes);
     const PayloadRange selection[]{rangeOf(*registered, 0, 10)};
     ASSERT_TRUE(captureCommit(*world, selection).has_value());
   }
   sink.bytes_.clear();
   auto world             = boot(sink, journalPath_);
   const auto sourceBytes = bytesOf("bytes truly lost");
-  auto registered = registerPinned(*world, transientRef(86), sourceBytes);
+  auto registered        = registerPinned(*world, durableRef(86), sourceBytes);
   ASSERT_TRUE(world->coordinator->reconcile(1, ReconcileRelease{}).has_value());
   const PayloadRange range[]{rangeOf(*registered, 0, 10)};
   ASSERT_TRUE(captureCommit(*world, range).has_value());
@@ -2208,7 +2559,7 @@ TEST_F(IoCaptureTest,
     FailAfterSink sink(*durable->sink);
     auto world      = boot(sink, journalPath_, 4u << 20, 1u << 20, true, {},
                            durable->publisher.get());
-    auto registered = registerPinned(*world, transientRef(87), sourceBytes);
+    auto registered = registerPinned(*world, durableRef(87), sourceBytes);
     const PayloadRange selection[]{rangeOf(*registered, 0, 7)};
     auto prepared = world->coordinator->prepare(selection);
     ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
@@ -2248,7 +2599,7 @@ TEST_F(IoCaptureTest,
 
 TEST_F(IoCaptureTest, ReconciledRecordRoundTripsAndVersionOneIsRefused) {
   {
-    CaptureJournal journal(journalPath_, 0);
+    CaptureJournal journal(journalPath_, std::nullopt);
     CaptureJournalRecord record;
     record.reconciledPromoted = true;
     record.span               = localSpan(3, 9);
@@ -2270,7 +2621,7 @@ TEST_F(IoCaptureTest, ReconciledRecordRoundTripsAndVersionOneIsRefused) {
     const std::uint32_t one = 1;
     file.write(reinterpret_cast<const char *>(&one), sizeof(one));
   }
-  CaptureJournal reopened(journalPath_, 0);
+  CaptureJournal reopened(journalPath_, std::nullopt);
   EXPECT_EQ(reopened.recover().status, CaptureJournalStatus::Corrupt);
 }
 

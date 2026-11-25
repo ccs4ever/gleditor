@@ -127,6 +127,11 @@ public:
   [[nodiscard]] auto requirePersistable(const PayloadLease &lease) const
       -> std::expected<xanadu::PrimediaSpan, IoError>;
 
+  /// Whether @p ref's bytes can still be retained: a durable origin always
+  /// (the permascroll holds them), any other only while a registration pin,
+  /// lease or owner token keeps its chunk. The capture map asks this to
+  /// forget translations of sources nothing can read any more.
+  [[nodiscard]] auto sourceReachable(const PayloadRef &ref) const -> bool;
   [[nodiscard]] auto liveLeases() const -> std::size_t;
   /// Sources whose bytes are still reachable: every durable origin plus each
   /// transient/proxy origin with a live registration pin, lease or owner
