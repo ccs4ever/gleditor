@@ -1119,6 +1119,23 @@ resolved through `ArenaManifold::resolveSourceCell`, while a cell of another sto
 index, or an ephemeral cell, is not. It is pure and reads no host state, so it may sit in a
 parameter pipeline, but it is never memoised: a memo key is content, and identity is not.
 
+`#AWAIT` (`OpcodeKind::Await`) and `#SUBMIT` (`OpcodeKind::Submit`) are the two I/O opcodes, both
+appended last so persisted opcode ordinals hold. They name no I/O service, schema or language: each
+calls an owner-thread host hook installed on the VM (`setAwaitHandler`, `setSubmitHandler`).
+
+- `#AWAIT` takes one RequestCell input and writes one OutcomeCell output. A request that is not yet
+  terminal parks the cursor on the Await itself; the resume consumes the delivered outcome, writes
+  the output and advances, without running anything before it again.
+- `#SUBMIT` takes two inputs, a CapabilityCell and a request description cell, and three outputs:
+  the managed submission sum cell, its arm ordinal as an Int64 (0 admitted, 1 refused) and the arm's
+  payload cell (the RequestCell, or the Rejected OutcomeCell). The hook returns that triple already
+  decoded, so the VM never reads an I/O schema. A refusal is the second arm, a value, never a trap;
+  a host that throws, a non-capability input, a missing hook or an active mutation group fail the
+  step by name and advance nothing. It runs the hook exactly once per executed instruction and is
+  never memoised. Backtracking (`#FAIL`) rolls the arena back but cannot recall an admitted request,
+  so a re-executed Submit is a new operation. A match is `#BRANCH_FALSE_CELL` on the arm ordinal
+  followed by `#AWAIT` of the payload on the admitted arm.
+
 ### 8.3 `std:logic` Standard Library Module
 
 The standard library exports the `std:logic` module off `d.stdlib`:
@@ -1303,6 +1320,7 @@ table.
 | 11.1    | `19c985a` | 2026-09-12 | Vortex Standard Library architecture (written in Vortex): `d.stdlib` module rank, spatial symbol resolution, and core standard modules.                                                                                                                                                                                                                       |
 | 12.0    | `1271d20` | 2026-09-12 | **Vlog Vortex Extension & `std:logic` Module**: `d.clause` dimension, logic opcodes, and SLD resolution over `ArenaManifold`.                                                                                                                                                                                                                                 |
 | 13.0    | *this*    | 2026-10-15 | **`std:xanadu` Standard Library Module** (§9): the shared, language-neutral package for direct xanadoc/slice manipulation — addressing, arena authoring, batch constructors, bidirectional link following, rank walking, staged content resolution, and provenance — relocated here from the vlace note so VQL/VPL/vicon/vprolog/vlace all import one module. |
+| 13.1    | *this*    | 2026-11-25 | **`#SUBMIT` opcode** (`OpcodeKind::Submit`, appended after `Await`): a language-neutral admission, with its host hook, arm ordinal and payload outputs, once-per-execution and backtracking rules (§8.2). Vortex I/O plan P6. An addition that breaks no persisted ordinal.                                                                                   |
 
 [toc-01]: #2-core-c-runtime-engine-reference-implementation
 [toc-02]: #3-the-dual-wing-calling-convention--spatial-parameter-binding

@@ -26,8 +26,13 @@ Workflow brief: [`brief-common.md`](brief-common.md).
 
 ## Open proposals
 
-Applied: P1, P3, P4 and P5. Not needed: P2. Nothing is open.
+Applied: P1, P3, P4, P5 and P6. Not needed: P2. Nothing is open.
 
+- P6: a language-neutral `Submit` opcode in `VortexVM` (`vortex_vm.{hpp,cpp}` only), with a submit
+  hook beside the await hook. Applied with owner approval: two inputs (capability, request
+  description), three outputs (submission sum, arm ordinal, arm payload), once per executed
+  instruction, refusal a value, host exceptions contained. VQL effect clauses lower to it
+  (`MakeTerm`, `Submit`, `BranchFalseCell`, `Await`); see the plan's "P6: the Submit opcode".
 - P4: per-cell `ArenaManifold` release (`freeCell`) and the request reaper that uses it. Applied
   with owner approval; see [`p4-p5-implementation.md`](p4-p5-implementation.md).
 - P5: the `Append` intent fsync moved off the owner into the append's worker turn, with

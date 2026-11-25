@@ -1192,10 +1192,10 @@ M7a implementation notes and deliberate deferrals:
 
 Deferred, by design:
 
-- There is no Vortex `Submit` opcode: the baseline's `Submit` is `IoHost::submitCell` wrapped by
-  `FrontendBridge::submit`, and a Vortex program reaches Await only with a request cell a host
-  already holds. Adding the opcode is a `vortex_vm` change and needs its own approval; no language
-  milestone is blocked on it, because each lowers its submit to a host call.
+- Resolved by P6: the opcode is `OpcodeKind::Submit` (see "P6: the Submit opcode" after the M7-VQL
+  notes). Until then a Vortex program reached Await only with a request cell a host already held;
+  the baseline's `Submit` is still `IoHost::submitCell` wrapped by `FrontendBridge::submit`, which a
+  language host calls from the VM's submit hook.
 - `FrontendRunResult` is a template over the language's value; the plan's per-language result types
   (`Parked{scriptActivation, ...}`, `DriverResult`, `IoRunResult`) are each language's own enums
   that carry or convert to the common `FrontendToken`. Their mapping is the language milestone's.
@@ -1223,22 +1223,27 @@ M7-VQL implementation notes and deliberate deferrals:
   call name in any expression (those three are now reserved). `effect` itself is contextual (an
   identifier followed by `{`), so no existing query changes meaning. Grammar and semantics are in
   `vql-query-language.md` §4.13 and change-history entry 16.2.
-- Execution design. VQL runs as Vortex bytecode on `VortexVM`, and the VM has no `Submit` opcode, so
-  the action has no bytecode form. It is run by `ScriptRunner`
-  (`apps/common/xanadu/vql/script_runner.{hpp,cpp}`), which sits above `QueryExecutor`: it cuts the
-  script at each action, runs each stretch of ordinary statements through the unchanged executor
-  (same session, same VM), and runs the action through `FrontendBridge` (`submit`, `match`,
-  `awaitSubmission`, `resume`, status gate). A parked action returns `Parked{FrontendToken}` whose
-  `activation` is the suspended script (plan: `scriptActivation`), `position` the action's statement
-  index (`effectAction`) and `request` the request cell (`requestCell`); resuming re-awaits that
-  request and never submits. The plan's "`ExecutionBlock` result gains
+- Execution design (revised by P6; the first cut had no `Submit` opcode and so cut the script at
+  each action). The compiler lowers an action to bytecode (`compile_io_effect.cpp`): `MakeTerm`
+  builds the request description `read_bytes(offset, max)` as cells, `Submit` admits it, a
+  `BranchFalseCell` on the submission's arm ordinal selects `refused($e) => $e` (a `CopyCellRefs` of
+  the Rejected outcome) or `admitted($q) => await($q)` (`Await` of the request), and both arms write
+  one result slot. The whole script is one program. `ScriptRunner`
+  (`apps/common/xanadu/vql/script_runner.{hpp,cpp}`) is the host loop around it: it runs the program
+  through `QueryExecutor::begin`, and when the VM stops at an unfinished Await it routes the
+  `FrontendToken` and returns `Parked`; `resume` runs the same cursor on from that Await
+  (`QueryExecutor::resume`), so the Submit before it never executes twice. The runner answers the
+  VM's submit hook (decode the description, stage the read, admit through `FrontendBridge`) and
+  reads a finished action's payload text, which lives outside the arena. A parked action returns
+  `Parked{FrontendToken}` whose `activation` is the suspended script (plan: `scriptActivation`),
+  `position` the action's statement index (`effectAction`, found from the compiled site table) and
+  `request` the request cell (`requestCell`). The plan's "`ExecutionBlock` result gains
   `Completed{rows}`/`Parked{...}`" is realised as `ScriptRunResult = FrontendRunResult<rows>` over
-  the whole script, since an action is a statement and not a block; `QueryExecutor::execute` itself
-  keeps returning rows and refuses a script holding an action (`VQL_IO_EFFECT_NOT_COMPILABLE`) so it
-  can never be silently dropped, and `VQLCompiler::compile` (so `vqueryc` and `:asm`) refuses it the
-  same way. C++ rather than Vortex because it parks a native activation across a host pump and sits
-  on the owner-thread bridge; nothing in it is language policy that Vortex could express without the
-  missing opcode.
+  the whole script, since an action is a statement and not a block. `QueryExecutor::execute` is
+  synchronous and cannot wait, so it refuses a script holding an action with
+  `VQL_IO_EFFECT_NEEDS_RUNNER` (replacing `VQL_IO_EFFECT_NOT_COMPILABLE`); `VQLCompiler::compile`,
+  `vqueryc` and `:asm` compile it. A script's actions are validated (capability, operands) before
+  anything compiles, so a bad later action now fails the script before an earlier statement runs.
 - Values. The script's result is its final executed statement's rows, as before. An action's value
   is the outcome cell, then one text cell with the retained bytes only when the shared status gate
   exposes a payload. A refusal is a `Rejected` outcome row (nothing started) and the script goes on;
@@ -1260,9 +1265,10 @@ M7-VQL implementation notes and deliberate deferrals:
   REPL reads the user's own line input, as it always has); the scheduler's workers `pread`. There is
   no synchronous fallback: a query path that cannot park is refused, not run blocking. One
   `VortexVM` now serves the whole process because the core has a single write guard that a second VM
-  would null on destruction. `vqueryc` is compile-only and opens no file or endpoint; it refuses an
-  action with `VQL_IO_EFFECT_NOT_COMPILABLE`. The host is built lazily, so a plain query starts no
-  worker.
+  would null on destruction. `vqueryc` is compile-only and opens no file or endpoint; it compiles an
+  action (a capability variable it has no binding for becomes a text cell naming it, which no Submit
+  accepts, so running that program unbound fails by value). The host is built lazily, so a plain
+  query starts no worker.
 - Harness. `ConformanceDriver` gained `collectWakes()` (default empty) and `pumpDriver`, because a
   language whose runner is not the driver itself must forward the wakes its runner received; the M7a
   drivers are unchanged. `VqlScriptConformance` instantiates all five checks with a driver that runs
@@ -1276,8 +1282,6 @@ M7-VQL implementation notes and deliberate deferrals:
 
 Deferred, by design:
 
-- A Vortex `Submit` opcode and so a bytecode lowering of the action; `vqueryc` cannot compile one.
-  It needs the `vortex_vm` approval already noted under M7a.
 - Matching on an outcome's tag or fields inside the script (`outcome(complete($payload, ..), ..)` of
   the examples document): the script sees the outcome cell and the gated payload text, and the host
   inspects the tag. Binding the action's result to a variable for later statements is also absent,
@@ -1287,14 +1291,39 @@ Deferred, by design:
   one-shot CLI never notices and a long-lived host must handle.
 - Write, capture, `message` and frame modes, `stable` reads, and any action other than a bounded
   read of one file capability; reads over a loop or per row (refused until an explicit later gate).
-- The runner needs a `VQLEngine` session (mounts and `let` bindings reach later stretches through
-  it), runs one stretch per cut and does not carry a stretch's local bindings across an action
-  except through the session; a script whose stretch declares a mount runs the declaration once
-  before the first action.
+- The runner needs a `VQLEngine` session (it supplies the bound capability and operand cells at
+  compile time and the host-side payload read). The whole script is one program, so a statement
+  after an action sees the earlier ones' bindings as it would without an action; an action's own
+  value is still not nameable by later statements.
 - No overall timeout on a parked script: it waits for the backend's own deadline (open has one; a
   read has none yet), and cancelling a request stays a separate explicit action.
 - `submit`, `await` and `read_bytes` are reserved call names; a user `def` of those names can no
   longer be called.
+
+P6: the Submit opcode (applied with owner approval, `vortex_vm.{hpp,cpp}` only):
+
+- `OpcodeKind::Submit`, appended after `Await`. Inputs: a CapabilityCell and a request description
+  cell (cells built by bytecode, no serialised text). Outputs: the managed submission sum cell, its
+  arm ordinal as an Int64 (0 the admitted arm, 1 the refused arm) and the arm's payload cell (the
+  RequestCell or the Rejected OutcomeCell). It is dispatched from `step()` beside Await
+  (`stepSubmit`), because it needs a cursor and a host.
+- Host hook: `VortexVM::setSubmitHandler`, a function from (capability, description cell, cursor) to
+  `VmSubmission`, mirroring `setAwaitHandler`. The VM names no I/O service, language or schema:
+  `VmSubmission` carries the sum cell, the arm ordinal and the payload cell already decoded by the
+  host. The host answers admission refusal as a value (arm 1), never by throwing.
+- Failures are typed step failures that advance nothing and publish nothing: no handler, a wrong
+  operand count, an input that is not a live CapabilityCell, an active mutation group (a Submit is
+  an effect on the world and cannot be rolled back), a host that throws (contained, as for Await),
+  and a returned sum that is stale or not a Submission cell. The mesh evaluator and the artifact
+  decoder treat it as they do Await: not provably pure, and a valid ordinal.
+- Once per executed instruction. A parked Await resumes at the Await, after the Submit, so a resume
+  never re-executes it. Backtracking does not recall a request: `Fail` restores arena cells and
+  choice state, but the admitted request is an effect in the service, so executing a Submit again
+  after backtracking (or twice in a loop) creates a new operation, as the plan's multiplicity rule
+  says. The abandoned submission cells go with the arena rollback; the request stays with the host
+  to retire.
+- Pattern matching reuses existing opcodes: `BranchFalseCell` on the arm ordinal selects the arm,
+  `Await` takes the payload. No second opcode was needed.
 
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per
 repository policy. Run source-level focused tests while implementing and full `make -j$(nproc) test`
