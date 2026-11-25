@@ -1,5 +1,7 @@
 #include "common/xanadu/vortex/io_service.hpp"
 
+#include <gleditor/logging.hpp>
+
 #include <algorithm>
 #include <limits>
 #include <ranges>
@@ -154,6 +156,13 @@ auto IoService::submit(const CapabilityCell capability,
   if (frozen->endpoint &&
       closingEndpoints_.contains(
           {frozen->endpoint->cell, frozen->endpoint->incarnation})) {
+    // Same staged-entry rule admit() keeps: a refused submission consumes
+    // the staged spec exactly like execute would have, so the adapter's
+    // staging table cannot fill with a spec no request will ever run.
+    if (const auto adapter = adapters_.find(frozen->key);
+        adapter != adapters_.end()) {
+      adapter->second->abandonStaged(frozen->specification);
+    }
     return {Refused{cells_.mintRefusal({IoErrorCode::Conflict, 0})}};
   }
   return admit(std::move(*frozen), nullptr);
@@ -161,6 +170,13 @@ auto IoService::submit(const CapabilityCell capability,
 
 auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
   if (shuttingDown_) {
+    // Reachable only if shutdown raced between submit()/admitOpen()'s own
+    // check and this call; the staged spec still gets consumed so the
+    // adapter's table cannot fill with a spec no request will ever run.
+    if (const auto adapter = adapters_.find(request.key);
+        adapter != adapters_.end()) {
+      adapter->second->abandonStaged(request.specification);
+    }
     return {
         Refused{cells_.mintRefusal({IoErrorCode::SchedulerUnavailable, 0})}};
   }
@@ -239,7 +255,8 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
     state.lane = LaneKey{0, token.value, CellRequest::Direction::Control};
   }
   requests_.emplace(tokenKey(token), std::move(state));
-  requestByCell_.emplace(requestCell->cell, tokenKey(token));
+  requestByCell_.emplace(std::pair{requestCell->cell, requestCell->incarnation},
+                         tokenKey(token));
   if (const auto lane = requests_.at(tokenKey(token)).lane) {
     if (activeLanes_.contains(*lane)) {
       laneQueues_[*lane].push_back(tokenKey(token));
@@ -329,22 +346,34 @@ auto IoService::ensureTerminalOutcome(RequestState &state)
     lease = PayloadLease{state.terminalPayload->range,
                          state.terminalPayload->lease};
   }
-  const auto materialized = cells_.publishTerminal(
-      state.cell, *state.terminalRecord, state.progress, lease);
-  if (materialized) {
-    state.outcome = *materialized;
-  } else {
-    // Known M1 gap: a persistent publishTerminal refusal re-mints a refusal
-    // cell on every poll/await instead of caching one. Caching it in
-    // state.outcome would suppress the real terminal in pump(), so the
-    // re-mint stays until request retirement bounds the growth.
-    return cells_.mintRefusal(materialized.error());
+  try {
+    const auto materialized = cells_.publishTerminal(
+        state.cell, *state.terminalRecord, state.progress, lease);
+    if (materialized) {
+      state.outcome = *materialized;
+    } else {
+      // Known M1 gap: a persistent publishTerminal refusal re-mints a
+      // refusal cell on every poll/await instead of caching one. Caching
+      // it in state.outcome would suppress the real terminal in pump(),
+      // so the re-mint stays until request retirement bounds the growth.
+      return cells_.mintRefusal(materialized.error());
+    }
+  } catch (...) {
+    // A throwing cell store must not escape poll/await: degrade to a
+    // refusal mint, and to "still pending" if even that throws -- the
+    // terminal record stays durable for the next retry.
+    try {
+      return cells_.mintRefusal({IoErrorCode::BackendFailure, 2});
+    } catch (...) {
+      return std::nullopt;
+    }
   }
   return state.outcome;
 }
 
 auto IoService::poll(const RequestCell request) -> PollResult {
-  const auto found = requestByCell_.find(request.cell);
+  const auto found =
+      requestByCell_.find(std::pair{request.cell, request.incarnation});
   if (found == requestByCell_.end()) {
     // A retired request keeps its arena outcome link: report the terminal
     // cell with no live progress (phase/progress died with the state).
@@ -368,7 +397,8 @@ auto IoService::poll(const RequestCell request) -> PollResult {
 auto IoService::await(const RequestCell request,
                       const OwnerWaiterRegistration registration)
     -> AwaitResult {
-  const auto found = requestByCell_.find(request.cell);
+  const auto found =
+      requestByCell_.find(std::pair{request.cell, request.incarnation});
   if (found == requestByCell_.end()) {
     return {Ready{cells_.mintRefusal({IoErrorCode::Stale, 0})}};
   }
@@ -390,18 +420,21 @@ auto IoService::await(const RequestCell request,
     return {Pending{registration.continuation, duplicate->first}};
   }
   const auto waiter = cells_.mintWaiter(request, registration);
-  if (waiter.incarnation == AllocationIncarnation{}) {
-    // mintWaiter refuses by returning an empty handle; arena exhaustion is a
-    // budget refusal, not a backend failure.
-    return {Ready{cells_.mintRefusal({IoErrorCode::BudgetExceeded, 0})}};
+  if (!waiter) {
+    // The store types its refusal: a dead request/cursor is Stale, an
+    // arena write failure is BackendFailure -- await() reports the code
+    // the mint actually hit rather than guessing BudgetExceeded.
+    return {Ready{cells_.mintRefusal(waiter.error())}};
   }
-  state->second.waiters.emplace_back(waiter, registration);
-  waiterToToken_.insert_or_assign(waiter.cell, found->second);
-  return {Pending{registration.continuation, waiter}};
+  state->second.waiters.emplace_back(*waiter, registration);
+  waiterToToken_.insert_or_assign(std::pair{waiter->cell, waiter->incarnation},
+                                  found->second);
+  return {Pending{registration.continuation, *waiter}};
 }
 
 auto IoService::cancelWaiter(const WaiterCell waiter) -> WaiterCancelResult {
-  const auto token = waiterToToken_.find(waiter.cell);
+  const auto token =
+      waiterToToken_.find(std::pair{waiter.cell, waiter.incarnation});
   if (token == waiterToToken_.end())
     return {WaiterCancelState::AlreadyComplete, {}};
   const auto state = requests_.find(token->second);
@@ -424,7 +457,8 @@ void IoService::retireWaiter(const WaiterCell waiter) {
 
 auto IoService::cancelRequest(const RequestCell request)
     -> RequestCancelResult {
-  const auto found = requestByCell_.find(request.cell);
+  const auto found =
+      requestByCell_.find(std::pair{request.cell, request.incarnation});
   if (found == requestByCell_.end()) {
     return {RequestCancelState::Refused, request,
             cells_.mintRefusal({IoErrorCode::Stale, 0})};
@@ -472,7 +506,8 @@ void IoService::retireRequest(const RequestCell request) {
   // M1 gap, documented not redesigned: requests_ entries leave only through
   // here (or shutdown), so production callers must retire each request once
   // its outcome cell is consumed or the map grows monotonically.
-  const auto indexed = requestByCell_.find(request.cell);
+  const auto indexed =
+      requestByCell_.find(std::pair{request.cell, request.incarnation});
   if (indexed == requestByCell_.end()) return;
   const auto found = requests_.find(indexed->second);
   if (found == requests_.end() || found->second.cell != request) return;
@@ -540,7 +575,9 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
     const auto position = requests_.find(tokenKey(event.token));
     if (position != requests_.end()) {
       auto &state = position->second;
-      if (event.progress) {
+      if (event.progress && !state.outcome) {
+        // A late progress event must not regress the phase after the
+        // terminal outcome was published.
         state.progress = *event.progress;
         state.phase    = event.progress->phase;
       }
@@ -569,84 +606,128 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
     auto &state          = found->second;
     state.terminalQueued = false;
     if (!state.candidate || !state.released || state.outcome) continue;
-    NativeCompletion completion{
-        .token    = state.token,
-        .result   = std::move(*state.candidate),
-        .payload  = std::move(state.payload),
-        .released = BackendReleaseAck{PrivateReleaseToken{state.token}}};
-    const LeaseRelease releasePayload(
-        payloads_, completion.payload ? std::optional{completion.payload->lease}
-                                      : std::nullopt);
-    IoOutcome outcome;
-    if (state.synthetic) {
-      outcome = std::move(completion.result.outcome);
-    } else {
-      OwnerContext owner;
-      auto publication = state.adapter->publish(completion, owner);
-      outcome          = publication ? std::move(publication->outcome)
-                                     : errorOutcome(publication.error());
-    }
-    if (state.open) {
-      if (auto *complete = std::get_if<Complete>(&outcome)) {
-        const auto opened = cells_.mintOpenedEndpoint(*state.open);
-        if (opened) {
-          complete->value = *opened;
-        } else {
-          outcome = errorOutcome(opened.error());
+
+    // Everything from moving the candidate out to recording the terminal
+    // outcome can throw: adapter->publish is not noexcept, and the cell
+    // mints and payload retains allocate. A throw must still leave the
+    // request with exactly one typed terminal outcome and the lane tail
+    // below advancing -- never a wedged head with a leaked request.
+    IoOutcome outcome = Failed{{IoErrorCode::BackendFailure, 0},
+                               {},
+                               IoProgress{.phase = IoPhase::Terminal}};
+    try {
+      NativeCompletion completion{
+          .token    = state.token,
+          .result   = std::move(*state.candidate),
+          .payload  = std::move(state.payload),
+          .released = BackendReleaseAck{PrivateReleaseToken{state.token}}};
+      const LeaseRelease releasePayload(
+          payloads_, completion.payload
+                         ? std::optional{completion.payload->lease}
+                         : std::nullopt);
+      if (state.synthetic) {
+        outcome = std::move(completion.result.outcome);
+      } else {
+        OwnerContext owner;
+        auto publication = state.adapter->publish(completion, owner);
+        outcome          = publication ? std::move(publication->outcome)
+                                       : errorOutcome(publication.error());
+      }
+      if (state.open) {
+        if (auto *complete = std::get_if<Complete>(&outcome)) {
+          const auto opened = cells_.mintOpenedEndpoint(*state.open);
+          if (opened) {
+            complete->value = *opened;
+          } else {
+            outcome = errorOutcome(opened.error());
+          }
         }
       }
-    }
-    // A payload lease may only ride an outcome variant that has a payload
-    // field; attaching one to EndOfStream/Overflow/... would mint a cell the
-    // §3.2 contract says cannot carry bytes.
-    if (completion.payload && !outcomeCanCarryPayload(outcome)) {
-      outcome = errorOutcome({IoErrorCode::InvalidRequest, 4});
-    }
-    auto payloadRange = outcomePayloadRange(outcome);
-    if (completion.payload && payloadRange &&
-        completion.payload->range != *payloadRange) {
-      outcome = errorOutcome({IoErrorCode::InvalidRequest, 3});
-      payloadRange.reset();
-      state.terminalPayload.reset();
-    } else if (completion.payload) {
-      payloadRange = completion.payload->range;
-    }
-    if (payloadRange) {
-      std::expected<std::shared_ptr<const PayloadOwnerToken>, IoError> owner =
-          std::unexpected{IoError{IoErrorCode::Unresolved, 0}};
-      if (completion.payload && completion.payload->range == *payloadRange) {
-        owner = payloads_.retainOwner(*completion.payload);
-      } else {
-        auto retained = payloads_.retain(*payloadRange);
-        if (retained) {
-          owner = payloads_.retainOwner(*retained);
-          payloads_.release(retained->lease);
-        } else {
-          owner = std::unexpected{retained.error()};
-        }
+      // A payload lease may only ride an outcome variant that has a
+      // payload field; attaching one to EndOfStream/Overflow/... would
+      // mint a cell the §3.2 contract says cannot carry bytes.
+      if (completion.payload && !outcomeCanCarryPayload(outcome)) {
+        outcome = errorOutcome({IoErrorCode::InvalidRequest, 4});
       }
-      if (owner) {
-        state.terminalPayload = std::move(*owner);
-      } else {
+      auto payloadRange = outcomePayloadRange(outcome);
+      if (completion.payload && payloadRange &&
+          completion.payload->range != *payloadRange) {
+        outcome = errorOutcome({IoErrorCode::InvalidRequest, 3});
+        payloadRange.reset();
         state.terminalPayload.reset();
-        outcome = errorOutcome(owner.error());
+      } else if (completion.payload) {
+        payloadRange = completion.payload->range;
       }
+      if (payloadRange) {
+        std::expected<std::shared_ptr<const PayloadOwnerToken>, IoError> owner =
+            std::unexpected{IoError{IoErrorCode::Unresolved, 0}};
+        if (completion.payload && completion.payload->range == *payloadRange) {
+          owner = payloads_.retainOwner(*completion.payload);
+        } else {
+          auto retained = payloads_.retain(*payloadRange);
+          if (retained) {
+            owner = payloads_.retainOwner(*retained);
+            payloads_.release(retained->lease);
+          } else {
+            owner = std::unexpected{retained.error()};
+          }
+        }
+        if (owner) {
+          state.terminalPayload = std::move(*owner);
+        } else {
+          state.terminalPayload.reset();
+          outcome = errorOutcome(owner.error());
+        }
+      }
+      state.phase          = IoPhase::Terminal;
+      state.progress.phase = IoPhase::Terminal;
+      state.terminalRecord = outcome;
+    } catch (...) {
+      // The adapter or a cell mint threw mid-materialization. The request
+      // still gets exactly one typed terminal outcome; whatever partial
+      // state the throw left is superseded here. release() is idempotent,
+      // so re-releasing a lease the completion's guard may already have
+      // dropped is a no-op.
+      if (state.payload) {
+        payloads_.release(state.payload->lease);
+        state.payload.reset();
+      }
+      state.terminalPayload.reset();
+      state.phase          = IoPhase::Terminal;
+      state.progress.phase = IoPhase::Terminal;
+      outcome              = Failed{{IoErrorCode::BackendFailure, 0},
+                                    {},
+                       IoProgress{.phase = IoPhase::Terminal}};
+      state.terminalRecord = outcome;
     }
-    state.phase          = IoPhase::Terminal;
-    state.progress.phase = IoPhase::Terminal;
-    state.terminalRecord = outcome;
+
+    // publishTerminal throws on the same allocation paths. The terminal
+    // record is already durable in state, so a later poll/await
+    // rematerializes through ensureTerminalOutcome; leave state.outcome
+    // unset rather than escape pump() with the lane still held.
     std::optional<PayloadLease> retainedPayload;
     if (state.terminalPayload) {
       retainedPayload = PayloadLease{state.terminalPayload->range,
                                      state.terminalPayload->lease};
     }
-    const auto materialized = cells_.publishTerminal(
-        state.cell, outcome, state.progress, retainedPayload);
-    if (!materialized) {
-      const auto failed = cells_.mintRefusal({IoErrorCode::BackendFailure, 1});
-      state.outcome     = failed;
-    } else {
-      state.outcome = *materialized;
+    try {
+      const auto materialized = cells_.publishTerminal(
+          state.cell, outcome, state.progress, retainedPayload);
+      if (!materialized) {
+        const auto failed =
+            cells_.mintRefusal({IoErrorCode::BackendFailure, 1});
+        state.outcome = failed;
+      } else {
+        state.outcome = *materialized;
+      }
+    } catch (...) {
+      // terminalQueued suppresses requeue: with state.outcome still unset
+      // a late sink event would otherwise pass queueTerminal's gate and
+      // run this whole materialization a second time.
+      state.terminalQueued = true;
+      GLEDITOR_LOG_DEBUG(
+          "vortex.io",
+          "terminal publication threw; outcome stays rematerializable");
     }
     // Terminal reached: if execute never ran -- cancel-before-start, a
     // scheduler-side removal, an enqueue-invariant failure -- the staged
@@ -656,7 +737,7 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
     for (const auto &[waiter, registration] : state.waiters) {
       static_cast<void>(registration);
       cells_.retireWaiter(waiter);
-      waiterToToken_.erase(waiter.cell);
+      waiterToToken_.erase(std::pair{waiter.cell, waiter.incarnation});
     }
     state.waiters.clear();
     {
@@ -700,7 +781,7 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
     --remaining;
     ++delivered;
     if (state.retireAfterTerminal) {
-      requestByCell_.erase(state.cell.cell);
+      requestByCell_.erase(std::pair{state.cell.cell, state.cell.incarnation});
       requests_.erase(key);
     }
   }
@@ -786,8 +867,16 @@ void IoService::terminalCandidate(
     if (!event.candidate) {
       event.candidate = std::move(result);
       event.payload   = std::move(payload);
-    } else if (payload) {
-      payloads_.release(payload->lease);
+    } else {
+      // A second candidate for an already-decided request is dropped with
+      // its result; its payload lease must still be released or the chunk
+      // stays pinned forever.
+      try {
+        GLEDITOR_LOG_DEBUG("vortex.io", "duplicate terminal candidate dropped");
+      } catch (...) {
+        // Logging must never terminate a noexcept sink callback.
+      }
+      if (payload) payloads_.release(payload->lease);
     }
     if (!event.queued) {
       event.queued = true;
@@ -800,7 +889,15 @@ void IoService::releaseAcknowledged(const BackendReleaseAck ack) noexcept {
   std::scoped_lock lock(sinkState_->mutex);
   auto &event = sinkState_->events[tokenKey(ack.token.request)];
   event.token = ack.token.request;
-  if (!event.release) event.release = ack;
+  if (!event.release) {
+    event.release = ack;
+  } else {
+    try {
+      GLEDITOR_LOG_DEBUG("vortex.io", "duplicate release ack dropped");
+    } catch (...) {
+      // Logging must never terminate a noexcept sink callback.
+    }
+  }
   if (!event.queued) {
     event.queued = true;
     sinkState_->ready.push_back(tokenKey(ack.token.request));

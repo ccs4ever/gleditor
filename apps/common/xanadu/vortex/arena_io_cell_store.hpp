@@ -55,7 +55,7 @@ public:
   auto mintOpenedEndpoint(const OpenSpec &spec)
       -> std::expected<OpenedEndpoint, IoErrorInfo> override;
   auto mintWaiter(RequestCell request, OwnerWaiterRegistration registration)
-      -> WaiterCell override;
+      -> std::expected<WaiterCell, IoErrorInfo> override;
   void retireWaiter(WaiterCell waiter) noexcept override;
 
 private:

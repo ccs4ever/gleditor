@@ -539,10 +539,10 @@ auto ArenaIoCellStore::mintOpenedEndpoint(const OpenSpec &spec)
 
 auto ArenaIoCellStore::mintWaiter(const RequestCell request,
                                   const OwnerWaiterRegistration registration)
-    -> WaiterCell {
+    -> std::expected<WaiterCell, IoErrorInfo> {
   if (!arena_.matches(request.cell, request.incarnation) ||
       !arena_.matches(registration.cursor, registration.cursorIncarnation)) {
-    return {};
+    return std::unexpected{IoErrorInfo{IoErrorCode::Stale, 0}};
   }
   // One choice point for the whole waiter graph: a mid-mint refusal must not
   // orphan the request occurrence or field cells it already made.
@@ -550,7 +550,7 @@ auto ArenaIoCellStore::mintWaiter(const RequestCell request,
   auto waiter     = makeWaiterCell(arena_);
   if (!waiter) {
     static_cast<void>(arena_.release(mark));
-    return {};
+    return std::unexpected{cellError(waiter.error())};
   }
   const auto requestOccurrence = arena_.makeCell("io waiter request");
   const auto requestOccurrenceIncarnation =
@@ -561,7 +561,7 @@ auto ArenaIoCellStore::mintWaiter(const RequestCell request,
       !arena_.link(waiter->cell, dim, DimVector::POS, requestOccurrence) ||
       !arena_.link(requestOccurrence, dim, DimVector::POS, request.cell)) {
     static_cast<void>(arena_.release(mark));
-    return {};
+    return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 2}};
   }
   const auto values = std::array{
       std::pair{std::string_view{"cursor"}, number(registration.cursor)},
@@ -573,12 +573,12 @@ auto ArenaIoCellStore::mintWaiter(const RequestCell request,
     if (!appendField(arena_, waiter->cell, schema_.dim(IoDimension::Occurrence),
                      schema_.dim(IoDimension::State), label, value)) {
       static_cast<void>(arena_.release(mark));
-      return {};
+      return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 3}};
     }
   }
   if (!arena_.discard(mark)) {
     static_cast<void>(arena_.release(mark));
-    return {};
+    return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 4}};
   }
   return *waiter;
 }

@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <semaphore>
+#include <stdexcept>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -77,6 +78,10 @@ public:
   auto publishTerminal(RequestCell request, const IoOutcome &outcome,
                        const IoProgress &, const std::optional<PayloadLease> &)
       -> std::expected<OutcomeCell, IoErrorInfo> override {
+    if (publishTerminalFailures > 0) {
+      --publishTerminalFailures;
+      throw std::runtime_error("publishTerminal boom");
+    }
     outcomes.push_back(outcome);
     const OutcomeCell cell{nextCell++, 1};
     publishedOutcomes.push_back(cell);
@@ -103,8 +108,10 @@ public:
                           CapabilityCell{nextCell++, 1}};
   }
   auto mintWaiter(RequestCell request, OwnerWaiterRegistration registration)
-      -> WaiterCell override {
-    if (failMintWaiter) return {};
+      -> std::expected<WaiterCell, IoErrorInfo> override {
+    if (failMintWaiter) {
+      return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded});
+    }
     const WaiterCell waiter{nextCell++, 1};
     waiters.emplace_back(waiter, request, registration);
     return waiter;
@@ -116,6 +123,7 @@ public:
   bool rejectFreeze{};
   bool failMintRequest{};
   bool failMintWaiter{};
+  int publishTerminalFailures{};
   std::size_t completionBoundBytes{1024};
   std::size_t payloadBoundBytes{1024};
   std::optional<EndpointCell> endpoint;
@@ -234,6 +242,7 @@ public:
       -> std::expected<OwnerPublication, IoErrorInfo> override {
     ++publishCalls;
     publishThread = std::this_thread::get_id();
+    if (throwOnPublish) throw std::runtime_error("publish boom");
     return OwnerPublication{completion.result.outcome};
   }
   void abandonStaged(OwnerCell specification) noexcept override {
@@ -246,6 +255,7 @@ public:
   std::size_t abandonCalls{};
   std::vector<OwnerCell> abandoned;
   std::thread::id publishThread;
+  bool throwOnPublish{};
 };
 
 struct Harness {
@@ -565,6 +575,84 @@ TEST(IoServiceTest, EndpointQueuesFifoPerDirectionAndPermitFullDuplex) {
             std::byte{2});
   EXPECT_FALSE(harness.service.poll(secondRead).outcome.has_value());
   EXPECT_FALSE(harness.service.poll(firstWrite).outcome.has_value());
+}
+
+TEST(IoServiceTest, ThrowingPublishStillTerminatesAndAdvancesTheLane) {
+  Harness harness;
+  harness.adapter.throwOnPublish = true;
+  harness.cells.endpoint         = EndpointCell{40, 2};
+  harness.cells.direction        = CellRequest::Direction::Read;
+  const auto firstRead           = harness.submit(OwnerCell{1});
+  const auto secondRead          = harness.submit(OwnerCell{2});
+  ASSERT_NE(firstRead.incarnation, 0U);
+  ASSERT_NE(secondRead.incarnation, 0U);
+  // FIFO lane: only the head is enqueued; the second read queues behind it.
+  ASSERT_EQ(harness.scheduler->entries.size(), 1U);
+
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+
+  // The adapter's publish threw mid-materialization: the request must
+  // still report exactly one typed Failed{BackendFailure} outcome, the
+  // reservation must be released once, and the queued lane head must
+  // start -- never a wedged lane behind a leaked request.
+  EXPECT_EQ(harness.adapter.publishCalls, 1U);
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  const auto *failed = std::get_if<Failed>(&harness.cells.outcomes.front());
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::BackendFailure);
+  EXPECT_EQ(harness.scheduler->unusedReleases, 1U);
+  ASSERT_EQ(harness.scheduler->entries.size(), 2U);
+  EXPECT_EQ(harness.scheduler->entries[1].command.operation.bytes.front(),
+            std::byte{2});
+  const auto poll = harness.service.poll(firstRead);
+  EXPECT_TRUE(poll.outcome.has_value());
+  EXPECT_EQ(poll.phase, IoPhase::Terminal);
+  EXPECT_FALSE(harness.service.poll(secondRead).outcome.has_value());
+}
+
+TEST(IoServiceTest, ThrowingPublishTerminalRematerializesOnPoll) {
+  Harness harness;
+  // pump()'s publishTerminal throws once; the durable terminal record must
+  // let poll() rematerialize the real outcome instead of losing it.
+  harness.cells.publishTerminalFailures = 1;
+  const auto request                    = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_EQ(harness.cells.outcomes.size(), 0U);
+
+  const auto poll = harness.service.poll(request);
+  EXPECT_TRUE(poll.outcome.has_value());
+  EXPECT_EQ(poll.phase, IoPhase::Terminal);
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<Complete>(harness.cells.outcomes.front()));
+  EXPECT_EQ(*poll.outcome, harness.cells.publishedOutcomes.front());
+}
+
+TEST(IoServiceTest, PersistentPublishTerminalThrowDegradesToRefusal) {
+  Harness harness;
+  harness.cells.publishTerminalFailures = 100;
+  const auto request                    = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+
+  // Every publishTerminal throws: poll must still surface a typed outcome
+  // (the refusal-cell fallback) rather than propagating the exception.
+  const auto poll = harness.service.poll(request);
+  EXPECT_TRUE(poll.outcome.has_value());
+  EXPECT_EQ(poll.phase, IoPhase::Terminal);
+  ASSERT_FALSE(harness.cells.outcomes.empty());
+  const auto *failed = std::get_if<Failed>(&harness.cells.outcomes.back());
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::BackendFailure);
 }
 
 TEST(IoServiceTest, RealArenaBridgeMintsAndPublishesTypedRequestOutcome) {
@@ -1055,8 +1143,8 @@ TEST(IoServiceTest, AwaitWaiterMintFailureIsBudgetExceeded) {
   harness.cells.failMintWaiter = true;
   const auto result = harness.service.await(request, {OwnerCell{22}, 1, 31});
   ASSERT_TRUE(std::holds_alternative<Ready>(result.value));
-  // mintWaiter refuses by returning an empty handle: arena exhaustion is
-  // a budget refusal, not a backend failure.
+  // mintWaiter types its refusal through the expected: the fake reports
+  // BudgetExceeded, which await() must surface verbatim -- not collapse.
   ASSERT_EQ(harness.cells.outcomes.size(), 1U);
   const auto *failed = std::get_if<Failed>(&harness.cells.outcomes.front());
   ASSERT_NE(failed, nullptr);

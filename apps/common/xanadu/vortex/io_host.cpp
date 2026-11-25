@@ -20,6 +20,11 @@ IoHost::IoHost(IoService &service, zigzag::ArenaManifold &arena,
 }
 
 IoHost::~IoHost() {
+  // The teardown below clears the VM's await handler and retires waiters
+  // on the service -- owner-thread operations like every other verb, so
+  // the same contract guards destruction (a cross-thread destroy is a
+  // logic_error, which terminates the noexcept destructor).
+  requireOwner();
   vm_.setAwaitHandler({});
   for (auto &[id, parked] : parked_) {
     static_cast<void>(id);

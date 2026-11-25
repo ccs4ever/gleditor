@@ -58,8 +58,12 @@ public:
       -> std::optional<OutcomeCell> = 0;
   virtual auto mintOpenedEndpoint(const OpenSpec &)
       -> std::expected<OpenedEndpoint, IoErrorInfo> = 0;
+  /// Mint the waiter cell for an await registration. Refuses with a typed
+  /// error -- Stale for a dead request/cursor handle, the cell mint's own
+  /// code, BackendFailure for an arena write that failed mid-graph -- so
+  /// await() never collapses every refusal into one guessed code.
   virtual auto mintWaiter(RequestCell, OwnerWaiterRegistration)
-      -> WaiterCell                              = 0;
+      -> std::expected<WaiterCell, IoErrorInfo>  = 0;
   virtual void retireWaiter(WaiterCell) noexcept = 0;
   virtual ~IoCellStore()                         = default;
 };
@@ -158,8 +162,13 @@ private:
   IoCellStore &cells_;
   std::map<AdapterKey, IoAdapter *> adapters_;
   std::unordered_map<std::uint64_t, RequestState> requests_;
-  std::unordered_map<zigzag::CellRef, std::uint64_t> requestByCell_;
-  std::unordered_map<zigzag::CellRef, std::uint64_t> waiterToToken_;
+  // Both cell indexes key the full handle (dense index + allocation
+  // incarnation): the arena can recycle a bare CellRef after a release,
+  // and a stale entry must never shadow the new allocation's mapping.
+  std::map<std::pair<zigzag::CellRef, AllocationIncarnation>, std::uint64_t>
+      requestByCell_;
+  std::map<std::pair<zigzag::CellRef, AllocationIncarnation>, std::uint64_t>
+      waiterToToken_;
   std::map<LaneKey, std::uint64_t> activeLanes_;
   std::map<LaneKey, std::deque<std::uint64_t>> laneQueues_;
   std::map<std::pair<zigzag::CellRef, AllocationIncarnation>, bool>
