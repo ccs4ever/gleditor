@@ -170,6 +170,11 @@ void ActorIoJournal::repairTornTail() {
     poisoned_ = true;
     return;
   }
+  // Every exit -- a read error, an unprovable boundary, a refused
+  // ftruncate, or a throwing appendBytes allocation -- closes the
+  // descriptor exactly once through this guard, the same discipline
+  // appendRecord keeps.
+  const FdGuard guard{fd};
 
   std::vector<std::byte> bytes;
   char buffer[4096];
@@ -185,32 +190,27 @@ void ActorIoJournal::repairTornTail() {
     appendBytes(bytes, buffer, static_cast<std::size_t>(n));
   }
   if (!readOk) {
-    ::close(fd);
     poisoned_ = true;
     return;
   }
 
   const auto boundary = journalPrefixEnd(bytes);
   if (!boundary) {
-    ::close(fd);
     poisoned_ = true;
     return;
   }
   writtenBytes_ = *boundary;
   wroteHeader_  = true; // the scan proved the header bytes are ours
   if (*boundary == bytes.size()) {
-    ::close(fd);
     return; // no tear to cut
   }
   // ftruncate needs a writable fd; an O_RDONLY scan fd fails here and
   // poisons, which is correct: a proven tear that cannot be cut still
   // cannot accept appends.
   if (::ftruncate(fd, static_cast<off_t>(*boundary)) != 0) {
-    ::close(fd);
     poisoned_ = true;
     return;
   }
-  ::close(fd);
 }
 
 ActorIoJournal::~ActorIoJournal() = default;
@@ -406,18 +406,19 @@ auto ActorIoJournal::recover() const -> ActorRestoreResult {
       // "empty". Report Corrupt rather than Clean over missing evidence.
       return {ActorRestoreStatus::Corrupt, {}, {}};
     }
+    // A throwing appendBytes allocation mid-scan must not leak the
+    // descriptor; the guard closes it on every exit path.
+    const FdGuard guard{fd};
     char buffer[4096];
     for (;;) {
       const auto n = ::read(fd, buffer, sizeof(buffer));
       if (n < 0) {
         if (errno == EINTR) continue;
-        ::close(fd);
         return {ActorRestoreStatus::Corrupt, {}, {}};
       }
       if (n == 0) break;
       appendBytes(bytes, buffer, static_cast<std::size_t>(n));
     }
-    ::close(fd);
   }
 
   if (bytes.empty()) return {ActorRestoreStatus::Clean, {}, {}};
