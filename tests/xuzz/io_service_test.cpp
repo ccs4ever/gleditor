@@ -1227,4 +1227,90 @@ TEST(IoServiceTest, RetireDuringPublishThrowStillFreesStateAfterMaterialize) {
   EXPECT_FALSE(second.progress.has_value());
 }
 
+TEST(IoServiceTest, RetireBeforeTerminalKeepsThrownPublishResolvable) {
+  Harness harness;
+  // Every publishTerminal attempt throws: the terminal record stays
+  // durable in state but no outcome cell -- and no arena request->outcome
+  // link -- is ever written. retireRequest lands while the request is
+  // still outstanding, so the terminal pass erases state under
+  // retireAfterTerminal; the erase must keep the state because
+  // outcomeFor cannot resolve what was never linked.
+  harness.cells.publishTerminalFailures = 100;
+  const auto request                    = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  harness.service.retireRequest(request);
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_TRUE(harness.cells.outcomes.empty());
+
+  // The retained state keeps rematerializing: each poll/await retries
+  // publishTerminal, which keeps throwing, and degrades to the typed
+  // BackendFailure refusal mint -- never the Stale a stranded request
+  // would report, and never an empty poll.
+  const auto poll = harness.service.poll(request);
+  EXPECT_TRUE(poll.outcome.has_value());
+  const auto awaiting = harness.service.await(request, {OwnerCell{22}, 1, 31});
+  ASSERT_TRUE(std::holds_alternative<Ready>(awaiting.value));
+  const auto *ready = std::get_if<Ready>(&awaiting.value);
+  ASSERT_NE(ready, nullptr);
+  EXPECT_NE(ready->outcome, OutcomeCell{});
+  ASSERT_GE(harness.cells.outcomes.size(), 2U);
+  for (const auto &outcome : harness.cells.outcomes) {
+    const auto *failed = std::get_if<Failed>(&outcome);
+    ASSERT_NE(failed, nullptr);
+    EXPECT_EQ(failed->reason.code, IoErrorCode::BackendFailure);
+  }
+}
+
+TEST(IoServiceTest, RetireBeforeTerminalKeepsRefusedPublishResolvable) {
+  Harness harness;
+  // publishTerminal refuses with a typed error: pump() mints the
+  // rejection into state.outcome, but that cell is NOT linked from the
+  // request -- outcomeFor still cannot resolve it after the state is
+  // gone, so retireAfterTerminal must retain the state the same way.
+  harness.cells.publishTerminalRefusal =
+      IoErrorInfo{IoErrorCode::InvalidRequest, 9};
+  const auto request = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  harness.service.retireRequest(request);
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+
+  const auto poll = harness.service.poll(request);
+  ASSERT_TRUE(poll.outcome.has_value());
+  // state.outcome is current, so poll/await report the same typed
+  // InvalidRequest{9} refusal cell the terminal pass minted -- a late
+  // await is Ready with that outcome, not a fresh Stale mint.
+  const auto awaiting = harness.service.await(request, {OwnerCell{22}, 1, 31});
+  ASSERT_TRUE(std::holds_alternative<Ready>(awaiting.value));
+  const auto *ready = std::get_if<Ready>(&awaiting.value);
+  ASSERT_NE(ready, nullptr);
+  EXPECT_EQ(ready->outcome, *poll.outcome);
+  const auto *failed = std::get_if<Failed>(&harness.cells.outcomes.front());
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::InvalidRequest);
+  EXPECT_EQ(failed->reason.stableDetail, 9U);
+}
+
+TEST(IoServiceTest, AwaitAfterRetireResolvesThePublishedOutcome) {
+  Harness harness;
+  const auto request = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+  const auto outcome = harness.service.poll(request).outcome;
+  ASSERT_TRUE(outcome.has_value());
+
+  harness.service.retireRequest(request);
+  // The same arena-link fallback poll() keeps: a late await reports the
+  // terminal outcome Ready rather than minting a Stale refusal for
+  // work that actually completed.
+  const auto late = harness.service.await(request, {OwnerCell{22}, 1, 31});
+  ASSERT_TRUE(std::holds_alternative<Ready>(late.value));
+  const auto *ready = std::get_if<Ready>(&late.value);
+  ASSERT_NE(ready, nullptr);
+  EXPECT_EQ(ready->outcome, *outcome);
+}
+
 } // namespace

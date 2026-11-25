@@ -351,6 +351,22 @@ void IoService::eraseRequestState(const std::uint64_t tokenKey) {
   // through poll(), which finds the outcome via requestByCell_ or the
   // arena link. Same rule retireRequest() keeps.
   if (!found->second.waiters.empty()) return;
+  // The outcome must stay resolvable once the state is gone: poll() and
+  // await() fall back to cells_.outcomeFor(request), which reads only
+  // the arena request->outcome link. A terminal that never linked one --
+  // publishTerminal threw (the durable terminalRecord dies with the
+  // state) or refused (state.outcome holds an unlinked Rejected cell) --
+  // would strand every late poll/await and parked IoHost waiter, so the
+  // state stays until a materialization produces a linked outcome or
+  // the service stops. A throwing store cannot prove resolvability
+  // either; keep the state rather than risk the same strand.
+  std::optional<OutcomeCell> linked;
+  try {
+    linked = cells_.outcomeFor(found->second.cell);
+  } catch (...) {
+    return;
+  }
+  if (!linked) return;
   requestByCell_.erase(
       std::pair{found->second.cell.cell, found->second.cell.incarnation});
   requests_.erase(found);
@@ -374,9 +390,12 @@ auto IoService::ensureTerminalOutcome(RequestState &state)
       state.outcome = *materialized;
     } else {
       // Known M1 gap: a persistent publishTerminal refusal re-mints a
-      // refusal cell on every poll/await instead of caching one. Caching
-      // it in state.outcome would suppress the real terminal in pump(),
-      // so the re-mint stays until request retirement bounds the growth.
+      // refusal cell on every poll/await that reaches this path --
+      // state.outcome stays unset so pump()'s terminal pass can still
+      // retry the real publish, which means request retirement does NOT
+      // bound the growth: each retry mints one runtime-only cell until
+      // publishTerminal succeeds, the request state drops, or the
+      // service stops.
       return cells_.mintRefusal(materialized.error());
     }
   } catch (...) {
@@ -430,6 +449,12 @@ auto IoService::await(const RequestCell request,
   const auto found =
       requestByCell_.find(std::pair{request.cell, request.incarnation});
   if (found == requestByCell_.end()) {
+    // A retired request keeps its arena outcome link (poll()'s rule):
+    // report the terminal outcome Ready rather than minting a Stale
+    // refusal for work that actually completed.
+    if (const auto outcome = cells_.outcomeFor(request)) {
+      return {Ready{*outcome}};
+    }
     return {Ready{cells_.mintRefusal({IoErrorCode::Stale, 0})}};
   }
   auto state = requests_.find(found->second);
@@ -555,8 +580,11 @@ void IoService::retireRequest(const RequestCell request) {
     return;
   }
   if (!found->second.waiters.empty()) return;
-  requestByCell_.erase(indexed);
-  requests_.erase(found);
+  // Same gate the terminal pass and poll/await keep: state.outcome may
+  // be an unlinked refusal cell, so only a request whose arena link
+  // resolves may leave the indexes -- erasing here would strand the
+  // late poll/await exactly like the other three call sites.
+  eraseRequestState(found->first);
 }
 
 auto IoService::closeEndpoint(const EndpointCell endpoint, const CloseMode mode)

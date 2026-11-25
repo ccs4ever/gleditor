@@ -154,8 +154,13 @@ private:
   void startLaneHead(const LaneKey &);
   void queueTerminal(RequestState &);
   /// Drop a request from both indexes once its terminal outcome is
-  /// settled. Shared by pump()'s terminal pass and the poll/await paths
-  /// that materialize an outcome the pass could not publish; refuses
+  /// settled AND still resolvable without the state: poll()/await() fall
+  /// back to cells_.outcomeFor(request), which reads only the arena
+  /// request->outcome link, so a terminal that never linked one (a
+  /// publishTerminal throw or refusal) keeps the state rather than
+  /// stranding late polls, awaits and parked waiters. Shared by
+  /// pump()'s terminal pass, the poll/await paths that materialize an
+  /// outcome the pass could not publish, and retireRequest(); refuses
   /// while waiters are still registered, mirroring retireRequest().
   void eraseRequestState(std::uint64_t tokenKey);
   [[nodiscard]] auto ensureTerminalOutcome(RequestState &)
