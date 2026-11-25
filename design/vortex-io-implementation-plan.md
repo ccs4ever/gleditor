@@ -98,9 +98,28 @@ authority.
 | Capture          | selected source intervals, map reservation, append request occurrence, phase                                   | Journal sequence and recovery index                         |
 
 `OpenedEndpoint` contains only owner-created endpoint/capability cell references.
-`CaptureAppendReceipt`, `ProbeValue`, and `CommitReceipt` contain typed managed fields. Logical cell
-links and tags are canonical; native indices can be discarded and rebuilt from those fields plus
-validated incarnations.
+`CaptureAppendReceipt`, `ProbeValue`, and `CommitReceipt` contain typed managed fields.
+
+Reconciliation with the M1–M6 code (review r1, finding zigzag 4): the table's "authoritative graph
+fields" column is the target schema, and the code does not meet it. What the graph holds today is
+the topology and the tags: endpoint, capability and request identity, the endpoint queue rank, each
+request's endpoint and capability clone views, the outcome link, payload/source/progress/range
+occurrences, a capture's request and receipt links, and the closed tag of each cell. What lives only
+in native tables is a request's operation, frozen arguments, state and deadline (`IoService`), an
+endpoint's kind, generation and state (`IoService`/adapters), a capability's rights, limits and
+consistency masks (the open authorizer and the request decoder), and a capture's source intervals,
+map reservation and phase (`PendingCapture`, `translations_`, the journal). The text fields cells do
+carry (`rights`, `consistency`, progress counts, a receipt's `captureId`/`appendDigest`) are
+non-authoritative mirrors for inspection that nothing parses back. The price of the departure is
+deliberate: a request's arguments are a frozen, cell-free `CellRequest` because workers must never
+see cells (§1.1); a capability is authority that "is never reconstructed from fields" (the table's
+own sidecar column); and recoverable capture state is the fsynced journal, not the arena, which
+`ArenaManifold` keeps runtime-only and refuses to persist. So the sentence that logical links and
+tags are canonical and native indices can be rebuilt from them is **withdrawn** for requests,
+endpoints, capabilities and captures: the cells are an inspectable, owner-thread view of native
+state, and a lost service is recovered only through the journals. Making request state and
+capability limits graph-authoritative is a milestone-sized change (scalar cells on `d.io.state` and
+`d.io.lease`, a decoder that reads them back) and is not done.
 
 `BufferPolicy` is a typed request field: `Raw{maxBytes, readAhead=0}`, `Fixed{length}`,
 `Line{delimiter, maxBytes, maxReadAhead, OversizePolicy, EncodingPolicy}`,
@@ -765,7 +784,7 @@ expand this work.
 | M3 — profiles/actor                   | Generic profile gate, VAgent intent staging, durable journal, Evidence adapter preservation. Depends M1–M2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Crash injection around journal flush/dispatch/receipt/checkpoint; unknown refuses replay, no silent resend, actor completion is later message, full journal refuses before service admission.                                                                                                                                                                                                                           |
 | M4 — lenses/adapters                  | Registered IoAdapter staged source plan, stream/process/net, command mailbox, then DB/config/Git/log. Depends M2.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Source generation/conflict tests, ProjectionSession transaction semantics retained, Router/Union no duplicate submission, endpoint direction ordering.                                                                                                                                                                                                                                                                  |
 | M5 — file/media                       | ReadObservation, live/stable capability contracts, 64-bit range reads, bounded decoder/cache leases. Depends M1/M4.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Replacement/truncation/in-place mutation/external writer tests; offsets above 4 GiB; no path-only cache reuse; bounds and cancellation cleanup; unsupported atomicity refuses.                                                                                                                                                                                                                                          |
-| M6 — capture                          | Per-user overlap map, capture coordinator and v2 journal. Depends M0/M1/M5.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | \[0,10) then \[5,15) reuses overlap; discontiguous split; mismatched append request/outcome refuses publication; failures injected after each durable step; restart reconciles; no hash identity; orphan bytes handled explicitly.                                                                                                                                                                                      |
+| M6 — capture                          | Per-user overlap map, capture coordinator and v3 journal. Depends M0/M1/M5.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | \[0,10) then \[5,15) reuses overlap; discontiguous split; mismatched append request/outcome refuses publication; failures injected after each durable step; restart reconciles; no hash identity; orphan bytes handled explicitly.                                                                                                                                                                                      |
 | M7a — frontend common bridge features | Language-neutral pieces every frontend shares: managed `IoSubmissionValue` `Admitted`/`Refused` tagged-sum cell and its pattern accessors; generic `FrontendRunResult = Completed or Parked{FrontendToken} or Failed{FrontendDiagnostic}` carrier; `FrontendToken` (suspended activation, request cell and incarnation, waiter cell, continuation ID, optional position) as host state, never a language value; `IoHost` wakeup routing of a token to its owning runner; shared terminal-status gating for payload access (`Complete` exposes payload, `EndOfStream` none, `Partial`/`Failed`/`Cancelled`/`TimedOut` only when present); shared diagnostic-code registry for the frontend refusals in §10 and §14; Direct Vortex shared-host baseline conformance (Submit/Await cell protocol, runner `Parked` path); reusable conformance test harness every language milestone runs. Depends M2; adapter gates only via the M1 delayed fake backend. | Direct-host conformance suite passes, proving no frontend branches in Core/VM and no raw IDs in cells. Harness proves same-request Pending resume, refusal remains a value, terminal outcomes are not logical failure, and no raw `RequestId`/`WaiterId`/`ContinuationId` in language-visible values.                                                                                                                   |
 | M7-VQL                                | `EffectClause` `let $r := submit(...); match $r { admitted => await, refused => $err }` in script grammar only; `ExecutionBlock` result gains `Completed{rows}`/`Parked{scriptActivation, effectAction, requestCell}`; submit runs once per reached script action; row/query placement refused with `VQL_IO_QUERY_CONTEXT`. Depends M7a; real `read_bytes`/file endpoints need the M4/M5 gate, otherwise fake backend.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Script-action multiplicity (no per-row fanout), same-request Pending resume, terminal outcomes are script values never `QueryError`/empty rows, pure query clauses/projections, vquery/vqueryc CLI host I/O audited. Passes the M7a conformance harness. Gate: approved by a VQL expert reviewer and a Vortex expert reviewer; reports under `design/projects/vortex-io-implementation-review/m7-vql/`.                 |
 | M7-VPL                                | `R ← submit¨ Caps Specs`; `Out ← await¨ R` shape-preserving sums; `ExecutionResult` gains `Parked{activation, submissions, outcomes, nextPosition, requestCell, waiterCell}` separate from `ExecutionError`; one left-to-right waiter per activation; equal shapes required before submit; message/frame modes refused with `IO_UNSUPPORTED_MODE`. Depends M7a; real endpoints need the M4/M5 gate, otherwise fake backend.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Out-of-order completion with one left-to-right waiter, per-slot refusal passes through, shape mismatch refused before submit, same-request Pending resume, pure arithmetic, vpl/vplc CLI host I/O audited. Passes the M7a conformance harness. Gate: approved by a VPL expert reviewer and a Vortex expert reviewer; reports under `design/projects/vortex-io-implementation-review/m7-vpl/`.                           |
@@ -889,13 +908,15 @@ M6 implementation notes and deliberate deferrals:
   non-`Complete` outcome returns `Refused` with no journal record, cell or translation published.
 - Journal records are `Append` (intent, before submission), `Appended` (span plus full translation
   intent, fsynced before the receipt cell is minted), `Committed` (after Structure publication and
-  the Store save), `Aborted` (with an uncertain flag) and, from version 2, `Reconciled` (the owner's
-  promote-or-release decision for a pinned capture; version 1 had no such record and is refused).
-  `recover()` rebuilds translations from `Appended`/`Committed`, pins the source intervals of open
-  intents and uncertain aborts (`NeedsReconciliation`, overlapping prepare then refuses with
-  `Conflict`), and reports `orphanBytes` as the sum of append lengths that may have landed without a
-  proven commit. It never resubmits. Corruption, bad signature/version and sequence gaps are
-  `PersistenceRefusal` naming the 1-based record; a torn tail is cut by the constructor.
+  the Store save), `Aborted` (with an uncertain flag), from version 2 `Reconciled` (the owner's
+  promote-or-release decision for a pinned capture) and, from version 3, `Identity`, always the
+  first record: the journal's own random 64-bit identity plus the highest `CaptureId` minted so far.
+  Versions 1 and 2 are refused by number. `recover()` rebuilds translations from
+  `Appended`/`Committed` (durable origins only; see the review-r1 bullets below), pins the source
+  intervals of open intents and uncertain aborts (`NeedsReconciliation`, overlapping prepare then
+  refuses with `Conflict`), and reports `orphanBytes` as the sum of append lengths that may have
+  landed without a proven commit. It never resubmits. Corruption, bad signature/version and sequence
+  gaps are `PersistenceRefusal` naming the 1-based record; a torn tail is cut by the constructor.
 - Journal frame sizes are exported from `capture_journal.hpp` (`kCaptureJournal*Bytes`,
   `captureJournalFramedBytes`), and the coordinator derives its reservations from them; nothing
   hardcodes the format. Fallback bounds (`maxIntervals`, `maxAppendBytes`, `maxPieces`,
@@ -975,6 +996,47 @@ M6 implementation notes and deliberate deferrals:
   real spools in a temp directory: `sync()` is what moves bytes into the segment file,
   `highWaterBytes()` is the size after reopen, and an end-to-end capture runs through the real
   permascroll and Store save/reload.
+- Review r1 (fixer B) corrections to the notes above:
+  - A waiter's `d.io.request` link and the capture's append-request link both reach the request
+    through a clone view on the request's `d.io.clone` rank (`attachClonedField`, the one
+    implementation every field uses), so the request is never a fan-in target and an await cannot
+    evict the capture's link. A retired request is taken out of its endpoint's queue and clone ranks
+    (`IoCellStore::reapRequest`, called when the service drops the request's state), so the ranks
+    every submit walks are as long as the live requests, not every request ever made.
+  - A `CaptureId` is unique only within one journal. The journal's `Identity` record names it, a
+    Store receipt carries the identity as a scalar on its `d.io.provenance` rank, and publication
+    idempotence is keyed by `(journalId, CaptureId)`; the same key naming different pieces is a
+    `PersistenceRefusal`, not a skipped publish. A receipt or provenance chain the reader cannot
+    parse is a `PersistenceRefusal` too, never a default of zero.
+  - Only a durable origin has an identity that outlives its process. `Transient`, `Scratch` and
+    `Proxy` ids restart with every process, so recovery validates their records, reports their
+    orphan bytes and publishes their spans, but neither rebuilds their translations nor pins their
+    intervals: a later session's unrelated source 1 must not inherit the earlier one's bytes or its
+    pin. Their Store provenance records the process-local numbers as diagnostics, together with the
+    journal identity; it is not a locator, and no locator path from a `PayloadRange` to a source
+    exists yet.
+  - `translations_` is an in-process dedup cache over journal-proven slots, not a second source of
+    truth: the Store's receipt and range ranks are the published fact, the journal is what rebuilds
+    the cache, and a lost cache costs a repeated append, never a wrong reference.
+  - Nothing is reaped by hand. Before a map or journal bound refuses, the coordinator forgets
+    committed translations of origins nothing can read any more (`PayloadResolver::sourceReachable`)
+    and rewrites the journal (`CaptureJournal::compact`, atomic temp file, fsync, rename, directory
+    sync) without the whole records of captures that are resolved and published, keeping what is
+    unresolved (live, pinned, awaiting publication) and what survives a restart (a durable-origin
+    capture). The `Identity` record carries the id floor, so ids are never reused. A long run past
+    the old ceilings is the test `CaptureStateIsReapedSoALongRunPastTheOldCeilingsWorks`. A
+    durable-origin capture's records are the one thing never retired, and they stay inside the
+    journal bound, which refuses explicitly.
+  - Zero is no longer "unbounded": `CaptureJournal`, `CaptureCoordinator` and
+    `BackendBudget::maxBytes` take `std::optional`, and 0 holds nothing. A zero-extended crash tail
+    is cut like any other tear (both journals share the scan).
+  - **Deviation from §14, not fixed:** `commit()` runs the permascroll `sync()`, two journal fsyncs
+    and the whole-Store `Store::save` on the owner thread, and `appendRequest()` journals its intent
+    with an fsync there too. §14's "any path that blocks the evaluation/UI thread" is therefore
+    broken by the capture commit. The journal and sink steps can move to a worker adapter with an
+    owner-side continuation without touching the crash order; `Store::save` cannot, because it reads
+    the whole Store the owner mutates. Moving it needs a snapshot or incremental save in
+    `store.hpp`, a core change recorded as proposal P3 in the round-1 disposition.
 - Remaining, deliberately: moving the `capture_defaults` bounds into `system://settings` (M8); there
   is no UI or keymap command invoking `reconcile` yet (it is an owner API); an ambiguous journal
   order is reconcilable only by the same promote/release decisions, with no tool that explains why
