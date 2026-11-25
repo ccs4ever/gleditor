@@ -64,6 +64,9 @@ auto transact(ArenaManifold &arena, Body &&body) -> decltype(body()) {
       return result;
     }
     if (!arena.discard(mark)) {
+      // A refused discard leaves the mark outstanding; release it best-effort
+      // so it cannot wedge a later release().
+      static_cast<void>(arena.release(mark));
       return std::unexpected{IoCellError::ArenaRefused};
     }
     return result;

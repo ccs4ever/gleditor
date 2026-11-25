@@ -50,6 +50,8 @@ public:
       -> std::expected<OutcomeCell, IoErrorInfo> override;
   [[nodiscard]] auto isOutcomeCurrent(OutcomeCell outcome) const noexcept
       -> bool override;
+  [[nodiscard]] auto outcomeFor(const RequestCell request)
+      -> std::optional<OutcomeCell> override;
   auto mintOpenedEndpoint(const OpenSpec &spec)
       -> std::expected<OpenedEndpoint, IoErrorInfo> override;
   auto mintWaiter(RequestCell request, OwnerWaiterRegistration registration)

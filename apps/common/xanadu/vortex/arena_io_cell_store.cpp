@@ -200,8 +200,7 @@ auto addPayload(ArenaManifold &arena, const IoCellSchema &schema,
 
   const auto rangeRecord      = arena.makeCell("payload range");
   const auto rangeIncarnation = arena.incarnationOf(rangeRecord);
-  if (!rangeIncarnation || !arena.markRuntimeOnly(rangeRecord) ||
-      !arena.markRuntimeOnly(rangeRecord)) {
+  if (!rangeIncarnation || !arena.markRuntimeOnly(rangeRecord)) {
     return false;
   }
   const auto rangeOccurrence = arena.makeCell("payload range metadata");
@@ -416,10 +415,43 @@ auto ArenaIoCellStore::mintRequest(const CellRequest &request)
   return graph->request;
 }
 
-auto ArenaIoCellStore::mintRefusal(const IoErrorInfo) -> OutcomeCell {
+auto ArenaIoCellStore::mintRefusal(const IoErrorInfo error) -> OutcomeCell {
+  // §3.2: a Rejected outcome carries the IoErrorInfo that refused it, so
+  // BudgetExceeded and Unsupported refusals stay distinguishable to readers.
+  const auto mark = arena_.mark();
   const auto outcome =
       makeOutcomeCell(arena_, schema_, std::nullopt, IoOutcomeTag::Rejected);
-  return outcome ? *outcome : OutcomeCell{};
+  if (!outcome ||
+      !appendField(arena_, outcome->cell, schema_.dim(IoDimension::Occurrence),
+                   schema_.dim(IoDimension::State), "errorCode",
+                   toString(error.code)) ||
+      !appendField(arena_, outcome->cell, schema_.dim(IoDimension::Occurrence),
+                   schema_.dim(IoDimension::State), "stableDetail",
+                   number(error.stableDetail))) {
+    static_cast<void>(arena_.release(mark));
+    return {};
+  }
+  if (!arena_.discard(mark)) {
+    static_cast<void>(arena_.release(mark));
+    return {};
+  }
+  return *outcome;
+}
+
+auto ArenaIoCellStore::outcomeFor(const RequestCell request)
+    -> std::optional<OutcomeCell> {
+  const auto requestTag = ioCellTag(arena_, request.cell, request.incarnation);
+  if (!requestTag || *requestTag != IoCellTag::Request) return std::nullopt;
+  // makeOutcomeCell links request --Outcome--> outcome cell directly; the
+  // link survives retireRequest because it lives in the arena graph.
+  const auto at = arena_.linked(request.cell, schema_.dim(IoDimension::Outcome),
+                                DimVector::POS);
+  if (!at) return std::nullopt;
+  const auto incarnation = arena_.incarnationOf(*at);
+  if (!incarnation) return std::nullopt;
+  const auto outcomeTag = ioCellTag(arena_, *at, *incarnation);
+  if (!outcomeTag || *outcomeTag != IoCellTag::Outcome) return std::nullopt;
+  return OutcomeCell{.cell = *at, .incarnation = *incarnation};
 }
 
 auto ArenaIoCellStore::publishTerminal(const RequestCell request,
@@ -454,6 +486,7 @@ auto ArenaIoCellStore::publishTerminal(const RequestCell request,
     return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 0}};
   }
   if (!arena_.discard(mark)) {
+    static_cast<void>(arena_.release(mark));
     return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 1}};
   }
   return *cell;
@@ -498,6 +531,7 @@ auto ArenaIoCellStore::mintOpenedEndpoint(const OpenSpec &spec)
     return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 3}};
   }
   if (!arena_.discard(mark)) {
+    static_cast<void>(arena_.release(mark));
     return std::unexpected{IoErrorInfo{IoErrorCode::BackendFailure, 2}};
   }
   return OpenedEndpoint{*endpoint, *capability};
@@ -510,8 +544,14 @@ auto ArenaIoCellStore::mintWaiter(const RequestCell request,
       !arena_.matches(registration.cursor, registration.cursorIncarnation)) {
     return {};
   }
-  auto waiter = makeWaiterCell(arena_);
-  if (!waiter) return {};
+  // One choice point for the whole waiter graph: a mid-mint refusal must not
+  // orphan the request occurrence or field cells it already made.
+  const auto mark = arena_.mark();
+  auto waiter     = makeWaiterCell(arena_);
+  if (!waiter) {
+    static_cast<void>(arena_.release(mark));
+    return {};
+  }
   const auto requestOccurrence = arena_.makeCell("io waiter request");
   const auto requestOccurrenceIncarnation =
       arena_.incarnationOf(requestOccurrence);
@@ -520,6 +560,7 @@ auto ArenaIoCellStore::mintWaiter(const RequestCell request,
       !arena_.markRuntimeOnly(requestOccurrence) ||
       !arena_.link(waiter->cell, dim, DimVector::POS, requestOccurrence) ||
       !arena_.link(requestOccurrence, dim, DimVector::POS, request.cell)) {
+    static_cast<void>(arena_.release(mark));
     return {};
   }
   const auto values = std::array{
@@ -531,8 +572,13 @@ auto ArenaIoCellStore::mintWaiter(const RequestCell request,
   for (const auto &[label, value] : values) {
     if (!appendField(arena_, waiter->cell, schema_.dim(IoDimension::Occurrence),
                      schema_.dim(IoDimension::State), label, value)) {
+      static_cast<void>(arena_.release(mark));
       return {};
     }
+  }
+  if (!arena_.discard(mark)) {
+    static_cast<void>(arena_.release(mark));
+    return {};
   }
   return *waiter;
 }
