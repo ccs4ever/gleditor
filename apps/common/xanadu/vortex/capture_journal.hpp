@@ -21,7 +21,7 @@
 #include "common/xanadu/vortex/payload_resolver.hpp"
 
 // design/vortex-io-implementation-plan.md §8.2, capture journal format:
-// `capture.journal`, signature \x89XUDCAP, version 3, append-only
+// `capture.journal`, signature \x89XUDCAP, version 4, append-only
 // length-delimited records carrying record kind, sequence, CaptureId,
 // source interval, permascroll span, append digest and checksum. Records
 // are metadata only -- never transient bytes. A journal entry is fsynced
@@ -33,9 +33,15 @@
 
 namespace xanadu::vortex {
 
-inline constexpr char kCaptureJournalSignature[8]     = {'\x89', 'X', 'U', 'D',
-                                                         'C',    'A', 'P', '\n'};
-inline constexpr std::uint32_t kCaptureJournalVersion = 3;
+inline constexpr char kCaptureJournalSignature[8] = {'\x89', 'X', 'U', 'D',
+                                                     'C',    'A', 'P', '\n'};
+/// Version 4: the Append intent is written by the append's own worker turn,
+/// not by the owner before submission. An admission refusal therefore leaves
+/// no record at all, and an Aborted record may stand with no intent before it
+/// (nothing landed: bytes only ever follow a durable intent). Version 3
+/// journals, whose recovery read that shape as ambiguous, are refused by
+/// number.
+inline constexpr std::uint32_t kCaptureJournalVersion = 4;
 
 // On-disk frame sizes, exported so reservations are computed from the format
 // and cannot drift from it. Every record is u32 bodyLen + body.
@@ -65,10 +71,11 @@ inline constexpr std::size_t kCaptureJournalIdentityBytes = 8;
 using CaptureId = std::uint64_t;
 
 enum class CaptureJournalRecordKind : std::uint8_t {
-  /// Append intent: the CaptureAppend request was admitted and the
-  /// translation intent (source intervals + append digest) is durable.
-  /// Written before the append is submitted so a crash can never leave
-  /// permascroll bytes with no journal trace.
+  /// Append intent: the translation intent (source intervals + append
+  /// digest) is durable. Written by the append's worker turn, fsynced, and
+  /// only then does that turn hand a byte to the sink, so a crash can never
+  /// leave permascroll bytes with no journal trace. The owner never writes it:
+  /// a request refused at admission has no intent to close.
   Append,
   /// Append completion: the terminal append outcome was a validated
   /// success and the allocated permascroll span plus the full translation
@@ -77,10 +84,14 @@ enum class CaptureJournalRecordKind : std::uint8_t {
   /// Completion: Structure publication finished; the capture's
   /// translations are final. Follows publication.
   Committed,
-  /// The append resolved without publication: admission was refused
-  /// (certain: no bytes can exist) or the terminal outcome was not a
-  /// successful Complete (uncertain flag reports whether bytes may have
-  /// landed anyway).
+  /// The append resolved without publication: the terminal outcome was not
+  /// a successful Complete (uncertain flag reports whether bytes may have
+  /// landed anyway), or the owner gave the request up after admitting it. It
+  /// may stand with no intent before it, when the worker never wrote one
+  /// (cancelled before its turn, or its intent write refused); the bytes
+  /// follow a durable intent, so nothing landed. An intent written after the
+  /// Aborted (the worker raced the owner) opens a new attempt that recovery
+  /// pins.
   Aborted,
   /// The owner's explicit decision about a capture whose bytes could not be
   /// proven (plan §8.2 "explicit reconciliation"): either Promoted -- the

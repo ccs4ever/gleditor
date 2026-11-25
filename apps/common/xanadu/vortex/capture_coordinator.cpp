@@ -475,6 +475,17 @@ void CaptureAppendAdapter::execute(const BackendCommand &command,
                                     {},
                                     IoProgress{.phase = IoPhase::Terminal}},
                              {}};
+    } else if (const auto intent =
+                   spec->writeIntent
+                       ? spec->writeIntent()
+                       : std::expected<std::uint64_t, IoErrorInfo>{0};
+               !intent) {
+      // The intent could not be made durable, so nothing was appended and
+      // nothing may be: the key is deliberately NOT marked executed, which
+      // is what lets the owner's Aborted be certain.
+      result = BackendResult{
+          Failed{intent.error(), {}, IoProgress{.phase = IoPhase::Terminal}},
+          {}};
     } else {
       {
         const std::lock_guard lock(mutex_);
@@ -1402,9 +1413,9 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
   }
   auto &pending             = it->second;
   const CaptureId captureId = pending.captureId;
-  // A retry after a refused admission has spent part of its hold on the
-  // earlier Append/Aborted pair; refuse here, before any append, when the
-  // budget cannot cover another attempt.
+  // A retry after a refused attempt may have spent part of its hold on the
+  // earlier Append and Aborted records; refuse here, before any append, when
+  // the budget cannot cover another attempt.
   if (const auto held = topUpHold(pending); !held) {
     return submitRefusal(held.error());
   }
@@ -1423,9 +1434,36 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
   }
   const auto specKey = static_cast<std::uint32_t>(specCell);
 
+  // The append intent is durable BEFORE the sink sees a byte: a crash can
+  // then never leave permascroll bytes with no journal trace. The worker's own
+  // turn writes and fsyncs it, ahead of the append, so the owner never waits
+  // on that fsync; the owner has nothing to write here, and a refusal below
+  // leaves no record to close.
+  CaptureJournalRecord intent;
+  intent.appendDigest = pending.appendDigest;
+  intent.appendLength = pending.appendLength;
+  intent.intervals    = journalIntervals(pending.pieces);
+  const auto writeIntent =
+      [this, captureId, intent = std::move(intent),
+       crash = crashPoints_]() -> std::expected<std::uint64_t, IoErrorInfo> {
+    auto stamped = journal_.appendRecord(CaptureJournalRecordKind::Append,
+                                         captureId, intent, crash);
+    if (!stamped) {
+      GLEDITOR_LOG_WARN(kLog,
+                        "capture {} journal Append intent refused: code {} "
+                        "detail {}",
+                        captureId, toString(stamped.error().code),
+                        stamped.error().stableDetail);
+      return std::unexpected(stamped.error());
+    }
+    return stamped->sequence;
+  };
+
   // Stage the frozen bytes under the spec cell's ref: the staging key IS
   // the request specification the decoder will echo back.
-  CaptureAppendSpec spec{.bytes = pending.appendBytes, .captureId = captureId};
+  CaptureAppendSpec spec{.bytes       = pending.appendBytes,
+                         .captureId   = captureId,
+                         .writeIntent = writeIntent};
   if (const auto staged = adapter_.stageAt(specKey, std::move(spec)); !staged) {
     return submitRefusal(staged.error());
   }
@@ -1435,33 +1473,15 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
   pending.spec =
       PendingCapture::SpecLink{.cell = specCell, .incarnation = *specInc};
 
-  // The append intent is durable BEFORE the request is submitted: a crash
-  // can then never leave permascroll bytes with no journal trace.
-  CaptureJournalRecord intent;
-  intent.appendDigest = pending.appendDigest;
-  intent.appendLength = pending.appendLength;
-  intent.intervals    = journalIntervals(pending.pieces);
-  auto stamped =
-      appendJournal(pending, CaptureJournalRecordKind::Append, intent);
-  if (!stamped) {
-    adapter_.abandon(specKey);
-    pending.spec.reset();
-    return submitRefusal(stamped.error());
-  }
-
   auto admitted = service_.submit(*capability, specCell);
   if (std::holds_alternative<Refused>(admitted.value)) {
-    // Admission refusal is certain: the request never ran, so no append
-    // bytes can exist. The capture stays Prepared and may retry. The
-    // staged entry is dropped here too: a freezeRequest-level refusal
+    // Admission refusal is certain: the request never ran, so no worker
+    // turn wrote an intent and no append bytes can exist. There is nothing
+    // in the journal to close. The capture stays Prepared and may retry.
+    // The staged entry is dropped here too: a freezeRequest-level refusal
     // never reaches the service's abandonStaged path.
     adapter_.abandon(specKey);
     pending.spec.reset();
-    // Failure is logged by appendJournal; recovery reads a missing Aborted
-    // as an open intent and pins, which is the safe direction.
-    static_cast<void>(
-        appendJournal(pending, CaptureJournalRecordKind::Aborted,
-                      abortPayload(IoOutcomeTag::Rejected, false)));
     return CaptureAppend{std::move(admitted)};
   }
   const auto &request = std::get<Admitted>(admitted.value).request;
@@ -1480,7 +1500,8 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
   if (!linked) {
     // The request is already admitted and may execute: cancel best
     // effort, but the append outcome is unknowable, so the abort is
-    // uncertain and recovery will pin the intervals.
+    // uncertain. The worker may yet write its intent after this record;
+    // recovery reads either order as pinned intervals.
     static_cast<void>(service_.cancelRequest(request));
     static_cast<void>(
         appendJournal(pending, CaptureJournalRecordKind::Aborted,
@@ -1571,6 +1592,14 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
     return refuse({IoErrorCode::BackendFailure, 4});
   }
 
+  // A Complete append means its worker turn wrote the intent first, so the
+  // bytes that record occupies are no longer a promise but a fact. The owner
+  // gives the hold back here because only the owner touches the hold.
+  if (!pending.intentHoldConsumed) {
+    consumeHold(pending, CaptureJournalRecordKind::Append,
+                pending.pieces.size());
+    pending.intentHoldConsumed = true;
+  }
   return advanceCommit(it, *receipt);
 }
 
@@ -2050,9 +2079,10 @@ auto CaptureCoordinator::recover()
 
   // Per-capture attempt state machine over the journal's record order.
   // Legitimate attempt shapes: Append then one of {Appended->Committed,
-  // Appended->(open), Aborted, (open)}; Aborted closes an attempt so a
-  // later Append starts a fresh one (the refused-admission retry path).
-  // Anything else is ambiguous and sticky.
+  // Appended->(open), Aborted, (open)}, or a bare Aborted (no intent was
+  // ever written: nothing landed); Aborted closes an attempt so a later
+  // Append starts a fresh one (the retry path). Anything else is ambiguous
+  // and sticky.
   enum class AttemptPhase : std::uint8_t {
     None,
     Intent,
@@ -2099,12 +2129,19 @@ auto CaptureCoordinator::recover()
       }
       break;
     case CaptureJournalRecordKind::Aborted:
-      // Aborted legitimately closes an open Intent only: the admission
-      // refusal and the non-Complete-outcome paths both run before any
-      // Appended record exists. After Appended the only legal close is
-      // Committed, so Aborted there -- or with no attempt at all -- is
-      // an anomaly.
-      if (attempt.phase != AttemptPhase::Intent) {
+      // Aborted closes an open Intent, and may also stand with none: the
+      // worker writes the intent, so a cancelled turn or a refused intent
+      // write leaves the owner an outcome to abort and no intent to close.
+      // Bytes only ever follow a durable intent, so with none open nothing
+      // landed, whatever the record's uncertain flag says. (An intent that
+      // lands after such an Aborted is a worker that raced the owner; it
+      // opens its own attempt and is pinned.) After Appended the only legal
+      // close is Committed, so Aborted there is an anomaly.
+      if (attempt.phase == AttemptPhase::None) {
+        attempt.phase = AttemptPhase::Aborted;
+      } else if (attempt.phase == AttemptPhase::Aborted) {
+        // A second abort closes nothing; what the first said still stands.
+      } else if (attempt.phase != AttemptPhase::Intent) {
         attempt.ambiguous = true;
       } else {
         attempt.phase            = AttemptPhase::Aborted;
@@ -2237,7 +2274,8 @@ auto CaptureCoordinator::recover()
         needsReconciliation(captureId, CaptureRecoveryReason::UncertainAbort,
                             *attempt.intent, true);
       } else {
-        // Certain abort (admission refusal): no bytes can exist.
+        // Certain abort (the worker never wrote an intent, or the attempt
+        // was refused before it appended): no bytes can exist.
         report.entries.push_back(CaptureRecoveryEntry{
             .capture = captureId, .state = CaptureRecoveryState::Reconciled});
       }

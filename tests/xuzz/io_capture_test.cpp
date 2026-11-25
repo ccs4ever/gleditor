@@ -720,6 +720,44 @@ TEST_F(IoCaptureTest, CommitBeforeOutcomeIsPublishedRefuses) {
 // -- crash injection
 // ------------------------------------------------------------
 
+TEST_F(IoCaptureTest, RestartBeforeTheWorkerTurnLeavesNoIntentToReconcile) {
+  RecordingSink sink;
+  PayloadRef origin;
+  {
+    auto world = boot(sink, journalPath_);
+    ASSERT_TRUE(world);
+    const auto sourceBytes = bytesOf("persistent source bytes");
+    auto registered = registerPinned(*world, durableRef(21), sourceBytes);
+    ASSERT_TRUE(registered.has_value());
+    origin = *registered;
+    const PayloadRange selection[]{rangeOf(origin, 0, 12)};
+    auto prepared = world->coordinator->prepare(selection);
+    ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
+    // Admitted and queued; the "crash" lands before the worker turn. The
+    // intent is the worker's to write, so there is none, and no bytes.
+    auto appended =
+        world->coordinator->appendRequest(std::get<Prepared>(prepared).capture);
+    ASSERT_TRUE(std::holds_alternative<Admitted>(appended.admission.value));
+    ASSERT_EQ(world->scheduler->queued(), 1U);
+    CaptureJournal journal(journalPath_, std::nullopt);
+    EXPECT_TRUE(journal.recover().records.empty());
+  }
+  EXPECT_TRUE(sink.bytes_.empty());
+
+  auto world = boot(sink, journalPath_);
+  ASSERT_TRUE(world);
+  auto registered = registerPinned(*world, durableRef(21),
+                                   bytesOf("persistent source bytes"));
+  ASSERT_TRUE(registered.has_value());
+  const auto report = world->coordinator->recover();
+  ASSERT_TRUE(report.has_value());
+  EXPECT_TRUE(report->entries.empty());
+  EXPECT_EQ(report->orphanBytes, 0U);
+  // Nothing is pinned: the same range captures at once.
+  const PayloadRange again[]{rangeOf(origin, 0, 12)};
+  EXPECT_TRUE(captureCommit(*world, again).has_value());
+}
+
 TEST_F(IoCaptureTest, RestartAfterAppendIntentPinsAndReportsOrphanBytes) {
   RecordingSink sink;
   PayloadRef origin;
@@ -738,13 +776,17 @@ TEST_F(IoCaptureTest, RestartAfterAppendIntentPinsAndReportsOrphanBytes) {
     ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
     capture = std::get<Prepared>(prepared).capture;
 
-    // The append intent is durable and the request is admitted, but the
-    // "crash" lands before the worker turn: no bytes can exist.
-    auto appended = world->coordinator->appendRequest(capture);
-    ASSERT_TRUE(std::holds_alternative<Admitted>(appended.admission.value));
-    ASSERT_EQ(world->scheduler->queued(), 1U);
+    // The worker turn writes the intent, and the process dies right after
+    // the fsync, before it hands a byte to the sink: the intent is durable
+    // and no bytes exist.
+    CaptureJournalCrashPoints points;
+    points.afterFlush = [] { throw std::runtime_error("die"); };
+    world->coordinator->setJournalCrashPoints(points);
+    const auto outcome = driveAppendToOutcome(*world, capture);
+    ASSERT_TRUE(outcome.has_value());
+    EXPECT_EQ(ioOutcomeTag(world->arena, *outcome), IoOutcomeTag::Failed);
     appendLength = 12;
-    // world destroyed here with the append still queued.
+    // world destroyed here: the owner never got to write an Aborted.
   }
   EXPECT_TRUE(sink.bytes_.empty());
 
@@ -1571,9 +1613,11 @@ TEST_F(IoCaptureTest, CertainAbortReleasesSlotsAndLeasesSoTheRangeCanRetry) {
   CaptureJournal journal(journalPath_, std::nullopt);
   const auto view = journal.recover();
   ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
-  ASSERT_GE(view.records.size(), 2U);
-  EXPECT_EQ(view.records[1].kind, CaptureJournalRecordKind::Aborted);
-  EXPECT_FALSE(view.records[1].abortUncertain);
+  // Cancelled before its worker turn, so there was never an intent: the
+  // Aborted stands alone, and recovery reads it as nothing having landed.
+  ASSERT_GE(view.records.size(), 1U);
+  EXPECT_EQ(view.records[0].kind, CaptureJournalRecordKind::Aborted);
+  EXPECT_FALSE(view.records[0].abortUncertain);
 }
 
 TEST_F(IoCaptureTest, UncertainAbortKeepsPinsInProcessButReleasesLeases) {
@@ -2584,8 +2628,10 @@ TEST_F(IoCaptureTest, CommitDoesNoBlockingIoOnTheOwnerThread) {
   world->coordinator->setJournalCrashPoints(noteJournalThreads(journalThreads));
   const auto prepared = prepareAndAppend(*world, rangeOf(*registered, 0, 8));
   ASSERT_TRUE(prepared.has_value());
-  // The Append intent is the one record the owner still writes (see
-  // appendRequest); everything after it must not be the owner's.
+  // The intent is written in the append's worker turn, which this harness
+  // runs on the calling thread; AppendRequestDoesNoJournalFsyncOnTheOwnerThread
+  // runs it on a thread of its own. Everything after it must not be the
+  // owner's.
   ASSERT_EQ(journalThreads->size(), 1U);
   EXPECT_EQ(journalThreads->front(), owner);
 
@@ -2630,6 +2676,220 @@ TEST_F(IoCaptureTest, CommitDoesNoBlockingIoOnTheOwnerThread) {
   ASSERT_EQ(journalThreads->size(), 3U);
   EXPECT_EQ((*journalThreads)[1], workerOne);
   EXPECT_EQ((*journalThreads)[2], workerTwo);
+}
+
+/// A sink over a recording one that notes, at the moment of each append,
+/// whether the journal already held an Append intent for the capture and on
+/// which thread the append ran.
+class IntentOrderingSink final : public CaptureByteSink {
+public:
+  IntentOrderingSink(CaptureByteSink &inner, std::filesystem::path journal)
+      : inner_(inner), journal_(std::move(journal)) {}
+  auto append(const std::span<const std::byte> bytes)
+      -> xanadu::PrimediaSpan override {
+    intentsSeenAtAppend.push_back(
+        countKind(journal_, CaptureJournalRecordKind::Append));
+    return inner_.append(bytes);
+  }
+  auto sync() -> bool override { return inner_.sync(); }
+  auto highWaterBytes() const -> std::uint64_t override {
+    return inner_.highWaterBytes();
+  }
+  auto read(const xanadu::PrimediaSpan &span) const
+      -> std::optional<std::vector<std::byte>> override {
+    return inner_.read(span);
+  }
+  std::vector<std::size_t> intentsSeenAtAppend;
+
+private:
+  CaptureByteSink &inner_;
+  std::filesystem::path journal_;
+};
+
+TEST_F(IoCaptureTest, AppendRequestDoesNoJournalFsyncOnTheOwnerThread) {
+  const auto owner = std::this_thread::get_id();
+  RecordingSink recording;
+  IntentOrderingSink sink(recording, journalPath_);
+  auto world      = boot(sink, journalPath_);
+  auto registered = registerPinned(*world, durableRef(82),
+                                   bytesOf("the intent fsync is a worker's"));
+  ASSERT_TRUE(registered.has_value());
+  auto journalThreads = std::make_shared<std::vector<std::thread::id>>();
+  world->coordinator->setJournalCrashPoints(noteJournalThreads(journalThreads));
+
+  const PayloadRange selection[]{rangeOf(*registered, 0, 8)};
+  const auto prepared = world->coordinator->prepare(selection);
+  ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
+  const auto capture    = std::get<Prepared>(prepared).capture;
+  const auto heldBefore = world->coordinator->journal().heldBytes();
+  const auto appended   = world->coordinator->appendRequest(capture);
+  ASSERT_TRUE(std::holds_alternative<Admitted>(appended.admission.value));
+  const auto request = std::get<Admitted>(appended.admission.value).request;
+
+  // Admitted and queued: the owner returned without an fsync, a record, or a
+  // byte, and the intent's budget is still promised.
+  EXPECT_TRUE(journalThreads->empty());
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Append), 0U);
+  EXPECT_TRUE(recording.bytes_.empty());
+  EXPECT_EQ(world->coordinator->journal().heldBytes(), heldBefore);
+
+  const auto worker = world->scheduler->runOnWorker();
+  ASSERT_NE(worker, owner);
+  ASSERT_EQ(journalThreads->size(), 1U);
+  EXPECT_EQ(journalThreads->front(), worker);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Append), 1U);
+  // The intent was durable when the sink saw its first byte.
+  EXPECT_EQ(sink.intentsSeenAtAppend, std::vector<std::size_t>{1U});
+
+  static_cast<void>(world->service->pump(8));
+  const auto outcome = world->service->poll(request).outcome;
+  ASSERT_TRUE(outcome.has_value());
+  const auto done = commitToEnd(*world, capture, *outcome);
+  EXPECT_TRUE(std::holds_alternative<Committed>(done));
+  // The commit gave the intent's bytes back; nothing is left promised.
+  EXPECT_EQ(world->coordinator->journal().heldBytes(), 0U);
+}
+
+TEST_F(IoCaptureTest, AnAdmissionRefusalWritesNoRecordAndTheCaptureRetries) {
+  RecordingSink sink;
+  auto world = boot(sink, journalPath_);
+  auto registered =
+      registerPinned(*world, durableRef(83), bytesOf("refused, then admitted"));
+  ASSERT_TRUE(registered.has_value());
+  const PayloadRange selection[]{rangeOf(*registered, 0, 8)};
+  const auto prepared = world->coordinator->prepare(selection);
+  ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
+  const auto capture = std::get<Prepared>(prepared).capture;
+  const auto held    = world->coordinator->journal().heldBytes();
+
+  // No worker turn ever runs, so no intent exists and none needs closing.
+  static_cast<void>(world->service->requestShutdown(ShutdownMode::Drain));
+  const auto refused = world->coordinator->appendRequest(capture);
+  EXPECT_TRUE(std::holds_alternative<Refused>(refused.admission.value));
+  EXPECT_TRUE(journalKinds(journalPath_).empty());
+  EXPECT_EQ(world->coordinator->journal().heldBytes(), held)
+      << "a refusal spends none of the capture's budget";
+  EXPECT_TRUE(sink.bytes_.empty());
+
+  // Restart: nothing to reconcile, nothing pinned.
+  auto restarted    = boot(sink, journalPath_);
+  const auto report = restarted->coordinator->recover();
+  ASSERT_TRUE(report.has_value());
+  EXPECT_TRUE(report->entries.empty());
+}
+
+TEST_F(IoCaptureTest, ARefusedIntentWriteAppendsNothingAndAbortsCertainly) {
+  RecordingSink sink;
+  PayloadRef origin;
+  {
+    auto world      = boot(sink, journalPath_);
+    auto registered = registerPinned(*world, durableRef(84),
+                                     bytesOf("the intent could not land"));
+    ASSERT_TRUE(registered.has_value());
+    origin = *registered;
+    // Death before the intent's fsync: the record is rolled back.
+    CaptureJournalCrashPoints points;
+    points.beforeFlush = [] { throw std::runtime_error("die"); };
+    world->coordinator->setJournalCrashPoints(points);
+    const PayloadRange selection[]{rangeOf(origin, 0, 8)};
+    const auto prepared = world->coordinator->prepare(selection);
+    ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
+    const auto capture = std::get<Prepared>(prepared).capture;
+    const auto outcome = driveAppendToOutcome(*world, capture);
+    ASSERT_TRUE(outcome.has_value());
+    EXPECT_EQ(ioOutcomeTag(world->arena, *outcome), IoOutcomeTag::Failed);
+    // The sink never saw a byte, which is what makes the abort certain.
+    EXPECT_TRUE(sink.bytes_.empty());
+    world->coordinator->setJournalCrashPoints({});
+    EXPECT_TRUE(std::holds_alternative<Refused>(
+        world->coordinator->commit(capture, *outcome)));
+    // An Aborted with no intent before it: certain, so the range is free.
+    const auto kinds = journalKinds(journalPath_);
+    ASSERT_EQ(kinds.size(), 1U);
+    EXPECT_EQ(kinds[0], CaptureJournalRecordKind::Aborted);
+    EXPECT_TRUE(captureCommit(*world, selection).has_value());
+  }
+
+  // And a restart over that journal pins nothing for the aborted attempt.
+  auto restarted    = boot(sink, journalPath_);
+  const auto report = restarted->coordinator->recover();
+  ASSERT_TRUE(report.has_value());
+  EXPECT_EQ(report->orphanBytes, 0U);
+  for (const auto &entry : report->entries) {
+    EXPECT_EQ(entry.state, CaptureRecoveryState::Reconciled);
+  }
+}
+
+TEST_F(IoCaptureTest, AnAbortedWithNoIntentIsACertainAbortNotAnAmbiguity) {
+  RecordingSink sink;
+  {
+    CaptureJournal journal(journalPath_, std::nullopt);
+    CaptureJournalRecord aborted;
+    aborted.abortUncertain = true;
+    ASSERT_TRUE(
+        journal.appendRecord(CaptureJournalRecordKind::Aborted, 1, aborted)
+            .has_value());
+  }
+  auto world  = boot(sink, journalPath_);
+  auto report = world->coordinator->recover();
+  ASSERT_TRUE(report.has_value());
+  ASSERT_EQ(report->entries.size(), 1U);
+  EXPECT_EQ(report->entries[0].state, CaptureRecoveryState::Reconciled);
+  EXPECT_EQ(report->orphanBytes, 0U);
+}
+
+TEST_F(IoCaptureTest, AnIntentThatLandsAfterTheOwnersAbortedIsAnOpenAttempt) {
+  // The owner gave an admitted request up and wrote an uncertain Aborted
+  // while its worker turn was still to come; the turn then wrote its intent
+  // and may have appended. Either order pins, never reads as nothing landed.
+  const auto origin = durableRef(85);
+  RecordingSink sink;
+  sink.bytes_.resize(8);
+  {
+    CaptureJournal journal(journalPath_, std::nullopt);
+    CaptureJournalRecord aborted;
+    aborted.abortUncertain = true;
+    ASSERT_TRUE(
+        journal.appendRecord(CaptureJournalRecordKind::Aborted, 1, aborted)
+            .has_value());
+    CaptureJournalRecord intent;
+    intent.appendLength = 8;
+    intent.intervals    = {intervalOf(origin, 0, 8, 0)};
+    ASSERT_TRUE(
+        journal.appendRecord(CaptureJournalRecordKind::Append, 1, intent)
+            .has_value());
+  }
+  auto world  = boot(sink, journalPath_);
+  auto report = world->coordinator->recover();
+  ASSERT_TRUE(report.has_value());
+  ASSERT_EQ(report->entries.size(), 1U);
+  EXPECT_EQ(report->entries[0].state,
+            CaptureRecoveryState::NeedsReconciliation);
+  EXPECT_EQ(report->entries[0].reason, CaptureRecoveryReason::OpenIntent);
+  EXPECT_EQ(report->orphanBytes, std::uint64_t{8});
+}
+
+TEST_F(IoCaptureTest, AVersionThreeJournalIsRefusedByNumber) {
+  EXPECT_EQ(kCaptureJournalVersion, 4U);
+  {
+    CaptureJournal journal(journalPath_, std::nullopt);
+    CaptureJournalRecord intent;
+    intent.appendLength = 1;
+    ASSERT_TRUE(
+        journal.appendRecord(CaptureJournalRecordKind::Append, 1, intent)
+            .has_value());
+  }
+  {
+    std::fstream file(journalPath_,
+                      std::ios::in | std::ios::out | std::ios::binary);
+    file.seekp(sizeof(kCaptureJournalSignature));
+    const std::uint32_t three = 3;
+    file.write(reinterpret_cast<const char *>(&three), sizeof(three));
+  }
+  CaptureJournal reopened(journalPath_, std::nullopt);
+  const auto view = reopened.recover();
+  EXPECT_EQ(view.status, CaptureJournalStatus::Corrupt);
+  EXPECT_TRUE(view.records.empty());
 }
 
 TEST_F(IoCaptureTest, AStoreEditedWhileItsSnapshotIsInFlightIsNotTornIntoIt) {
@@ -2876,8 +3136,6 @@ TEST_F(IoCaptureTest, ARetiredCapturesJournalHoldOutlivesItsRunningStep) {
   const auto mark = world->arena.mark();
   const auto one  = prepareAndAppend(*world, rangeOf(*registered, 0, 13));
   ASSERT_TRUE(one.has_value());
-  const auto held = world->coordinator->journal().heldBytes();
-  ASSERT_GT(held, 0U);
   // What a capture of one piece holds at prepare: every record it may write.
   const auto worstCase =
       captureJournalFramedBytes(CaptureJournalRecordKind::Append, 1) +
@@ -2887,6 +3145,10 @@ TEST_F(IoCaptureTest, ARetiredCapturesJournalHoldOutlivesItsRunningStep) {
 
   auto first = world->coordinator->commit(one->capture, one->outcome);
   ASSERT_TRUE(std::holds_alternative<CommitPending>(first));
+  // The commit gave back the Append intent's bytes, which the worker's append
+  // turn had already written.
+  const auto held = world->coordinator->journal().heldBytes();
+  ASSERT_GT(held, 0U);
   std::thread worker([&] { world->scheduler->runOnWorker(); });
   while (!sink.entered.load()) std::this_thread::yield();
 

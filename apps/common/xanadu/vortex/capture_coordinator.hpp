@@ -46,8 +46,9 @@
 // blocking work -- the sink sync, the journal fsyncs and the Store snapshot
 // write -- is staged as CaptureDurable steps and runs there too, never on
 // the owner (plan §14); the owner only validates, publishes into the Store
-// in memory and copies the snapshot. The one blocking write left on the
-// owner is the Append intent in appendRequest(): see that method.
+// in memory and copies the snapshot. The Append intent is written the same
+// way, by the append's own worker turn (see appendRequest()). What the owner
+// still writes is the Aborted record of a failure path.
 
 namespace xanadu {
 class UserPermascroll;
@@ -148,6 +149,13 @@ inline constexpr AdapterKey captureAppendAdapterKey = {captureSourceKind, 1};
 struct CaptureAppendSpec {
   std::vector<std::byte> bytes;
   CaptureId captureId{};
+  /// Writes and fsyncs the capture's Append intent, returning its journal
+  /// sequence. The adapter calls it in the append's worker turn, after the
+  /// turn's last chance to be cancelled and before it hands a byte to the
+  /// sink, so the owner thread never waits on that fsync. A refusal ends the
+  /// turn with a Failed outcome and no bytes. Empty means no intent is
+  /// recorded (adapter tests that stage bare bytes).
+  std::function<std::expected<std::uint64_t, IoErrorInfo>()> writeIntent;
 };
 
 /// IoAdapter for the CaptureAppend operation: appends one frozen byte
@@ -450,20 +458,19 @@ public:
                              const CapturePolicy &policy = {})
       -> CapturePrepareResult;
 
-  /// Journal the append intent, stage the frozen bytes under a fresh spec
-  /// cell and submit the CaptureAppend through IoService.
+  /// Stage the frozen bytes under a fresh spec cell, with the closure that
+  /// writes the capture's Append intent, and submit the CaptureAppend through
+  /// IoService.
   ///
-  /// The intent's fsync stays on the owner, deliberately (P3 moved the
-  /// commit's, not this): the Append record is the only evidence that bytes
-  /// may exist, so recovery's state machine, the certain-abort path (an
-  /// Aborted record closing an intent the admission refusal proved never
-  /// ran) and every restart test read it as "durable before submit". Running
-  /// it in the append's worker turn would make an admission refusal an Aborted
-  /// record with no intent, and would still leave the Aborted fsyncs of the
-  /// failure paths on the owner. The returned
+  /// The intent is written and fsynced by the append's worker turn, ahead of
+  /// the sink append (P5): it is still the only evidence that bytes may exist,
+  /// and the order that matters -- intent durable before a byte is handed to
+  /// the sink -- is the one the turn keeps. The owner writes nothing here, so
+  /// an admission refusal leaves no record to close, and an intent refused in
+  /// the turn ends it Failed with no bytes. The returned
   /// CaptureAppend wraps the service's SubmitResult: Admitted carries the
   /// RequestCell commit() later validates; Refused carries the typed
-  /// outcome (journal failure, cell mint failure or service refusal).
+  /// outcome (cell mint failure or service refusal).
   /// A capture whose append was refused at admission stays Prepared and
   /// may be retried.
   [[nodiscard]] auto appendRequest(CaptureCell capture) -> CaptureAppend;
@@ -585,6 +592,9 @@ private:
     };
     std::optional<SpecLink> spec;
     std::optional<RequestCell> appendRequest;
+    /// The Append intent's budget has been given back. The worker writes the
+    /// record, so the owner accounts it when it sees the append's outcome.
+    bool intentHoldConsumed{};
     /// Journal sequence of the durable Appended record, once written.
     std::optional<std::uint64_t> appendedSequence;
     std::optional<CaptureReceiptCell> receiptCell;
