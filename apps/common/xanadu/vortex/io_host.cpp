@@ -69,14 +69,18 @@ auto IoHost::awaitForVm(const RequestCell request, const zigzag::CellRef cursor)
   // handler outside the try that converts exceptions: whatever escapes here
   // propagates out of run() on the owner thread. awaitCell's documented
   // throws (stale cursor, arena allocation limit, identity exhaustion) are
-  // therefore turned into the same typed refusal a profile gate yields.
+  // therefore turned into the same typed refusal a profile gate yields. The
+  // owner check stays outside: a call from the wrong thread must throw and
+  // mint nothing, not turn into a refusal cell minted off the owner.
+  requireOwner();
   try {
     return awaitCell(request, cursor);
   } catch (const std::exception &error) {
     GLEDITOR_LOG_WARN("vortex.io.host", "await refused: {}", error.what());
   }
   try {
-    return {Ready{service_.refuse(IoErrorInfo{IoErrorCode::BackendFailure, 0})}};
+    return {
+        Ready{service_.refuse(IoErrorInfo{IoErrorCode::BackendFailure, 0})}};
   } catch (const std::exception &error) {
     // Minting the refusal can fail for the very reason the await did (an
     // exhausted arena). The request is a live cell that is not an outcome,
@@ -152,8 +156,16 @@ auto IoHost::awaitCell(const RequestCell request, const zigzag::CellRef cursor)
     vm_.retireAwait(cursor, *cursorIncarnation, continuation);
     throw std::overflow_error("I/O host waiter identity space exhausted");
   }
-  parked_.emplace(nextId_, ParkedAwait{request, pending->waiter, cursor,
-                                       *cursorIncarnation, continuation});
+  try {
+    parked_.emplace(nextId_, ParkedAwait{request, pending->waiter, cursor,
+                                         *cursorIncarnation, continuation});
+  } catch (...) {
+    // The VM already parked and the service registered the waiter; an
+    // allocation failure here must not leave either behind.
+    service_.retireWaiter(pending->waiter);
+    vm_.retireAwait(cursor, *cursorIncarnation, continuation);
+    throw;
+  }
   if (nextVisit_ == 0) nextVisit_ = nextId_;
   ++nextId_;
   return result;

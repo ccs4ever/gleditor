@@ -114,17 +114,10 @@ public:
   /// unknown source kind) is a PersistenceRefusal, never a default.
   [[nodiscard]] auto published(const PublicationKey &key) const
       -> std::expected<std::optional<PublishedCapture>, IoErrorInfo>;
-  /// The sealed publication for @p captureId under any journal (the first
-  /// on the rank): for a Store a single journal writes, and for diagnostics.
-  [[nodiscard]] auto published(CaptureId captureId) const
-      -> std::optional<PublishedCapture>;
   /// Every key with a sealed receipt: one walk of the receipt rank.
   [[nodiscard]] auto publishedKeys() const
       -> std::expected<std::unordered_set<PublicationKey, PublicationKeyHash>,
                        IoErrorInfo>;
-  /// Every CaptureId with a sealed receipt, across journals.
-  [[nodiscard]] auto publishedIds() const -> std::unordered_set<CaptureId>;
-
   [[nodiscard]] auto store() noexcept -> xanadu::Store & { return store_; }
   [[nodiscard]] auto directory() const noexcept
       -> const std::filesystem::path & {

@@ -141,22 +141,6 @@ auto CapturePublisher::published(const PublicationKey &key) const
   return std::optional<PublishedCapture>{};
 }
 
-auto CapturePublisher::published(const CaptureId captureId) const
-    -> std::optional<PublishedCapture> {
-  auto manifold = store_.rebuildManifold(store_.latest());
-  manifold.setStore(&store_);
-  const auto dims = lookupDims(manifold, store_);
-  if (!dims) return std::nullopt;
-  const auto rank = receiptRank(manifold, *dims);
-  if (!rank) return std::nullopt;
-  for (const auto &receipt : *rank) {
-    if (receipt.key.captureId != captureId) continue;
-    auto read = readPublication(manifold, *dims, receipt.cell);
-    if (read) return std::move(*read);
-  }
-  return std::nullopt;
-}
-
 auto CapturePublisher::publishedKeys() const
     -> std::expected<std::unordered_set<PublicationKey, PublicationKeyHash>,
                      IoErrorInfo> {
@@ -169,14 +153,6 @@ auto CapturePublisher::publishedKeys() const
     for (const auto &receipt : *rank) keys.insert(receipt.key);
   }
   return keys;
-}
-
-auto CapturePublisher::publishedIds() const -> std::unordered_set<CaptureId> {
-  std::unordered_set<CaptureId> ids;
-  if (const auto keys = publishedKeys()) {
-    for (const auto &key : *keys) ids.insert(key.captureId);
-  }
-  return ids;
 }
 
 auto CapturePublisher::publish(const CapturePublication &publication)

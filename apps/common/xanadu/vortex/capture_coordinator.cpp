@@ -291,6 +291,13 @@ auto CaptureAppendAdapter::stageAt(const std::uint32_t key,
     // turn onto the new spec.
     return std::unexpected(IoErrorInfo{IoErrorCode::Conflict, 3});
   }
+  if (running_.contains(key) || completeAfterTurn_.contains(key)) {
+    // A retired capture's worker turn is still inside the sink append under
+    // this raw cell key. Staging the key again now would let that turn's
+    // deferred cleanup erase the new capture's receipt, so the new capture is
+    // refused until the old turn ends.
+    return std::unexpected(IoErrorInfo{IoErrorCode::Conflict, 6});
+  }
   if (staged_.size() >= maxStagedAppends) {
     return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded, 3});
   }

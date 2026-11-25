@@ -4,6 +4,8 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -411,6 +413,34 @@ TEST(VortexIoVmContinuationTest,
   EXPECT_FALSE(parked.success);
   EXPECT_NE(parked.errorMessage.find("does not belong"), std::string::npos)
       << parked.errorMessage;
+}
+
+TEST(VortexIoVmContinuationTest, AwaitFromAForeignThreadThrowsAndMintsNothing) {
+  Harness h;
+  const auto request = h.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto await  = h.vm.mintOpcode(OpcodeKind::Await);
+  const auto halt   = h.vm.mintOpcode(OpcodeKind::Halt);
+  const auto output = h.arena.makeCell();
+  h.core.bindInput(await, request.cell);
+  h.core.bindOutput(await, output);
+  ASSERT_TRUE(h.arena.link(await, h.core.dims().spin, DimVector::POS, halt));
+  const auto cursor = h.vm.spawnCursor(await);
+
+  // The owner discipline is the contract: a refusal minted from the wrong
+  // thread would be an arena mutation off the owner.
+  const auto cellsBefore = h.arena.cellCount();
+  bool threw             = false;
+  std::thread foreign([&] {
+    try {
+      static_cast<void>(h.vm.step(cursor));
+    } catch (const std::logic_error &) {
+      threw = true;
+    }
+  });
+  foreign.join();
+  EXPECT_TRUE(threw);
+  EXPECT_EQ(h.arena.cellCount(), cellsBefore);
 }
 
 } // namespace

@@ -2007,6 +2007,33 @@ TEST_F(IoCaptureTest, CompleteDuringAWorkerTurnLeavesNoStaleReceipt) {
   EXPECT_FALSE(adapter.wasExecuted(key));
 }
 
+TEST_F(IoCaptureTest, ReusedKeyIsRefusedWhileTheRetiredTurnStillRuns) {
+  GatedSink sink;
+  CaptureAppendAdapter adapter(sink);
+  constexpr std::uint32_t key = 78;
+  ASSERT_TRUE(adapter.stageAt(key, CaptureAppendSpec{bytesOf("old"), 1}));
+  std::vector<std::byte> bytes(sizeof(key));
+  std::memcpy(bytes.data(), &key, sizeof(key));
+  BackendCommand command{};
+  command.operation.bytes = std::move(bytes);
+  PayloadResolver payloads;
+  BackendContext context{.stop = {}, .payloads = payloads, .budget = {}};
+  StubCompletionSink completion;
+  std::thread worker([&] { adapter.execute(command, context, completion); });
+  while (!sink.entered.load()) std::this_thread::yield();
+  adapter.complete(key); // the capture is retired; its turn is still running
+  // The cell key is reusable by a new capture, but its receipt must not be
+  // erased by the old turn's deferred cleanup: staging is refused instead.
+  const auto reused =
+      adapter.stageAt(key, CaptureAppendSpec{bytesOf("new"), 2});
+  ASSERT_FALSE(reused.has_value());
+  EXPECT_EQ(reused.error().code, IoErrorCode::Conflict);
+  sink.open.store(true);
+  worker.join();
+  EXPECT_TRUE(adapter.stageAt(key, CaptureAppendSpec{bytesOf("new"), 2}))
+      << "the key is usable again once the old turn has ended";
+}
+
 // -- Structure publication (M6, plan §8.2)
 // -------------------------------------
 
@@ -2063,6 +2090,31 @@ std::size_t countKind(const std::filesystem::path &path,
                       const CaptureJournalRecordKind kind) {
   const auto kinds = journalKinds(path);
   return static_cast<std::size_t>(std::ranges::count(kinds, kind));
+}
+
+/// The first sealed publication carrying @p id under any journal: a test
+/// convenience for stores one journal wrote. The library API is keyed by
+/// (journal, id), so a lookup that ignores the journal cannot be misused
+/// outside a test.
+std::optional<PublishedCapture> publishedById(const CapturePublisher &publisher,
+                                              const CaptureId id) {
+  const auto keys = publisher.publishedKeys();
+  if (!keys) return std::nullopt;
+  for (const auto &key : *keys) {
+    if (key.captureId != id) continue;
+    if (const auto found = publisher.published(key); found && *found) {
+      return **found;
+    }
+  }
+  return std::nullopt;
+}
+
+std::set<CaptureId> publishedIdsOf(const CapturePublisher &publisher) {
+  std::set<CaptureId> ids;
+  if (const auto keys = publisher.publishedKeys()) {
+    for (const auto &key : *keys) ids.insert(key.captureId);
+  }
+  return ids;
 }
 
 TEST_F(IoCaptureTest, TwoJournalsOverOneStoreNeverTakeEachOthersReceipt) {
@@ -2138,20 +2190,20 @@ TEST_F(IoCaptureTest, CommitPublishesTranslatedSpansAndReceiptIntoTheStore) {
   const PayloadRange third[]{rangeOf(*registered, 0, 5)};
   ASSERT_TRUE(captureCommit(*world, third).has_value());
 
-  const auto one = durable->publisher->published(1);
+  const auto one = publishedById(*durable->publisher, 1);
   ASSERT_TRUE(one.has_value());
   ASSERT_EQ(one->pieces.size(), 1U);
   EXPECT_EQ(permascrollText(*durable, one->pieces[0].span), "hello");
   EXPECT_EQ(one->pieces[0].origin, *registered);
   EXPECT_EQ(one->pieces[0].srcOffset, std::uint64_t{0});
 
-  const auto two = durable->publisher->published(2);
+  const auto two = publishedById(*durable->publisher, 2);
   ASSERT_TRUE(two.has_value());
   ASSERT_EQ(two->pieces.size(), 1U);
   EXPECT_EQ(permascrollText(*durable, two->pieces[0].span), " wo");
   EXPECT_EQ(two->pieces[0].srcOffset, std::uint64_t{5});
 
-  const auto three = durable->publisher->published(3);
+  const auto three = publishedById(*durable->publisher, 3);
   ASSERT_TRUE(three.has_value());
   EXPECT_TRUE(three->pieces.empty());
 
@@ -2160,13 +2212,14 @@ TEST_F(IoCaptureTest, CommitPublishesTranslatedSpansAndReceiptIntoTheStore) {
   auto manifold = durable->store->rebuildManifold(durable->store->latest());
   manifold.setStore(durable->store.get());
   EXPECT_EQ(manifold.asInt64(one->receipt), std::optional<std::int64_t>{1});
-  EXPECT_EQ(durable->publisher->publishedIds().size(), 3U);
+  EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 3U);
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 3U);
 }
 
 TEST_F(IoCaptureTest, PublicationRoundTripsThroughStoreSaveAndReload) {
   xanadu::PrimediaSpan span;
-  const auto sourceBytes = bytesOf("round trip bytes");
+  std::uint64_t journalId = 0;
+  const auto sourceBytes  = bytesOf("round trip bytes");
   {
     auto durable = openDurable(dir_);
     auto world   = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
@@ -2175,17 +2228,29 @@ TEST_F(IoCaptureTest, PublicationRoundTripsThroughStoreSaveAndReload) {
     ASSERT_TRUE(registered.has_value());
     const PayloadRange selection[]{rangeOf(*registered, 0, 10)};
     ASSERT_TRUE(captureCommit(*world, selection).has_value());
-    span = durable->publisher->published(1).value().pieces.at(0).span;
+    span      = publishedById(*durable->publisher, 1).value().pieces.at(0).span;
+    journalId = world->coordinator->journal().journalId();
     world.reset();
   }
   // Commit already saved: nothing else is written before the reload.
   auto durable        = openDurable(dir_);
-  const auto reloaded = durable->publisher->published(1);
+  const auto reloaded = publishedById(*durable->publisher, 1);
   ASSERT_TRUE(reloaded.has_value());
   ASSERT_EQ(reloaded->pieces.size(), 1U);
   EXPECT_EQ(reloaded->pieces[0].span, span);
   EXPECT_EQ(permascrollText(*durable, reloaded->pieces[0].span), "round trip");
   EXPECT_EQ(reloaded->pieces[0].origin.occurrence, std::uint64_t{71});
+  // The journal identity rides in the Store, so the reloaded receipt is
+  // found by (journal, id) and by no other journal's key.
+  const auto keyed = durable->publisher->published(
+      PublicationKey{.journalId = journalId, .captureId = 1});
+  ASSERT_TRUE(keyed.has_value());
+  ASSERT_TRUE(keyed->has_value());
+  EXPECT_EQ((*keyed)->pieces[0].span, span);
+  const auto foreign = durable->publisher->published(
+      PublicationKey{.journalId = journalId + 1, .captureId = 1});
+  ASSERT_TRUE(foreign.has_value());
+  EXPECT_FALSE(foreign->has_value());
 }
 
 /// Throws on the Nth journal write of the coordinator it is installed in,
@@ -2227,7 +2292,7 @@ TEST_F(IoCaptureTest,
 
   auto durable = openDurable(dir_);
   // The Store was saved before the crash: the receipt is already there.
-  ASSERT_TRUE(durable->publisher->published(1).has_value());
+  ASSERT_TRUE(publishedById(*durable->publisher, 1).has_value());
   const auto before = durable->store->latest();
   auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
                     durable->publisher.get());
@@ -2240,12 +2305,12 @@ TEST_F(IoCaptureTest,
   // No second publication: the Store did not move, one receipt, and the
   // missing Committed record was written.
   EXPECT_EQ(durable->store->latest(), before);
-  EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+  EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 1U);
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
   const auto translated =
       world->coordinator->translationFor(rangeOf(*registered, 0, 9));
   ASSERT_TRUE(translated.has_value());
-  EXPECT_EQ(translated, durable->publisher->published(1)->pieces[0].span);
+  EXPECT_EQ(translated, publishedById(*durable->publisher, 1)->pieces[0].span);
 }
 
 TEST_F(IoCaptureTest, CrashBetweenAppendedAndPublicationPublishesExactlyOnce) {
@@ -2266,21 +2331,21 @@ TEST_F(IoCaptureTest, CrashBetweenAppendedAndPublicationPublishesExactlyOnce) {
     EXPECT_THROW(
         static_cast<void>(world->coordinator->commit(capture, *outcome)),
         std::runtime_error);
-    EXPECT_FALSE(durable->publisher->published(1).has_value());
+    EXPECT_FALSE(publishedById(*durable->publisher, 1).has_value());
   }
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
 
   {
     auto durable = openDurable(dir_);
-    EXPECT_FALSE(durable->publisher->published(1).has_value());
+    EXPECT_FALSE(publishedById(*durable->publisher, 1).has_value());
     auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
                       {}, durable->publisher.get());
     ASSERT_TRUE(world);
-    const auto published = durable->publisher->published(1);
+    const auto published = publishedById(*durable->publisher, 1);
     ASSERT_TRUE(published.has_value());
     ASSERT_EQ(published->pieces.size(), 1U);
     EXPECT_EQ(permascrollText(*durable, published->pieces[0].span), "appended");
-    EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+    EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 1U);
     EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
   }
   // A third boot finds everything finished and mints nothing.
@@ -2290,7 +2355,7 @@ TEST_F(IoCaptureTest, CrashBetweenAppendedAndPublicationPublishesExactlyOnce) {
                     durable->publisher.get());
   ASSERT_TRUE(world);
   EXPECT_EQ(durable->store->latest(), before);
-  EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+  EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 1U);
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
 }
 
@@ -2318,12 +2383,12 @@ TEST_F(IoCaptureTest, CommitRetryAfterRefusedStoreSaveNeverPublishesTwice) {
   auto refused = world->coordinator->commit(capture, *outcome);
   EXPECT_TRUE(std::holds_alternative<Refused>(refused));
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 0U);
-  EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+  EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 1U);
 
   std::filesystem::remove(blocker);
   auto committed = world->coordinator->commit(capture, *outcome);
   ASSERT_TRUE(std::holds_alternative<Committed>(committed));
-  EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+  EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 1U);
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
   EXPECT_TRUE(std::filesystem::exists(blocker / "store" / "ops.nodes"));
@@ -2688,14 +2753,14 @@ TEST_F(IoCaptureTest,
     ASSERT_TRUE(outcome.has_value());
     EXPECT_TRUE(std::holds_alternative<Refused>(
         world->coordinator->commit(capture, *outcome)));
-    EXPECT_FALSE(durable->publisher->published(1).has_value());
+    EXPECT_FALSE(publishedById(*durable->publisher, 1).has_value());
     // The bytes sit at the old high-water mark: the owner names that span.
     landed = localSpan(0, 7);
     const auto promoted =
         world->coordinator->reconcile(1, ReconcilePromote{landed});
     ASSERT_TRUE(promoted.has_value());
     EXPECT_FALSE(promoted->publicationPending);
-    const auto published = durable->publisher->published(1);
+    const auto published = publishedById(*durable->publisher, 1);
     ASSERT_TRUE(published.has_value());
     ASSERT_EQ(published->pieces.size(), 1U);
     EXPECT_EQ(published->pieces[0].span, landed);
@@ -2703,11 +2768,11 @@ TEST_F(IoCaptureTest,
   }
   // The promotion and its publication are durable across a restart.
   auto durable = openDurable(dir_);
-  ASSERT_TRUE(durable->publisher->published(1).has_value());
+  ASSERT_TRUE(publishedById(*durable->publisher, 1).has_value());
   auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
                     durable->publisher.get());
   EXPECT_TRUE(world->coordinator->pinnedCaptures().empty());
-  EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+  EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 1U);
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
 }
 
