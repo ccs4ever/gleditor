@@ -352,3 +352,98 @@ TEST_F(VQueryE2ETest, DefaultVmExecutesForContractsAndRuntimeFiltering) {
   ASSERT_EQ(result.exitCode, 0) << result.output;
   EXPECT_EQ(result.output, "7\n");
 }
+
+// M7-VQL: script I/O actions through the real CLI, headless. The CLI opens the
+// file through the asynchronous file endpoint and drives the parked/resume
+// loop through IoHost; there is no blocking read on the evaluation thread.
+namespace {
+
+constexpr auto readAction =
+    "effect { let $s := submit($src, read_bytes(6, 5)); "
+    "match $s { admitted($q) => await($q), refused($e) => $e } }";
+
+fs::path writeSource(const fs::path &dir, const std::string &content) {
+  const auto path = dir / "source.txt";
+  std::ofstream(path, std::ios::binary) << content;
+  return path;
+}
+
+} // namespace
+
+TEST_F(VQueryE2ETest, ScriptActionReadsARealFileEndToEnd) {
+  const auto source = writeSource(testDir, "hello world");
+  const auto result = runVQuery("--io-file src=" + source.string() + " -e '" +
+                                readAction + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "Complete\nworld\n");
+}
+
+TEST_F(VQueryE2ETest, ScriptActionReadsPastTheEndAsAnEndOfStreamValue) {
+  const auto source = writeSource(testDir, "abc");
+  const auto result = runVQuery("--io-file src=" + source.string() + " -e '" +
+                                readAction + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "EndOfStream\n") << "an outcome row, no payload row";
+}
+
+TEST_F(VQueryE2ETest, ReplOpensAFileAndRunsTwoActionsInOneSession) {
+  const auto source = writeSource(testDir, "hello world");
+  const auto input  = testDir / "session.vql";
+  {
+    std::ofstream script(input);
+    script << ":open src " << source.string() << "\n"
+           << readAction << "\n"
+           << readAction << "\n:quit\n";
+  }
+  const auto result = runVQuery("< '" + input.string() + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("Opened " + source.string() + " as $src"),
+            std::string::npos)
+      << result.output;
+  const auto first = result.output.find("world");
+  ASSERT_NE(first, std::string::npos) << result.output;
+  EXPECT_NE(result.output.find("world", first + 1), std::string::npos)
+      << "each reached action read once: " << result.output;
+}
+
+TEST_F(VQueryE2ETest, ScriptActionInARowContextIsRefusedStatically) {
+  const auto result =
+      runVQuery(std::string{"-e 'for $x in ## "} + readAction + "'");
+  EXPECT_EQ(result.exitCode, 1);
+  EXPECT_NE(result.output.find("VQL_IO_QUERY_CONTEXT"), std::string::npos)
+      << result.output;
+  const auto call = runVQuery("-e 'return (submit($src, read_bytes(0, 1)))'");
+  EXPECT_EQ(call.exitCode, 1);
+  EXPECT_NE(call.output.find("VQL_IO_QUERY_CONTEXT"), std::string::npos)
+      << call.output;
+}
+
+TEST_F(VQueryE2ETest, ScriptActionWithoutACapabilityFailsBeforeSubmitting) {
+  const auto result = runVQuery(std::string{"-e '"} + readAction + "'");
+  EXPECT_EQ(result.exitCode, 1);
+  EXPECT_NE(result.output.find("VQL_IO_EFFECT_ARGUMENT"), std::string::npos)
+      << result.output;
+}
+
+TEST_F(VQueryE2ETest, AMissingIoFileIsATypedOpenFailure) {
+  const auto result =
+      runVQuery("--io-file src=" + (testDir / "missing.txt").string() +
+                " -e 'return ##'");
+  EXPECT_EQ(result.exitCode, 1);
+  EXPECT_NE(result.output.find("Open failed"), std::string::npos)
+      << result.output;
+}
+
+TEST_F(VQueryE2ETest, TheCompilerCliRefusesAScriptActionWithoutLowering) {
+  const auto script = testDir / "action.vql";
+  std::ofstream(script) << readAction << "\n";
+  const auto cmd = "./build/vqueryc '" + script.string() + "' 2>&1";
+  FILE *pipe     = popen(cmd.c_str(), "r");
+  ASSERT_NE(pipe, nullptr);
+  std::string out;
+  char buffer[256];
+  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) out += buffer;
+  const auto status = pclose(pipe);
+  EXPECT_NE(WEXITSTATUS(status), 0);
+  EXPECT_NE(out.find("VQL_IO_EFFECT_NOT_COMPILABLE"), std::string::npos) << out;
+}

@@ -197,8 +197,19 @@ public:
   void wake(FrontendToken token, const FrontendWake why) override {
     woken.emplace_back(std::move(token), why);
   }
+  /// A language whose runner is not the driver itself (it owns its own
+  /// FrontendRunner) moves the wakes that runner received into `woken` here;
+  /// the harness calls it after every pump.
+  virtual void collectWakes() {}
   std::vector<std::pair<FrontendToken, FrontendWake>> woken;
 };
+
+/// Pump the host, then let the driver gather the wakes its runner received.
+inline auto pumpDriver(World &w, ConformanceDriver &driver) -> std::size_t {
+  const auto work = w.pump();
+  driver.collectWakes();
+  return work;
+}
 
 using DriverFactory =
     std::function<std::unique_ptr<ConformanceDriver>(World &)>;
@@ -228,12 +239,12 @@ inline void checkSameRequestPendingResume(const DriverFactory &make) {
   ASSERT_EQ(w.submissions(), 1U);
   const auto parkedToken = *token;
 
-  static_cast<void>(w.pump());
+  static_cast<void>(pumpDriver(w, *driver));
   EXPECT_TRUE(driver->woken.empty())
       << "no wake before the request is terminal";
 
   w.complete(0, EndOfStream{{}});
-  static_cast<void>(w.pump());
+  static_cast<void>(pumpDriver(w, *driver));
   ASSERT_EQ(driver->woken.size(), 1U);
   EXPECT_EQ(driver->woken[0].second, FrontendWake::Resumable);
   EXPECT_EQ(driver->woken[0].first.continuation, parkedToken.continuation);
@@ -328,7 +339,7 @@ checkTerminalOutcomesAreNotLogicalFailure(const DriverFactory &make) {
     const auto begun  = driver->begin(w, w.capability, w.specification());
     ASSERT_NE(detail::parked(begun), nullptr);
     w.complete(0, test.outcome(w));
-    static_cast<void>(w.pump());
+    static_cast<void>(pumpDriver(w, *driver));
     ASSERT_EQ(driver->woken.size(), 1U);
     const auto resumed = driver->resume(w, driver->woken[0].first);
     ASSERT_FALSE(std::holds_alternative<RunResult::Failed>(resumed.value))
@@ -372,7 +383,7 @@ inline void checkNoRawIdsInLanguageValues(const DriverFactory &make) {
       << "the audit must flag the owner-only waiter graph";
 
   w.complete(0, EndOfStream{{}});
-  static_cast<void>(w.pump());
+  static_cast<void>(pumpDriver(w, *driver));
   ASSERT_EQ(driver->woken.size(), 1U);
   const auto resumed = driver->resume(w, driver->woken[0].first);
   ASSERT_TRUE(detail::completed(resumed));
@@ -395,7 +406,7 @@ checkCancelledWaiterDropsRouteNotRequest(const DriverFactory &make) {
   EXPECT_EQ(w.host.cancelWaiter(parkedToken.waiter).state,
             WaiterCancelState::Removed);
   w.complete(0, EndOfStream{{}});
-  static_cast<void>(w.pump());
+  static_cast<void>(pumpDriver(w, *driver));
   EXPECT_TRUE(driver->woken.empty()) << "a cancelled waiter is never woken";
   EXPECT_TRUE(w.service.poll(parkedToken.request).outcome)
       << "request cancellation is a separate, explicit action";
