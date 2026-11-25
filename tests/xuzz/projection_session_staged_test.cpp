@@ -394,6 +394,33 @@ TEST(ProjectionSessionStagedTest,
   EXPECT_EQ(session.dirtyCount(), 0U);
 }
 
+TEST(ProjectionSessionStagedTest, RewindRefusesWhileAStagedOpIsInFlight) {
+  SessionStack stack("{\"name\":\"old\"}\n");
+  auto &session = *stack.session;
+
+  const auto staged = session.prepareRefresh(*stack.adapter);
+  ASSERT_TRUE(staged.has_value());
+  // Mint the terminal outcome BEFORE the checkpoint: mintTaggedOutcome's
+  // arena cells are foreign to the session's mintCount_, so a post-cp mint
+  // would make the final rewind refuse on the foreign-mint check -- which
+  // is correct behaviour, just not what this test targets.
+  const auto cell = mintTaggedOutcome(stack.fixture, IoOutcomeTag::Complete);
+  const auto cp   = session.checkpoint();
+
+  // The staged op owns the lens's unproject half and froze its batch
+  // owner-side; rewinding the arena and dirty_ under it would desync the
+  // publish that consumes the outcome -- the same refusal the write
+  // verbs give.
+  const auto refused = session.rewind(cp);
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_NE(refused.error().find("staged"), std::string::npos);
+
+  // Consuming the terminal outcome frees the slot and the same rewind
+  // goes through.
+  ASSERT_TRUE(session.publishRefresh(cell).has_value());
+  EXPECT_TRUE(session.rewind(cp).has_value());
+}
+
 TEST(ProjectionSessionStagedTest, SyncMutatorsRefuseWhileAStagedOpIsInFlight) {
   SessionStack stack("{\"name\":\"old\"}\n");
   auto &session      = *stack.session;

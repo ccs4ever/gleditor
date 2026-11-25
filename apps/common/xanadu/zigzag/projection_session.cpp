@@ -672,6 +672,7 @@ ProjectionSession::Checkpoint ProjectionSession::checkpoint() {
                 .keyHighWater   = mintOrder_.size(),
                 .rootsHighWater = roots_.size(),
                 .mintHighWater  = mintCount_,
+                .dirty          = dirty_,
                 .boundaryKey    = {}};
   cps_.push_back(cp);
   return cp;
@@ -698,6 +699,13 @@ ProjectionSession::rewind(const Checkpoint &cp) {
   // equal our own checkpoints' count or something else holds the stack.
   if (arena.outstandingMarks() != cps_.size()) {
     return std::unexpected("foreign marks outstanding; cannot rewind");
+  }
+
+  // A staged op owns the lens's unproject half and froze its edit batch
+  // owner-side; rewinding the arena and dirty_ under it would desync the
+  // publish that consumes the outcome. Same refusal the write verbs give.
+  if (stagedKind_ != StagedKind::None) {
+    return std::unexpected("a staged source operation is in flight");
   }
 
   // Pinned keys minted after cp block the toss -- refuse, naming the key.
@@ -749,6 +757,15 @@ ProjectionSession::rewind(const Checkpoint &cp) {
   mintOrder_.resize(cp.keyHighWater);
   roots_.resize(std::min(cp.rootsHighWater, roots_.size()));
   mintCount_ = cp.mintHighWater;
+  // dirty_ rewinds to the checkpoint's snapshot: edits the toss erased
+  // leave the diff set so a later commit() cannot resurrect text the
+  // rewind already undid, and edits pending at cp stay pending.
+  // presentKeys_ is NOT restored -- it records the last refresh()'s
+  // source enumeration, which a rewind does not revert (the next
+  // refresh() rebuilds it either way). stagedCommit_ needs no restore
+  // either: it is only live while stagedKind_ == Commit, which the
+  // refusal above makes unreachable here.
+  dirty_ = cp.dirty;
 
   // The lens-side half of the toss: a windowed lens drops buffered windows
   // so a replay -- never a buffer hit -- is the only way a window returns.

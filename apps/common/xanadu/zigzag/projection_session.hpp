@@ -212,12 +212,19 @@ public:
 
   /// One rewind boundary. High-waters let rewind() forget exactly what was
   /// minted after the mark: keyToCell_/cellToKey_ entries (by mint order),
-  /// roots_ entries, and the checkpoint stack itself.
+  /// roots_ entries, the checkpoint stack itself, and the dirty_ diff set
+  /// (restored to its checkpoint() snapshot -- an edit the toss erases
+  /// must leave dirty_, or a later commit() would push text the rewind
+  /// already undid).
   struct Checkpoint {
     zigzag::Mark mark;
     std::size_t keyHighWater{0};   ///< mintOrder_ size at checkpoint()
     std::size_t rootsHighWater{0}; ///< roots_ size at checkpoint()
     std::size_t mintHighWater{0};  ///< all session mints at checkpoint()
+    /// dirty_ at checkpoint() time. Not part of ==: every dirty_-mutating
+    /// verb also moves the arena mark, so the boundary fields already
+    /// distinguish the checkpoints that matter.
+    std::unordered_set<ExternalKey> dirty;
     /// The earliest node key the mint log records above this mark, filled at
     /// rewind() time -- the key the windowed lens's discard is driven by.
     ExternalKey boundaryKey;
@@ -247,15 +254,19 @@ public:
 
   /// Pop every checkpoint above @p cp (discard, no undo), then
   /// release(cp.mark): tosses cells minted after it, truncates the identity
-  /// maps and roots_ to their high-waters, and reverses trail entries. Then
-  /// invokes the lens's windowed-side discard (WindowedLens::
-  /// discardMaterializedAfter, driven by the earliest mint-log key above cp)
-  /// so the lens's page buffer can't resurrect the toss on the next refresh.
-  /// Refuses -- naming the pinned key -- if anything pinned was minted after
-  /// cp; refuses -- reporting the dense index -- if the mint delta above cp
-  /// exceeds the session's logged mints (a foreign mint: solver answer cells,
-  /// another lens's attach(Space) mints -- a checkpoint must not straddle
-  /// writes it can't repair); refuses if foreign marks interleave above cp.
+  /// maps, roots_ and dirty_ to their checkpoint-time state, and reverses
+  /// trail entries. Then invokes the lens's windowed-side discard
+  /// (WindowedLens::discardMaterializedAfter, driven by the earliest
+  /// mint-log key above cp) so the lens's page buffer can't resurrect the
+  /// toss on the next refresh. Refuses while a staged source op is in
+  /// flight -- the worker owns the lens's unproject half and the frozen
+  /// batch would desync from a rewound arena (the same refusal
+  /// editContent/revertKey/commit give). Refuses -- naming the pinned key --
+  /// if anything pinned was minted after cp; refuses -- reporting the dense
+  /// index -- if the mint delta above cp exceeds the session's logged mints
+  /// (a foreign mint: solver answer cells, another lens's attach(Space)
+  /// mints -- a checkpoint must not straddle writes it can't repair);
+  /// refuses if foreign marks interleave above cp.
   [[nodiscard]] std::expected<void, std::string> rewind(const Checkpoint &cp);
 
 private:

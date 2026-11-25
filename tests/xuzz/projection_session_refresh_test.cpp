@@ -72,6 +72,25 @@ public:
     ++discardCalls;
     lastBoundary = k;
   }
+
+  // Write-path support for the dirty_/rewind tests: canApply admits every
+  // key; applyContentChange records the write and restates the node's
+  // content so commit()'s trailing refresh() sees what was sent.
+  bool writable{true};
+  std::vector<std::pair<ExternalKey, std::string>> applied;
+  [[nodiscard]] bool canApply(const ExternalKey &) const override {
+    return writable;
+  }
+  std::expected<ExternalKey, std::string>
+  applyContentChange(const ExternalKey &key, std::string_view text) override {
+    applied.emplace_back(key, std::string{text});
+    for (auto &n : nodes) {
+      if (n.key == key) {
+        n.content = NodeContent{std::string{text}};
+      }
+    }
+    return key;
+  }
 };
 
 struct Fixture {
@@ -271,6 +290,45 @@ TEST(RewindTest, BoundaryKeyIsEarliestMintedAboveCp) {
   (void)f.session->refresh();
   ASSERT_TRUE(f.session->rewind(cp).has_value());
   EXPECT_EQ(f.lens->lastBoundary, "D");
+}
+
+TEST(RewindTest, RewindRestoresDirtySetToCheckpointSnapshot) {
+  Fixture f;
+  f.start();
+  // An edit pending at the boundary stays pending across the rewind.
+  ASSERT_TRUE(f.session->editContent("B", "edited-at-cp"));
+  const auto cp = f.session->checkpoint();
+  EXPECT_EQ(f.session->dirtyCount(), 1U);
+
+  // Edits after the boundary -- on a surviving cell (B, minted before cp)
+  // and on a cell the toss removes (D) -- must leave dirty_ with the
+  // rewind: otherwise a later commit() would push text the rewind already
+  // undid back into the source.
+  ASSERT_TRUE(f.session->editContent("B", "edited-after-cp"));
+  ASSERT_TRUE(f.session->editContent("C", "gamma-edit"));
+  f.lens->nodes.push_back(
+      {.key = "D", .content = std::string{"delta"}, .attributes = {}});
+  (void)f.session->refresh();
+  ASSERT_TRUE(f.session->cellFor("D").has_value());
+  ASSERT_TRUE(f.session->editContent("D", "delta-edit"));
+  EXPECT_EQ(f.session->dirtyCount(), 3U);
+
+  ASSERT_TRUE(f.session->rewind(cp).has_value());
+  EXPECT_EQ(f.session->dirtyCount(), 1U);
+  EXPECT_FALSE(f.session->cellFor("D").has_value());
+  // The arena content reverted to the checkpoint-era edit on B, and to
+  // the source text on C.
+  EXPECT_EQ(f.core.arena().textOf(*f.session->cellFor("B")), "edited-at-cp");
+  EXPECT_EQ(f.core.arena().textOf(*f.session->cellFor("C")), "gamma");
+
+  // commit() sends exactly the checkpoint-era pending edit.
+  const auto committed = f.session->commit();
+  ASSERT_TRUE(committed.has_value()) << committed.error();
+  EXPECT_EQ(*committed, 1);
+  ASSERT_EQ(f.lens->applied.size(), 1U);
+  EXPECT_EQ(f.lens->applied.front().first, "B");
+  EXPECT_EQ(f.lens->applied.front().second, "edited-at-cp");
+  EXPECT_EQ(f.session->dirtyCount(), 0U);
 }
 
 TEST(RootsTest, StructuralDefaultAndLensDeclared) {
