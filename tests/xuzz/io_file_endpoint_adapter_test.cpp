@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -116,13 +117,21 @@ std::optional<OpenedEndpoint> openedEndpointOf(const IoCellSchema &schema,
                         CapabilityCell{*capability, *capabilityInc}};
 }
 
+/// The newest live open of @p path -- the one the caller just awaited.
+FileOpenId lastOpen(const FileEndpointFixture &fixture,
+                    const std::string &path) {
+  const auto ids = fixture.adapter.openIdsFor(path);
+  EXPECT_FALSE(ids.empty());
+  return ids.empty() ? FileOpenId{} : ids.back();
+}
+
 /// Mint a spec cell whose text tags the op for makeFileRequestDecoder and
 /// stage the matching FileEndpointOp under the cell's own ref.
 CellRef stageSpec(FileEndpointFixture &fixture, std::string_view tag,
-                  const std::string &path, FileOpSpec op) {
+                  const FileOpenId open, FileOpSpec op) {
   const auto spec   = fixture.arena.makeCell(tag);
   const auto staged = fixture.adapter.stageAt(
-      spec, FileEndpointOp{.locator = path, .op = std::move(op)});
+      spec, FileEndpointOp{.open = open, .op = std::move(op)});
   EXPECT_TRUE(staged);
   return spec;
 }
@@ -209,7 +218,7 @@ TEST_F(FileEndpointAdapterTest,
       openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
   ASSERT_TRUE(opened.has_value());
   EXPECT_TRUE(fixture.adapter.openedCount() == 1);
-  const auto caps = fixture.adapter.capabilities(path);
+  const auto caps = fixture.adapter.capabilities(lastOpen(fixture, path));
   ASSERT_TRUE(caps.has_value());
   EXPECT_EQ(caps->locator, path);
   EXPECT_EQ(caps->consistency, SourceConsistency::Live);
@@ -218,7 +227,7 @@ TEST_F(FileEndpointAdapterTest,
   // Stage a read under a live spec cell and submit it on the opened
   // capability: the full admitOpen -> submit -> worker -> publish path.
   const auto spec = stageSpec(
-      fixture, fileReadSpecTag, path,
+      fixture, fileReadSpecTag, lastOpen(fixture, path),
       FileOpSpec{.kind = FileOpSpec::Kind::Read, .range = MediaRange{6, 5}});
   const auto outcome = submitAndAwait(fixture, opened->initialCapability, spec);
   ASSERT_TRUE(outcome.has_value());
@@ -249,10 +258,11 @@ TEST_F(FileEndpointAdapterTest, AdmitOpenThenSubmitWriteUpdatesFile) {
       fixture, path, fileRightRead | fileRightWrite, ioConsistencyLive);
   ASSERT_TRUE(opened.has_value());
 
-  const auto spec    = stageSpec(fixture, fileWriteSpecTag, path,
-                                 FileOpSpec{.kind       = FileOpSpec::Kind::Write,
-                                            .range      = MediaRange{2, 0},
-                                            .writeBytes = bytesOf("XY")});
+  const auto spec =
+      stageSpec(fixture, fileWriteSpecTag, lastOpen(fixture, path),
+                FileOpSpec{.kind       = FileOpSpec::Kind::Write,
+                           .range      = MediaRange{2, 0},
+                           .writeBytes = bytesOf("XY")});
   const auto outcome = submitAndAwait(fixture, opened->initialCapability, spec);
   ASSERT_TRUE(outcome.has_value());
   EXPECT_EQ(ioOutcomeTag(fixture.arena, *outcome), IoOutcomeTag::Complete);
@@ -311,26 +321,27 @@ TEST_F(FileEndpointAdapterTest, WriteThroughReadOnlyOpenIsRefusedUnsupported) {
       openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
   ASSERT_TRUE(opened.has_value());
 
-  const auto spec    = stageSpec(fixture, fileWriteSpecTag, path,
-                                 FileOpSpec{.kind       = FileOpSpec::Kind::Write,
-                                            .range      = MediaRange{0, 0},
-                                            .writeBytes = bytesOf("nope")});
+  const auto spec =
+      stageSpec(fixture, fileWriteSpecTag, lastOpen(fixture, path),
+                FileOpSpec{.kind       = FileOpSpec::Kind::Write,
+                           .range      = MediaRange{0, 0},
+                           .writeBytes = bytesOf("nope")});
   const auto outcome = submitAndAwait(fixture, opened->initialCapability, spec);
   ASSERT_TRUE(outcome.has_value());
   EXPECT_EQ(ioOutcomeTag(fixture.arena, *outcome), IoOutcomeTag::Rejected);
 }
 
-TEST_F(FileEndpointAdapterTest, StageAtRefusesLocatorThatWasNeverOpened) {
+TEST_F(FileEndpointAdapterTest, StageAtRefusesAnOpenThatDoesNotExist) {
   FileEndpointFixture fixture;
   const auto spec   = fixture.arena.makeCell(fileReadSpecTag);
   const auto staged = fixture.adapter.stageAt(
-      spec, FileEndpointOp{.locator = "/tmp/never-opened.bin",
-                           .op      = FileOpSpec{.kind  = FileOpSpec::Kind::Read,
-                                                 .range = MediaRange{0, 1}}});
+      spec, FileEndpointOp{.open = FileOpenId{999},
+                           .op   = FileOpSpec{.kind  = FileOpSpec::Kind::Read,
+                                              .range = MediaRange{0, 1}}});
   ASSERT_FALSE(staged);
 }
 
-TEST_F(FileEndpointAdapterTest, TwoFilesShareOneAdapterAndDispatchByLocator) {
+TEST_F(FileEndpointAdapterTest, TwoFilesShareOneAdapterAndDispatchByOpen) {
   const auto pathA = makeFile("alpha");
   const auto pathB = (dir_ / "b.bin").string();
   {
@@ -348,10 +359,10 @@ TEST_F(FileEndpointAdapterTest, TwoFilesShareOneAdapterAndDispatchByLocator) {
   EXPECT_EQ(fixture.adapter.openedCount(), 2U);
 
   const auto specA = stageSpec(
-      fixture, fileReadSpecTag, pathA,
+      fixture, fileReadSpecTag, lastOpen(fixture, pathA),
       FileOpSpec{.kind = FileOpSpec::Kind::Read, .range = MediaRange{0, 5}});
   const auto specB = stageSpec(
-      fixture, fileReadSpecTag, pathB,
+      fixture, fileReadSpecTag, lastOpen(fixture, pathB),
       FileOpSpec{.kind = FileOpSpec::Kind::Read, .range = MediaRange{0, 4}});
   const auto outcomeA =
       submitAndAwait(fixture, openedA->initialCapability, specA);
@@ -365,6 +376,127 @@ TEST_F(FileEndpointAdapterTest, TwoFilesShareOneAdapterAndDispatchByLocator) {
   ASSERT_TRUE(bytesB.has_value());
   EXPECT_EQ(textOf(*bytesA), "alpha");
   EXPECT_EQ(textOf(*bytesB), "beta");
+}
+
+TEST_F(FileEndpointAdapterTest, TwoOpensOfOnePathAcrossReplaceKeepTheirInodes) {
+  const auto path = makeFile("inode-A");
+  FileEndpointFixture fixture;
+
+  const auto openedA =
+      openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
+  ASSERT_TRUE(openedA.has_value());
+  const auto idA = lastOpen(fixture, path);
+
+  // Replace the file under the same path, then open it again.
+  const auto replacement = (dir_ / "replacement.bin").string();
+  {
+    std::ofstream out(replacement, std::ios::binary | std::ios::trunc);
+    out << "inode-B";
+  }
+  ASSERT_EQ(::rename(replacement.c_str(), path.c_str()), 0);
+  const auto openedB =
+      openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
+  ASSERT_TRUE(openedB.has_value());
+  const auto ids = fixture.adapter.openIdsFor(path);
+  ASSERT_EQ(ids.size(), 2U);
+  EXPECT_EQ(ids.front(), idA);
+  const auto idB = ids.back();
+  EXPECT_NE(idA, idB);
+  EXPECT_EQ(fixture.adapter.openedCount(), 2U);
+
+  // Stage on the FIRST open before and after the second open exists: both
+  // still reach inode A.
+  const auto specA = stageSpec(
+      fixture, fileReadSpecTag, idA,
+      FileOpSpec{.kind = FileOpSpec::Kind::Read, .range = MediaRange{0, 7}});
+  const auto specB = stageSpec(
+      fixture, fileReadSpecTag, idB,
+      FileOpSpec{.kind = FileOpSpec::Kind::Read, .range = MediaRange{0, 7}});
+  const auto outcomeA =
+      submitAndAwait(fixture, openedA->initialCapability, specA);
+  const auto outcomeB =
+      submitAndAwait(fixture, openedB->initialCapability, specB);
+  ASSERT_TRUE(outcomeA.has_value());
+  ASSERT_TRUE(outcomeB.has_value());
+  const auto bytesA = readOutcomePayload(fixture, *outcomeA);
+  const auto bytesB = readOutcomePayload(fixture, *outcomeB);
+  ASSERT_TRUE(bytesA.has_value());
+  ASSERT_TRUE(bytesB.has_value());
+  EXPECT_EQ(textOf(*bytesA), "inode-A");
+  EXPECT_EQ(textOf(*bytesB), "inode-B");
+}
+
+TEST_F(FileEndpointAdapterTest, ReleaseClosesTheOpenAndRefusesFurtherUse) {
+  const auto path = makeFile("release me");
+  FileEndpointFixture fixture;
+  const auto fdCount = [] {
+    std::size_t n = 0;
+    for ([[maybe_unused]] const auto &entry :
+         std::filesystem::directory_iterator("/proc/self/fd"))
+      ++n;
+    return n;
+  };
+  const auto baseline = fdCount();
+
+  const auto opened =
+      openAndAwait(fixture, path, fileRightRead, ioConsistencyLive);
+  ASSERT_TRUE(opened.has_value());
+  const auto id = lastOpen(fixture, path);
+  EXPECT_EQ(fdCount(), baseline + 1);
+
+  // A staged op dies with its open; the key is free again afterwards.
+  const auto spec = fixture.arena.makeCell(fileReadSpecTag);
+  ASSERT_TRUE(fixture.adapter.stageAt(
+      spec, FileEndpointOp{.open = id,
+                           .op   = FileOpSpec{.kind  = FileOpSpec::Kind::Read,
+                                              .range = MediaRange{0, 1}}}));
+
+  // An in-flight holder keeps the descriptor open past release.
+  auto held = fixture.adapter.fileFor(id);
+  ASSERT_NE(held, nullptr);
+  const auto released = fixture.adapter.release(id);
+  ASSERT_TRUE(released);
+  EXPECT_EQ(*released, &fixture.adapter);
+  EXPECT_EQ(fixture.adapter.openedCount(), 0U);
+  EXPECT_TRUE(fixture.adapter.openIdsFor(path).empty());
+  EXPECT_FALSE(fixture.adapter.capabilities(id).has_value());
+  EXPECT_EQ(fdCount(), baseline + 1);
+  EXPECT_TRUE(held->probeCapabilities().has_value());
+  held.reset();
+  EXPECT_EQ(fdCount(), baseline);
+
+  EXPECT_FALSE(fixture.adapter.release(id));
+  EXPECT_FALSE(fixture.adapter.stageAt(
+      spec, FileEndpointOp{.open = id, .op = FileOpSpec{}}));
+  // The submit of the dropped staged op is refused at prepare.
+  const auto outcome = submitAndAwait(fixture, opened->initialCapability, spec);
+  ASSERT_TRUE(outcome.has_value());
+  EXPECT_EQ(ioOutcomeTag(fixture.arena, *outcome), IoOutcomeTag::Rejected);
+}
+
+TEST_F(FileEndpointAdapterTest, DuplicateLiveStageKeyAcrossOpensIsRefused) {
+  const auto pathA = makeFile("alpha");
+  const auto pathB = (dir_ / "b.bin").string();
+  {
+    std::ofstream out(pathB, std::ios::binary | std::ios::trunc);
+    out << "beta";
+  }
+  FileEndpointFixture fixture;
+  ASSERT_TRUE(openAndAwait(fixture, pathA, fileRightRead, ioConsistencyLive));
+  ASSERT_TRUE(openAndAwait(fixture, pathB, fileRightRead, ioConsistencyLive));
+  const auto idA = lastOpen(fixture, pathA);
+  const auto idB = lastOpen(fixture, pathB);
+
+  const auto spec = fixture.arena.makeCell(fileReadSpecTag);
+  const FileOpSpec read{.kind = FileOpSpec::Kind::Read, .range = {0, 1}};
+  ASSERT_TRUE(fixture.adapter.stageAt(spec, {.open = idA, .op = read}));
+  // The same key against the OTHER file must not overwrite the route.
+  EXPECT_FALSE(fixture.adapter.stageAt(spec, {.open = idB, .op = read}));
+  EXPECT_FALSE(fixture.adapter.stageAt(spec, {.open = idA, .op = read}));
+
+  // Abandoning frees the key for reuse.
+  fixture.adapter.abandon(spec);
+  EXPECT_TRUE(fixture.adapter.stageAt(spec, {.open = idB, .op = read}));
 }
 
 } // namespace

@@ -16,19 +16,27 @@
  *
  * - `prepare`/`execute` on an open command run `::open` on the scheduler
  *   worker (plan §7.2's "all opens off evaluation/UI threads"), then wrap
- *   the descriptor in a per-locator `FileSourceAdapter`.
+ *   the descriptor in a `FileSourceAdapter` registered under a fresh
+ *   `FileOpenId` -- one per open, never per path, so a second open of the
+ *   same path (after a replace, say) is a different file and cannot
+ *   redirect the first's operations.
  * - `stageAt` forwards a bounded `FileOpSpec` to the `FileSourceAdapter`
- *   that owns the locator, under the caller-chosen key (the minted spec
+ *   that @p open names, under the caller-chosen key (the minted spec
  *   cell's ref -- `ArenaIoCellStore::freezeRequest` refuses OwnerCells with
  *   no arena incarnation, the `StagedLensSourceAdapter::stageAt` pattern).
  * - `execute` on a data command routes the staged key back to that file's
  *   adapter, which performs the `pread`/`pwrite` and the observation.
+ * - `release` is the close path: it drops the open, abandons its staged
+ *   ops, and lets the descriptor close once the last in-flight operation
+ *   holding the file lets go.
  *
- * Endpoint-to-locator binding is the caller/staged-spec contract, the same
+ * Endpoint-to-open binding is the caller/staged-spec contract, the same
  * trust model M4's staged adapters use: the capability cell proves WHICH
  * endpoint admitted the request, and the staged spec names WHICH opened
- * file it addresses. A spec naming a locator this adapter never opened is
- * refused at `stageAt`.
+ * file it addresses. A spec naming an open this adapter does not hold is
+ * refused at `stageAt`. `openIdsFor` lists a locator's live opens in
+ * completion order; await each open before starting the next of the same
+ * locator so the newest id is the one just completed.
  */
 
 #include <cstdint>
@@ -41,6 +49,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "common/xanadu/vortex/file_source_adapter.hpp"
 #include "common/xanadu/vortex/io_protocol.hpp"
@@ -59,10 +68,18 @@ inline constexpr std::uint32_t fileSourceKind = 4;
 inline constexpr AdapterKey fileOpenAdapterKey{fileSourceKind, 1};
 inline constexpr AdapterKey fileDataAdapterKey{fileSourceKind, 2};
 
-/// A staged data op on a file endpoint: the locator the open minted plus
-/// the bounded file operation itself.
+/// Identity of one completed open of a file endpoint. Minted per open, so
+/// two opens of the same path are two ids.
+struct FileOpenId {
+  std::uint64_t value{};
+  friend auto operator<=>(const FileOpenId &, const FileOpenId &) = default;
+  friend bool operator==(const FileOpenId &, const FileOpenId &)  = default;
+};
+
+/// A staged data op on a file endpoint: the open it addresses plus the
+/// bounded file operation itself.
 struct FileEndpointOp {
-  std::string locator;
+  FileOpenId open;
   FileOpSpec op;
 };
 
@@ -79,17 +96,23 @@ public:
 
   // -- owner-thread staging for data ops on an opened locator -------------
 
-  /// Stage a read/write/stable-read against the file @p spec.locator names.
-  /// The file must already be open (its `admitOpen` completed): `stageAt`
-  /// refuses a locator this adapter has not opened. @p key is the minted
-  /// spec cell's ref -- see the class comment for why it must be a live
-  /// arena cell.
-  [[nodiscard]] std::expected<std::uint32_t, std::string>
-  stageAt(std::uint32_t key, FileEndpointOp spec);
+  /// Stage a read/write/stable-read against the open @p spec.open names.
+  /// The open must be live (its `admitOpen` completed and it was not
+  /// released). @p key is the minted spec cell's ref -- see the class
+  /// comment for why it must be a live arena cell -- and must not already
+  /// name a live staged op on this adapter.
+  [[nodiscard]] std::expected<StageKey, std::string>
+  stageAt(StageKey key, FileEndpointOp spec);
 
   /// Owner-thread: drop a staged op that will never reach `execute` (the
   /// submission was refused, or the caller abandoned it).
-  void abandon(std::uint32_t key);
+  void abandon(StageKey key);
+
+  /// Close path: forget @p open and abandon its staged ops. Operations
+  /// already executing keep the file alive until they finish; ones not yet
+  /// started fail as InvalidRequest. Refuses an id that is not live.
+  [[nodiscard]] std::expected<FileEndpointAdapter *, std::string>
+  release(FileOpenId open);
 
   /// `IoAdapter` hook: the service calls this with the request's
   /// `specification` when a submission is refused or its request reaches a
@@ -107,27 +130,38 @@ public:
 
   // -- owner/test accessors ----------------------------------------------
 
-  /// The opened file's declared capabilities, or nullopt when @p locator
-  /// was never opened through this adapter (or its open failed).
-  [[nodiscard]] auto capabilities(std::string_view locator) const
+  /// The opened file's declared capabilities, or nullopt when @p open is
+  /// not live.
+  [[nodiscard]] auto capabilities(FileOpenId open) const
       -> std::optional<FileOpenCapabilities>;
   [[nodiscard]] auto openedCount() const -> std::size_t;
-  /// The per-locator `FileSourceAdapter` for adapter-level tests and
-  /// owners that need its observation/decode-lease views; nullptr when the
-  /// locator was never opened through this adapter.
-  [[nodiscard]] auto fileFor(std::string_view locator) -> FileSourceAdapter *;
+  /// Live opens of @p locator, oldest completion first.
+  [[nodiscard]] auto openIdsFor(std::string_view locator) const
+      -> std::vector<FileOpenId>;
+  /// The `FileSourceAdapter` of a live open, for adapter-level tests and
+  /// owners that need its observation/decode-lease views; null when
+  /// @p open is not live. Shared so the caller's use cannot outlive it.
+  [[nodiscard]] auto fileFor(FileOpenId open)
+      -> std::shared_ptr<FileSourceAdapter>;
 
 private:
+  struct OpenFile {
+    std::string locator;
+    std::shared_ptr<FileSourceAdapter> file;
+  };
+
   mutable std::mutex mutex_;
-  /// locator -> opened file. Populated in `execute` (worker thread) when an
+  /// open id -> opened file. Populated in `execute` (worker thread) when an
   /// open operation succeeds; read under `mutex_` everywhere else. Shared
   /// ownership so a delegated `prepare`/`execute`/`abandon` keeps the
-  /// adapter alive even if a re-open replaces the map entry mid-call.
-  std::map<std::string, std::shared_ptr<FileSourceAdapter>> files_;
-  /// staged spec key -> locator, so `execute`/`abandonStaged` can route a
-  /// data op to the file that owns it. Entries live from `stageAt` until
-  /// `execute` consumes them or `abandon`/`abandonStaged` drops them.
-  std::unordered_map<std::uint32_t, std::string> stagedLocator_;
+  /// adapter (and its descriptor) alive even if `release` drops the entry
+  /// mid-call.
+  std::map<FileOpenId, OpenFile> files_;
+  FileOpenId nextOpenId_{1};
+  /// staged spec key -> the open that owns it, so `execute`/`abandonStaged`
+  /// can route a data op to its file. Entries live from `stageAt` until
+  /// `execute` consumes them or `abandon`/`release` drops them.
+  std::unordered_map<StageKey, FileOpenId> stagedOpen_;
 };
 
 /// Build the `RequestDecoder` an `ArenaIoCellStore` needs for file

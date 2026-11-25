@@ -8,11 +8,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <gleditor/logging.hpp>
+
 namespace xanadu::vortex {
 
 namespace {
 
-/// Live staged ops per adapter; a full table refuses new stages (key 0)
+/// Spdlog category for every diagnostic this file's adapters emit.
+constexpr const char *fileLogCategory = "vortex.io.file";
+
+/// Live staged ops per adapter; a full table refuses new stages
 /// rather than evicting an entry an in-flight request still names.
 constexpr std::size_t maxStagedOps = 4096;
 
@@ -20,7 +25,7 @@ constexpr std::size_t maxStagedOps = 4096;
 /// ops. The entry cap alone lets 4096 staged writes pin unbounded memory
 /// (each carries its own byte vector); the bound sits well above the
 /// scheduler's default 16 MiB per-op backend budget so legitimate
-/// multi-op staging still fits, while a stage past it fails as key 0
+/// multi-op staging still fits, while a stage past it is refused
 /// exactly like a full table.
 constexpr std::size_t maxStagedWriteBytes = 64U * 1024U * 1024U;
 
@@ -41,17 +46,18 @@ BackendResult failedResult(IoErrorInfo reason, IoProgress progress = {}) {
   return BackendResult{Failed{reason, {}, progress}, {}};
 }
 
-/// `stat` combines size and mtime into one opaque generation value. This
-/// detects an *uncertain* write (plan §7.2); it is not proof that no write
-/// happened (a same-size, same-timestamp in-place rewrite is invisible to
-/// it), which is exactly why a `Stable`/CAS request is refused rather than
-/// synthesized from this value.
-std::uint64_t generationFromStat(const struct stat &st) noexcept {
-  std::uint64_t mix = static_cast<std::uint64_t>(st.st_size);
-  mix ^= static_cast<std::uint64_t>(st.st_mtim.tv_sec) * 1000000007ULL;
-  mix ^= static_cast<std::uint64_t>(st.st_mtim.tv_nsec) * 1000000009ULL;
-  mix ^= static_cast<std::uint64_t>(st.st_ino) * 2654435761ULL;
-  return mix == 0 ? 1 : mix;
+/// The exact fstat fields a generation is made of. This detects an
+/// *uncertain* write (plan §7.2); it is not proof that no write happened (a
+/// same-size, same-timestamp in-place rewrite is invisible to it), which is
+/// exactly why a `Stable`/CAS request is refused rather than synthesized
+/// from this value.
+FileGeneration generationFromStat(const struct stat &st) noexcept {
+  return FileGeneration{
+      .device           = static_cast<std::uint64_t>(st.st_dev),
+      .inode            = static_cast<std::uint64_t>(st.st_ino),
+      .size             = static_cast<std::uint64_t>(st.st_size),
+      .mtimeSeconds     = static_cast<std::int64_t>(st.st_mtim.tv_sec),
+      .mtimeNanoseconds = static_cast<std::int64_t>(st.st_mtim.tv_nsec)};
 }
 
 } // namespace
@@ -67,15 +73,40 @@ FileSourceAdapter::~FileSourceAdapter() {
   if (fd_ >= 0) ::close(fd_);
 }
 
-std::uint64_t FileSourceAdapter::statGeneration() const noexcept {
-  if (fd_ < 0) return 0;
+auto FileSourceAdapter::statFileGeneration() const noexcept
+    -> std::optional<FileGeneration> {
+  if (fd_ < 0) return std::nullopt;
   struct stat st{};
-  if (::fstat(fd_, &st) != 0) return 0;
+  if (::fstat(fd_, &st) != 0) return std::nullopt;
   return generationFromStat(st);
 }
 
-std::uint64_t FileSourceAdapter::currentGeneration() const noexcept {
-  return statGeneration();
+auto FileSourceAdapter::internGenerationLocked(
+    const FileGeneration &generation) const -> std::uint64_t {
+  if (const auto found = generationIds_.find(generation);
+      found != generationIds_.end())
+    return found->second;
+  if (generationOrder_.size() >= maxInternedGenerations_) {
+    generationIds_.erase(generationOrder_.front());
+    generationOrder_.pop_front();
+  }
+  const auto id = nextGenerationId_++;
+  generationIds_.emplace(generation, id);
+  generationOrder_.push_back(generation);
+  return id;
+}
+
+auto FileSourceAdapter::observeGeneration() const
+    -> std::optional<std::uint64_t> {
+  const auto generation = statFileGeneration();
+  if (!generation) return std::nullopt;
+  const std::lock_guard lock(mutex_);
+  return internGenerationLocked(*generation);
+}
+
+auto FileSourceAdapter::currentGeneration() const
+    -> std::optional<std::uint64_t> {
+  return observeGeneration();
 }
 
 auto FileSourceAdapter::probeCapabilities() const
@@ -83,102 +114,106 @@ auto FileSourceAdapter::probeCapabilities() const
   if (fd_ < 0) return std::nullopt;
   struct stat st{};
   if (::fstat(fd_, &st) != 0) return std::nullopt;
-  return FileOpenCapabilities{.locator     = path_,
-                              .consistency = SourceConsistency::Live,
-                              .identity    = FileSourceIdentity::OpenedInode,
-                              .initialGeneration = generationFromStat(st),
-                              .sizeAtOpen =
-                                  static_cast<std::uint64_t>(st.st_size)};
+  const std::lock_guard lock(mutex_);
+  return FileOpenCapabilities{
+      .locator           = path_,
+      .consistency       = SourceConsistency::Live,
+      .identity          = FileSourceIdentity::OpenedInode,
+      .initialGeneration = internGenerationLocked(generationFromStat(st)),
+      .sizeAtOpen        = static_cast<std::uint64_t>(st.st_size)};
 }
 
-std::uint32_t FileSourceAdapter::stageRead(MediaRange range,
-                                           std::uint64_t expectedGeneration) {
-  const std::lock_guard lock(mutex_);
-  if (staged_.size() >= maxStagedOps) return 0;
-  const auto key = nextStageKeyLocked();
-  staged_[key] =
-      StagedFileOp{StagedFileOp::Kind::Read, range, {}, expectedGeneration};
-  return key;
-}
-
-std::uint32_t FileSourceAdapter::stageWrite(std::uint64_t offset,
-                                            std::vector<std::byte> bytes,
-                                            std::uint64_t expectedGeneration) {
-  const std::lock_guard lock(mutex_);
-  if (staged_.size() >= maxStagedOps ||
-      bytes.size() > maxStagedWriteBytes - stagedWriteBytes_)
-    return 0;
-  const auto key       = nextStageKeyLocked();
-  const auto byteCount = bytes.size();
-  staged_[key] =
-      StagedFileOp{StagedFileOp::Kind::Write,
-                   MediaRange{offset, static_cast<std::uint64_t>(byteCount)},
-                   std::move(bytes), expectedGeneration};
+auto FileSourceAdapter::stageLocked(const StageKey key, StagedFileOp op)
+    -> std::expected<StageKey, std::string> {
+  if (staged_.contains(key))
+    return std::unexpected("staging key already in use");
+  if (staged_.size() >= maxStagedOps)
+    return std::unexpected("staging table full");
+  const auto byteCount = op.writeBytes.size();
+  if (byteCount > maxStagedWriteBytes - stagedWriteBytes_)
+    return std::unexpected("staged write byte bound exceeded");
+  staged_.emplace(key, std::move(op));
   // Count only once the op is actually staged: a throwing map insert must
   // not leave the byte ledger ahead of the table.
   stagedWriteBytes_ += byteCount;
   return key;
 }
 
-std::uint32_t FileSourceAdapter::stageStableRead(MediaRange range) {
+std::optional<StageKey>
+FileSourceAdapter::stageRead(MediaRange range,
+                             std::optional<std::uint64_t> expectedGeneration) {
   const std::lock_guard lock(mutex_);
-  if (staged_.size() >= maxStagedOps) return 0;
-  const auto key = nextStageKeyLocked();
-  staged_[key]   = StagedFileOp{StagedFileOp::Kind::StableRead, range, {}, 0};
-  return key;
+  const auto key    = nextStageKeyLocked();
+  const auto staged = stageLocked(
+      key,
+      StagedFileOp{StagedFileOp::Kind::Read, range, {}, expectedGeneration});
+  if (!staged) return std::nullopt;
+  return *staged;
 }
 
-std::expected<std::uint32_t, std::string>
-FileSourceAdapter::stageAt(std::uint32_t key, FileOpSpec spec) {
+std::optional<StageKey>
+FileSourceAdapter::stageWrite(std::uint64_t offset,
+                              std::vector<std::byte> bytes,
+                              std::optional<std::uint64_t> expectedGeneration) {
   const std::lock_guard lock(mutex_);
-  // Key 0 is the table-full sentinel the stage* helpers report; an entry
-  // there would be found by a request whose specification names nothing.
-  if (key == 0) return std::unexpected("staging key 0 is reserved");
-  if (staged_.contains(key))
-    return std::unexpected("staging key already in use");
-  if (staged_.size() >= maxStagedOps)
-    return std::unexpected("staging table full");
-  StagedFileOp op;
+  const auto key       = nextStageKeyLocked();
+  const auto byteCount = static_cast<std::uint64_t>(bytes.size());
+  const auto staged =
+      stageLocked(key, StagedFileOp{StagedFileOp::Kind::Write,
+                                    MediaRange{offset, byteCount},
+                                    std::move(bytes), expectedGeneration});
+  if (!staged) return std::nullopt;
+  return *staged;
+}
+
+std::optional<StageKey> FileSourceAdapter::stageStableRead(MediaRange range) {
+  const std::lock_guard lock(mutex_);
+  const auto key    = nextStageKeyLocked();
+  const auto staged = stageLocked(
+      key,
+      StagedFileOp{StagedFileOp::Kind::StableRead, range, {}, std::nullopt});
+  if (!staged) return std::nullopt;
+  return *staged;
+}
+
+std::expected<StageKey, std::string>
+FileSourceAdapter::stageAt(const StageKey key, FileOpSpec spec) {
+  const std::lock_guard lock(mutex_);
   switch (spec.kind) {
   case FileOpSpec::Kind::Read:
     if (!spec.writeBytes.empty())
       return std::unexpected("read spec carries write bytes");
-    op = StagedFileOp{
-        StagedFileOp::Kind::Read, spec.range, {}, spec.expectedGeneration};
-    break;
+    return stageLocked(key, StagedFileOp{StagedFileOp::Kind::Read,
+                                         spec.range,
+                                         {},
+                                         spec.expectedGeneration});
   case FileOpSpec::Kind::StableRead:
     if (!spec.writeBytes.empty())
       return std::unexpected("stable-read spec carries write bytes");
-    op = StagedFileOp{StagedFileOp::Kind::StableRead, spec.range, {}, 0};
-    break;
+    return stageLocked(
+        key, StagedFileOp{
+                 StagedFileOp::Kind::StableRead, spec.range, {}, std::nullopt});
   case FileOpSpec::Kind::Write: {
-    if (spec.writeBytes.size() > maxStagedWriteBytes - stagedWriteBytes_)
-      return std::unexpected("staged write byte bound exceeded");
-    const auto byteCount = spec.writeBytes.size();
-    op                   = StagedFileOp{
-        StagedFileOp::Kind::Write,
-        MediaRange{spec.range.offset, static_cast<std::uint64_t>(byteCount)},
-        spec.writeBytes, spec.expectedGeneration};
-    staged_[key] = std::move(op);
-    // Count only once the op is actually staged: a throwing map insert
-    // must not leave the byte ledger ahead of the table.
-    stagedWriteBytes_ += byteCount;
-    return key;
+    const auto byteCount = static_cast<std::uint64_t>(spec.writeBytes.size());
+    return stageLocked(
+        key, StagedFileOp{StagedFileOp::Kind::Write,
+                          MediaRange{spec.range.offset, byteCount},
+                          std::move(spec.writeBytes), spec.expectedGeneration});
   }
   }
-  staged_[key] = std::move(op);
-  return key;
+  return std::unexpected("unknown file op kind");
 }
 
-std::uint32_t FileSourceAdapter::nextStageKeyLocked() {
-  // Skip 0 (the table-full sentinel) and any key a wrapped counter could
-  // revisit while still live; the table bound keeps the skip short.
+StageKey FileSourceAdapter::nextStageKeyLocked() {
+  // Skip any key a caller-chosen stageAt or a wrapped counter left live;
+  // the table bound keeps the skip short. Every key value is a valid cell
+  // ref, so nothing is reserved.
   auto key = nextStageKey_++;
-  while (key == 0 || staged_.contains(key)) key = nextStageKey_++;
+  while (staged_.contains(key)) key = nextStageKey_++;
   return key;
 }
 
-void FileSourceAdapter::abandon(const std::uint32_t key) {
+void FileSourceAdapter::abandon(const StageKey key) {
   const std::lock_guard lock(mutex_);
   const auto it = staged_.find(key);
   if (it != staged_.end()) stagedWriteBytes_ -= it->second.writeBytes.size();
@@ -186,20 +221,23 @@ void FileSourceAdapter::abandon(const std::uint32_t key) {
 }
 
 void FileSourceAdapter::abandonStaged(const OwnerCell specification) noexcept {
-  abandon(static_cast<std::uint32_t>(specification));
+  abandon(specification);
 }
 
 auto FileSourceAdapter::prepare(const CellRequest &request, OwnerContext &)
     -> std::expected<PreparedOperation, IoErrorInfo> {
   if (fd_ < 0) return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
 
-  const auto key = static_cast<std::uint32_t>(request.specification);
+  const StageKey key = request.specification;
   StagedFileOp op;
   {
     const std::lock_guard lock(mutex_);
     const auto it = staged_.find(key);
-    if (it == staged_.end())
+    if (it == staged_.end()) {
+      GLEDITOR_LOG_DEBUG(fileLogCategory,
+                         "prepare refused: no staged op under key {}", key);
       return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+    }
     op = it->second;
   }
 
@@ -213,14 +251,21 @@ auto FileSourceAdapter::prepare(const CellRequest &request, OwnerContext &)
   if (op.kind == StagedFileOp::Kind::Write && !writable_)
     return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
 
-  const auto current = statGeneration();
-  if (op.expectedGeneration != 0) {
-    if (current == 0)
-      // stat failed, so no generation can be verified; refuse rather than
+  if (op.expectedGeneration) {
+    const auto current = observeGeneration();
+    if (!current) {
+      // fstat failed, so no generation can be verified; refuse rather than
       // silently accept the staged expectation.
+      GLEDITOR_LOG_WARN(fileLogCategory,
+                        "prepare refused: fstat failed (errno {})", errno);
       return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
-    if (op.expectedGeneration != current)
+    }
+    if (*op.expectedGeneration != *current) {
+      GLEDITOR_LOG_DEBUG(fileLogCategory,
+                         "prepare refused: generation {} expected, {} current",
+                         *op.expectedGeneration, *current);
       return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
+    }
   }
 
   std::vector<std::byte> bytes(sizeof(key));
@@ -231,7 +276,7 @@ auto FileSourceAdapter::prepare(const CellRequest &request, OwnerContext &)
 void FileSourceAdapter::execute(const BackendCommand &command,
                                 BackendContext &context,
                                 CompletionSink &sink) noexcept {
-  std::uint32_t key{};
+  StageKey key{};
   if (command.operation.bytes.size() >= sizeof(key))
     std::memcpy(&key, command.operation.bytes.data(), sizeof(key));
 
@@ -266,13 +311,13 @@ void FileSourceAdapter::execute(const BackendCommand &command,
       // refuses that same unverifiable case as Unsupported, and bypassing
       // the CAS here would silently accept a request the caller expected
       // to be checked.
-      const auto observedBefore = statGeneration();
-      if (op->expectedGeneration != 0 && observedBefore == 0) {
+      const auto observedBefore = observeGeneration();
+      if (op->expectedGeneration && !observedBefore) {
         result = failedResult({IoErrorCode::Unsupported, 0});
-      } else if (op->expectedGeneration != 0 &&
-                 op->expectedGeneration != observedBefore) {
-        result = BackendResult{Conflict{Generation{op->expectedGeneration},
-                                        Generation{observedBefore},
+      } else if (op->expectedGeneration &&
+                 *op->expectedGeneration != *observedBefore) {
+        result = BackendResult{Conflict{Generation{*op->expectedGeneration},
+                                        Generation{*observedBefore},
                                         IoProgress{.phase = IoPhase::Terminal}},
                                {}};
       } else {
@@ -392,6 +437,17 @@ void FileSourceAdapter::execute(const BackendCommand &command,
                 }
                 out.resize(got);
                 const auto progress = terminalProgress(got);
+                // Sample the generation again after the transfer: a pread
+                // is not atomic against a concurrent writer, so a read whose
+                // before/after generations differ may mix two states and
+                // must not be recorded as an observation of either.
+                std::function<void()> afterTransfer;
+                {
+                  const std::lock_guard lock(mutex_);
+                  afterTransfer = afterTransferHook_;
+                }
+                if (afterTransfer) afterTransfer();
+                const auto observedAfter = observeGeneration();
                 if (context.stop.stop_requested()) {
                   // Reads never "land" bytes the way pwrite can, so a
                   // stopped read reports its range with uncertain=false.
@@ -400,6 +456,9 @@ void FileSourceAdapter::execute(const BackendCommand &command,
                   } else {
                     auto lease = publishTransientBytes(context.payloads, out);
                     if (!lease) {
+                      GLEDITOR_LOG_WARN(fileLogCategory,
+                                        "payload publish failed for {} bytes",
+                                        out.size());
                       result = failedResult({IoErrorCode::BackendFailure, 0});
                     } else {
                       payload = *lease;
@@ -412,6 +471,29 @@ void FileSourceAdapter::execute(const BackendCommand &command,
                       {IoErrorCode::BackendFailure, readErrno}, progress);
                 } else if (out.empty() && op->range.length != 0) {
                   result = BackendResult{EndOfStream{progress}, {}};
+                } else if (!observedBefore || !observedAfter) {
+                  // No generation can be claimed for bytes whose source
+                  // state could not be sampled on both sides.
+                  GLEDITOR_LOG_WARN(fileLogCategory,
+                                    "read refused: fstat failed around the "
+                                    "transfer (errno {})",
+                                    errno);
+                  result =
+                      failedResult({IoErrorCode::BackendFailure, 0}, progress);
+                } else if (*observedBefore != *observedAfter) {
+                  // Conflict (not Complete-with-uncertainty): the outcome
+                  // vocabulary's Conflict names exactly "the generation I
+                  // saw moved", the caller can retry, and no bytes are
+                  // published that belong to neither generation.
+                  GLEDITOR_LOG_DEBUG(
+                      fileLogCategory,
+                      "read raced a change: generation {} then {}",
+                      *observedBefore, *observedAfter);
+                  result = BackendResult{
+                      Conflict{Generation{*observedBefore},
+                               Generation{*observedAfter},
+                               IoProgress{.phase = IoPhase::Terminal}},
+                      {}};
                 } else {
                   // Read bytes publish through the payload channel: the
                   // outcome names the retained range and the lease reaches
@@ -424,6 +506,9 @@ void FileSourceAdapter::execute(const BackendCommand &command,
                   if (!out.empty()) {
                     auto lease = publishTransientBytes(context.payloads, out);
                     if (!lease) {
+                      GLEDITOR_LOG_WARN(fileLogCategory,
+                                        "payload publish failed for {} bytes",
+                                        out.size());
                       result = failedResult({IoErrorCode::BackendFailure, 0});
                       readPublished = false;
                     } else {
@@ -437,8 +522,8 @@ void FileSourceAdapter::execute(const BackendCommand &command,
                     // observed around this transfer and bound to the exact
                     // retained bytes -- minted before the outcome so
                     // ReadObservationResult names the same id.
-                    std::uint64_t observationId = 0;
-                    std::uint64_t observedGen   = 0;
+                    std::uint64_t observationId     = 0;
+                    const std::uint64_t observedGen = *observedAfter;
                     {
                       const std::lock_guard lock(mutex_);
                       observationId = nextObservationId_++;
@@ -449,7 +534,6 @@ void FileSourceAdapter::execute(const BackendCommand &command,
                       // to pick first.
                       if (observations_.size() >= maxRetainedObservations_)
                         observations_.erase(observations_.begin());
-                      observedGen                  = statGeneration();
                       observations_[observationId] = ReadObservation{
                           observationId,
                           observedGen,
@@ -482,6 +566,8 @@ void FileSourceAdapter::execute(const BackendCommand &command,
       }
     }
   } catch (...) {
+    GLEDITOR_LOG_WARN(fileLogCategory,
+                      "execute threw; reporting BackendFailure");
     result = failedResult({IoErrorCode::BackendFailure, 0});
   }
 
@@ -508,8 +594,10 @@ auto FileSourceAdapter::acquireDecodeLease(MediaRange range)
   const std::lock_guard lock(mutex_);
   if (decodeLeases_.size() >= maxDecodeLeases_)
     return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded});
-  const auto id = nextDecodeLease_++;
-  DecodeLease lease{id, range, statGeneration()};
+  const auto id         = nextDecodeLease_++;
+  const auto generation = statFileGeneration();
+  DecodeLease lease{id, range, std::nullopt};
+  if (generation) lease.sourceGeneration = internGenerationLocked(*generation);
   decodeLeases_[id] = lease;
   return lease;
 }
@@ -524,9 +612,18 @@ std::size_t FileSourceAdapter::liveDecodeLeases() const noexcept {
   return decodeLeases_.size();
 }
 
-void FileSourceAdapter::setMaxDecodeLeases(std::size_t value) noexcept {
+auto FileSourceAdapter::setMaxDecodeLeases(std::size_t value)
+    -> FileSourceAdapter * {
   const std::lock_guard lock(mutex_);
   maxDecodeLeases_ = value;
+  return this;
+}
+
+auto FileSourceAdapter::setAfterTransferHook(std::function<void()> hook)
+    -> FileSourceAdapter * {
+  const std::lock_guard lock(mutex_);
+  afterTransferHook_ = std::move(hook);
+  return this;
 }
 
 } // namespace xanadu::vortex

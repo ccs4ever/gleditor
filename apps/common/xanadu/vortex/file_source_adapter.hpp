@@ -25,13 +25,18 @@
  * `PayloadResolver` leases over the transferred bytes themselves.
  */
 
+#include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <expected>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "common/xanadu/vortex/io_protocol.hpp"
 #include "common/xanadu/vortex/payload_resolver.hpp"
@@ -79,7 +84,8 @@ struct ReadObservation {
 struct DecodeLease {
   LeaseId lease{};
   MediaRange sourceRange;
-  std::uint64_t sourceGeneration{};
+  /// nullopt when the file could not be stat'd at acquisition.
+  std::optional<std::uint64_t> sourceGeneration;
 };
 
 /// Whether a file source's operations address the inode opened at open
@@ -110,6 +116,28 @@ struct FileOpenCapabilities {
   std::uint64_t sizeAtOpen{};
 };
 
+/// The exact `fstat` fields a generation is made of. Equality is
+/// field-for-field, so two generations compare equal only when every field
+/// is equal -- no hashing or mixing that could make distinct states
+/// collide. The public `uint64_t` generation the protocol carries
+/// (`ReadObservationResult::sourceGeneration`, `Conflict`) is an id the
+/// adapter interns for one of these values.
+struct FileGeneration {
+  std::uint64_t device{};
+  std::uint64_t inode{};
+  std::uint64_t size{};
+  std::int64_t mtimeSeconds{};
+  std::int64_t mtimeNanoseconds{};
+  friend auto operator<=>(const FileGeneration &,
+                          const FileGeneration &) = default;
+  friend bool operator==(const FileGeneration &,
+                         const FileGeneration &)  = default;
+};
+
+/// The key a staged op is stored under: the minted spec cell's ref, so its
+/// width follows `OwnerCell` rather than a hand-picked integer.
+using StageKey = OwnerCell;
+
 /// Rights bits for file endpoint `OpenSpec::requestedRights` /
 /// `OpenGrant::rights` (adapter-defined per plan §3.3): bit 0 read, bit 1
 /// write. An open always carries read; write additionally requires the
@@ -128,8 +156,9 @@ struct FileOpSpec {
   MediaRange range{};
   /// Write only: the frozen bytes to pwrite.
   std::vector<std::byte> writeBytes;
-  /// Expected generation at staging time; 0 disables the check.
-  std::uint64_t expectedGeneration{};
+  /// Expected generation id at staging time (see `currentGeneration`);
+  /// nullopt performs no check.
+  std::optional<std::uint64_t> expectedGeneration;
 };
 
 /// A `d.io.kind` "file" source over one already-resolved filesystem path.
@@ -177,38 +206,39 @@ public:
       -> std::optional<FileOpenCapabilities>;
 
   /// Stage a bounded read at a checked 64-bit range, keyed by the generation
-  /// expected at staging time (0 disables the check, matching
-  /// `StreamOpSpec::expectedGeneration`'s convention). Returns the key to
-  /// place in the request's `specification` cell.
-  [[nodiscard]] std::uint32_t stageRead(MediaRange range,
-                                        std::uint64_t expectedGeneration);
+  /// expected at staging time (nullopt performs no check). Returns the key
+  /// to place in the request's `specification` cell, or nullopt when the
+  /// staging table is full.
+  [[nodiscard]] std::optional<StageKey>
+  stageRead(MediaRange range,
+            std::optional<std::uint64_t> expectedGeneration = std::nullopt);
   /// Stage a bounded write at a checked 64-bit offset. `Stable` sources never
   /// reach here (open already refused); writable `Live` files accept it.
-  [[nodiscard]] std::uint32_t stageWrite(std::uint64_t offset,
-                                         std::vector<std::byte> bytes,
-                                         std::uint64_t expectedGeneration);
+  /// nullopt when the table or its byte bound is full.
+  [[nodiscard]] std::optional<StageKey>
+  stageWrite(std::uint64_t offset, std::vector<std::byte> bytes,
+             std::optional<std::uint64_t> expectedGeneration = std::nullopt);
   /// Stage a strict-snapshot request. Always refused at `prepare` time with
   /// `Unsupported` -- a plain POSIX file is never a backend-proven immutable
   /// source -- but staged like any other operation so the refusal flows
   /// through the normal admission path instead of being special-cased by
-  /// callers.
-  [[nodiscard]] std::uint32_t stageStableRead(MediaRange range);
+  /// callers. nullopt when the table is full.
+  [[nodiscard]] std::optional<StageKey> stageStableRead(MediaRange range);
 
   /// Stage under a caller-chosen @p key (the minted spec cell's ref) -- the
   /// `StagedLensSourceAdapter::stageAt` pattern for callers whose request
   /// `specification` must name a live arena cell:
   /// `ArenaIoCellStore::freezeRequest` refuses any OwnerCell with no
   /// incarnation, so the key IS that cell and the adapter owns what it
-  /// means. Refuses key 0, an occupied key, or a full table; a write spec
-  /// is charged against the same staged-byte bound `stageWrite` enforces.
-  [[nodiscard]] std::expected<std::uint32_t, std::string>
-  stageAt(std::uint32_t key, FileOpSpec spec);
+  /// means. Refuses an occupied key or a full table; a write spec is
+  /// charged against the same staged-byte bound `stageWrite` enforces.
+  [[nodiscard]] std::expected<StageKey, std::string> stageAt(StageKey key,
+                                                             FileOpSpec spec);
 
   /// Owner-thread: drop a staged op that will never reach `execute` (the
   /// submission was refused, or the caller abandoned it). The staging
-  /// table is bounded at 4096 live ops; `stage*` returns 0 when full and a
-  /// request staged under key 0 then fails `prepare` as InvalidRequest.
-  void abandon(std::uint32_t key);
+  /// table is bounded at 4096 live ops; `stage*` returns nullopt when full.
+  void abandon(StageKey key);
 
   /// `IoAdapter` hook: the service calls this with the request's
   /// `specification` when a submission is refused or its request reaches a
@@ -222,10 +252,11 @@ public:
   auto publish(const NativeCompletion &completion, OwnerContext &context)
       -> std::expected<OwnerPublication, IoErrorInfo> override;
 
-  /// Current `stat`-derived generation; bumps whenever the adapter observes
-  /// (via `stat` taken around a transfer) that size or mtime moved, whether
-  /// by this adapter's own write or an external writer.
-  [[nodiscard]] std::uint64_t currentGeneration() const noexcept;
+  /// Id of the file's current generation (an exact `FileGeneration`
+  /// interned by this adapter); changes whenever size, mtime, device or
+  /// inode moved, whether by this adapter's own write or an external
+  /// writer. nullopt when the descriptor is absent or `fstat` fails.
+  [[nodiscard]] auto currentGeneration() const -> std::optional<std::uint64_t>;
 
   /// All recorded observations' bytes remain nominally retrievable while the
   /// caller holds the observation; the adapter keeps the metadata (not the
@@ -244,22 +275,37 @@ public:
   void releaseDecodeLease(LeaseId lease) noexcept;
   [[nodiscard]] std::size_t liveDecodeLeases() const noexcept;
 
-  void setMaxDecodeLeases(std::size_t value) noexcept;
+  auto setMaxDecodeLeases(std::size_t value) -> FileSourceAdapter *;
+
+  /// Test seam: @p hook runs on the executing thread after the transfer and
+  /// before the post-transfer generation sample, so a test can mutate the
+  /// file inside the window the double sample exists to detect.
+  auto setAfterTransferHook(std::function<void()> hook) -> FileSourceAdapter *;
 
 private:
   using StagedFileOp = FileOpSpec;
 
-  [[nodiscard]] std::uint64_t statGeneration() const noexcept;
+  [[nodiscard]] auto statFileGeneration() const noexcept
+      -> std::optional<FileGeneration>;
+  /// Stat and intern the current generation; takes `mutex_`.
+  [[nodiscard]] auto observeGeneration() const -> std::optional<std::uint64_t>;
+  /// Id of @p generation, minting one on first sight; caller holds mutex_.
+  [[nodiscard]] auto
+  internGenerationLocked(const FileGeneration &generation) const
+      -> std::uint64_t;
   /// Next free auto stage key; caller holds mutex_.
-  std::uint32_t nextStageKeyLocked();
+  StageKey nextStageKeyLocked();
+  /// Insert under a free @p key, charging write bytes; caller holds mutex_.
+  [[nodiscard]] auto stageLocked(StageKey key, StagedFileOp op)
+      -> std::expected<StageKey, std::string>;
 
   int fd_{-1};
   std::string path_;
   bool writable_{false};
 
   mutable std::mutex mutex_;
-  std::unordered_map<std::uint32_t, StagedFileOp> staged_;
-  std::uint32_t nextStageKey_{1};
+  std::unordered_map<StageKey, StagedFileOp> staged_;
+  StageKey nextStageKey_{};
   /// Sum of writeBytes held across staged_ (guarded by mutex_); the byte
   /// half of the staging bound the entry count alone cannot express.
   std::size_t stagedWriteBytes_{};
@@ -269,6 +315,17 @@ private:
   std::map<std::uint64_t, ReadObservation> observations_;
   std::uint64_t nextObservationId_{1};
   static constexpr std::size_t maxRetainedObservations_ = 4096;
+
+  /// Interned generations (guarded by mutex_): exact value -> public id,
+  /// with insertion order so the cap evicts the oldest. An evicted value
+  /// that reappears gets a fresh id, which only ever makes a stale
+  /// expectation fail, never pass.
+  mutable std::map<FileGeneration, std::uint64_t> generationIds_;
+  mutable std::deque<FileGeneration> generationOrder_;
+  mutable std::uint64_t nextGenerationId_{1};
+  static constexpr std::size_t maxInternedGenerations_ = 4096;
+
+  std::function<void()> afterTransferHook_;
 
   std::unordered_map<LeaseId, DecodeLease> decodeLeases_;
   LeaseId nextDecodeLease_{1};

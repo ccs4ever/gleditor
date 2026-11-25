@@ -8,11 +8,14 @@
 #include <cstdio>
 #include <fcntl.h>
 #include <filesystem>
+#include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <thread>
+#include <type_traits>
 #include <unistd.h>
 #include <vector>
 
@@ -75,10 +78,14 @@ readPayload(PayloadResolver &payloads, const PayloadLease &lease) {
   return payloads.read(lease, 0, static_cast<std::size_t>(lease.range.length));
 }
 
-CellRequest requestFor(std::uint32_t specification) {
+CellRequest requestFor(StageKey specification) {
   return CellRequest{.key           = AdapterKey{10, 1},
                      .capability    = CapabilityCell{},
                      .specification = specification};
+}
+
+CellRequest requestFor(const std::optional<StageKey> &staged) {
+  return requestFor(staged.value());
 }
 
 /// A fixture directory under the test's own XDG cache, never the author's
@@ -165,7 +172,7 @@ TEST_F(FileSourceAdapterTest, ReadAtOrPastEndOfFileIsEndOfStream) {
   PayloadResolver payloads;
   auto context = makeContext(payloads);
 
-  const auto key      = adapter.stageRead(MediaRange{2, 10}, 0);
+  const auto key      = adapter.stageRead(MediaRange{2, 10}, std::nullopt);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink{&payloads};
@@ -182,7 +189,7 @@ TEST_F(FileSourceAdapterTest, ReadBeyondBudgetIsBounded) {
   BackendContext context{
       .stop = {}, .payloads = payloads, .budget = BackendBudget{16}};
 
-  const auto key      = adapter.stageRead(MediaRange{0, 4096}, 0);
+  const auto key      = adapter.stageRead(MediaRange{0, 4096}, std::nullopt);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink{&payloads};
@@ -210,7 +217,8 @@ TEST_F(FileSourceAdapterTest,
   BackendContext context{
       .stop = {}, .payloads = payloads, .budget = BackendBudget{0}};
 
-  const auto key = adapter.stageRead(MediaRange{0, std::uint64_t{1} << 40}, 0);
+  const auto key =
+      adapter.stageRead(MediaRange{0, std::uint64_t{1} << 40}, std::nullopt);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink{&payloads};
@@ -294,7 +302,7 @@ TEST_F(FileSourceAdapterTest, TruncationBumpsGenerationAndShortensReads) {
   OwnerContext owner;
   PayloadResolver payloads;
   auto context        = makeContext(payloads);
-  const auto key      = adapter.stageRead(MediaRange{0, 10}, 0);
+  const auto key      = adapter.stageRead(MediaRange{0, 10}, std::nullopt);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink{&payloads};
@@ -328,7 +336,7 @@ TEST_F(FileSourceAdapterTest, HeldFdKeepsReadingUnlinkedOriginalAfterReplace) {
   OwnerContext owner;
   PayloadResolver payloads;
   auto context        = makeContext(payloads);
-  const auto key      = adapter.stageRead(MediaRange{0, 8}, 0);
+  const auto key      = adapter.stageRead(MediaRange{0, 8}, std::nullopt);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink{&payloads};
@@ -369,7 +377,7 @@ TEST_F(FileSourceAdapterTest, ReadsPast4GiBOffsetOnASparseFile) {
   PayloadResolver payloads;
   auto context = makeContext(payloads);
   const auto key =
-      adapter.stageRead(MediaRange{fiveGiB, sizeof(marker) - 1}, 0);
+      adapter.stageRead(MediaRange{fiveGiB, sizeof(marker) - 1}, std::nullopt);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink{&payloads};
@@ -381,6 +389,175 @@ TEST_F(FileSourceAdapterTest, ReadsPast4GiBOffsetOnASparseFile) {
   const auto bytes = readPayload(payloads, *sink.payloadLease);
   ASSERT_TRUE(bytes.has_value());
   EXPECT_EQ(textOf(*bytes), "past-4gib-marker");
+}
+
+TEST_F(FileSourceAdapterTest, ObservationOffsetPast4GiBSurvivesAs64Bit) {
+  constexpr std::uint64_t fiveGiB = 5ULL * 1024 * 1024 * 1024;
+  writeFile("");
+  FileSourceAdapter adapter(path_, /*writable=*/true);
+  OwnerContext owner;
+  PayloadResolver payloads;
+  auto context = makeContext(payloads);
+
+  // Write above 4 GiB through the staged-write path.
+  const auto writeKey = adapter.stageWrite(fiveGiB, bytesOf("high-write"));
+  ASSERT_TRUE(writeKey.has_value());
+  const auto writePrepared = adapter.prepare(requestFor(writeKey), owner);
+  ASSERT_TRUE(writePrepared);
+  CapturingSink writeSink{&payloads};
+  adapter.execute(BackendCommand{{1}, *writePrepared}, context, writeSink);
+  ASSERT_TRUE(writeSink.candidate);
+  if (const auto *failed = std::get_if<Failed>(&writeSink.candidate->outcome);
+      failed != nullptr && failed->reason.code == IoErrorCode::BackendFailure)
+    GTEST_SKIP() << "filesystem does not support a write at a >4GiB offset";
+  ASSERT_TRUE(std::holds_alternative<Complete>(writeSink.candidate->outcome));
+
+  // Read it back and check the observation keeps the full 64-bit offset.
+  const auto readKey = adapter.stageRead(MediaRange{fiveGiB, 10});
+  ASSERT_TRUE(readKey.has_value());
+  const auto readPrepared = adapter.prepare(requestFor(readKey), owner);
+  ASSERT_TRUE(readPrepared);
+  CapturingSink readSink{&payloads};
+  adapter.execute(BackendCommand{{2}, *readPrepared}, context, readSink);
+  ASSERT_TRUE(readSink.candidate);
+  const auto *complete = std::get_if<Complete>(&readSink.candidate->outcome);
+  ASSERT_NE(complete, nullptr);
+  const auto *details = std::get_if<ReadObservationResult>(&complete->value);
+  ASSERT_NE(details, nullptr);
+  EXPECT_EQ(details->readOffset, fiveGiB);
+  ASSERT_TRUE(readSink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *readSink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
+  EXPECT_EQ(textOf(*bytes), "high-write");
+  const auto observation = adapter.observation(details->observationId);
+  ASSERT_TRUE(observation.has_value());
+  EXPECT_EQ(observation->range.offset, fiveGiB);
+  EXPECT_EQ(observation->range.length, 10U);
+}
+
+// -- double generation sample, exact generations, option-typed API ----------
+
+TEST_F(FileSourceAdapterTest, ReadRacingAChangeIsConflictAndRecordsNothing) {
+  writeFile("0123456789");
+  FileSourceAdapter adapter(path_, /*writable=*/true);
+  OwnerContext owner;
+  PayloadResolver payloads;
+  auto context = makeContext(payloads);
+
+  // The hook mutates the file between the pread and the second sample --
+  // the window a single post-transfer sample cannot see.
+  const int fd = ::open(path_.c_str(), O_WRONLY);
+  ASSERT_GE(fd, 0);
+  adapter.setAfterTransferHook(
+      [fd] { static_cast<void>(::pwrite(fd, "tail", 4, 10)); });
+
+  const auto key = adapter.stageRead(MediaRange{0, 5});
+  ASSERT_TRUE(key.has_value());
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  ::close(fd);
+  ASSERT_TRUE(sink.candidate);
+  const auto *conflict = std::get_if<Conflict>(&sink.candidate->outcome);
+  ASSERT_NE(conflict, nullptr);
+  EXPECT_NE(conflict->expected.value, conflict->observed.value);
+  EXPECT_FALSE(sink.payloadLease.has_value());
+  EXPECT_FALSE(adapter.observation(1).has_value());
+}
+
+TEST_F(FileSourceAdapterTest, UnchangedFileStillCompletesWithTheHookInstalled) {
+  writeFile("0123456789");
+  FileSourceAdapter adapter(path_);
+  OwnerContext owner;
+  PayloadResolver payloads;
+  auto context  = makeContext(payloads);
+  int hookCalls = 0;
+  EXPECT_EQ(adapter.setAfterTransferHook([&hookCalls] { ++hookCalls; }),
+            &adapter);
+
+  const auto key = adapter.stageRead(MediaRange{0, 5});
+  ASSERT_TRUE(key.has_value());
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  ASSERT_TRUE(sink.candidate);
+  EXPECT_TRUE(std::holds_alternative<Complete>(sink.candidate->outcome));
+  EXPECT_EQ(hookCalls, 1);
+  EXPECT_TRUE(adapter.observation(1).has_value());
+}
+
+TEST(FileGenerationTest, EqualOnlyWhenEveryFieldIsEqual) {
+  const FileGeneration base{.device           = 1,
+                            .inode            = 2,
+                            .size             = 3,
+                            .mtimeSeconds     = 4,
+                            .mtimeNanoseconds = 5};
+  EXPECT_EQ(base, base);
+  auto other   = base;
+  other.device = 9;
+  EXPECT_NE(base, other);
+  other       = base;
+  other.inode = 9;
+  EXPECT_NE(base, other);
+  other      = base;
+  other.size = 9;
+  EXPECT_NE(base, other);
+  other              = base;
+  other.mtimeSeconds = 9;
+  EXPECT_NE(base, other);
+  other                  = base;
+  other.mtimeNanoseconds = 9;
+  EXPECT_NE(base, other);
+  // A swap of two fields -- which an XOR-style mix can fold together --
+  // is still a different generation.
+  other       = base;
+  other.size  = base.inode;
+  other.inode = base.size;
+  EXPECT_NE(base, other);
+}
+
+TEST_F(FileSourceAdapterTest, StageKeysFollowOwnerCellWidthAndZeroIsOrdinary) {
+  static_assert(std::is_same_v<StageKey, OwnerCell>);
+  writeFile("keyed");
+  FileSourceAdapter adapter(path_);
+  const auto highest = std::numeric_limits<StageKey>::max();
+  EXPECT_EQ(adapter.stageAt(highest, FileOpSpec{}).value(), highest);
+  EXPECT_EQ(adapter.stageAt(0, FileOpSpec{}).value(), StageKey{0});
+  EXPECT_FALSE(adapter.stageAt(highest, FileOpSpec{}));
+}
+
+TEST_F(FileSourceAdapterTest, FullStagingTableYieldsNulloptNotAKey) {
+  writeFile("x");
+  FileSourceAdapter adapter(path_);
+  std::size_t staged = 0;
+  while (adapter.stageRead(MediaRange{0, 1}).has_value()) ++staged;
+  EXPECT_GT(staged, 0U);
+  EXPECT_FALSE(adapter.stageRead(MediaRange{0, 1}).has_value());
+  EXPECT_FALSE(adapter.stageStableRead(MediaRange{0, 1}).has_value());
+}
+
+TEST_F(FileSourceAdapterTest, ExpectedGenerationIsOptionalNotZero) {
+  writeFile("abc");
+  FileSourceAdapter adapter(path_);
+  OwnerContext owner;
+  // A nonexistent id (what a zero sentinel used to mean "no check") is a
+  // real expectation now and is refused Stale.
+  const auto key = adapter.stageRead(MediaRange{0, 1}, std::uint64_t{0});
+  ASSERT_TRUE(key.has_value());
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  ASSERT_FALSE(prepared);
+  EXPECT_EQ(prepared.error().code, IoErrorCode::Stale);
+  ASSERT_TRUE(adapter.currentGeneration().has_value());
+}
+
+TEST_F(FileSourceAdapterTest, SetMaxDecodeLeasesChains) {
+  writeFile("abc");
+  FileSourceAdapter adapter(path_);
+  EXPECT_EQ(adapter.setMaxDecodeLeases(1), &adapter);
+  ASSERT_TRUE(adapter.acquireDecodeLease(MediaRange{0, 1}).has_value());
+  EXPECT_FALSE(adapter.acquireDecodeLease(MediaRange{0, 1}).has_value());
 }
 
 // -- no path-only cache reuse -------------------------------------------------
@@ -420,7 +597,7 @@ TEST_F(FileSourceAdapterTest,
   stopSource.request_stop();
   auto context = makeContext(payloads, stopSource.get_token());
 
-  const auto key      = adapter.stageRead(MediaRange{0, 5}, 0);
+  const auto key      = adapter.stageRead(MediaRange{0, 5}, std::nullopt);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
   CapturingSink sink{&payloads};
@@ -463,7 +640,7 @@ TEST_F(FileSourceAdapterTest, WriteToReadOnlyAdapterIsRefused) {
   FileSourceAdapter adapter(path_, /*writable=*/false);
   OwnerContext owner;
 
-  const auto key      = adapter.stageWrite(0, bytesOf("nope"), 0);
+  const auto key      = adapter.stageWrite(0, bytesOf("nope"), std::nullopt);
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_FALSE(prepared);
   EXPECT_EQ(prepared.error().code, IoErrorCode::Unsupported);
@@ -475,26 +652,26 @@ TEST_F(FileSourceAdapterTest, StageWriteByteBoundRefusesBeforeEntryCap) {
 
   // Each staged write carries its whole byte vector: the 4096-entry cap
   // alone would let the table pin unbounded memory, so stageWrite() also
-  // bounds the total staged bytes and fails as key 0 past it.
-  std::vector<std::uint32_t> keys;
+  // bounds the total staged bytes and refuses past it.
+  std::vector<StageKey> keys;
   const auto chunk = std::vector<std::byte>(8U * 1024U * 1024U);
   for (int i = 0; i < 4096; ++i) {
-    const auto key = adapter.stageWrite(0, chunk, 0);
-    if (key == 0) break;
-    keys.push_back(key);
+    const auto key = adapter.stageWrite(0, chunk, std::nullopt);
+    if (!key) break;
+    keys.push_back(*key);
   }
   EXPECT_FALSE(keys.empty());
   EXPECT_LT(keys.size(), 4096U); // refused on bytes, not on entries
 
   // Byte-free ops are unaffected by the write-byte bound.
-  const auto readKey = adapter.stageRead(MediaRange{0, 1}, 0);
-  EXPECT_NE(readKey, 0U);
+  const auto readKey = adapter.stageRead(MediaRange{0, 1}, std::nullopt);
+  EXPECT_TRUE(readKey.has_value());
 
   // Abandoning a staged write returns its bytes to the budget.
   adapter.abandon(keys.back());
   keys.pop_back();
-  const auto again = adapter.stageWrite(0, chunk, 0);
-  EXPECT_NE(again, 0U);
+  const auto again = adapter.stageWrite(0, chunk, std::nullopt);
+  EXPECT_TRUE(again.has_value());
 }
 
 TEST_F(FileSourceAdapterTest, WritableAdapterWritesAndBumpsGeneration) {
@@ -514,7 +691,7 @@ TEST_F(FileSourceAdapterTest, WritableAdapterWritesAndBumpsGeneration) {
   ASSERT_TRUE(std::holds_alternative<Complete>(sink.candidate->outcome));
   EXPECT_NE(adapter.currentGeneration(), before);
 
-  const auto readKey      = adapter.stageRead(MediaRange{0, 10}, 0);
+  const auto readKey      = adapter.stageRead(MediaRange{0, 10}, std::nullopt);
   const auto readPrepared = adapter.prepare(requestFor(readKey), owner);
   ASSERT_TRUE(readPrepared);
   CapturingSink readSink{&payloads};
@@ -578,7 +755,7 @@ TEST_F(FileSourceAdapterTest, ObservationCapEvictsOldestFirst) {
   // retention promise is "recent reads stay readable," so eviction order
   // is part of the contract.
   for (std::uint64_t i = 0; i < 4097; ++i) {
-    const auto key      = adapter.stageRead(MediaRange{0, 0}, 0);
+    const auto key      = adapter.stageRead(MediaRange{0, 0}, std::nullopt);
     const auto prepared = adapter.prepare(requestFor(key), owner);
     ASSERT_TRUE(prepared);
     CapturingSink sink{&payloads};
@@ -703,8 +880,9 @@ TEST_F(FileSourceAdapterTest, StageAtUsesCallerKeyAndRefusesBadKeys) {
   ASSERT_TRUE(staged);
   EXPECT_EQ(*staged, 77U);
 
-  // Key 0 and an occupied key are both refused.
-  EXPECT_FALSE(adapter.stageAt(0, FileOpSpec{}));
+  // An occupied key is refused; key 0 is an ordinary cell ref, not a
+  // sentinel, and stages like any other.
+  EXPECT_TRUE(adapter.stageAt(0, FileOpSpec{}));
   EXPECT_FALSE(adapter.stageAt(77, FileOpSpec{.kind  = FileOpSpec::Kind::Read,
                                               .range = MediaRange{0, 1}}));
 
@@ -743,7 +921,7 @@ TEST_F(FileSourceAdapterTest, CancelDuringReadYieldsCancelledNotComplete) {
                          .payloads = payloads,
                          .budget   = BackendBudget{size}};
 
-  const auto key = adapter.stageRead(MediaRange{0, size}, 0);
+  const auto key = adapter.stageRead(MediaRange{0, size}, std::nullopt);
   OwnerContext owner;
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
@@ -799,8 +977,8 @@ TEST_F(FileSourceAdapterTest, CancelDuringWriteReportsUncertainPartial) {
   const auto oldXfsz = ::signal(SIGXFSZ, SIG_IGN);
 
   std::vector<std::byte> payload(writeSize, std::byte{'w'});
-  const auto key = adapter.stageWrite(0, std::move(payload), 0);
-  ASSERT_NE(key, 0U);
+  const auto key = adapter.stageWrite(0, std::move(payload), std::nullopt);
+  ASSERT_TRUE(key.has_value());
   OwnerContext owner;
   const auto prepared = adapter.prepare(requestFor(key), owner);
   ASSERT_TRUE(prepared);
