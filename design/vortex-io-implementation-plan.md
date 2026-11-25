@@ -1094,6 +1094,104 @@ M6 implementation notes and deliberate deferrals:
   pinned by the map, so a capture of a transient origin whose last lease dropped is refused
   `Unresolved` by design (the tests hold a standing lease).
 
+M7a implementation notes and deliberate deferrals:
+
+- What was built, and where. `frontend_diagnostics.{hpp,cpp}` is the shared diagnostic-code
+  registry; `frontend_token.hpp` carries `FrontendRunResult<V>`, `FrontendToken`, `FrontendWake` and
+  the `FrontendRunner` interface; `frontend_bridge.{hpp,cpp}` is `FrontendBridge` (submit, match,
+  await, resume, status gate) and `auditLanguageValue`. `IoHost` gains `routeWake` and
+  `takeResumedOutcome`; `io_cells` gains `IoCellTag::Submission` and the submission-cell accessors.
+  `VortexCore`, `VortexVM`, `CompactOpNode`, `Store` and the manifolds are untouched. These are C++
+  because they are the host seam: the token is owner-thread native state (cursor, waiter,
+  continuation), `pumpIo` is the only place that knows a request went terminal, and the sum cell has
+  to be minted with an arena runtime tag. None of it is language policy, which stays in each
+  language (and, for its standard library, in Vortex).
+- `IoSubmissionValue` is a cell, not a C++ value. A `Submission`-tagged runtime-only cell whose arm
+  is the graph, not a stored flag: `Admitted` is a `d.io.request` field and `Refused` a
+  `d.io.outcome` field, each through an occurrence and a clone view like every other reference to a
+  request or outcome (`attachClonedField`), and a cell with neither or both is `MalformedGraph`.
+  `submissionRequest`/`submissionOutcome` are exclusive: the wrong arm answers `WrongTag`, which is
+  how an await is never handed a refusal. The cell text is `admitted` or `refused`. The sum holds a
+  view on the request's clone rank, so `reapIoRequest` keeps the request whole while a submission
+  cell names it: a runner must `release` the submission before `retireRequest` (tested).
+- `FrontendToken` holds the activation as `shared_ptr<FrontendActivation>` (an opaque base the
+  language subclasses), the request and waiter handles, the `ContinuationId` and an optional
+  position. The `Parked` result a runner returns and the route the host keeps share that activation;
+  neither is a cell. `IoHost::routeWake(token, runner)` accepts only a token matching a parked await
+  (request, waiter and continuation), keeps one route per continuation, and `pumpIo` hands the token
+  back to the runner as `Resumable` after it has resumed the VM cursor, or `Abandoned` when the
+  cursor or request went stale. Wakes are delivered after the pass, so a runner may re-await and
+  park again from inside `wake` (VPL's next position) but must not call `pumpIo`. `cancelWaiter`
+  that removes the waiter drops the route silently: cancelling an activation never cancels the
+  request. `~IoHost` drops remaining routes without calling anyone.
+- `FrontendBridge::awaitSubmission` is `Completed{outcome}` for any terminal tag (a terminal outcome
+  is a value, never a failure), `Parked{token}` for Pending, and `Failed{IO_AWAIT_NOT_ADMITTED}` for
+  a refused submission: refusal stays a value, and a language matches before awaiting. A second
+  await of the same request and cursor while Pending returns the same continuation and keeps the
+  first route. `resume` takes the outcome `pumpIo` delivered (`IoHost::takeResumedOutcome`, which
+  retires the VM's parked entry) and otherwise re-awaits the same request, rematerializing a
+  rolled-back outcome cell; it never submits.
+- Status gate: `gate()` returns the tag and a payload range only for `Complete`, `Partial`,
+  `Failed`, `Cancelled` and `TimedOut`, and only when bytes were retained; `EndOfStream` and every
+  other tag expose none whatever the graph holds, and `payloadOf()` answers
+  `IO_PAYLOAD_BEFORE_STATUS` when there is nothing to read. The static "diagnosed where statically
+  possible" half is each language's.
+- Diagnostic registry: a code is a stable `[A-Z][A-Z0-9_]*` string owned by one frontend and
+  carrying its prefix (`IO_`, `VQL_`, `VPL_`, `PROLOG_`, `VLACE_`, `VICON_`, `VAGENT_`); duplicates,
+  wrong prefixes and unregistered codes are refused. Built in: the shared `IO_UNSUPPORTED_MODE`,
+  `IO_AWAIT_NOT_ADMITTED`, `IO_PAYLOAD_BEFORE_STATUS`, `IO_EFFECT_FORBIDDEN_CONTEXT`,
+  `IO_SYNC_FALLBACK_FORBIDDEN`, `IO_TOKEN_STALE`, `IO_CELL_REFUSED`, and the language codes the plan
+  names (`VQL_IO_QUERY_CONTEXT`, `VPL_IO_SHAPE_MISMATCH`, `PROLOG_IO_EFFECT_CONTEXT`,
+  `VLACE_ASYNC_UNAVAILABLE`, `VAGENT_ACTOR_IO_SUSPEND_FORBIDDEN`). Each language milestone registers
+  any further code of its own (`registerCode`) before it emits one.
+- The harness (`tests/xuzz/io_frontend_conformance.hpp`). A language writes a `ConformanceDriver`
+  whose `begin` runs its real submit-match-await program once through its real runner and returns a
+  `FrontendRunResult<OutcomeCell>`, whose `resume` continues the same activation from a woken token
+  without submitting, and which reports `visibleCells()` (every cell the language holds) and its
+  `submission()`. One line, `XUZZ_FRONTEND_CONFORMANCE(Suite, factory)`, expands to five tests over
+  the M1 delayed fake backend: same-request Pending resume (one submission, one wake, same
+  continuation and request, outcome equal to the service's), refusal remains a value (`Rejected`
+  outcome, nothing admitted, awaiting it is refused), terminal outcomes are not logical failure
+  (eight outcome shapes through the status gate), no raw ids in language values (the audit passes on
+  the language's cells and fails on the owner-only waiter graph, so it can fail), and a cancelled
+  waiter drops its route but not its request. A driver must use only `World` (service, scheduler,
+  VM, host, bridge) and its own language; it never sees a `RequestId`, `WaiterId` or
+  `ContinuationId` except inside the token it returns.
+- The native-id audit is label and tag based, not a type walk, because cells carry text and tags and
+  nothing else: it fails on an owner-only `Waiter` or `Capture` cell, on text naming a native
+  identity (`continuation`, `waiter`, `cursor`, `token`, `requestid`, `incarnation`), and on text
+  equal to a raw id the test passes in (the harness passes the fake backend's private request
+  tokens, which start at `0xC0FFEE00` so they cannot collide with a counter). A `ContinuationId` or
+  `WaiterId` has no reachable form except the waiter graph, which the tag rule covers; a language
+  that invents its own text encoding of an id would be caught only by the label rule.
+- Layering is a source test, not a promise: `vortex_core.*` and `vortex_vm.*` include and name none
+  of the frontend headers or types, the `stepAwait`..`stepImpl` text contains no language name, and
+  the host/bridge files name no language runner. The VM's pre-existing `Vql*` opcodes are not I/O
+  and are out of that scan by construction.
+- Two harness instances run here: `DirectVortexDriver` (a real `Await` opcode program on a VM
+  cursor, the plan's shared-host baseline) and `BridgeAwaitDriver` (a runner with no Await opcode,
+  awaiting through the bridge, which is the shape VLace's IO trampoline will take).
+
+Deferred, by design:
+
+- There is no Vortex `Submit` opcode: the baseline's `Submit` is `IoHost::submitCell` wrapped by
+  `FrontendBridge::submit`, and a Vortex program reaches Await only with a request cell a host
+  already holds. Adding the opcode is a `vortex_vm` change and needs its own approval; no language
+  milestone is blocked on it, because each lowers its submit to a host call.
+- `FrontendRunResult` is a template over the language's value; the plan's per-language result types
+  (`Parked{scriptActivation, ...}`, `DriverResult`, `IoRunResult`) are each language's own enums
+  that carry or convert to the common `FrontendToken`. Their mapping is the language milestone's.
+- A parked token has no timeout or watchdog: if a runner is destroyed while its route exists the
+  host would call a dangling runner. A runner must cancel its waiter (`IoHost::cancelWaiter`) before
+  it dies; making routes self-expiring needs a lifetime handle and waits for the first runner that
+  cannot guarantee it.
+- Admission refusal is exercised through a decoder refusal. The actor-profile refusal and the
+  per-language static refusals (`VQL_IO_QUERY_CONTEXT` and the rest) are registered but emitted only
+  by their language milestones.
+- Vectorized (VPL) parking with out-of-order completion is a language behavior: the host gives one
+  token per active waiter and in-place outcome cells, and the harness proves only the single-request
+  contract; the multi-position scan is `M7-VPL`'s test.
+
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per
 repository policy. Run source-level focused tests while implementing and full `make -j$(nproc) test`
 before release; backend comparison only if graphics code is touched. Do not claim performance
