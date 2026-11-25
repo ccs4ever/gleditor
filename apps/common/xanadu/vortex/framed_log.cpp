@@ -134,6 +134,14 @@ auto scanFramedLog(const FramedLogFormat &format,
     std::uint32_t bodyLen{};
     std::memcpy(&bodyLen, bytes.data() + cursor, sizeof(bodyLen));
     if (bodyLen < format.minBodyBytes) {
+      // A filesystem that extends the size before the data leaves a zeroed
+      // tail after a crash. Nothing but zeros from here to the end is that
+      // tear, not a record, and cutting it loses nothing.
+      if (std::ranges::all_of(bytes.subspan(cursor), [](const std::byte b) {
+            return b == std::byte{0};
+          })) {
+        break;
+      }
       scan.corrupt     = true;
       scan.errorRecord = ordinal + 1;
       return scan;

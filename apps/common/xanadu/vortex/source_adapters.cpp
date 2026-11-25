@@ -59,8 +59,7 @@ inline auto payloadOutcome(PayloadResolver &payloads,
 
 } // namespace
 
-std::optional<std::uint32_t>
-StagedByteSourceAdapter::stage(StreamOpSpec spec) {
+std::optional<std::uint32_t> StagedByteSourceAdapter::stage(StreamOpSpec spec) {
   const std::lock_guard lock(mutex_);
   if (staged_.size() >= maxStagedSpecs ||
       spec.writeBytes.size() > maxStagedWriteBytes - stagedWriteBytes_)
@@ -199,14 +198,13 @@ auto InMemoryStreamAdapter::perform(const StreamOpSpec &spec,
     // Checked arithmetic and bounded extension: a sparse write must not
     // resize the buffer to an attacker-chosen offset, and the declared
     // completion/payload budget bounds the write itself.
-    if (spec.writeBytes.size() > context.budget.maxBytes &&
-        context.budget.maxBytes != 0) {
+    if (context.budget.maxBytes &&
+        spec.writeBytes.size() > *context.budget.maxBytes) {
       return failedResult({IoErrorCode::BudgetExceeded, 0},
                           terminalProgress(0));
     }
-    if (spec.offset > content_.size() &&
-        spec.offset - content_.size() > context.budget.maxBytes &&
-        context.budget.maxBytes != 0) {
+    if (context.budget.maxBytes && spec.offset > content_.size() &&
+        spec.offset - content_.size() > *context.budget.maxBytes) {
       return failedResult({IoErrorCode::InvalidRequest, 0},
                           terminalProgress(0));
     }
@@ -232,8 +230,8 @@ auto InMemoryStreamAdapter::perform(const StreamOpSpec &spec,
   const auto available =
       static_cast<std::uint64_t>(content_.size()) - spec.offset;
   auto toRead = std::min(spec.length, available);
-  if (context.budget.maxBytes != 0)
-    toRead = std::min<std::uint64_t>(toRead, context.budget.maxBytes);
+  if (context.budget.maxBytes)
+    toRead = std::min<std::uint64_t>(toRead, *context.budget.maxBytes);
   // length == 0 asks for zero bytes: complete trivially exactly as the
   // file adapter does -- EndOfStream would claim the source is exhausted
   // when the request simply named no bytes.
@@ -287,8 +285,8 @@ auto ProcessIoAdapter::perform(const StreamOpSpec &spec,
   std::vector<std::byte> out;
   auto limit =
       spec.length > 0 ? spec.length : static_cast<std::uint64_t>(1 << 20);
-  if (context.budget.maxBytes != 0)
-    limit = std::min<std::uint64_t>(limit, context.budget.maxBytes);
+  if (context.budget.maxBytes)
+    limit = std::min<std::uint64_t>(limit, *context.budget.maxBytes);
   std::array<char, 4096> buffer{};
   bool cancelled = false;
   while (out.size() < limit) {
@@ -360,12 +358,11 @@ auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context,
 
   if (spec.kind == StreamOpKind::Write) {
     // The same bound the read clamp and the in-memory/file adapters
-    // enforce: maxBytes == 0 reads as unbounded (BackendBudget's
-    // convention), a nonzero cap must cover the whole frozen write -- a
-    // partial send would misreport progress and leave a half-written
-    // stream the caller cannot distinguish from a completed one.
-    if (context.budget.maxBytes != 0 &&
-        spec.writeBytes.size() > context.budget.maxBytes) {
+    // enforce: an absent maxBytes is unbounded, a present cap must cover the
+    // whole frozen write -- a partial send would misreport progress and leave a
+    // half-written stream the caller cannot distinguish from a completed one.
+    if (context.budget.maxBytes &&
+        spec.writeBytes.size() > *context.budget.maxBytes) {
       return failedResult({IoErrorCode::BudgetExceeded, 0},
                           terminalProgress(0));
     }
@@ -428,8 +425,8 @@ auto NetIoAdapter::perform(const StreamOpSpec &spec, BackendContext &context,
   std::vector<std::byte> out;
   auto limit =
       spec.length > 0 ? spec.length : static_cast<std::uint64_t>(65536);
-  if (context.budget.maxBytes != 0)
-    limit = std::min<std::uint64_t>(limit, context.budget.maxBytes);
+  if (context.budget.maxBytes)
+    limit = std::min<std::uint64_t>(limit, *context.budget.maxBytes);
   std::array<char, 4096> buffer{};
   bool timedOut = false;
   while (out.size() < limit) {

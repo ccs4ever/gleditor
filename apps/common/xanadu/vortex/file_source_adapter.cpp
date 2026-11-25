@@ -327,8 +327,8 @@ void FileSourceAdapter::execute(const BackendCommand &command,
             result = BackendResult{
                 Cancelled{{}, IoProgress{.phase = IoPhase::Terminal}, false},
                 {}};
-          } else if (context.budget.maxBytes != 0 &&
-                     op->writeBytes.size() > context.budget.maxBytes) {
+          } else if (context.budget.maxBytes &&
+                     op->writeBytes.size() > *context.budget.maxBytes) {
             result = failedResult({IoErrorCode::BudgetExceeded, 0},
                                   terminalProgress(0));
           } else {
@@ -398,8 +398,7 @@ void FileSourceAdapter::execute(const BackendCommand &command,
               result = BackendResult{EndOfStream{terminalProgress(0)}, {}};
             } else {
               const auto maxBytes = static_cast<std::uint64_t>(
-                  context.budget.maxBytes > 0 ? context.budget.maxBytes
-                                              : op->range.length);
+                  context.budget.maxBytes.value_or(op->range.length));
               auto toRead = op->range.length == 0
                                 ? 0
                                 : std::min(op->range.length, maxBytes);
@@ -407,8 +406,8 @@ void FileSourceAdapter::execute(const BackendCommand &command,
               // bound after the read; stop at the bound instead of reading
               // and publishing bytes that are certain to be refused.
               if (context.budget.maxPayloadBytes) {
-                toRead = std::min<std::uint64_t>(toRead,
-                                                 *context.budget.maxPayloadBytes);
+                toRead = std::min<std::uint64_t>(
+                    toRead, *context.budget.maxPayloadBytes);
               }
               // A stat-able file bounds the read by what is actually
               // there: range.length or an unbounded budget can name far

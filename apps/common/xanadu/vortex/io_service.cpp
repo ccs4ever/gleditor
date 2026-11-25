@@ -203,10 +203,9 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
     return refuseAdmission({IoErrorCode::BudgetExceeded, 0});
   }
   // The decoder must declare at least one real byte channel. A zero bound
-  // forbids that channel at the terminal check; zero on BOTH would hand the
-  // backend an unlimited byte budget (BackendBudget::maxBytes == 0 reads as
-  // unbounded to adapters) while guaranteeing every produced byte fails --
-  // refuse instead of admitting a doomed request.
+  // forbids that channel at the terminal check; zero on BOTH would
+  // guarantee every produced byte fails -- refuse instead of admitting a
+  // doomed request.
   if (request.completionBoundBytes == 0 && request.payloadBoundBytes == 0) {
     return refuseAdmission({IoErrorCode::InvalidRequest, 0});
   }

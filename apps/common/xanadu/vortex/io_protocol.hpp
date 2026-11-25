@@ -228,7 +228,10 @@ struct CellRequest {
 };
 struct OwnerContext {};
 struct BackendBudget {
-  std::size_t maxBytes{};
+  /// Bytes the backend may move for this request. std::nullopt: the caller
+  /// named no bound (the service always names one; a bare adapter harness
+  /// may not).
+  std::optional<std::size_t> maxBytes{};
   /// The part of `maxBytes` the request's payload bound allows a published
   /// payload to occupy; a payload larger than this is refused by the service
   /// after the backend has already read and allocated it, so an adapter that

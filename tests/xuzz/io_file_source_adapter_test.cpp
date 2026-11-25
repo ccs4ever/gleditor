@@ -212,10 +212,10 @@ TEST_F(FileSourceAdapterTest, ReadStopsAtThePayloadBoundNotTheBackendBudget) {
   PayloadResolver payloads;
   // The backend budget is completion + payload bound; a read sized by it
   // would pull payload+completion bytes the service then refuses.
-  BackendContext context{.stop     = {},
-                         .payloads = payloads,
-                         .budget   = BackendBudget{.maxBytes        = 4096,
-                                                   .maxPayloadBytes = 16}};
+  BackendContext context{
+      .stop     = {},
+      .payloads = payloads,
+      .budget   = BackendBudget{.maxBytes = 4096, .maxPayloadBytes = 16}};
 
   const auto key      = adapter.stageRead(MediaRange{0, 4096}, std::nullopt);
   const auto prepared = adapter.prepare(requestFor(key), owner);
@@ -233,11 +233,11 @@ TEST_F(FileSourceAdapterTest,
   FileSourceAdapter adapter(path_);
   OwnerContext owner;
   PayloadResolver payloads;
-  // maxBytes == 0 reads as unbounded: without the file-size clamp the
+  // An absent maxBytes is unbounded: without the file-size clamp the
   // staging vector would try to allocate the full 1 TiB range before the
   // first pread ever saw the EOF.
   BackendContext context{
-      .stop = {}, .payloads = payloads, .budget = BackendBudget{0}};
+      .stop = {}, .payloads = payloads, .budget = BackendBudget{}};
 
   const auto key =
       adapter.stageRead(MediaRange{0, std::uint64_t{1} << 40}, std::nullopt);
