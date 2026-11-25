@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -15,10 +16,15 @@
 #include <system_error>
 #include <vector>
 
+#include "common/xanadu/segmented_primedia_spool.hpp"
 #include "common/xanadu/spool.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/store_loader.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/arena_io_cell_store.hpp"
 #include "common/xanadu/vortex/capture_coordinator.hpp"
 #include "common/xanadu/vortex/capture_journal.hpp"
+#include "common/xanadu/vortex/capture_publication.hpp"
 #include "common/xanadu/vortex/io_cells.hpp"
 #include "common/xanadu/vortex/io_scheduler.hpp"
 #include "common/xanadu/vortex/io_service.hpp"
@@ -84,6 +90,16 @@ public:
   }
   auto highWaterBytes() const -> std::uint64_t override {
     return bytes_.size();
+  }
+  auto read(const xanadu::PrimediaSpan &span) const
+      -> std::optional<std::vector<std::byte>> override {
+    if (span.scroll != xanadu::localScroll ||
+        span.start + span.length > bytes_.size()) {
+      return std::nullopt;
+    }
+    return std::vector<std::byte>(
+        bytes_.begin() + static_cast<std::ptrdiff_t>(span.start),
+        bytes_.begin() + static_cast<std::ptrdiff_t>(span.start + span.length));
   }
   /// Simulated crash: bytes appended but never synced do not survive.
   void loseUnsynced() { bytes_.resize(durable_); }
@@ -191,12 +207,13 @@ auto registerPinned(World &world, const PayloadRef ref,
   return origin;
 }
 
-std::unique_ptr<World> boot(RecordingSink &sink,
+std::unique_ptr<World> boot(CaptureByteSink &sink,
                             const std::filesystem::path &journalPath,
                             const std::size_t journalMaxBytes     = 4u << 20,
                             const std::size_t backendMaxBytes     = 1u << 20,
                             const bool recoverNow                 = true,
-                            const CaptureCoordinatorLimits limits = {}) {
+                            const CaptureCoordinatorLimits limits = {},
+                            CapturePublisher *publisher           = nullptr) {
   auto world  = std::make_unique<World>();
   auto schema = makeIoCellSchema(world->arena);
   EXPECT_TRUE(schema.has_value());
@@ -225,6 +242,8 @@ std::unique_ptr<World> boot(RecordingSink &sink,
       journalPath, journalMaxBytes, limits);
   world->service->registerAdapter(world->coordinator->appendKey(),
                                   world->coordinator->appendAdapter());
+  // Before recover(): recovery completes half-finished publications.
+  world->coordinator->setPublisher(publisher);
   // recover() is idempotent, so tests that inspect the restart report call
   // it again and see the same one; a corrupt journal leaves the coordinator
   // unrecovered and that test asserts the refusal itself.
@@ -1508,6 +1527,684 @@ TEST_F(IoCaptureTest, CoordinatorJournalCrashPointsBracketTheAppendedFsync) {
     ASSERT_TRUE(span.has_value());
     EXPECT_EQ(span->start, std::uint64_t{0});
   }
+}
+
+// -- Structure publication (M6, plan §8.2)
+// -------------------------------------
+
+/// The production stack for publication tests: a real UserPermascroll in a
+/// directory, the sink over it, and a Store (loaded when one was saved) with
+/// its publisher. Destroyed and rebuilt over the same directory to model a
+/// restart.
+struct Durable {
+  std::filesystem::path root;
+  std::shared_ptr<xanadu::UserPermascroll> perma;
+  std::unique_ptr<UserPermascrollCaptureSink> sink;
+  std::unique_ptr<xanadu::Store> store;
+  std::unique_ptr<CapturePublisher> publisher;
+  [[nodiscard]] std::filesystem::path storeDir() const {
+    return root / "store";
+  }
+};
+
+std::unique_ptr<Durable> openDurable(const std::filesystem::path &root,
+                                     std::filesystem::path storeDir = {}) {
+  auto durable  = std::make_unique<Durable>();
+  durable->root = root;
+  xanadu::UserPermascroll::Config config;
+  config.storageDir = root / "permascroll";
+  durable->perma    = std::make_shared<xanadu::UserPermascroll>(config);
+  durable->sink = std::make_unique<UserPermascrollCaptureSink>(*durable->perma);
+  if (storeDir.empty()) storeDir = durable->storeDir();
+  if (std::filesystem::exists(storeDir / "ops.nodes")) {
+    durable->store = xanadu::loadStore(storeDir, durable->perma);
+  } else {
+    durable->store = std::make_unique<xanadu::Store>(durable->perma);
+  }
+  durable->publisher =
+      std::make_unique<CapturePublisher>(*durable->store, storeDir);
+  return durable;
+}
+
+std::string permascrollText(const Durable &durable,
+                            const xanadu::PrimediaSpan &span) {
+  return durable.perma->read(span);
+}
+
+std::vector<CaptureJournalRecordKind>
+journalKinds(const std::filesystem::path &path) {
+  CaptureJournal journal(path, 0);
+  std::vector<CaptureJournalRecordKind> kinds;
+  for (const auto &record : journal.recover().records) {
+    kinds.push_back(record.kind);
+  }
+  return kinds;
+}
+
+std::size_t countKind(const std::filesystem::path &path,
+                      const CaptureJournalRecordKind kind) {
+  const auto kinds = journalKinds(path);
+  return static_cast<std::size_t>(std::ranges::count(kinds, kind));
+}
+
+TEST_F(IoCaptureTest, CommitPublishesTranslatedSpansAndReceiptIntoTheStore) {
+  auto durable = openDurable(dir_);
+  auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                    durable->publisher.get());
+  ASSERT_TRUE(world);
+  const auto sourceBytes = bytesOf("hello world");
+  auto registered = registerPinned(*world, transientRef(70), sourceBytes);
+  ASSERT_TRUE(registered.has_value());
+
+  const PayloadRange first[]{rangeOf(*registered, 0, 5)};
+  ASSERT_TRUE(captureCommit(*world, first).has_value());
+  // [3,8) overlaps: only the uncovered suffix [5,8) is appended and published.
+  const PayloadRange second[]{rangeOf(*registered, 3, 5)};
+  ASSERT_TRUE(captureCommit(*world, second).has_value());
+  // A fully covered selection appends nothing: a receipt with no pieces.
+  const PayloadRange third[]{rangeOf(*registered, 0, 5)};
+  ASSERT_TRUE(captureCommit(*world, third).has_value());
+
+  const auto one = durable->publisher->published(1);
+  ASSERT_TRUE(one.has_value());
+  ASSERT_EQ(one->pieces.size(), 1U);
+  EXPECT_EQ(permascrollText(*durable, one->pieces[0].span), "hello");
+  EXPECT_EQ(one->pieces[0].origin, *registered);
+  EXPECT_EQ(one->pieces[0].srcOffset, std::uint64_t{0});
+
+  const auto two = durable->publisher->published(2);
+  ASSERT_TRUE(two.has_value());
+  ASSERT_EQ(two->pieces.size(), 1U);
+  EXPECT_EQ(permascrollText(*durable, two->pieces[0].span), " wo");
+  EXPECT_EQ(two->pieces[0].srcOffset, std::uint64_t{5});
+
+  const auto three = durable->publisher->published(3);
+  ASSERT_TRUE(three.has_value());
+  EXPECT_TRUE(three->pieces.empty());
+
+  // The receipt cell is a scalar whose canonical bits are the CaptureId,
+  // readable without parsing text, and the three form one rank in order.
+  auto manifold = durable->store->rebuildManifold(durable->store->latest());
+  manifold.setStore(durable->store.get());
+  EXPECT_EQ(manifold.asInt64(one->receipt), std::optional<std::int64_t>{1});
+  EXPECT_EQ(durable->publisher->publishedIds().size(), 3U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 3U);
+}
+
+TEST_F(IoCaptureTest, PublicationRoundTripsThroughStoreSaveAndReload) {
+  xanadu::PrimediaSpan span;
+  const auto sourceBytes = bytesOf("round trip bytes");
+  {
+    auto durable = openDurable(dir_);
+    auto world   = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
+                        {}, durable->publisher.get());
+    auto registered = registerPinned(*world, transientRef(71), sourceBytes);
+    ASSERT_TRUE(registered.has_value());
+    const PayloadRange selection[]{rangeOf(*registered, 0, 10)};
+    ASSERT_TRUE(captureCommit(*world, selection).has_value());
+    span = durable->publisher->published(1).value().pieces.at(0).span;
+    world.reset();
+  }
+  // Commit already saved: nothing else is written before the reload.
+  auto durable        = openDurable(dir_);
+  const auto reloaded = durable->publisher->published(1);
+  ASSERT_TRUE(reloaded.has_value());
+  ASSERT_EQ(reloaded->pieces.size(), 1U);
+  EXPECT_EQ(reloaded->pieces[0].span, span);
+  EXPECT_EQ(permascrollText(*durable, reloaded->pieces[0].span), "round trip");
+  EXPECT_EQ(reloaded->pieces[0].origin.source, std::uint64_t{71});
+}
+
+/// Throws on the Nth journal write of the coordinator it is installed in,
+/// before or after the fsync: the process dying at that durable step.
+CaptureJournalCrashPoints crashOnWrite(const int nth, const bool before) {
+  auto counter = std::make_shared<int>(0);
+  CaptureJournalCrashPoints points;
+  auto hook = [counter, nth] {
+    if (++*counter == nth) throw std::runtime_error("die");
+  };
+  (before ? points.beforeFlush : points.afterFlush) = hook;
+  return points;
+}
+
+TEST_F(IoCaptureTest,
+       CrashBetweenStoreSaveAndCommittedRecoversWithoutRepublish) {
+  const auto sourceBytes = bytesOf("published but not committed");
+  PayloadRef origin;
+  {
+    auto durable = openDurable(dir_);
+    auto world   = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
+                        {}, durable->publisher.get());
+    auto registered = registerPinned(*world, transientRef(72), sourceBytes);
+    origin          = *registered;
+    // Writes this coordinator makes: 1 Append, 2 Appended, 3 Committed.
+    world->coordinator->setJournalCrashPoints(crashOnWrite(3, true));
+    const PayloadRange selection[]{rangeOf(origin, 0, 9)};
+    auto prepared = world->coordinator->prepare(selection);
+    ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
+    const auto capture = std::get<Prepared>(prepared).capture;
+    const auto outcome = driveAppendToOutcome(*world, capture);
+    ASSERT_TRUE(outcome.has_value());
+    EXPECT_THROW(
+        static_cast<void>(world->coordinator->commit(capture, *outcome)),
+        std::runtime_error);
+  }
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 0U);
+
+  auto durable = openDurable(dir_);
+  // The Store was saved before the crash: the receipt is already there.
+  ASSERT_TRUE(durable->publisher->published(1).has_value());
+  const auto before = durable->store->latest();
+  auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                    durable->publisher.get());
+  auto registered = registerPinned(*world, transientRef(72), sourceBytes);
+  ASSERT_TRUE(registered.has_value());
+  const auto report = world->coordinator->recover();
+  ASSERT_TRUE(report.has_value());
+  ASSERT_EQ(report->entries.size(), 1U);
+  EXPECT_EQ(report->entries[0].state, CaptureRecoveryState::Reconciled);
+  // No second publication: the Store did not move, one receipt, and the
+  // missing Committed record was written.
+  EXPECT_EQ(durable->store->latest(), before);
+  EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
+  const auto translated =
+      world->coordinator->translationFor(rangeOf(*registered, 0, 9));
+  ASSERT_TRUE(translated.has_value());
+  EXPECT_EQ(translated, durable->publisher->published(1)->pieces[0].span);
+}
+
+TEST_F(IoCaptureTest, CrashBetweenAppendedAndPublicationPublishesExactlyOnce) {
+  const auto sourceBytes = bytesOf("appended but not published");
+  {
+    auto durable = openDurable(dir_);
+    auto world   = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
+                        {}, durable->publisher.get());
+    auto registered = registerPinned(*world, transientRef(73), sourceBytes);
+    // Die right after the Appended record is durable, before publication.
+    world->coordinator->setJournalCrashPoints(crashOnWrite(2, false));
+    const PayloadRange selection[]{rangeOf(*registered, 0, 8)};
+    auto prepared = world->coordinator->prepare(selection);
+    ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
+    const auto capture = std::get<Prepared>(prepared).capture;
+    const auto outcome = driveAppendToOutcome(*world, capture);
+    ASSERT_TRUE(outcome.has_value());
+    EXPECT_THROW(
+        static_cast<void>(world->coordinator->commit(capture, *outcome)),
+        std::runtime_error);
+    EXPECT_FALSE(durable->publisher->published(1).has_value());
+  }
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
+
+  {
+    auto durable = openDurable(dir_);
+    EXPECT_FALSE(durable->publisher->published(1).has_value());
+    auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
+                      {}, durable->publisher.get());
+    ASSERT_TRUE(world);
+    const auto published = durable->publisher->published(1);
+    ASSERT_TRUE(published.has_value());
+    ASSERT_EQ(published->pieces.size(), 1U);
+    EXPECT_EQ(permascrollText(*durable, published->pieces[0].span), "appended");
+    EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+    EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
+  }
+  // A third boot finds everything finished and mints nothing.
+  auto durable      = openDurable(dir_);
+  const auto before = durable->store->latest();
+  auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                    durable->publisher.get());
+  ASSERT_TRUE(world);
+  EXPECT_EQ(durable->store->latest(), before);
+  EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
+}
+
+TEST_F(IoCaptureTest, CommitRetryAfterRefusedStoreSaveNeverPublishesTwice) {
+  const auto blocker = dir_ / "blocker";
+  {
+    std::ofstream out(blocker);
+    out << "a file where the store directory must go";
+  }
+  auto durable =
+      openDurable(dir_, blocker / "store"); // create_directories must fail
+  auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                    durable->publisher.get());
+  const auto sourceBytes = bytesOf("retry me");
+  auto registered = registerPinned(*world, transientRef(74), sourceBytes);
+  const PayloadRange selection[]{rangeOf(*registered, 0, 8)};
+  auto prepared = world->coordinator->prepare(selection);
+  ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
+  const auto capture = std::get<Prepared>(prepared).capture;
+  const auto outcome = driveAppendToOutcome(*world, capture);
+  ASSERT_TRUE(outcome.has_value());
+
+  // Publication reaches the in-memory Store but the save is refused: the
+  // commit refuses and no Committed record exists.
+  auto refused = world->coordinator->commit(capture, *outcome);
+  EXPECT_TRUE(std::holds_alternative<Refused>(refused));
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 0U);
+  EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+
+  std::filesystem::remove(blocker);
+  auto committed = world->coordinator->commit(capture, *outcome);
+  ASSERT_TRUE(std::holds_alternative<Committed>(committed));
+  EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
+  EXPECT_TRUE(std::filesystem::exists(blocker / "store" / "ops.nodes"));
+}
+
+// -- real sinks ---------------------------------------------------------------
+
+TEST_F(IoCaptureTest, UserPermascrollSinkSyncMakesAppendsDurableAcrossReopen) {
+  xanadu::PrimediaSpan span;
+  const auto active = dir_ / "permascroll" / "active.primedia";
+  {
+    auto durable = openDurable(dir_);
+    EXPECT_EQ(durable->sink->highWaterBytes(), std::uint64_t{0});
+    span = durable->sink->append(bytesOf("durable capture bytes"));
+    EXPECT_EQ(span.length, std::uint64_t{21});
+    EXPECT_EQ(durable->sink->highWaterBytes(), std::uint64_t{21});
+    // append() writes into memory; only sync() reaches the file.
+    const auto beforeSync = std::filesystem::exists(active)
+                                ? std::filesystem::file_size(active)
+                                : std::uintmax_t{0};
+    EXPECT_LT(beforeSync, std::uintmax_t{21});
+    ASSERT_TRUE(durable->sink->sync());
+    EXPECT_EQ(std::filesystem::file_size(active), std::uintmax_t{21});
+    const auto held = durable->sink->read(span);
+    ASSERT_TRUE(held.has_value());
+    EXPECT_EQ(textOf(*held), "durable capture bytes");
+    // A span that runs past the target is no read at all.
+    EXPECT_FALSE(durable->sink->read(xanadu::PrimediaSpan{
+        .scroll = xanadu::localScroll, .start = 10, .length = 50}));
+  }
+  auto reopened = openDurable(dir_);
+  EXPECT_EQ(reopened->sink->highWaterBytes(), std::uint64_t{21});
+  const auto held = reopened->sink->read(span);
+  ASSERT_TRUE(held.has_value());
+  EXPECT_EQ(textOf(*held), "durable capture bytes");
+  // The next append continues after the reopened high-water mark.
+  const auto next = reopened->sink->append(bytesOf("more"));
+  EXPECT_EQ(next.start, std::uint64_t{21});
+}
+
+TEST_F(IoCaptureTest, SegmentedSinkSyncAndHighWaterSurviveReopen) {
+  const auto file = dir_ / "segment.primedia";
+  xanadu::PrimediaSpan span;
+  {
+    xanadu::SegmentedPrimediaSpool spool;
+    ASSERT_TRUE(spool.openActiveSegment(file));
+    SegmentedPrimediaCaptureSink sink(spool);
+    EXPECT_EQ(sink.highWaterBytes(), std::uint64_t{0});
+    span = sink.append(bytesOf("segmented bytes"));
+    EXPECT_EQ(sink.highWaterBytes(), std::uint64_t{15});
+    EXPECT_LT(std::filesystem::file_size(file), std::uintmax_t{15});
+    ASSERT_TRUE(sink.sync());
+    EXPECT_EQ(std::filesystem::file_size(file), std::uintmax_t{15});
+  }
+  xanadu::SegmentedPrimediaSpool reopened;
+  ASSERT_TRUE(reopened.openActiveSegment(file));
+  SegmentedPrimediaCaptureSink sink(reopened);
+  EXPECT_EQ(sink.highWaterBytes(), std::uint64_t{15});
+  const auto held = sink.read(span);
+  ASSERT_TRUE(held.has_value());
+  EXPECT_EQ(textOf(*held), "segmented bytes");
+}
+
+TEST_F(IoCaptureTest, CaptureThroughRealPermascrollSinkEndToEnd) {
+  auto durable = openDurable(dir_);
+  auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                    durable->publisher.get());
+  const auto sourceBytes = bytesOf("end to end through the real sink");
+  auto registered = registerPinned(*world, transientRef(75), sourceBytes);
+  const PayloadRange selection[]{rangeOf(*registered, 4, 6)};
+  ASSERT_TRUE(captureCommit(*world, selection).has_value());
+  const auto span = world->coordinator->translationFor(selection[0]);
+  ASSERT_TRUE(span.has_value());
+  EXPECT_EQ(permascrollText(*durable, *span), "to end");
+  EXPECT_LE(span->start + span->length, durable->sink->highWaterBytes());
+}
+
+// -- reconciliation of pinned intervals ---------------------------------------
+
+/// Run one capture whose append lands bytes and then fails: an uncertain
+/// abort, leaving the capture pinned. Returns the world still open.
+struct AbortedCapture {
+  std::unique_ptr<World> world;
+  PayloadRef origin;
+};
+
+AbortedCapture uncertainAbort(RecordingSink &sink,
+                              const std::filesystem::path &journalPath,
+                              const std::uint64_t source,
+                              const std::string_view text,
+                              const std::uint64_t length) {
+  AbortedCapture out;
+  out.world              = boot(sink, journalPath);
+  const auto sourceBytes = bytesOf(text);
+  auto registered =
+      registerPinned(*out.world, transientRef(source), sourceBytes);
+  out.origin = *registered;
+  const PayloadRange selection[]{rangeOf(out.origin, 0, length)};
+  auto prepared = out.world->coordinator->prepare(selection);
+  EXPECT_TRUE(std::holds_alternative<Prepared>(prepared));
+  const auto capture = std::get<Prepared>(prepared).capture;
+  auto appended      = out.world->coordinator->appendRequest(capture);
+  EXPECT_TRUE(std::holds_alternative<Admitted>(appended.admission.value));
+  sink.throwAfterAppend = true;
+  out.world->scheduler->runNext();
+  static_cast<void>(out.world->service->pump(8));
+  const auto request = std::get<Admitted>(appended.admission.value).request;
+  const auto outcome = out.world->service->poll(request).outcome;
+  EXPECT_TRUE(outcome.has_value());
+  EXPECT_TRUE(std::holds_alternative<Refused>(
+      out.world->coordinator->commit(capture, *outcome)));
+  return out;
+}
+
+TEST_F(IoCaptureTest, ReconcilePromoteVerifiesBytesThenCommitsTheTranslation) {
+  RecordingSink sink;
+  auto aborted =
+      uncertainAbort(sink, journalPath_, 80, "promote these bytes", 7);
+  auto &coordinator = *aborted.world->coordinator;
+  ASSERT_EQ(coordinator.pinnedCaptures(), std::vector<CaptureId>{1});
+  const PayloadRange range[]{rangeOf(aborted.origin, 0, 7)};
+  EXPECT_TRUE(std::holds_alternative<Refused>(coordinator.prepare(range)));
+
+  // A span holding other bytes, of another length, or past the high-water
+  // mark is refused and the pin stays.
+  sink.bytes_.insert(sink.bytes_.end(), 7, std::byte{'x'});
+  const auto wrongBytes =
+      coordinator.reconcile(1, ReconcilePromote{localSpan(7, 7)});
+  ASSERT_FALSE(wrongBytes.has_value());
+  EXPECT_EQ(wrongBytes.error().code, IoErrorCode::Conflict);
+  EXPECT_FALSE(
+      coordinator.reconcile(1, ReconcilePromote{localSpan(0, 6)}).has_value());
+  EXPECT_FALSE(
+      coordinator.reconcile(1, ReconcilePromote{localSpan(20, 7)}).has_value());
+  // An open intent names no span, so the owner must supply one.
+  EXPECT_FALSE(coordinator.reconcile(1, ReconcilePromote{}).has_value());
+  EXPECT_EQ(coordinator.pinnedCaptures().size(), 1U);
+  EXPECT_FALSE(coordinator.translationFor(range[0]).has_value());
+
+  const auto promoted =
+      coordinator.reconcile(1, ReconcilePromote{localSpan(0, 7)});
+  ASSERT_TRUE(promoted.has_value());
+  EXPECT_EQ(promoted->resolution, CaptureReconcileResult::Resolution::Promoted);
+  EXPECT_FALSE(promoted->publicationPending);
+  EXPECT_TRUE(coordinator.pinnedCaptures().empty());
+  EXPECT_EQ(coordinator.translationFor(range[0]), localSpan(0, 7));
+  // The range now reuses the committed translation: nothing is appended.
+  const auto size = sink.bytes_.size();
+  EXPECT_TRUE(captureCommit(*aborted.world, range).has_value());
+  EXPECT_EQ(sink.bytes_.size(), size);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Reconciled), 1U);
+  // Not pinned any more, so a second decision has nothing to act on.
+  EXPECT_FALSE(coordinator.reconcile(1, ReconcileRelease{}).has_value());
+}
+
+TEST_F(IoCaptureTest, ReconcileReleaseUnpinsAndAllowsRecapture) {
+  RecordingSink sink;
+  auto aborted = uncertainAbort(sink, journalPath_, 81, "release these", 7);
+  auto &coordinator = *aborted.world->coordinator;
+  const PayloadRange range[]{rangeOf(aborted.origin, 0, 7)};
+  EXPECT_TRUE(std::holds_alternative<Refused>(coordinator.prepare(range)));
+
+  const auto released = coordinator.reconcile(1, ReconcileRelease{});
+  ASSERT_TRUE(released.has_value());
+  EXPECT_EQ(released->resolution, CaptureReconcileResult::Resolution::Released);
+  EXPECT_TRUE(coordinator.pinnedCaptures().empty());
+  // The orphaned bytes stay where they are, never aliased: a recapture
+  // appends the range again after them.
+  const auto orphanEnd = sink.bytes_.size();
+  ASSERT_TRUE(captureCommit(*aborted.world, range).has_value());
+  const auto span = coordinator.translationFor(range[0]);
+  ASSERT_TRUE(span.has_value());
+  EXPECT_EQ(span->start, orphanEnd);
+}
+
+TEST_F(IoCaptureTest, ReconcileAfterRestartResolvesRecoveredPins) {
+  RecordingSink sink;
+  PayloadRef origin;
+  {
+    auto aborted =
+        uncertainAbort(sink, journalPath_, 82, "pinned over restart", 8);
+    origin = aborted.origin;
+  }
+  {
+    auto world             = boot(sink, journalPath_);
+    const auto sourceBytes = bytesOf("pinned over restart");
+    auto registered = registerPinned(*world, transientRef(82), sourceBytes);
+    ASSERT_TRUE(registered.has_value());
+    EXPECT_EQ(world->coordinator->pinnedCaptures(), std::vector<CaptureId>{1});
+    const auto promoted =
+        world->coordinator->reconcile(1, ReconcilePromote{localSpan(0, 8)});
+    ASSERT_TRUE(promoted.has_value());
+  }
+  // The decision replays: committed, nothing pinned, nothing reported.
+  auto world        = boot(sink, journalPath_);
+  const auto report = world->coordinator->recover();
+  ASSERT_TRUE(report.has_value());
+  ASSERT_EQ(report->entries.size(), 1U);
+  EXPECT_EQ(report->entries[0].state, CaptureRecoveryState::Reconciled);
+  EXPECT_EQ(report->orphanBytes, std::uint64_t{0});
+  EXPECT_TRUE(world->coordinator->pinnedCaptures().empty());
+  EXPECT_EQ(world->coordinator->translationFor(rangeOf(origin, 0, 8)),
+            localSpan(0, 8));
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
+}
+
+TEST_F(IoCaptureTest,
+       RestartBetweenReconciledAndCommittedFinishesThePromotion) {
+  RecordingSink sink;
+  PayloadRef origin;
+  {
+    auto aborted =
+        uncertainAbort(sink, journalPath_, 83, "die mid reconcile", 9);
+    origin = aborted.origin;
+  }
+  {
+    auto world             = boot(sink, journalPath_);
+    const auto sourceBytes = bytesOf("die mid reconcile");
+    ASSERT_TRUE(registerPinned(*world, transientRef(83), sourceBytes));
+    // Writes from here: 1 Reconciled, 2 Committed -- die before the second.
+    world->coordinator->setJournalCrashPoints(crashOnWrite(2, true));
+    EXPECT_THROW(static_cast<void>(world->coordinator->reconcile(
+                     1, ReconcilePromote{localSpan(0, 9)})),
+                 std::runtime_error);
+  }
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Reconciled), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 0U);
+  auto world        = boot(sink, journalPath_);
+  const auto report = world->coordinator->recover();
+  ASSERT_TRUE(report.has_value());
+  ASSERT_EQ(report->entries.size(), 1U);
+  EXPECT_EQ(report->entries[0].state, CaptureRecoveryState::Reconciled);
+  EXPECT_TRUE(world->coordinator->pinnedCaptures().empty());
+  EXPECT_EQ(world->coordinator->translationFor(rangeOf(origin, 0, 9)),
+            localSpan(0, 9));
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
+}
+
+TEST_F(IoCaptureTest, ReconcileReleaseSurvivesRestart) {
+  RecordingSink sink;
+  PayloadRef origin;
+  {
+    auto aborted =
+        uncertainAbort(sink, journalPath_, 84, "release and restart", 7);
+    origin = aborted.origin;
+    ASSERT_TRUE(aborted.world->coordinator->reconcile(1, ReconcileRelease{})
+                    .has_value());
+  }
+  auto world             = boot(sink, journalPath_);
+  const auto sourceBytes = bytesOf("release and restart");
+  auto registered = registerPinned(*world, transientRef(84), sourceBytes);
+  ASSERT_TRUE(registered.has_value());
+  EXPECT_TRUE(world->coordinator->pinnedCaptures().empty());
+  const auto report = world->coordinator->recover();
+  ASSERT_TRUE(report.has_value());
+  EXPECT_EQ(report->orphanBytes, std::uint64_t{0});
+  const PayloadRange range[]{rangeOf(*registered, 0, 7)};
+  EXPECT_TRUE(
+      std::holds_alternative<Prepared>(world->coordinator->prepare(range)));
+  (void)origin;
+}
+
+TEST_F(IoCaptureTest,
+       ReconcileSpanBeyondPermascrollUsesTheJournalsSpanOnceBytesReturn) {
+  RecordingSink sink;
+  PayloadRef origin;
+  {
+    auto world             = boot(sink, journalPath_);
+    const auto sourceBytes = bytesOf("bytes later lost");
+    auto registered = registerPinned(*world, transientRef(85), sourceBytes);
+    origin          = *registered;
+    const PayloadRange selection[]{rangeOf(origin, 0, 10)};
+    ASSERT_TRUE(captureCommit(*world, selection).has_value());
+  }
+  const auto saved = sink.bytes_;
+  sink.bytes_.resize(4);
+  auto world             = boot(sink, journalPath_);
+  const auto sourceBytes = bytesOf("bytes later lost");
+  ASSERT_TRUE(registerPinned(*world, transientRef(85), sourceBytes));
+  auto &coordinator = *world->coordinator;
+  ASSERT_EQ(coordinator.pinnedCaptures(), std::vector<CaptureId>{1});
+  // The journal names the span, but the permascroll no longer holds it.
+  const auto missing = coordinator.reconcile(1, ReconcilePromote{});
+  ASSERT_FALSE(missing.has_value());
+  EXPECT_EQ(missing.error().code, IoErrorCode::Conflict);
+  EXPECT_EQ(coordinator.pinnedCaptures().size(), 1U);
+  // The bytes come back (a restored permascroll): the journal's span verifies.
+  sink.bytes_         = saved;
+  const auto promoted = coordinator.reconcile(1, ReconcilePromote{});
+  ASSERT_TRUE(promoted.has_value());
+  EXPECT_EQ(coordinator.translationFor(rangeOf(origin, 0, 10)),
+            localSpan(0, 10));
+}
+
+TEST_F(IoCaptureTest, ReconcileReleaseOfALostSpanFreesTheRangeForRecapture) {
+  RecordingSink sink;
+  {
+    auto world             = boot(sink, journalPath_);
+    const auto sourceBytes = bytesOf("bytes truly lost");
+    auto registered = registerPinned(*world, transientRef(86), sourceBytes);
+    const PayloadRange selection[]{rangeOf(*registered, 0, 10)};
+    ASSERT_TRUE(captureCommit(*world, selection).has_value());
+  }
+  sink.bytes_.clear();
+  auto world             = boot(sink, journalPath_);
+  const auto sourceBytes = bytesOf("bytes truly lost");
+  auto registered = registerPinned(*world, transientRef(86), sourceBytes);
+  ASSERT_TRUE(world->coordinator->reconcile(1, ReconcileRelease{}).has_value());
+  const PayloadRange range[]{rangeOf(*registered, 0, 10)};
+  ASSERT_TRUE(captureCommit(*world, range).has_value());
+  EXPECT_EQ(world->coordinator->translationFor(range[0]), localSpan(0, 10));
+}
+
+TEST_F(IoCaptureTest,
+       ReconcilePromotePublishesIntoTheStoreWhenAPublisherIsAttached) {
+  /// A real permascroll that lands the bytes and then throws: the uncertain
+  /// abort that pins a capture.
+  class FailAfterSink final : public CaptureByteSink {
+  public:
+    explicit FailAfterSink(CaptureByteSink &inner) : inner_(inner) {}
+    auto append(const std::span<const std::byte> bytes)
+        -> xanadu::PrimediaSpan override {
+      const auto span = inner_.append(bytes);
+      if (failOnce) {
+        failOnce = false;
+        throw std::runtime_error("sink boom after write");
+      }
+      return span;
+    }
+    auto sync() -> bool override { return inner_.sync(); }
+    auto highWaterBytes() const -> std::uint64_t override {
+      return inner_.highWaterBytes();
+    }
+    auto read(const xanadu::PrimediaSpan &span) const
+        -> std::optional<std::vector<std::byte>> override {
+      return inner_.read(span);
+    }
+    bool failOnce{};
+
+  private:
+    CaptureByteSink &inner_;
+  };
+
+  const auto sourceBytes = bytesOf("promote into the store");
+  xanadu::PrimediaSpan landed;
+  {
+    auto durable = openDurable(dir_);
+    FailAfterSink sink(*durable->sink);
+    auto world      = boot(sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                           durable->publisher.get());
+    auto registered = registerPinned(*world, transientRef(87), sourceBytes);
+    const PayloadRange selection[]{rangeOf(*registered, 0, 7)};
+    auto prepared = world->coordinator->prepare(selection);
+    ASSERT_TRUE(std::holds_alternative<Prepared>(prepared));
+    const auto capture = std::get<Prepared>(prepared).capture;
+    auto appended      = world->coordinator->appendRequest(capture);
+    ASSERT_TRUE(std::holds_alternative<Admitted>(appended.admission.value));
+    sink.failOnce = true;
+    world->scheduler->runNext();
+    static_cast<void>(world->service->pump(8));
+    const auto request = std::get<Admitted>(appended.admission.value).request;
+    const auto outcome = world->service->poll(request).outcome;
+    ASSERT_TRUE(outcome.has_value());
+    EXPECT_TRUE(std::holds_alternative<Refused>(
+        world->coordinator->commit(capture, *outcome)));
+    EXPECT_FALSE(durable->publisher->published(1).has_value());
+    // The bytes sit at the old high-water mark: the owner names that span.
+    landed = localSpan(0, 7);
+    const auto promoted =
+        world->coordinator->reconcile(1, ReconcilePromote{landed});
+    ASSERT_TRUE(promoted.has_value());
+    EXPECT_FALSE(promoted->publicationPending);
+    const auto published = durable->publisher->published(1);
+    ASSERT_TRUE(published.has_value());
+    ASSERT_EQ(published->pieces.size(), 1U);
+    EXPECT_EQ(published->pieces[0].span, landed);
+    EXPECT_EQ(permascrollText(*durable, landed), "promote");
+  }
+  // The promotion and its publication are durable across a restart.
+  auto durable = openDurable(dir_);
+  ASSERT_TRUE(durable->publisher->published(1).has_value());
+  auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                    durable->publisher.get());
+  EXPECT_TRUE(world->coordinator->pinnedCaptures().empty());
+  EXPECT_EQ(durable->publisher->publishedIds().size(), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
+}
+
+TEST_F(IoCaptureTest, ReconciledRecordRoundTripsAndVersionOneIsRefused) {
+  {
+    CaptureJournal journal(journalPath_, 0);
+    CaptureJournalRecord record;
+    record.reconciledPromoted = true;
+    record.span               = localSpan(3, 9);
+    ASSERT_TRUE(
+        journal.appendRecord(CaptureJournalRecordKind::Reconciled, 7, record)
+            .has_value());
+    const auto view = journal.recover();
+    ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
+    ASSERT_EQ(view.records.size(), 1U);
+    EXPECT_EQ(view.records[0].kind, CaptureJournalRecordKind::Reconciled);
+    EXPECT_TRUE(view.records[0].reconciledPromoted);
+    EXPECT_EQ(view.records[0].span, localSpan(3, 9));
+  }
+  // A version 1 file (no Reconciled record existed) is refused by number.
+  {
+    std::fstream file(journalPath_,
+                      std::ios::in | std::ios::out | std::ios::binary);
+    file.seekp(sizeof(kCaptureJournalSignature));
+    const std::uint32_t one = 1;
+    file.write(reinterpret_cast<const char *>(&one), sizeof(one));
+  }
+  CaptureJournal reopened(journalPath_, 0);
+  EXPECT_EQ(reopened.recover().status, CaptureJournalStatus::Corrupt);
 }
 
 } // namespace
