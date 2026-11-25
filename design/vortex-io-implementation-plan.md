@@ -820,6 +820,39 @@ M4 known gaps carried forward (recorded 2026-11-24, review fix round):
   misroute the earlier abandon onto the other's live staged entry (documented on the class;
   `StagedLensSourceAdapter` members mint unique cells and satisfy it).
 
+M5 implementation notes and deliberate deferrals:
+
+- `ReadObservation` is a real minted cell (`IoCellTag::ReadObservation`), not adapter-local
+  metadata: `FileSourceAdapter::execute` publishes the retained bytes first, then records the
+  observation against the actual bytes-read extent, and `ArenaIoCellStore::publishTerminal` mints
+  the cell off the outcome's `d.io.source` field when a `Complete` carries `ReadObservationResult`,
+  binding the same `PayloadRange` through its own owner lease.
+  `outcomeCellReadObservation` is the owner-side reader.
+- File endpoints are served by `FileEndpointAdapter` (`fileOpenAdapterKey`/`fileDataAdapterKey`,
+  `d.io.kind` "file"): `admitOpen` runs `::open` inside `execute` on the scheduler worker (§7.2's
+  off-owner-thread rule) and adopts the descriptor in a per-locator `FileSourceAdapter`, so every
+  later op addresses the opened inode (`FileSourceIdentity::OpenedInode`, declared on
+  `FileOpenCapabilities`). `makeFileRequestDecoder` freezes spec-cell text into `CellRequest`s;
+  `stageAt` keys are the minted spec cells' refs.
+- Live/stable consistency is typed vocabulary, not adapter-private: `SourceConsistency` lives in
+  `io_cells.hpp`, `ioConsistencyLive`/`ioConsistencyStable` mask
+  `OpenSpec`/`OpenGrant::consistency`, and `FileSourceAdapter` offers `Live` only — a `Stable`
+  request is refused before admission because a plain POSIX file proves no snapshot/CAS.
+- §7.1's framing/message/cursor vocabulary is deferred wholesale until the consumer milestone that
+  needs it: `BufferPolicy` (`Raw`/`Fixed`/`Line`/`Message`), `OversizePolicy`, `EncodingPolicy`,
+  the `Sequential`/`AtOffset`/`Reset` cursor modes, and the `ReadFrame`/`ReceiveMessage`/
+  `SendMessage`/`FlushAfter`/`Seek`/`DecodeRange` operations have no adapter or cell-schema
+  representation yet. File/media M5 ships `ReadBytes`/`WriteBytes`-equivalent transfers only;
+  §14's "unsupported framing/message semantics" refusal stands until then.
+- `FileSourceAdapter`'s `DecodeLease` pool (`acquireDecodeLease`/`releaseDecodeLease`,
+  `maxDecodeLeases` bound) is a placeholder accounting seam: no decoder or derived-product cache
+  exists behind it, so leases record source range + generation but retain no decoded bytes. It
+  exists so the lease/budget class is settled before a real decoder lands.
+- `generationFromStat` (size + mtime + inode) detects an uncertain write but cannot see a
+  same-size, same-timestamp in-place rewrite — proven by
+  `SameSizeRewriteWithRestoredMtimeSharesTheGeneration`. That blind spot is why `Stable`/CAS is
+  refused rather than synthesized from the generation value.
+
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per
 repository policy. Run source-level focused tests while implementing and full `make -j$(nproc) test`
 before release; backend comparison only if graphics code is touched. Do not claim performance
