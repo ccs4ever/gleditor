@@ -614,6 +614,58 @@ TEST(IoServiceTest, RealArenaBridgeMintsAndPublishesTypedRequestOutcome) {
   EXPECT_EQ(ioOutcomeTag(arena, *poll.outcome), IoOutcomeTag::Failed);
 }
 
+TEST(IoServiceTest, RetiredRequestPollResolvesOutcomeThroughArenaStore) {
+  // The FakeCells outcomeFor scans a vector; this drives the real
+  // ArenaIoCellStore::outcomeFor -- request -d.io.outcome-> outcome cell --
+  // through the same poll-after-retire path.
+  zigzag::ArenaManifold arena;
+  const auto schema = makeIoCellSchema(arena);
+  ASSERT_TRUE(schema);
+  const auto endpoint = makeEndpointCell(arena, *schema);
+  ASSERT_TRUE(endpoint);
+  const auto capability = makeCapabilityCell(arena, *schema, *endpoint);
+  ASSERT_TRUE(capability);
+  PayloadResolver payloads;
+  FakeScheduler *schedulerRaw{};
+  auto scheduler = std::make_unique<FakeScheduler>();
+  schedulerRaw   = scheduler.get();
+  FakeAdapter adapter;
+  ArenaIoCellStore cells(
+      arena, *schema, payloads,
+      [endpoint = *endpoint](CapabilityCell requestCapability, OwnerCell spec)
+          -> std::expected<CellRequest, IoErrorInfo> {
+        return CellRequest{.key                  = testKey,
+                           .capability           = requestCapability,
+                           .endpoint             = endpoint,
+                           .completionBoundBytes = 1024,
+                           .payloadBoundBytes    = 1024,
+                           .direction            = CellRequest::Direction::Read,
+                           .specification        = spec};
+      });
+  IoService service({8, 1024, 1024, 1024, 8}, std::move(scheduler), payloads,
+                    cells);
+  service.registerAdapter(testKey, adapter);
+  const auto specification = arena.makeCell("io request spec");
+  const auto submitted     = service.submit(*capability, specification);
+  ASSERT_TRUE(std::holds_alternative<Admitted>(submitted.value));
+  const auto request = std::get<Admitted>(submitted.value).request;
+
+  const auto token = tokenOf(*schedulerRaw);
+  schedulerRaw->candidate(token, Complete{{}, {}, {}});
+  schedulerRaw->acknowledge(token);
+  static_cast<void>(service.pump(8));
+  const auto outcome = service.poll(request).outcome;
+  ASSERT_TRUE(outcome.has_value());
+  EXPECT_EQ(ioOutcomeTag(arena, *outcome), IoOutcomeTag::Complete);
+
+  service.retireRequest(request);
+  const auto late = service.poll(request);
+  EXPECT_EQ(late.phase, IoPhase::Terminal);
+  ASSERT_TRUE(late.outcome.has_value());
+  EXPECT_EQ(*late.outcome, *outcome);
+  EXPECT_EQ(ioOutcomeTag(arena, *late.outcome), IoOutcomeTag::Complete);
+}
+
 TEST(IoSchedulerTest, BoundedPoolNeverRunsAdapterOnTheSubmittingThread) {
   PayloadResolver payloads;
   BoundedIoScheduler scheduler({1, 2, 4096, 1024}, payloads);
