@@ -35,6 +35,8 @@ constexpr std::string_view kindName(const CaptureJournalRecordKind kind) {
     return "Committed";
   case CaptureJournalRecordKind::Aborted:
     return "Aborted";
+  case CaptureJournalRecordKind::Reconciled:
+    return "Reconciled";
   }
   return "Unknown";
 }
@@ -219,6 +221,28 @@ auto UserPermascrollCaptureSink::highWaterBytes() const -> std::uint64_t {
   return permascroll_.size();
 }
 
+namespace {
+/// A read that comes back short (the span runs past what the target holds)
+/// is no read at all: verification must never see a clamped prefix.
+auto bytesOfRead(const std::string &text, const std::uint64_t wanted)
+    -> std::optional<std::vector<std::byte>> {
+  if (text.size() != wanted) return std::nullopt;
+  std::vector<std::byte> out(text.size());
+  std::memcpy(out.data(), text.data(), text.size());
+  return out;
+}
+} // namespace
+
+auto UserPermascrollCaptureSink::read(const xanadu::PrimediaSpan &span) const
+    -> std::optional<std::vector<std::byte>> {
+  if (span.scroll != xanadu::localScroll ||
+      span.start + span.length < span.start ||
+      span.start + span.length > permascroll_.size()) {
+    return std::nullopt;
+  }
+  return bytesOfRead(permascroll_.read(span), span.length);
+}
+
 SegmentedPrimediaCaptureSink::SegmentedPrimediaCaptureSink(
     xanadu::SegmentedPrimediaSpool &spool)
     : spool_(spool) {}
@@ -233,6 +257,16 @@ auto SegmentedPrimediaCaptureSink::sync() -> bool { return spool_.flush(); }
 
 auto SegmentedPrimediaCaptureSink::highWaterBytes() const -> std::uint64_t {
   return spool_.size();
+}
+
+auto SegmentedPrimediaCaptureSink::read(const xanadu::PrimediaSpan &span) const
+    -> std::optional<std::vector<std::byte>> {
+  if (span.scroll != xanadu::localScroll ||
+      span.start + span.length < span.start ||
+      span.start + span.length > spool_.size()) {
+    return std::nullopt;
+  }
+  return bytesOfRead(spool_.read(span), span.length);
 }
 
 // -- CaptureAppendAdapter ----------------------------------------------------
@@ -304,6 +338,12 @@ auto CaptureAppendAdapter::syncSink() noexcept -> bool {
 
 auto CaptureAppendAdapter::sinkHighWater() const -> std::uint64_t {
   return sink_.highWaterBytes();
+}
+
+auto CaptureAppendAdapter::sinkRead(const xanadu::PrimediaSpan &span) const
+    -> std::optional<std::vector<std::byte>> {
+  const std::lock_guard lock(performMutex_);
+  return sink_.read(span);
 }
 
 auto CaptureAppendAdapter::prepare(const CellRequest &request, OwnerContext &)
@@ -435,6 +475,12 @@ auto CaptureCoordinator::setJournalCrashPoints(CaptureJournalCrashPoints points)
   return this;
 }
 
+auto CaptureCoordinator::setPublisher(CapturePublisher *publisher)
+    -> CaptureCoordinator * {
+  publisher_ = publisher;
+  return this;
+}
+
 auto CaptureCoordinator::recovered() const noexcept -> bool {
   return recoveryReport_.has_value();
 }
@@ -484,10 +530,20 @@ void CaptureCoordinator::sweepDead() {
 
 void CaptureCoordinator::retire(
     const std::map<PendingKey, PendingCapture>::iterator it,
-    const bool uncertain) {
+    const bool uncertain, const CaptureRecoveryReason reason) {
   auto &pending = it->second;
   if (uncertain) {
     pinPendingSlots(pending.captureId);
+    // The CaptureCell dies with this record, so reconcile() needs what the
+    // journal's Append intent already says: intervals, length and digest.
+    PinnedCapture pin;
+    pin.reason                 = reason;
+    pin.record.kind            = CaptureJournalRecordKind::Append;
+    pin.record.captureId       = pending.captureId;
+    pin.record.appendDigest    = pending.appendDigest;
+    pin.record.appendLength    = pending.appendLength;
+    pin.record.intervals       = journalIntervals(pending.pieces);
+    pinned_[pending.captureId] = std::move(pin);
     GLEDITOR_LOG_WARN(kLog, "capture {} retired uncertain: intervals pinned",
                       pending.captureId);
   } else {
@@ -1053,7 +1109,7 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
     static_cast<void>(
         appendJournal(pending, CaptureJournalRecordKind::Aborted,
                       abortPayload(IoOutcomeTag::Rejected, true)));
-    retire(it, true);
+    retire(it, true, CaptureRecoveryReason::UncertainAbort);
     return submitRefusal({IoErrorCode::BackendFailure, 2});
   }
 
@@ -1126,7 +1182,7 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
     GLEDITOR_LOG_WARN(kLog, "capture {} aborted: outcome {} uncertain {}",
                       pending.captureId, static_cast<unsigned>(*outcomeTag),
                       uncertain);
-    retire(it, uncertain);
+    retire(it, uncertain, CaptureRecoveryReason::UncertainAbort);
     return refuse({IoErrorCode::InvalidRequest, 7});
   }
 
@@ -1159,6 +1215,27 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
         appendJournal(pending, CaptureJournalRecordKind::Appended, appended);
     if (!stamped) return refuse(stamped.error());
     pending.appendedSequence = stamped->sequence;
+  }
+
+  // Structure publication, between the durable Appended record and the
+  // Committed record: Appended proves the bytes, the Store save proves the
+  // references, and only then does Committed claim both. Idempotent by
+  // CaptureId, so a retry after a refusal here (or after a crash, via
+  // recovery) never publishes twice.
+  if (publisher_ && !pending.published) {
+    CaptureJournalRecord appended;
+    appended.captureId    = pending.captureId;
+    appended.appendLength = pending.appendLength;
+    appended.intervals    = journalIntervals(pending.pieces);
+    appended.span         = *receipt;
+    const auto pieces     = publishedPieces(appended);
+    const auto stored     = publisher_->publish(
+        CapturePublication{.captureId = pending.captureId, .pieces = pieces});
+    if (!stored) return refuse(stored.error());
+    if (const auto saved = publisher_->save(); !saved) {
+      return refuse(saved.error());
+    }
+    pending.published = true;
   }
 
   // Publish the receipt cell and the capture->receipt link under one
@@ -1360,9 +1437,10 @@ void CaptureCoordinator::pinFromRecord(const CaptureJournalRecord &record) {
       // concurrent shape would break the invariant; emplace keeps the
       // first writer.
       auto [it, inserted] = slots.emplace(
-          from, TranslationSlot{.kind      = TranslationSlot::Kind::Pinned,
-                                .srcOffset = from,
-                                .srcLength = to - from});
+          from, TranslationSlot{.kind           = TranslationSlot::Kind::Pinned,
+                                .srcOffset      = from,
+                                .srcLength      = to - from,
+                                .pendingCapture = record.captureId});
       if (inserted) ++translationSlots_;
     };
     for (const auto &[coverStart, coverEnd] : covered) {
@@ -1408,6 +1486,7 @@ auto CaptureCoordinator::recover()
     AwaitingCommit,
     Committed,
     Aborted,
+    Released,
   };
   struct Attempt {
     AttemptPhase phase{AttemptPhase::None};
@@ -1423,7 +1502,8 @@ auto CaptureCoordinator::recover()
     case CaptureJournalRecordKind::Append:
       if (attempt.phase == AttemptPhase::Intent ||
           attempt.phase == AttemptPhase::AwaitingCommit ||
-          attempt.phase == AttemptPhase::Committed) {
+          attempt.phase == AttemptPhase::Committed ||
+          attempt.phase == AttemptPhase::Released) {
         attempt.ambiguous = true;
       }
       attempt.phase            = AttemptPhase::Intent;
@@ -1458,6 +1538,30 @@ auto CaptureCoordinator::recover()
         attempt.abortedUncertain = record.abortUncertain;
       }
       break;
+    case CaptureJournalRecordKind::Reconciled: {
+      // The owner's explicit decision supersedes whatever left the
+      // capture pinned (open intent, uncertain abort, lost span, an
+      // ambiguous order). Released ends the attempt; Promoted proceeds as
+      // if an Appended record had named the verified span.
+      const auto &basis = attempt.appended ? attempt.appended : attempt.intent;
+      if (attempt.phase == AttemptPhase::None ||
+          attempt.phase == AttemptPhase::Committed ||
+          attempt.phase == AttemptPhase::Released || !basis) {
+        attempt.ambiguous = true;
+        break;
+      }
+      attempt.ambiguous = false;
+      if (!record.reconciledPromoted) {
+        attempt.phase = AttemptPhase::Released;
+        break;
+      }
+      auto promoted    = *basis;
+      promoted.kind    = CaptureJournalRecordKind::Appended;
+      promoted.span    = record.span;
+      attempt.appended = promoted;
+      attempt.phase    = AttemptPhase::AwaitingCommit;
+      break;
+    }
     }
   }
 
@@ -1467,6 +1571,12 @@ auto CaptureCoordinator::recover()
                                        const CaptureJournalRecord &record,
                                        const bool countOrphans) {
     pinFromRecord(record);
+    PinnedCapture pin;
+    pin.reason           = reason;
+    pin.record           = record;
+    pin.hasSpan          = record.kind == CaptureJournalRecordKind::Appended;
+    pin.record.captureId = id;
+    pinned_[id]          = std::move(pin);
     if (countOrphans) report.orphanBytes += record.appendLength;
     report.entries.push_back(
         CaptureRecoveryEntry{.capture = id,
@@ -1512,7 +1622,16 @@ auto CaptureCoordinator::recover()
         needsReconciliation(captureId, *problem, appended, false);
         break;
       }
-      if (attempt.phase == AttemptPhase::AwaitingCommit) {
+      auto proven      = appended;
+      proven.captureId = captureId;
+      if (publisher_) {
+        // The Store decides whether the publication happened: queue it,
+        // completePublications() below finishes whatever is missing and
+        // writes the Committed record only after the Store save.
+        unpublished_[captureId] = UnpublishedCapture{
+            .appended          = std::move(proven),
+            .committedRecorded = attempt.phase == AttemptPhase::Committed};
+      } else if (attempt.phase == AttemptPhase::AwaitingCommit) {
         // Best effort: a failure (logged by the journal path) leaves the
         // Appended record for the next process to close.
         const auto framed = journal_.appendRecord(
@@ -1528,6 +1647,12 @@ auto CaptureCoordinator::recover()
           .capture = captureId, .state = CaptureRecoveryState::Reconciled});
       break;
     }
+    case AttemptPhase::Released:
+      // The owner released this capture: nothing pinned, nothing orphaned
+      // is claimed.
+      report.entries.push_back(CaptureRecoveryEntry{
+          .capture = captureId, .state = CaptureRecoveryState::Reconciled});
+      break;
     case AttemptPhase::Aborted:
       if (attempt.abortedUncertain) {
         // A non-Complete outcome after the append was attempted: bytes
@@ -1552,11 +1677,200 @@ auto CaptureCoordinator::recover()
       break;
     }
   }
+  if (publisher_ && !unpublished_.empty()) {
+    const auto pendingIds = [&] {
+      std::vector<CaptureId> ids;
+      for (const auto &entry : unpublished_) ids.push_back(entry.first);
+      return ids;
+    }();
+    if (const auto done = completePublications(); !done) {
+      // The bytes are proven and their translations rebuilt; only the
+      // Structure half is outstanding. Report it, pin nothing, and leave
+      // the queue for resumePublications().
+      for (auto &entry : report.entries) {
+        if (std::ranges::find(pendingIds, entry.capture) == pendingIds.end() ||
+            !unpublished_.contains(entry.capture)) {
+          continue;
+        }
+        entry.state  = CaptureRecoveryState::NeedsReconciliation;
+        entry.reason = CaptureRecoveryReason::PublicationIncomplete;
+      }
+    }
+  }
   GLEDITOR_LOG_DEBUG(kLog,
                      "recover(): {} captures, {} orphan bytes, next id {}",
                      report.entries.size(), report.orphanBytes, nextCaptureId_);
   recoveryReport_ = report;
   return report;
+}
+
+// -- publication completion and reconciliation -------------------------------
+
+auto CaptureCoordinator::publishedPieces(const CaptureJournalRecord &appended)
+    -> std::vector<PublishedPiece> {
+  std::vector<PublishedPiece> pieces;
+  pieces.reserve(appended.intervals.size());
+  for (const auto &interval : appended.intervals) {
+    pieces.push_back(
+        PublishedPiece{.origin    = originOf(interval),
+                       .srcOffset = interval.srcOffset,
+                       .span      = xanadu::PrimediaSpan{
+                                .scroll = appended.span.scroll,
+                                .start  = appended.span.start + interval.dstOffset,
+                                .length = interval.srcLength}});
+  }
+  return pieces;
+}
+
+auto CaptureCoordinator::completePublications()
+    -> std::expected<std::size_t, IoErrorInfo> {
+  if (unpublished_.empty()) return std::size_t{0};
+  // With no Structure target a Committed record proves only the journal and
+  // the map; the publish and save steps are skipped, the record still lands.
+  if (publisher_) {
+    const auto present = publisher_->publishedIds();
+    for (const auto &[id, entry] : unpublished_) {
+      if (present.contains(id)) continue;
+      const auto pieces = publishedPieces(entry.appended);
+      const auto stored = publisher_->publish(
+          CapturePublication{.captureId = id, .pieces = pieces});
+      if (!stored) return std::unexpected(stored.error());
+    }
+    // One save covers every publication above. It also runs when the Store
+    // already held a receipt: an earlier attempt may have minted it in
+    // memory and failed to save, and Committed must never outrun the save.
+    if (const auto saved = publisher_->save(); !saved) {
+      return std::unexpected(saved.error());
+    }
+  }
+  std::size_t completed = 0;
+  for (auto it = unpublished_.begin(); it != unpublished_.end();) {
+    if (!it->second.committedRecorded) {
+      const auto done = journal_.appendRecord(
+          CaptureJournalRecordKind::Committed, it->first, {}, crashPoints_);
+      if (!done) {
+        GLEDITOR_LOG_WARN(kLog, "capture {} completion record refused: code {}",
+                          it->first, toString(done.error().code));
+        return std::unexpected(done.error());
+      }
+    }
+    ++completed;
+    it = unpublished_.erase(it);
+  }
+  return completed;
+}
+
+auto CaptureCoordinator::resumePublications()
+    -> std::expected<std::size_t, IoErrorInfo> {
+  return completePublications();
+}
+
+auto CaptureCoordinator::pinnedCaptures() const -> std::vector<CaptureId> {
+  std::vector<CaptureId> ids;
+  ids.reserve(pinned_.size());
+  for (const auto &entry : pinned_) ids.push_back(entry.first);
+  return ids;
+}
+
+void CaptureCoordinator::erasePinnedSlots(const CaptureId captureId) {
+  for (auto &entry : translations_) {
+    auto &slots = entry.second;
+    for (auto sit = slots.begin(); sit != slots.end();) {
+      if (sit->second.kind == TranslationSlot::Kind::Pinned &&
+          sit->second.pendingCapture == captureId) {
+        sit = slots.erase(sit);
+        --translationSlots_;
+      } else {
+        ++sit;
+      }
+    }
+  }
+}
+
+auto CaptureCoordinator::reconcile(const CaptureId capture,
+                                   const CaptureReconcileDecision &decision)
+    -> std::expected<CaptureReconcileResult, IoErrorInfo> {
+  if (!recovered()) return std::unexpected(IoErrorInfo{IoErrorCode::Stale, 5});
+  const auto found = pinned_.find(capture);
+  if (found == pinned_.end()) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest, 20});
+  }
+  auto &pin = found->second;
+
+  if (std::holds_alternative<ReconcileRelease>(decision)) {
+    CaptureJournalRecord record;
+    record.reconciledPromoted = false;
+    if (const auto written =
+            journal_.appendRecord(CaptureJournalRecordKind::Reconciled, capture,
+                                  record, crashPoints_);
+        !written) {
+      GLEDITOR_LOG_WARN(kLog, "capture {} release record refused: code {}",
+                        capture, toString(written.error().code));
+      return std::unexpected(written.error());
+    }
+    erasePinnedSlots(capture);
+    pinned_.erase(found);
+    GLEDITOR_LOG_INFO(kLog, "capture {} released by the owner", capture);
+    return CaptureReconcileResult{
+        .resolution = CaptureReconcileResult::Resolution::Released};
+  }
+
+  // Promote: the owner names (or the journal already names) where the bytes
+  // are, and the coordinator verifies rather than trusts. The hash only
+  // validates the named span; it never goes looking for one.
+  const auto &promote = std::get<ReconcilePromote>(decision);
+  const auto named =
+      promote.span
+          ? promote.span
+          : (pin.hasSpan ? std::optional{pin.record.span} : std::nullopt);
+  if (!named) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest, 21});
+  }
+  const auto span = *named;
+  if (span.scroll != xanadu::localScroll ||
+      span.length != pin.record.appendLength ||
+      span.start + span.length < span.start ||
+      span.start + span.length > adapter_.sinkHighWater()) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::Conflict, 21});
+  }
+  const auto held = adapter_.sinkRead(span);
+  if (!held || digestOf(*held) != pin.record.appendDigest) {
+    GLEDITOR_LOG_WARN(kLog, "capture {} promote refused: bytes at span differ",
+                      capture);
+    return std::unexpected(IoErrorInfo{IoErrorCode::Conflict, 22});
+  }
+
+  // The decision is durable before it is acted on, so a restart replays it.
+  CaptureJournalRecord record;
+  record.reconciledPromoted = true;
+  record.span               = span;
+  if (const auto written = journal_.appendRecord(
+          CaptureJournalRecordKind::Reconciled, capture, record, crashPoints_);
+      !written) {
+    return std::unexpected(written.error());
+  }
+  auto appended      = pin.record;
+  appended.kind      = CaptureJournalRecordKind::Appended;
+  appended.span      = span;
+  appended.captureId = capture;
+  erasePinnedSlots(capture);
+  if (const auto problem = rebuildFromAppended(appended)) {
+    // The same conflict will recur on replay and re-pin the capture then;
+    // keep it pinned now too.
+    pinFromRecord(pin.record);
+    GLEDITOR_LOG_WARN(kLog, "capture {} promote conflicts with the map: {}",
+                      capture, static_cast<unsigned>(*problem));
+    return std::unexpected(IoErrorInfo{IoErrorCode::Conflict, 23});
+  }
+  pinned_.erase(found);
+  unpublished_[capture] =
+      UnpublishedCapture{.appended = appended, .committedRecorded = false};
+  GLEDITOR_LOG_INFO(kLog, "capture {} promoted by the owner at start {}",
+                    capture, span.start);
+  CaptureReconcileResult result{
+      .resolution = CaptureReconcileResult::Resolution::Promoted};
+  result.publicationPending = !completePublications().has_value();
+  return result;
 }
 
 } // namespace xanadu::vortex

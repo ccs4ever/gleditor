@@ -19,6 +19,7 @@
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/vortex/capture_constants.hpp"
 #include "common/xanadu/vortex/capture_journal.hpp"
+#include "common/xanadu/vortex/capture_publication.hpp"
 #include "common/xanadu/vortex/io_cells.hpp"
 #include "common/xanadu/vortex/io_protocol.hpp"
 #include "common/xanadu/vortex/io_service.hpp"
@@ -67,7 +68,13 @@ public:
   /// mark recovery reconciles journal spans against (§8.2): a span that
   /// ends past it names bytes that were lost and must not be trusted.
   [[nodiscard]] virtual std::uint64_t highWaterBytes() const = 0;
-  virtual ~CaptureByteSink()                                 = default;
+  /// The bytes at @p span, or std::nullopt when the target does not hold
+  /// them. Reconciliation verifies an owner-named span against the append
+  /// digest with this; it never searches for bytes (a hash validates, it
+  /// does not select identity).
+  [[nodiscard]] virtual std::optional<std::vector<std::byte>>
+  read(const xanadu::PrimediaSpan &span) const = 0;
+  virtual ~CaptureByteSink()                   = default;
 };
 
 /// CaptureByteSink over the author's UserPermascroll (the production
@@ -80,6 +87,8 @@ public:
       -> xanadu::PrimediaSpan override;
   [[nodiscard]] auto sync() -> bool override;
   [[nodiscard]] auto highWaterBytes() const -> std::uint64_t override;
+  [[nodiscard]] auto read(const xanadu::PrimediaSpan &span) const
+      -> std::optional<std::vector<std::byte>> override;
 
 private:
   xanadu::UserPermascroll &permascroll_;
@@ -95,6 +104,8 @@ public:
       -> xanadu::PrimediaSpan override;
   [[nodiscard]] auto sync() -> bool override;
   [[nodiscard]] auto highWaterBytes() const -> std::uint64_t override;
+  [[nodiscard]] auto read(const xanadu::PrimediaSpan &span) const
+      -> std::optional<std::vector<std::byte>> override;
 
 private:
   xanadu::SegmentedPrimediaSpool &spool_;
@@ -156,6 +167,9 @@ public:
   /// never interleaves with a worker's append on a single-appender sink.
   [[nodiscard]] auto syncSink() noexcept -> bool;
   [[nodiscard]] auto sinkHighWater() const -> std::uint64_t;
+  /// CaptureByteSink::read() under the append serialization.
+  [[nodiscard]] auto sinkRead(const xanadu::PrimediaSpan &span) const
+      -> std::optional<std::vector<std::byte>>;
 
   auto prepare(const CellRequest &, OwnerContext &)
       -> std::expected<PreparedOperation, IoErrorInfo> override;
@@ -172,7 +186,7 @@ private:
   std::unordered_set<std::uint32_t> executed_;
   /// Serializes sink_.append across worker turns: CaptureByteSink
   /// implementations are not required to be internally locked.
-  std::mutex performMutex_;
+  mutable std::mutex performMutex_;
   static constexpr std::size_t maxStagedAppends = 4096;
 };
 
@@ -243,6 +257,11 @@ enum class CaptureRecoveryReason : std::uint8_t {
   /// An Appended span ends past the permascroll's durable size: its bytes
   /// were lost (or never became durable) and must not be trusted.
   SpanBeyondPermascroll,
+  /// Append bytes are proven (Appended span within the permascroll) but the
+  /// Structure publication could not be completed -- the Store or its save
+  /// refused. Translations are rebuilt; no Committed record is written
+  /// until resumePublications() succeeds. Nothing is pinned.
+  PublicationIncomplete,
   /// An Appended record's intervals are inconsistent with its span or
   /// with each other.
   InvalidTranslation,
@@ -262,6 +281,32 @@ struct CaptureRecoveryReport {
   /// appendLength over captures whose intent is open or whose abort is
   /// uncertain. Reported, never aliased.
   std::uint64_t orphanBytes{};
+};
+
+/// reconcile() decisions for a pinned capture (plan §8.2, explicit
+/// reconciliation). Release declares the capture's bytes unreachable: its
+/// intervals are unpinned and may be captured afresh; any bytes that did land
+/// stay orphaned, never aliased. Promote asserts the bytes are at a span:
+/// the coordinator verifies length, high-water and the append digest against
+/// the permascroll, and only then turns the pinned intervals into committed
+/// translations and publishes them. @c span defaults to the span a journal
+/// Appended record already names (SpanBeyondPermascroll after the bytes
+/// returned); an open intent or uncertain abort has none, so the owner must
+/// name it.
+struct ReconcileRelease {};
+struct ReconcilePromote {
+  std::optional<xanadu::PrimediaSpan> span;
+};
+using CaptureReconcileDecision =
+    std::variant<ReconcileRelease, ReconcilePromote>;
+
+struct CaptureReconcileResult {
+  enum class Resolution : std::uint8_t { Released, Promoted };
+  Resolution resolution{Resolution::Released};
+  /// Promoted only: the decision and translations are durable but the
+  /// Structure publication (or its completion record) is not yet; call
+  /// resumePublications().
+  bool publicationPending{};
 };
 
 /// The per-user capture owner (plan §8.2): owns the interval translation
@@ -360,6 +405,33 @@ public:
   [[nodiscard]] auto recover()
       -> std::expected<CaptureRecoveryReport, IoErrorInfo>;
 
+  /// Where commit() publishes Structure (plan §8.2). Must be set before
+  /// recover() so recovery can complete half-finished publications; a
+  /// coordinator with no publisher still journals and maps but a Committed
+  /// record then proves only the journal, not a published reference.
+  ///
+  /// Ordering, one capture: Appended (fsynced, after the permascroll sync)
+  /// -> publish into the Store -> Store save -> Committed. A crash between
+  /// any two leaves a state recovery completes without re-appending or
+  /// double-publishing: publication is idempotent keyed by CaptureId, found
+  /// by walking the Store's receipt rank.
+  auto setPublisher(CapturePublisher *publisher) -> CaptureCoordinator *;
+  /// Complete publications recovery or reconcile() found proven but not
+  /// finished (idempotent by CaptureId): publish what the Store lacks, save
+  /// once, then write the Committed records. Returns how many captures were
+  /// completed. Any refusal leaves the remainder queued for a retry.
+  [[nodiscard]] auto resumePublications()
+      -> std::expected<std::size_t, IoErrorInfo>;
+
+  /// CaptureIds whose intervals are pinned awaiting reconcile().
+  [[nodiscard]] auto pinnedCaptures() const -> std::vector<CaptureId>;
+  /// Resolve one pinned capture explicitly, journaling the decision before
+  /// acting on it so a restart replays it. Refuses (and keeps the pin) when
+  /// verification of a Promote fails: nothing is ever guessed into identity.
+  [[nodiscard]] auto reconcile(CaptureId capture,
+                               const CaptureReconcileDecision &decision)
+      -> std::expected<CaptureReconcileResult, IoErrorInfo>;
+
 private:
   enum class PendingPhase : std::uint8_t {
     Prepared,
@@ -401,6 +473,8 @@ private:
     std::optional<std::uint64_t> appendedSequence;
     std::optional<CaptureReceiptCell> receiptCell;
     bool committedRecorded{};
+    /// The Structure publication is in the Store and saved.
+    bool published{};
     /// Journal file budget still held for this capture's records.
     std::size_t heldJournalBytes{};
   };
@@ -461,8 +535,8 @@ private:
   /// A capture reached a terminal state: drop its slots (pinned when
   /// @p uncertain, erased otherwise), leases and journal hold, free its
   /// pending-capture slot, and drop the adapter's spent evidence.
-  void retire(std::map<PendingKey, PendingCapture>::iterator it,
-              bool uncertain);
+  void retire(std::map<PendingKey, PendingCapture>::iterator it, bool uncertain,
+              CaptureRecoveryReason reason = CaptureRecoveryReason::OpenIntent);
   /// Write one journal record for @p pending, logging a refusal and
   /// consuming the held budget the record accounts for.
   auto appendJournal(PendingCapture &pending, CaptureJournalRecordKind kind,
@@ -488,6 +562,33 @@ private:
   journalIntervals(const std::vector<CapturePiece> &pieces)
       -> std::vector<CaptureSourceInterval>;
 
+  /// A capture whose intervals are pinned until reconcile(): what its
+  /// journal records proved, enough to promote or release without the
+  /// (long gone) CaptureCell.
+  struct PinnedCapture {
+    CaptureRecoveryReason reason{CaptureRecoveryReason::OpenIntent};
+    /// The latest Append/Appended record, captureId stamped.
+    CaptureJournalRecord record;
+    /// record.span is a span the journal named.
+    bool hasSpan{};
+  };
+  /// Proven-appended captures whose Structure publication or Committed
+  /// record is outstanding.
+  struct UnpublishedCapture {
+    CaptureJournalRecord appended;
+    bool committedRecorded{};
+  };
+  /// Pieces a publication carries: each interval at its permanent span.
+  [[nodiscard]] static auto
+  publishedPieces(const CaptureJournalRecord &appended)
+      -> std::vector<PublishedPiece>;
+  /// Publish (idempotently) and save @p appended, then record Committed
+  /// unless already recorded. The one completion path for recovery,
+  /// reconcile() and resumePublications().
+  [[nodiscard]] auto completePublications()
+      -> std::expected<std::size_t, IoErrorInfo>;
+  void erasePinnedSlots(CaptureId captureId);
+
   zigzag::ArenaManifold &arena_;
   IoCellSchema schema_;
   PayloadResolver &payloads_;
@@ -499,6 +600,9 @@ private:
   AdapterKey appendKey_{captureAppendAdapterKey};
   CaptureCoordinatorLimits limits_;
   std::map<PendingKey, PendingCapture> pending_;
+  CapturePublisher *publisher_{};
+  std::map<CaptureId, PinnedCapture> pinned_;
+  std::map<CaptureId, UnpublishedCapture> unpublished_;
   TranslationMap translations_;
   std::size_t translationSlots_{};
   CaptureId nextCaptureId_{1};
