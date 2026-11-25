@@ -1075,7 +1075,12 @@ M6 implementation notes and deliberate deferrals:
     that serves requests holds its live requests' cells and not every request's (measured at 18 live
     cells, about 1.2 KB, per served request: six times the earlier price of three cells). A request
     that a capture still views on its clone rank is kept until the view leaves. Retiring is the
-    consumer saying the outcome is read: a late poll of a reaped request finds a stale handle.
+    consumer saying the outcome is read: a late poll of a reaped request finds a stale handle. The
+    first measurement counted only requests that never parked. A parked await also mints a waiter
+    graph (about nine cells: the waiter, its request occurrence and clone view, and three label and
+    value pairs), which `reapIoWaiter` now frees when the waiter retires, whether by cancel, by the
+    terminal pass or at resume (M7a review R1, tested with ten thousand await cycles); a cell that
+    other cells still view through its clone rank is kept whole, with its subgraph.
   - **P5, applied** (owner-approved journal-protocol change; `capture.journal` version 4). The
     `Append` intent is written and fsynced by the append's own worker turn, after the turn's last
     chance to be cancelled and before it hands a byte to the sink, so no journal fsync of a commit
@@ -1113,7 +1118,9 @@ M7a implementation notes and deliberate deferrals:
   `submissionRequest`/`submissionOutcome` are exclusive: the wrong arm answers `WrongTag`, which is
   how an await is never handed a refusal. The cell text is `admitted` or `refused`. The sum holds a
   view on the request's clone rank, so `reapIoRequest` keeps the request whole while a submission
-  cell names it: a runner must `release` the submission before `retireRequest` (tested).
+  cell names it. The order does not leak any more: `FrontendBridge::release` reaps a request the
+  service had already retired once the view is gone, and `FrontendBridge::retire(submission)`
+  releases the sum and retires the request when it is terminal (it never cancels a running one).
 - `FrontendToken` holds the activation as `shared_ptr<FrontendActivation>` (an opaque base the
   language subclasses), the request and waiter handles, the `ContinuationId` and an optional
   position. The `Parked` result a runner returns and the route the host keeps share that activation;
@@ -1123,14 +1130,23 @@ M7a implementation notes and deliberate deferrals:
   cursor or request went stale. Wakes are delivered after the pass, so a runner may re-await and
   park again from inside `wake` (VPL's next position) but must not call `pumpIo`. `cancelWaiter`
   that removes the waiter drops the route silently: cancelling an activation never cancels the
-  request. `~IoHost` drops remaining routes without calling anyone.
+  request. `~IoHost` drops remaining routes without calling anyone. A route holds the runner's
+  `routeLife()` token (the `FrontendRunner` base owns it), which `pumpIo` re-checks before every
+  delivery, so a runner destroyed without cancelling its waiter, or by another runner's wake in the
+  same pass, is skipped and never called; `unrouteWake(continuation)` and `unrouteRunner(runner)`
+  drop routes explicitly. A `wake` that throws is contained per runner: it is logged, counted
+  (`failedWakes()`), its VM continuation is retired and the rest of the batch is still delivered.
+  Routing a parked await again with the same runner and activation is accepted; another runner or
+  activation is `AlreadyRouted`, which the bridge returns as `IO_TOKEN_STALE` instead of parking
+  with the second activation.
 - `FrontendBridge::awaitSubmission` is `Completed{outcome}` for any terminal tag (a terminal outcome
   is a value, never a failure), `Parked{token}` for Pending, and `Failed{IO_AWAIT_NOT_ADMITTED}` for
   a refused submission: refusal stays a value, and a language matches before awaiting. A second
   await of the same request and cursor while Pending returns the same continuation and keeps the
-  first route. `resume` takes the outcome `pumpIo` delivered (`IoHost::takeResumedOutcome`, which
-  retires the VM's parked entry) and otherwise re-awaits the same request, rematerializing a
-  rolled-back outcome cell; it never submits.
+  first route (for the same runner and activation; see above for any other). `resume` takes the
+  outcome `pumpIo` delivered (`IoHost::takeResumedOutcome`, which retires the VM's parked entry) and
+  otherwise re-awaits the same request, rematerializing a rolled-back outcome cell; it never
+  submits.
 - Status gate: `gate()` returns the tag and a payload range only for `Complete`, `Partial`,
   `Failed`, `Cancelled` and `TimedOut`, and only when bytes were retained; `EndOfStream` and every
   other tag expose none whatever the graph holds, and `payloadOf()` answers
@@ -1160,10 +1176,12 @@ M7a implementation notes and deliberate deferrals:
 - The native-id audit is label and tag based, not a type walk, because cells carry text and tags and
   nothing else: it fails on an owner-only `Waiter` or `Capture` cell, on text naming a native
   identity (`continuation`, `waiter`, `cursor`, `token`, `requestid`, `incarnation`), and on text
-  equal to a raw id the test passes in (the harness passes the fake backend's private request
-  tokens, which start at `0xC0FFEE00` so they cannot collide with a counter). A `ContinuationId` or
-  `WaiterId` has no reachable form except the waiter graph, which the tag rule covers; a language
-  that invents its own text encoding of an id would be caught only by the label rule.
+  equal to, or a scalar value (integer or integral real) equal to, a raw id the test passes in,
+  under any label. The harness passes the fake backend's private request tokens (which start at
+  `0xC0FFEE00` so they cannot collide with a counter) and the parked token's `ContinuationId`,
+  waiter cell and request cell, and plants each of them as a text cell and as a scalar cell behind a
+  benign label to prove the audit can fail. A language that invents a transformed encoding of an id
+  (hex, a prefix) would be caught only by the label rule.
 - Layering is a source test, not a promise: `vortex_core.*` and `vortex_vm.*` include and name none
   of the frontend headers or types, the `stepAwait`..`stepImpl` text contains no language name, and
   the host/bridge files name no language runner. The VM's pre-existing `Vql*` opcodes are not I/O
@@ -1249,7 +1267,12 @@ M7-VQL implementation notes and deliberate deferrals:
   language whose runner is not the driver itself must forward the wakes its runner received; the M7a
   drivers are unchanged. `VqlScriptConformance` instantiates all five checks with a driver that runs
   the real parser and runner. The runner keeps the latest `$submission` sum until the next action or
-  its destruction, which is what the harness needs to prove a refusal cannot be awaited.
+  its destruction, which is what the harness needs to prove a refusal cannot be awaited. It also
+  retires the replaced action's request (through `FrontendBridge::retire`) so a session holds one
+  finished action's request, not every one; the rows an action returned stay readable until the next
+  action or the runner's destruction, which is why `vquery` keeps one runner for the session and
+  prints before the next script runs. A request still running when the runner dies is never
+  cancelled, and neither is one an activation of the same runner still awaits.
 
 Deferred, by design:
 
