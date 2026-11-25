@@ -305,16 +305,50 @@ auto CaptureAppendAdapter::stageAt(const std::uint32_t key,
   return key;
 }
 
+auto CaptureAppendAdapter::stageDurableAt(const std::uint32_t key,
+                                          CaptureDurableStep step)
+    -> std::expected<std::uint32_t, IoErrorInfo> {
+  const std::lock_guard lock(mutex_);
+  if (key == 0)
+    return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest, 3});
+  // The same refusals as stageAt, for the same reasons: a key is one worker
+  // turn's identity, whichever kind of turn it is.
+  if (staged_.contains(key) || durableStaged_.contains(key)) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::Conflict, 3});
+  }
+  if (running_.contains(key) || completeAfterTurn_.contains(key)) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::Conflict, 6});
+  }
+  if (staged_.size() + durableStaged_.size() >= maxStagedAppends) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded, 3});
+  }
+  reports_.erase(key);
+  durableStaged_[key] = std::move(step);
+  return key;
+}
+
+auto CaptureAppendAdapter::takeDurableReport(const std::uint32_t key)
+    -> std::optional<CaptureDurableReport> {
+  const std::lock_guard lock(mutex_);
+  const auto it = reports_.find(key);
+  if (it == reports_.end()) return std::nullopt;
+  auto report = std::move(it->second);
+  reports_.erase(it);
+  return report;
+}
+
 void CaptureAppendAdapter::abandon(const std::uint32_t key) noexcept {
   // Staged-spec cleanup only: the service invokes this at every terminal,
   // executed or not, so receipts_/executed_ must survive for commit().
   const std::lock_guard lock(mutex_);
   staged_.erase(key);
+  durableStaged_.erase(key);
 }
 
 void CaptureAppendAdapter::complete(const std::uint32_t key) noexcept {
   const std::lock_guard lock(mutex_);
   staged_.erase(key);
+  durableStaged_.erase(key);
   if (running_.contains(key)) {
     // A swept capture can be retired while its worker turn is still inside
     // the sink append. Erasing now would let the turn re-create the entries
@@ -325,6 +359,7 @@ void CaptureAppendAdapter::complete(const std::uint32_t key) noexcept {
   }
   receipts_.erase(key);
   executed_.erase(key);
+  reports_.erase(key);
 }
 
 void CaptureAppendAdapter::abandonStaged(
@@ -370,7 +405,7 @@ auto CaptureAppendAdapter::prepare(const CellRequest &request, OwnerContext &)
   const auto key = static_cast<std::uint32_t>(request.specification);
   {
     const std::lock_guard lock(mutex_);
-    if (!staged_.contains(key)) {
+    if (!staged_.contains(key) && !durableStaged_.contains(key)) {
       return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest, 4});
     }
   }
@@ -388,6 +423,7 @@ void CaptureAppendAdapter::execute(const BackendCommand &command,
   }
 
   std::optional<CaptureAppendSpec> spec;
+  std::optional<CaptureDurableStep> durableStep;
   {
     const std::lock_guard lock(mutex_);
     const auto it = staged_.find(key);
@@ -395,16 +431,17 @@ void CaptureAppendAdapter::execute(const BackendCommand &command,
       spec = std::move(it->second);
       staged_.erase(it);
       running_.insert(key);
+    } else if (const auto durable = durableStaged_.find(key);
+               durable != durableStaged_.end()) {
+      durableStep = std::move(durable->second);
+      durableStaged_.erase(durable);
+      running_.insert(key);
     }
   }
-  // Ends the turn: a complete() that arrived meanwhile takes effect now.
-  const auto endTurn = [&] {
-    const std::lock_guard lock(mutex_);
-    if (running_.erase(key) != 0 && completeAfterTurn_.erase(key) != 0) {
-      receipts_.erase(key);
-      executed_.erase(key);
-    }
-  };
+  if (durableStep) {
+    executeDurable(command, context, sink, key, std::move(*durableStep));
+    return;
+  }
 
   // Everything past the table lookup can throw (spec access, the sink
   // append, map inserts): execute is noexcept, so an escaped exception
@@ -461,7 +498,64 @@ void CaptureAppendAdapter::execute(const BackendCommand &command,
                                   IoProgress{.phase = IoPhase::Terminal}},
                            {}};
   }
-  endTurn();
+  endTurn(key);
+  sink.terminalCandidate(command.token, std::move(result), {});
+  sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
+}
+
+void CaptureAppendAdapter::endTurn(const std::uint32_t key) noexcept {
+  const std::lock_guard lock(mutex_);
+  if (running_.erase(key) != 0 && completeAfterTurn_.erase(key) != 0) {
+    receipts_.erase(key);
+    executed_.erase(key);
+    reports_.erase(key);
+  }
+}
+
+void CaptureAppendAdapter::executeDurable(const BackendCommand &command,
+                                          BackendContext &context,
+                                          CompletionSink &sink,
+                                          const std::uint32_t key,
+                                          CaptureDurableStep step) noexcept {
+  BackendResult result;
+  try {
+    if (context.stop.stop_requested()) {
+      // Cancelled before the step began: certain that nothing was made
+      // durable, so no report exists and the owner treats the step as never
+      // having run.
+      result = BackendResult{
+          Cancelled{{}, IoProgress{.phase = IoPhase::Terminal}, false}, {}};
+    } else {
+      CaptureDurableReport report;
+      try {
+        report = step();
+      } catch (...) {
+        report.thrown = std::current_exception();
+      }
+      const bool ok = !report.failure && !report.thrown;
+      const auto reason =
+          report.failure.value_or(IoErrorInfo{IoErrorCode::BackendFailure, 0});
+      {
+        const std::lock_guard lock(mutex_);
+        executed_.insert(key);
+        reports_[key] = std::move(report);
+      }
+      result =
+          ok ? BackendResult{Complete{{},
+                                      {},
+                                      IoProgress{.phase = IoPhase::Terminal}},
+                             {}}
+             : BackendResult{
+                   Failed{reason, {}, IoProgress{.phase = IoPhase::Terminal}},
+                   {}};
+    }
+  } catch (...) {
+    result = BackendResult{Failed{{IoErrorCode::BackendFailure, 0},
+                                  {},
+                                  IoProgress{.phase = IoPhase::Terminal}},
+                           {}};
+  }
+  endTurn(key);
   sink.terminalCandidate(command.token, std::move(result), {});
   sink.releaseAcknowledged({PrivateReleaseToken{command.token}});
 }
@@ -588,6 +682,9 @@ void CaptureCoordinator::retire(
   }
   if (pending.spec) {
     adapter_.complete(static_cast<std::uint32_t>(pending.spec->cell));
+  }
+  if (pending.durable) {
+    adapter_.complete(static_cast<std::uint32_t>(pending.durable->spec));
   }
   releaseLeases(pending);
   journal_.unhold(pending.heldJournalBytes);
@@ -1213,9 +1310,16 @@ auto CaptureCoordinator::decodeAppendRequest(const CapabilityCell capability,
     -> std::optional<CellRequest> {
   for (const auto &[key, pending] : pending_) {
     (void)key;
-    if (!pending.spec || pending.spec->cell != specification ||
-        pending.phase != PendingPhase::Prepared ||
-        !arena_.matches(specification, pending.spec->incarnation)) {
+    // A durable step's spec cell is decodable the same way, until it is
+    // admitted: one adapter, one request shape.
+    const bool durableAwaitingAdmission =
+        pending.durable && !pending.durable->request &&
+        pending.durable->spec == specification &&
+        arena_.matches(specification, pending.durable->incarnation);
+    if (!durableAwaitingAdmission &&
+        (!pending.spec || pending.spec->cell != specification ||
+         pending.phase != PendingPhase::Prepared ||
+         !arena_.matches(specification, pending.spec->incarnation))) {
       continue;
     }
     // The spec cell names a live capture append awaiting admission. The
@@ -1360,6 +1464,9 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
     return refuse({IoErrorCode::InvalidRequest, 0});
   }
   auto &pending = it->second;
+  // One durable step at a time: a second commit() while a step is in flight
+  // would stage a second step over the same journal records.
+  if (pending.durable) return refuse({IoErrorCode::Conflict, 7});
 
   // Follow the append request occurrence stored in THIS CaptureCell and
   // validate the request allocation's incarnation.
@@ -1416,60 +1523,149 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
     return refuse({IoErrorCode::BackendFailure, 4});
   }
 
-  // The Appended record -- span plus full translation intent -- is fsynced
-  // BEFORE Structure publication.
+  return advanceCommit(it, *receipt);
+}
+
+void CaptureCoordinator::consumeHold(PendingCapture &pending,
+                                     const CaptureJournalRecordKind kind,
+                                     const std::size_t intervals) {
+  const auto framed   = captureJournalFramedBytes(kind, intervals);
+  const auto consumed = std::min(pending.heldJournalBytes, framed);
+  pending.heldJournalBytes -= consumed;
+  journal_.unhold(consumed);
+}
+
+auto CaptureCoordinator::submitDurable(
+    const std::map<PendingKey, PendingCapture>::iterator it,
+    const CaptureJournalRecordKind record, CaptureDurableStep step)
+    -> CaptureCommitResult {
+  auto &pending     = it->second;
+  const auto refuse = [&](const IoErrorInfo error) {
+    GLEDITOR_LOG_DEBUG(kLog, "durable step refused: code {} detail {}",
+                       toString(error.code), error.stableDetail);
+    return CaptureCommitResult{Refused{service_.refuse(error)}};
+  };
+
+  // Per-request cells, exactly as appendRequest mints them: each durable step
+  // is a distinct request, and per-request cells cannot be stale-reused by an
+  // arena rollback.
+  const auto endpoint = makeEndpointCell(arena_, schema_);
+  if (!endpoint) return refuse(cellErrorToIoLocal(endpoint.error()));
+  const auto capability = makeCapabilityCell(arena_, schema_, *endpoint);
+  if (!capability) return refuse(cellErrorToIoLocal(capability.error()));
+  const auto specCell = arena_.makeCell("capture durable spec");
+  const auto specInc  = arena_.incarnationOf(specCell);
+  if (!specInc || !arena_.markRuntimeOnly(specCell)) {
+    return refuse({IoErrorCode::BackendFailure, 1});
+  }
+  const auto specKey = static_cast<std::uint32_t>(specCell);
+  if (const auto staged = adapter_.stageDurableAt(specKey, std::move(step));
+      !staged) {
+    return refuse(staged.error());
+  }
+  // Linked before submit: the request decoder runs inside service_.submit
+  // and must already see this spec cell as a durable step awaiting admission.
+  pending.durable = PendingCapture::DurableLink{.spec        = specCell,
+                                                .incarnation = *specInc,
+                                                .request     = {},
+                                                .record      = record};
+
+  auto admitted = service_.submit(*capability, specCell);
+  if (std::holds_alternative<Refused>(admitted.value)) {
+    adapter_.abandon(specKey);
+    adapter_.complete(specKey);
+    pending.durable.reset();
+    return CaptureCommitResult{std::get<Refused>(admitted.value)};
+  }
+  pending.durable->request = std::get<Admitted>(admitted.value).request;
+  return CaptureCommitResult{CommitPending{*pending.durable->request}};
+}
+
+auto CaptureCoordinator::advanceCommit(
+    const std::map<PendingKey, PendingCapture>::iterator it,
+    const xanadu::PrimediaSpan &receipt) -> CaptureCommitResult {
+  auto &pending     = it->second;
+  const auto refuse = [&](const IoErrorInfo error) {
+    GLEDITOR_LOG_DEBUG(kLog, "commit refused: code {} detail {}",
+                       toString(error.code), error.stableDetail);
+    return CaptureCommitResult{Refused{service_.refuse(error)}};
+  };
+
+  // Step 1, on a worker: the bytes must be durable BEFORE the record that
+  // promises them (a durable Appended naming bytes a crash then loses is a
+  // translation to nothing), and the record is fsynced BEFORE Structure
+  // publication.
   if (!pending.appendedSequence) {
-    // The bytes must be durable BEFORE the record that promises them: a
-    // durable Appended naming bytes a crash then loses is a translation to
-    // nothing.
-    if (!adapter_.syncSink()) {
-      GLEDITOR_LOG_WARN(kLog, "capture {}: permascroll sync failed",
-                        pending.captureId);
-      return refuse({IoErrorCode::PersistenceRefusal, 2});
-    }
     CaptureJournalRecord appended;
     appended.appendDigest = pending.appendDigest;
     appended.appendLength = pending.appendLength;
     appended.intervals    = journalIntervals(pending.pieces);
-    appended.span         = *receipt;
-    auto stamped =
-        appendJournal(pending, CaptureJournalRecordKind::Appended, appended);
-    if (!stamped) return refuse(stamped.error());
-    pending.appendedSequence = stamped->sequence;
+    appended.span         = receipt;
+    const auto captureId  = pending.captureId;
+    return submitDurable(
+        it, CaptureJournalRecordKind::Appended,
+        [this, captureId, appended = std::move(appended),
+         crash = crashPoints_]() -> CaptureDurableReport {
+          CaptureDurableReport report;
+          if (!adapter_.syncSink()) {
+            GLEDITOR_LOG_WARN(kLog, "capture {}: permascroll sync failed",
+                              captureId);
+            report.failure = IoErrorInfo{IoErrorCode::PersistenceRefusal, 2};
+            return report;
+          }
+          auto stamped = journal_.appendRecord(
+              CaptureJournalRecordKind::Appended, captureId, appended, crash);
+          if (!stamped) {
+            GLEDITOR_LOG_WARN(
+                kLog, "capture {} journal Appended record refused: code {}",
+                captureId, toString(stamped.error().code));
+            report.failure = stamped.error();
+            return report;
+          }
+          report.journalSequence = stamped->sequence;
+          return report;
+        });
   }
 
-  // Structure publication, between the durable Appended record and the
-  // Committed record: Appended proves the bytes, the Store save proves the
-  // references, and only then does Committed claim both. Idempotent by
-  // CaptureId, so a retry after a refusal here (or after a crash, via
-  // recovery) never publishes twice.
-  if (publisher_ && !pending.published) {
-    CaptureJournalRecord appended;
-    appended.captureId    = pending.captureId;
-    appended.appendLength = pending.appendLength;
-    appended.intervals    = journalIntervals(pending.pieces);
-    appended.span         = *receipt;
-    const auto pieces     = publishedPieces(appended);
-    const auto stored     = publisher_->publish(
-        CapturePublication{.journalId = journal_.journalId(),
-                               .captureId = pending.captureId,
-                               .pieces    = pieces});
-    if (!stored) return refuse(stored.error());
-    if (const auto saved = publisher_->save(); !saved) {
-      return refuse(saved.error());
+  // Owner step: publish into the Store (idempotent by CaptureId, so a retry
+  // after a refusal or a crash never publishes twice) and copy what the
+  // directory lacks, in O(new operations). Both are memory-only; nothing is
+  // durable until the next worker step, so Appended still precedes every
+  // durable effect of the publication.
+  std::optional<xanadu::StoreSnapshot> snapshot;
+  if (publisher_) {
+    if (!pending.publishedInStore) {
+      CaptureJournalRecord appended;
+      appended.captureId    = pending.captureId;
+      appended.appendLength = pending.appendLength;
+      appended.intervals    = journalIntervals(pending.pieces);
+      appended.span         = receipt;
+      const auto pieces     = publishedPieces(appended);
+      const auto stored     = publisher_->publish(
+          CapturePublication{.journalId = journal_.journalId(),
+                                 .captureId = pending.captureId,
+                                 .pieces    = pieces});
+      if (!stored) return refuse(stored.error());
+      pending.publishedInStore = true;
     }
-    pending.published = true;
+    // Taken again on every attempt, never reused: the directory's durable
+    // count moves only when a write completes, so a retry after a refused
+    // write copies from where the directory really is.
+    auto taken = publisher_->snapshot();
+    if (!taken) return refuse(taken.error());
+    snapshot = std::move(*taken);
   }
 
   // Publish the receipt cell and the capture->receipt link under one
-  // owner mark.
+  // owner mark. In memory only, so it may precede the durable step that
+  // makes the capture's Committed record true.
   if (!pending.receiptCell) {
     const auto rankDim      = schema_.dim(kFieldRank);
     const auto valueDim     = schema_.dim(kFieldValue);
     const auto outcomeD     = schema_.dim(kOutcomeDim);
     const auto cid          = pending.captureId;
     const auto seq          = *pending.appendedSequence;
-    const auto span         = *receipt;
+    const auto span         = receipt;
     const auto appendLength = pending.appendLength;
     const auto digest       = pending.appendDigest;
     const auto pieceCount   = pending.pieces.size();
@@ -1531,20 +1727,114 @@ auto CaptureCoordinator::commit(const CaptureCell capture,
     pending.receiptCell = *published;
   }
 
-  // The completion record follows publication.
-  if (!pending.committedRecorded) {
-    auto done = appendJournal(pending, CaptureJournalRecordKind::Committed, {});
-    if (!done) return refuse(done.error());
-    pending.committedRecorded = true;
+  // Step 2, on a worker: the Store snapshot is made durable, and only then
+  // does the Committed record claim both the bytes and the references. The
+  // completion record follows publication.
+  const auto captureId = pending.captureId;
+  return submitDurable(
+      it, CaptureJournalRecordKind::Committed,
+      [this, captureId, crash = crashPoints_,
+       snapshot = std::make_shared<std::optional<xanadu::StoreSnapshot>>(
+           std::move(snapshot))]() -> CaptureDurableReport {
+        CaptureDurableReport report;
+        if (publisher_ && snapshot->has_value()) {
+          if (const auto written = publisher_->write(**snapshot); !written) {
+            report.failure = written.error();
+            return report;
+          }
+        }
+        auto done = journal_.appendRecord(CaptureJournalRecordKind::Committed,
+                                          captureId, {}, crash);
+        if (!done) {
+          GLEDITOR_LOG_WARN(
+              kLog, "capture {} journal Committed record refused: code {}",
+              captureId, toString(done.error().code));
+          report.failure = done.error();
+          return report;
+        }
+        report.journalSequence = done->sequence;
+        return report;
+      });
+}
+
+auto CaptureCoordinator::continueCommit(const CaptureCell capture,
+                                        const OutcomeCell durableOutcome)
+    -> CaptureCommitResult {
+  sweepDead();
+  const auto refuse = [&](const IoErrorInfo error) {
+    GLEDITOR_LOG_DEBUG(kLog, "continueCommit refused: code {} detail {}",
+                       toString(error.code), error.stableDetail);
+    return CaptureCommitResult{Refused{service_.refuse(error)}};
+  };
+
+  const auto it = pendingFor(capture);
+  if (it == pending_.end() || !it->second.durable ||
+      !it->second.durable->request) {
+    return refuse({IoErrorCode::InvalidRequest, 8});
+  }
+  auto &pending       = it->second;
+  const auto &link    = *pending.durable;
+  const auto &request = *link.request;
+  if (!arena_.matches(request.cell, request.incarnation)) {
+    return refuse({IoErrorCode::InvalidRequest, 3});
+  }
+  // The outcome must be THIS step's published terminal outcome; anything
+  // else leaves the step in flight to be continued with the right one.
+  const auto poll = service_.poll(request);
+  if (!poll.outcome || *poll.outcome != durableOutcome) {
+    return refuse({IoErrorCode::InvalidRequest, 4});
+  }
+  const auto linkedOutcome =
+      arena_.linked(request.cell, schema_.dim(kOutcomeDim), DimVector::POS);
+  if (!linkedOutcome || *linkedOutcome != durableOutcome.cell) {
+    return refuse({IoErrorCode::InvalidRequest, 5});
   }
 
+  const auto specKey = static_cast<std::uint32_t>(link.spec);
+  const auto record  = link.record;
+  auto report        = adapter_.takeDurableReport(specKey);
+  adapter_.complete(specKey);
+  // The step's request is the coordinator's own and its outcome is read: the
+  // service need not keep it, and a commit is three requests, not one, so
+  // leaving them would spend a host's request budget three times as fast.
+  service_.retireRequest(request);
+  pending.durable.reset();
+
+  if (!report) {
+    // Cancelled before it began (or a worker that vanished): nothing was made
+    // durable by this step, so the commit is retriable as it stands.
+    return refuse({IoErrorCode::SchedulerUnavailable, 1});
+  }
+  if (report->thrown) std::rethrow_exception(report->thrown);
+  if (report->failure) return refuse(*report->failure);
+
+  const auto receipt =
+      adapter_.receiptFor(static_cast<std::uint32_t>(pending.spec->cell));
+  if (!receipt) return refuse({IoErrorCode::BackendFailure, 4});
+
+  if (CaptureJournalRecordKind::Appended == record) {
+    pending.appendedSequence = report->journalSequence;
+    consumeHold(pending, CaptureJournalRecordKind::Appended,
+                pending.pieces.size());
+    return advanceCommit(it, *receipt);
+  }
+  consumeHold(pending, CaptureJournalRecordKind::Committed, 0);
+  pending.committedRecorded = true;
+  pending.published         = true;
+  return finishCommit(it, *receipt);
+}
+
+auto CaptureCoordinator::finishCommit(
+    const std::map<PendingKey, PendingCapture>::iterator it,
+    const xanadu::PrimediaSpan &receipt) -> CaptureCommitResult {
+  auto &pending = it->second;
   // Commit the interval translations and retire the byte pins: durable
   // captured spans remain valid after the capture cell's retirement.
-  finalizeTranslations(pending, *receipt);
+  finalizeTranslations(pending, receipt);
   const auto receiptCell = *pending.receiptCell;
   GLEDITOR_LOG_DEBUG(kLog, "capture {} committed at scroll {} start {} len {}",
-                     pending.captureId, receipt->scroll, receipt->start,
-                     receipt->length);
+                     pending.captureId, receipt.scroll, receipt.start,
+                     receipt.length);
   // Terminal: the append's outcome is journaled, its receipt and executed
   // mark are spent evidence, and the committed capture must not hold one of
   // the maxPendingCaptures slots until its cell happens to die. Translations

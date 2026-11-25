@@ -105,9 +105,28 @@ public:
   /// nothing is minted. Never double-publishes.
   [[nodiscard]] auto publish(const CapturePublication &publication)
       -> std::expected<PublishedCapture, IoErrorInfo>;
-  /// Write the Store to its directory (Store::save, which also flushes the
-  /// permascroll the captured spans live in).
-  [[nodiscard]] auto save() const -> std::expected<void, IoErrorInfo>;
+  /// Owner thread, O(what the directory lacks): copy the Store's unsaved
+  /// operations and tables into a snapshot (Store::saveSnapshot) that a worker
+  /// can write while the owner keeps mutating the Store.
+  [[nodiscard]] auto snapshot()
+      -> std::expected<xanadu::StoreSnapshot, IoErrorInfo>;
+  /// Any thread: make @p snapshot durable (SnapshotWriter, fsynced, which also
+  /// flushes the permascroll the captured spans live in). Reads nothing the
+  /// owner can change. Refuses with PersistenceRefusal when the files cannot
+  /// be written or the directory is no longer the one the snapshot extends;
+  /// the next snapshot() then copies the whole Store.
+  [[nodiscard]] auto write(const xanadu::StoreSnapshot &snapshot) const
+      -> std::expected<void, IoErrorInfo>;
+  /// Snapshot and write on the calling thread: the recovery and reconcile
+  /// paths, which run while the owner has nothing else to do, and the one
+  /// place the retry after a mismatch lives.
+  [[nodiscard]] auto save() -> std::expected<void, IoErrorInfo>;
+  /// Test seam: @p writer stands in for SnapshotWriter::write, so a test can
+  /// see which thread writes, delay a write, or die between steps. It
+  /// follows SnapshotWriter::write's contract (false: the directory did not
+  /// hold what the snapshot extends; a throw: the files could not be written).
+  auto setSnapshotWriter(std::function<bool(const xanadu::StoreSnapshot &)>)
+      -> CapturePublisher *;
 
   /// The sealed publication for @p key, when the Store holds one. A receipt
   /// the reader cannot parse (short provenance chain, a non-scalar, an
@@ -127,6 +146,7 @@ public:
 private:
   xanadu::Store &store_;
   std::filesystem::path directory_;
+  std::function<bool(const xanadu::StoreSnapshot &)> writer_;
 };
 
 } // namespace xanadu::vortex

@@ -188,10 +188,33 @@ public:
     if (entries_.empty()) return;
     Entry entry = std::move(entries_.front());
     entries_.pop_front();
-    BackendContext context{.stop     = {},
-                           .payloads = payloads_,
-                           .budget   = {.maxBytes = backendMaxBytes_}};
-    entry.adapter->execute(entry.command, context, *entry.sink);
+    run(entry);
+  }
+  /// The queued command at @p index on a thread of its own, joined before
+  /// returning: the worker the owner must not be doing blocking I/O on
+  /// behalf of. Returns that thread's id.
+  auto runOnWorker(const std::size_t index = 0) -> std::thread::id {
+    EXPECT_LT(index, entries_.size());
+    if (index >= entries_.size()) return {};
+    Entry entry = std::move(entries_[index]);
+    entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(index));
+    std::thread::id worker;
+    std::thread([&] {
+      worker = std::this_thread::get_id();
+      run(entry);
+    }).join();
+    return worker;
+  }
+  /// Every queued command at once, each on its own thread.
+  void runAllConcurrently() {
+    std::vector<Entry> batch(std::make_move_iterator(entries_.begin()),
+                             std::make_move_iterator(entries_.end()));
+    entries_.clear();
+    std::vector<std::thread> threads;
+    for (auto &entry : batch) {
+      threads.emplace_back([&entry, this] { run(entry); });
+    }
+    for (auto &thread : threads) thread.join();
   }
   [[nodiscard]] auto queued() const -> std::size_t { return entries_.size(); }
 
@@ -202,6 +225,12 @@ private:
     IoAdapter *adapter;
     CompletionSink *sink;
   };
+  void run(Entry &entry) {
+    BackendContext context{.stop     = {},
+                           .payloads = payloads_,
+                           .budget   = {.maxBytes = backendMaxBytes_}};
+    entry.adapter->execute(entry.command, context, *entry.sink);
+  }
   PayloadResolver &payloads_;
   std::size_t backendMaxBytes_;
   std::uint64_t nextToken_{1};
@@ -306,6 +335,24 @@ std::optional<OutcomeCell> driveAppendToOutcome(World &world,
   return *poll.outcome;
 }
 
+/// commit(), then every durable step it submits, run one worker turn at a
+/// time and continued on the owner: what commit() returned before the
+/// blocking work left the owner. A step that threw (a crash point) rethrows
+/// out of continueCommit, as the same hook did out of the synchronous commit.
+CaptureCommitResult commitToEnd(World &world, const CaptureCell capture,
+                                const OutcomeCell outcome) {
+  auto result = world.coordinator->commit(capture, outcome);
+  while (const auto *const pending = std::get_if<CommitPending>(&result)) {
+    world.scheduler->runNext();
+    static_cast<void>(world.service->pump(8));
+    const auto poll = world.service->poll(pending->request);
+    EXPECT_TRUE(poll.outcome.has_value());
+    result = world.coordinator->continueCommit(
+        capture, poll.outcome.value_or(OutcomeCell{}));
+  }
+  return result;
+}
+
 /// The full happy-path transaction; returns the receipt cell.
 std::optional<CaptureReceiptCell>
 captureCommit(World &world, const std::span<const PayloadRange> selection) {
@@ -316,7 +363,7 @@ captureCommit(World &world, const std::span<const PayloadRange> selection) {
   const auto capture = std::get<Prepared>(prepared).capture;
   const auto outcome = driveAppendToOutcome(world, capture);
   if (!outcome) return std::nullopt;
-  auto committed = world.coordinator->commit(capture, *outcome);
+  auto committed = commitToEnd(world, capture, *outcome);
   if (!std::holds_alternative<Committed>(committed)) {
     return std::nullopt;
   }
@@ -481,7 +528,7 @@ TEST_F(IoCaptureTest, AwaitingTheAppendRequestDoesNotEvictTheCaptureLink) {
   const auto poll = world->service->poll(request);
   ASSERT_TRUE(poll.outcome.has_value());
   EXPECT_TRUE(std::holds_alternative<Committed>(
-      world->coordinator->commit(capture, *poll.outcome)));
+      commitToEnd(*world, capture, *poll.outcome)));
 }
 
 TEST_F(IoCaptureTest, OverlappingLaterSelectionReusesCommittedSpan) {
@@ -533,7 +580,7 @@ TEST_F(IoCaptureTest, OverlappingLaterSelectionReusesCommittedSpan) {
   const auto request = std::get<Admitted>(appended.admission.value).request;
   const auto outcome = world->service->poll(request).outcome;
   ASSERT_TRUE(outcome.has_value());
-  auto committed = world->coordinator->commit(capture, *outcome);
+  auto committed = commitToEnd(*world, capture, *outcome);
   EXPECT_TRUE(std::holds_alternative<Committed>(committed));
   // No new bytes: the whole selection was already translated.
   EXPECT_EQ(sink.bytes_.size(), 15U);
@@ -618,21 +665,21 @@ TEST_F(IoCaptureTest, CommitRejectsAnotherCapturesOutcomeAndNothingPublishes) {
   ASSERT_TRUE(outcomeA && outcomeB);
 
   // B's outcome is not A's append outcome: typed refusal, nothing minted.
-  auto wrong = world->coordinator->commit(captureA, *outcomeB);
+  auto wrong = commitToEnd(*world, captureA, *outcomeB);
   EXPECT_TRUE(std::holds_alternative<Refused>(wrong));
 
   // A commit with no published outcome yet is equally refused: retire A's
   // request is not needed -- poll simply has no outcome for a fresh request.
   // (Covered by the mismatch above; the second-commit check is next.)
-  auto right = world->coordinator->commit(captureA, *outcomeA);
+  auto right = commitToEnd(*world, captureA, *outcomeA);
   EXPECT_TRUE(std::holds_alternative<Committed>(right));
 
   // A second commit on the same capture is refused: the phase moved on.
-  auto again = world->coordinator->commit(captureA, *outcomeA);
+  auto again = commitToEnd(*world, captureA, *outcomeA);
   EXPECT_TRUE(std::holds_alternative<Refused>(again));
 
   // B still commits cleanly with its own outcome.
-  auto committedB = world->coordinator->commit(captureB, *outcomeB);
+  auto committedB = commitToEnd(*world, captureB, *outcomeB);
   EXPECT_TRUE(std::holds_alternative<Committed>(committedB));
 }
 
@@ -659,14 +706,14 @@ TEST_F(IoCaptureTest, CommitBeforeOutcomeIsPublishedRefuses) {
   const auto request = std::get<Admitted>(appended.admission.value).request;
   const auto refusal =
       world->service->refuse(IoErrorInfo{IoErrorCode::InvalidRequest, 0});
-  auto committed = world->coordinator->commit(capture, refusal);
+  auto committed = commitToEnd(*world, capture, refusal);
   EXPECT_TRUE(std::holds_alternative<Refused>(committed));
   // Nothing was published: the capture can still complete once the real
   // outcome lands.
   static_cast<void>(world->service->pump(8));
   const auto outcome = world->service->poll(request).outcome;
   ASSERT_TRUE(outcome.has_value());
-  auto done = world->coordinator->commit(capture, *outcome);
+  auto done = commitToEnd(*world, capture, *outcome);
   EXPECT_TRUE(std::holds_alternative<Committed>(done));
 }
 
@@ -906,7 +953,7 @@ TEST_F(IoCaptureTest, CertainAbortReconcilesWithoutPinsOrOrphans) {
     ASSERT_TRUE(outcome.has_value());
     // commit() sees a non-Complete terminal outcome and records a certain
     // abort (wasExecuted is false: execute never ran).
-    auto committed = world->coordinator->commit(capture, *outcome);
+    auto committed = commitToEnd(*world, capture, *outcome);
     EXPECT_TRUE(std::holds_alternative<Refused>(committed));
   }
 
@@ -953,7 +1000,7 @@ TEST_F(IoCaptureTest, UncertainAbortPinsIntervalsAndReportsPossibleOrphans) {
     const auto outcome = world->service->poll(request).outcome;
     ASSERT_TRUE(outcome.has_value());
     EXPECT_EQ(ioOutcomeTag(world->arena, *outcome), IoOutcomeTag::Failed);
-    auto committed = world->coordinator->commit(capture, *outcome);
+    auto committed = commitToEnd(*world, capture, *outcome);
     EXPECT_TRUE(std::holds_alternative<Refused>(committed));
     ASSERT_EQ(sink.bytes_.size(), 10U);
   }
@@ -1134,8 +1181,8 @@ TEST_F(IoCaptureTest, CommitSyncsPermascrollBeforeAppendedRecordIsWritten) {
   // The sink cannot make the bytes durable: commit refuses and no Appended
   // record exists to promise them.
   sink.failSync = true;
-  EXPECT_TRUE(std::holds_alternative<Refused>(
-      world->coordinator->commit(capture, *outcome)));
+  EXPECT_TRUE(
+      std::holds_alternative<Refused>(commitToEnd(*world, capture, *outcome)));
   {
     CaptureJournal journal(journalPath_, std::nullopt);
     const auto view = journal.recover();
@@ -1274,7 +1321,7 @@ TEST_F(IoCaptureTest,
   const auto outcome = driveAppendToOutcome(*world, capture);
   ASSERT_TRUE(outcome.has_value());
   EXPECT_TRUE(std::holds_alternative<Committed>(
-      world->coordinator->commit(capture, *outcome)));
+      commitToEnd(*world, capture, *outcome)));
   EXPECT_EQ(world->coordinator->journal().heldBytes(), 0U);
 }
 
@@ -1510,8 +1557,8 @@ TEST_F(IoCaptureTest, CertainAbortReleasesSlotsAndLeasesSoTheRangeCanRetry) {
   static_cast<void>(world->service->pump(8));
   const auto outcome = world->service->poll(request).outcome;
   ASSERT_TRUE(outcome.has_value());
-  EXPECT_TRUE(std::holds_alternative<Refused>(
-      world->coordinator->commit(capture, *outcome)));
+  EXPECT_TRUE(
+      std::holds_alternative<Refused>(commitToEnd(*world, capture, *outcome)));
 
   // Certain abort: the leases are back, the reservation is gone, and the
   // same range captures now without waiting for the dead cell to be swept.
@@ -1551,8 +1598,8 @@ TEST_F(IoCaptureTest, UncertainAbortKeepsPinsInProcessButReleasesLeases) {
       world->service->poll(std::get<Admitted>(appended.admission.value).request)
           .outcome;
   ASSERT_TRUE(outcome.has_value());
-  EXPECT_TRUE(std::holds_alternative<Refused>(
-      world->coordinator->commit(capture, *outcome)));
+  EXPECT_TRUE(
+      std::holds_alternative<Refused>(commitToEnd(*world, capture, *outcome)));
 
   EXPECT_EQ(world->payloads.liveLeases(), leasesBefore);
   // Bytes may exist: the interval stays pinned in this process too.
@@ -1603,9 +1650,8 @@ TEST_F(IoCaptureTest, CoordinatorJournalCrashPointsBracketTheAppendedFsync) {
     const auto capture = std::get<Prepared>(prepared).capture;
     const auto outcome = driveAppendToOutcome(*world, capture);
     ASSERT_TRUE(outcome.has_value());
-    EXPECT_THROW(
-        static_cast<void>(world->coordinator->commit(capture, *outcome)),
-        std::runtime_error);
+    EXPECT_THROW(static_cast<void>(commitToEnd(*world, capture, *outcome)),
+                 std::runtime_error);
   };
 
   // Death BEFORE the Appended fsync: the record is rolled back, the bytes
@@ -2283,9 +2329,8 @@ TEST_F(IoCaptureTest,
     const auto capture = std::get<Prepared>(prepared).capture;
     const auto outcome = driveAppendToOutcome(*world, capture);
     ASSERT_TRUE(outcome.has_value());
-    EXPECT_THROW(
-        static_cast<void>(world->coordinator->commit(capture, *outcome)),
-        std::runtime_error);
+    EXPECT_THROW(static_cast<void>(commitToEnd(*world, capture, *outcome)),
+                 std::runtime_error);
   }
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 0U);
@@ -2328,9 +2373,8 @@ TEST_F(IoCaptureTest, CrashBetweenAppendedAndPublicationPublishesExactlyOnce) {
     const auto capture = std::get<Prepared>(prepared).capture;
     const auto outcome = driveAppendToOutcome(*world, capture);
     ASSERT_TRUE(outcome.has_value());
-    EXPECT_THROW(
-        static_cast<void>(world->coordinator->commit(capture, *outcome)),
-        std::runtime_error);
+    EXPECT_THROW(static_cast<void>(commitToEnd(*world, capture, *outcome)),
+                 std::runtime_error);
     EXPECT_FALSE(publishedById(*durable->publisher, 1).has_value());
   }
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
@@ -2380,18 +2424,353 @@ TEST_F(IoCaptureTest, CommitRetryAfterRefusedStoreSaveNeverPublishesTwice) {
 
   // Publication reaches the in-memory Store but the save is refused: the
   // commit refuses and no Committed record exists.
-  auto refused = world->coordinator->commit(capture, *outcome);
+  auto refused = commitToEnd(*world, capture, *outcome);
   EXPECT_TRUE(std::holds_alternative<Refused>(refused));
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 0U);
   EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 1U);
 
   std::filesystem::remove(blocker);
-  auto committed = world->coordinator->commit(capture, *outcome);
+  auto committed = commitToEnd(*world, capture, *outcome);
   ASSERT_TRUE(std::holds_alternative<Committed>(committed));
   EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 1U);
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
   EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
   EXPECT_TRUE(std::filesystem::exists(blocker / "store" / "ops.nodes"));
+}
+
+// -- the commit's durable work is off the owner (P3) --------------------------
+
+/// A sink that notes the thread each sync() ran on, over a real one.
+class ThreadNotingSink final : public CaptureByteSink {
+public:
+  explicit ThreadNotingSink(CaptureByteSink &inner) : inner_(inner) {}
+  auto append(const std::span<const std::byte> bytes)
+      -> xanadu::PrimediaSpan override {
+    return inner_.append(bytes);
+  }
+  auto sync() -> bool override {
+    syncThreads.push_back(std::this_thread::get_id());
+    return inner_.sync();
+  }
+  auto highWaterBytes() const -> std::uint64_t override {
+    return inner_.highWaterBytes();
+  }
+  auto read(const xanadu::PrimediaSpan &span) const
+      -> std::optional<std::vector<std::byte>> override {
+    return inner_.read(span);
+  }
+  std::vector<std::thread::id> syncThreads;
+
+private:
+  CaptureByteSink &inner_;
+};
+
+/// Journal hooks that note the thread each record's fsync ran on.
+CaptureJournalCrashPoints
+noteJournalThreads(std::shared_ptr<std::vector<std::thread::id>> threads) {
+  CaptureJournalCrashPoints points;
+  points.beforeFlush = [threads] {
+    threads->push_back(std::this_thread::get_id());
+  };
+  return points;
+}
+
+/// One CommitPending request's terminal outcome, once its worker turn ran.
+OutcomeCell outcomeOf(World &world, const CommitPending &pending) {
+  static_cast<void>(world.service->pump(8));
+  const auto poll = world.service->poll(pending.request);
+  EXPECT_TRUE(poll.outcome.has_value());
+  return poll.outcome.value_or(OutcomeCell{});
+}
+
+struct PreparedAppend {
+  CaptureCell capture;
+  OutcomeCell outcome;
+};
+
+std::optional<PreparedAppend> prepareAndAppend(World &world,
+                                               const PayloadRange range) {
+  const PayloadRange selection[]{range};
+  auto prepared = world.coordinator->prepare(selection);
+  if (!std::holds_alternative<Prepared>(prepared)) return std::nullopt;
+  const auto capture = std::get<Prepared>(prepared).capture;
+  const auto outcome = driveAppendToOutcome(world, capture);
+  if (!outcome) return std::nullopt;
+  return PreparedAppend{capture, *outcome};
+}
+
+TEST_F(IoCaptureTest, CommitDoesNoBlockingIoOnTheOwnerThread) {
+  const auto owner       = std::this_thread::get_id();
+  const auto sourceBytes = bytesOf("blocking work belongs to workers");
+  auto durable           = openDurable(dir_);
+  ThreadNotingSink sink(*durable->sink);
+  auto writeThreads = std::make_shared<std::vector<std::thread::id>>();
+  durable->publisher->setSnapshotWriter(
+      [writeThreads](const xanadu::StoreSnapshot &snapshot) {
+        writeThreads->push_back(std::this_thread::get_id());
+        return xanadu::SnapshotWriter::write(snapshot);
+      });
+  auto world      = boot(sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                         durable->publisher.get());
+  auto registered = registerPinned(*world, durableRef(80), sourceBytes);
+  ASSERT_TRUE(registered.has_value());
+  auto journalThreads = std::make_shared<std::vector<std::thread::id>>();
+  world->coordinator->setJournalCrashPoints(noteJournalThreads(journalThreads));
+  const auto prepared = prepareAndAppend(*world, rangeOf(*registered, 0, 8));
+  ASSERT_TRUE(prepared.has_value());
+  // The Append intent is the one record the owner still writes (see
+  // appendRequest); everything after it must not be the owner's.
+  ASSERT_EQ(journalThreads->size(), 1U);
+  EXPECT_EQ(journalThreads->front(), owner);
+
+  // Step 1: submitted, nothing durable yet. The owner returned without a
+  // sync or an Appended record, so it never waited for either.
+  auto first = world->coordinator->commit(prepared->capture, prepared->outcome);
+  const auto *pendingFirst = std::get_if<CommitPending>(&first);
+  ASSERT_NE(pendingFirst, nullptr);
+  EXPECT_TRUE(sink.syncThreads.empty());
+  EXPECT_EQ(journalThreads->size(), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 0U);
+
+  const auto workerOne = world->scheduler->runOnWorker();
+  EXPECT_NE(workerOne, owner);
+  auto second = world->coordinator->continueCommit(
+      prepared->capture, outcomeOf(*world, *pendingFirst));
+  const auto *pendingSecond = std::get_if<CommitPending>(&second);
+  ASSERT_NE(pendingSecond, nullptr);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
+
+  // Step 2: the owner published into the Store and took the snapshot, in
+  // memory; the directory has no file and no Committed record until the
+  // worker has run.
+  EXPECT_TRUE(publishedById(*durable->publisher, 1).has_value());
+  EXPECT_FALSE(std::filesystem::exists(durable->storeDir() / "ops.nodes"));
+  EXPECT_TRUE(writeThreads->empty());
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 0U);
+
+  const auto workerTwo = world->scheduler->runOnWorker();
+  EXPECT_NE(workerTwo, owner);
+  const auto done = world->coordinator->continueCommit(
+      prepared->capture, outcomeOf(*world, *pendingSecond));
+  EXPECT_TRUE(std::holds_alternative<Committed>(done));
+  EXPECT_TRUE(std::filesystem::exists(durable->storeDir() / "ops.nodes"));
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
+
+  // Every blocking step ran on a worker and none on the owner.
+  ASSERT_EQ(sink.syncThreads.size(), 1U);
+  EXPECT_EQ(sink.syncThreads.front(), workerOne);
+  ASSERT_EQ(writeThreads->size(), 1U);
+  EXPECT_EQ(writeThreads->front(), workerTwo);
+  ASSERT_EQ(journalThreads->size(), 3U);
+  EXPECT_EQ((*journalThreads)[1], workerOne);
+  EXPECT_EQ((*journalThreads)[2], workerTwo);
+}
+
+TEST_F(IoCaptureTest, AStoreEditedWhileItsSnapshotIsInFlightIsNotTornIntoIt) {
+  const auto sourceBytes = bytesOf("snapshot then edit");
+  auto durable           = openDurable(dir_);
+  auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                    durable->publisher.get());
+  auto registered = registerPinned(*world, durableRef(81), sourceBytes);
+  ASSERT_TRUE(registered.has_value());
+  const auto prepared = prepareAndAppend(*world, rangeOf(*registered, 0, 8));
+  ASSERT_TRUE(prepared.has_value());
+
+  auto first = world->coordinator->commit(prepared->capture, prepared->outcome);
+  ASSERT_TRUE(std::holds_alternative<CommitPending>(first));
+  world->scheduler->runOnWorker();
+  auto second = world->coordinator->continueCommit(
+      prepared->capture, outcomeOf(*world, std::get<CommitPending>(first)));
+  ASSERT_TRUE(std::holds_alternative<CommitPending>(second));
+
+  // The snapshot is taken. The owner goes on editing the very Store while
+  // the worker writes it.
+  const auto opsAtSnapshot = durable->store->opCount();
+  durable->store->insert(durable->store->latest(), 0, "edited after");
+  EXPECT_GT(durable->store->opCount(), opsAtSnapshot);
+  world->scheduler->runOnWorker();
+  const auto done = world->coordinator->continueCommit(
+      prepared->capture, outcomeOf(*world, std::get<CommitPending>(second)));
+  ASSERT_TRUE(std::holds_alternative<Committed>(done));
+
+  xanadu::Store reloaded(durable->perma);
+  reloaded.load(durable->storeDir().string());
+  EXPECT_EQ(reloaded.opCount(), opsAtSnapshot);
+  // The edit is not lost, only not yet saved: the next save adds it.
+  durable->store->save(durable->storeDir().string());
+  xanadu::Store later(durable->perma);
+  later.load(durable->storeDir().string());
+  EXPECT_EQ(later.opCount(), durable->store->opCount());
+}
+
+TEST_F(IoCaptureTest, TwoCommitsInFlightTogetherLeaveBothDurable) {
+  const auto sourceBytes = bytesOf("first capture second capture");
+  {
+    auto durable = openDurable(dir_);
+    auto world   = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
+                        {}, durable->publisher.get());
+    auto registered = registerPinned(*world, durableRef(82), sourceBytes);
+    ASSERT_TRUE(registered.has_value());
+    const auto one = prepareAndAppend(*world, rangeOf(*registered, 0, 13));
+    const auto two = prepareAndAppend(*world, rangeOf(*registered, 14, 14));
+    ASSERT_TRUE(one.has_value());
+    ASSERT_TRUE(two.has_value());
+
+    auto a1 = world->coordinator->commit(one->capture, one->outcome);
+    auto b1 = world->coordinator->commit(two->capture, two->outcome);
+    ASSERT_TRUE(std::holds_alternative<CommitPending>(a1));
+    ASSERT_TRUE(std::holds_alternative<CommitPending>(b1));
+    world->scheduler->runAllConcurrently();
+    auto a2 = world->coordinator->continueCommit(
+        one->capture, outcomeOf(*world, std::get<CommitPending>(a1)));
+    auto b2 = world->coordinator->continueCommit(
+        two->capture, outcomeOf(*world, std::get<CommitPending>(b1)));
+    ASSERT_TRUE(std::holds_alternative<CommitPending>(a2));
+    ASSERT_TRUE(std::holds_alternative<CommitPending>(b2));
+
+    // Both snapshots were taken before either was written, so the second
+    // carries the first's operations too; they are written at the same
+    // time, in whichever order the threads win.
+    world->scheduler->runAllConcurrently();
+    EXPECT_TRUE(
+        std::holds_alternative<Committed>(world->coordinator->continueCommit(
+            two->capture, outcomeOf(*world, std::get<CommitPending>(b2)))));
+    EXPECT_TRUE(
+        std::holds_alternative<Committed>(world->coordinator->continueCommit(
+            one->capture, outcomeOf(*world, std::get<CommitPending>(a2)))));
+  }
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 2U);
+  auto durable = openDurable(dir_);
+  EXPECT_EQ(publishedIdsOf(*durable->publisher), (std::set<CaptureId>{1, 2}));
+  EXPECT_EQ(
+      permascrollText(*durable,
+                      publishedById(*durable->publisher, 1)->pieces[0].span),
+      "first capture");
+}
+
+TEST_F(IoCaptureTest, TheSecondSnapshotWrittenFirstStillLeavesBothDurable) {
+  const auto sourceBytes = bytesOf("alpha capture beta capture");
+  {
+    auto durable = openDurable(dir_);
+    auto world   = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
+                        {}, durable->publisher.get());
+    auto registered = registerPinned(*world, durableRef(83), sourceBytes);
+    const auto one  = prepareAndAppend(*world, rangeOf(*registered, 0, 13));
+    const auto two  = prepareAndAppend(*world, rangeOf(*registered, 14, 12));
+    ASSERT_TRUE(one.has_value());
+    ASSERT_TRUE(two.has_value());
+    auto a1 = world->coordinator->commit(one->capture, one->outcome);
+    auto b1 = world->coordinator->commit(two->capture, two->outcome);
+    world->scheduler->runAllConcurrently();
+    auto a2 = world->coordinator->continueCommit(
+        one->capture, outcomeOf(*world, std::get<CommitPending>(a1)));
+    auto b2 = world->coordinator->continueCommit(
+        two->capture, outcomeOf(*world, std::get<CommitPending>(b1)));
+    ASSERT_TRUE(std::holds_alternative<CommitPending>(a2));
+    ASSERT_TRUE(std::holds_alternative<CommitPending>(b2));
+    // The later snapshot is written first, then the earlier one arrives with
+    // nothing left to add and must not move the directory back.
+    world->scheduler->runOnWorker(1);
+    world->scheduler->runOnWorker(0);
+    EXPECT_TRUE(
+        std::holds_alternative<Committed>(world->coordinator->continueCommit(
+            one->capture, outcomeOf(*world, std::get<CommitPending>(a2)))));
+    EXPECT_TRUE(
+        std::holds_alternative<Committed>(world->coordinator->continueCommit(
+            two->capture, outcomeOf(*world, std::get<CommitPending>(b2)))));
+  }
+  auto durable = openDurable(dir_);
+  EXPECT_EQ(publishedIdsOf(*durable->publisher), (std::set<CaptureId>{1, 2}));
+}
+
+struct CrashInjected {};
+
+TEST_F(IoCaptureTest,
+       CrashDuringTheSnapshotWriteRecoversByPublishingAndSaving) {
+  const auto sourceBytes = bytesOf("snapshot never lands");
+  {
+    auto durable = openDurable(dir_);
+    durable->publisher->setSnapshotWriter(
+        [](const xanadu::StoreSnapshot &) -> bool { throw CrashInjected{}; });
+    auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
+                      {}, durable->publisher.get());
+    auto registered     = registerPinned(*world, durableRef(84), sourceBytes);
+    const auto prepared = prepareAndAppend(*world, rangeOf(*registered, 0, 8));
+    ASSERT_TRUE(prepared.has_value());
+    EXPECT_THROW(static_cast<void>(
+                     commitToEnd(*world, prepared->capture, prepared->outcome)),
+                 CrashInjected);
+    EXPECT_FALSE(std::filesystem::exists(durable->storeDir() / "ops.nodes"));
+  }
+  // Appended is durable, no receipt is: recovery publishes once, saves, and
+  // writes the Committed record.
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 0U);
+  {
+    auto durable = openDurable(dir_);
+    EXPECT_FALSE(publishedById(*durable->publisher, 1).has_value());
+    auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true,
+                      {}, durable->publisher.get());
+    ASSERT_TRUE(world);
+    EXPECT_TRUE(publishedById(*durable->publisher, 1).has_value());
+    EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
+  }
+  auto durable = openDurable(dir_);
+  EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 1U);
+}
+
+TEST_F(IoCaptureTest, ARefusedSnapshotWriteLeavesTheCommitRetriable) {
+  const auto sourceBytes = bytesOf("write refused once");
+  auto durable           = openDurable(dir_);
+  auto refusals          = std::make_shared<int>(1);
+  durable->publisher->setSnapshotWriter(
+      [refusals](const xanadu::StoreSnapshot &snapshot) {
+        if (*refusals > 0) {
+          --*refusals;
+          throw std::runtime_error("disk full");
+        }
+        return xanadu::SnapshotWriter::write(snapshot);
+      });
+  auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                    durable->publisher.get());
+  auto registered     = registerPinned(*world, durableRef(85), sourceBytes);
+  const auto prepared = prepareAndAppend(*world, rangeOf(*registered, 0, 5));
+  ASSERT_TRUE(prepared.has_value());
+
+  auto refused = commitToEnd(*world, prepared->capture, prepared->outcome);
+  EXPECT_TRUE(std::holds_alternative<Refused>(refused));
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 0U);
+
+  // The retry skips the Appended step (it is durable), publishes nothing
+  // twice and takes a fresh snapshot from where the directory really is.
+  auto committed = commitToEnd(*world, prepared->capture, prepared->outcome);
+  ASSERT_TRUE(std::holds_alternative<Committed>(committed));
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U);
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Committed), 1U);
+  EXPECT_EQ(publishedIdsOf(*durable->publisher).size(), 1U);
+}
+
+TEST_F(IoCaptureTest, ACommitWhileAStepIsInFlightIsRefusedNotDoubled) {
+  const auto sourceBytes = bytesOf("one step at a time");
+  auto durable           = openDurable(dir_);
+  auto world = boot(*durable->sink, journalPath_, 4u << 20, 1u << 20, true, {},
+                    durable->publisher.get());
+  auto registered     = registerPinned(*world, durableRef(86), sourceBytes);
+  const auto prepared = prepareAndAppend(*world, rangeOf(*registered, 0, 5));
+  ASSERT_TRUE(prepared.has_value());
+  auto first = world->coordinator->commit(prepared->capture, prepared->outcome);
+  ASSERT_TRUE(std::holds_alternative<CommitPending>(first));
+  EXPECT_TRUE(std::holds_alternative<Refused>(
+      world->coordinator->commit(prepared->capture, prepared->outcome)));
+  // A continuation with the wrong outcome leaves the step in flight.
+  EXPECT_TRUE(
+      std::holds_alternative<Refused>(world->coordinator->continueCommit(
+          prepared->capture, prepared->outcome)));
+  world->scheduler->runNext();
+  auto second = world->coordinator->continueCommit(
+      prepared->capture, outcomeOf(*world, std::get<CommitPending>(first)));
+  EXPECT_TRUE(std::holds_alternative<CommitPending>(second));
 }
 
 // -- real sinks ---------------------------------------------------------------
@@ -2498,7 +2877,7 @@ AbortedCapture uncertainAbort(RecordingSink &sink,
   const auto outcome = out.world->service->poll(request).outcome;
   EXPECT_TRUE(outcome.has_value());
   EXPECT_TRUE(std::holds_alternative<Refused>(
-      out.world->coordinator->commit(capture, *outcome)));
+      commitToEnd(*out.world, capture, *outcome)));
   return out;
 }
 
@@ -2752,7 +3131,7 @@ TEST_F(IoCaptureTest,
     const auto outcome = world->service->poll(request).outcome;
     ASSERT_TRUE(outcome.has_value());
     EXPECT_TRUE(std::holds_alternative<Refused>(
-        world->coordinator->commit(capture, *outcome)));
+        commitToEnd(*world, capture, *outcome)));
     EXPECT_FALSE(publishedById(*durable->publisher, 1).has_value());
     // The bytes sit at the old high-water mark: the owner names that span.
     landed = localSpan(0, 7);

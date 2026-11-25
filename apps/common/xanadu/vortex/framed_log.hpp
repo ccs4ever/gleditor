@@ -1,6 +1,7 @@
 #ifndef XANADU_VORTEX_FRAMED_LOG_HPP
 #define XANADU_VORTEX_FRAMED_LOG_HPP
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -197,8 +198,11 @@ private:
   std::filesystem::path path_;
   FramedLogFormat format_;
   std::optional<std::size_t> maxBytes_;
-  std::size_t writtenBytes_{};
-  bool wroteHeader_{};
+  /// Atomic because a journal's budget check reads it on the owner while a
+  /// worker's append is publishing a new length; both are relaxed -- a
+  /// slightly stale size only makes the budget check momentarily pessimistic.
+  std::atomic<std::size_t> writtenBytes_{};
+  std::atomic<bool> wroteHeader_{};
   /// Set when the append boundary cannot be proven: a failed append's
   /// rollback could not be proven, the constructor found a file it cannot
   /// classify or repair, or the file is too short to ever hold a header.

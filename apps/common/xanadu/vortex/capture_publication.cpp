@@ -262,15 +262,53 @@ auto CapturePublisher::publish(const CapturePublication &publication)
   }
 }
 
-auto CapturePublisher::save() const -> std::expected<void, IoErrorInfo> {
+auto CapturePublisher::snapshot()
+    -> std::expected<xanadu::StoreSnapshot, IoErrorInfo> {
   try {
-    store_.save(directory_.string());
+    return store_.saveSnapshot(directory_.string());
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN(kLog, "store snapshot refused: {}", error.what());
+    return std::unexpected(
+        IoErrorInfo{IoErrorCode::PersistenceRefusal, kDetailSave});
+  }
+}
+
+auto CapturePublisher::write(const xanadu::StoreSnapshot &snapshot) const
+    -> std::expected<void, IoErrorInfo> {
+  try {
+    const bool written =
+        writer_ ? writer_(snapshot) : xanadu::SnapshotWriter::write(snapshot);
+    if (!written) {
+      GLEDITOR_LOG_WARN(kLog, "store snapshot did not extend the directory");
+      return std::unexpected(
+          IoErrorInfo{IoErrorCode::PersistenceRefusal, kDetailSave});
+    }
     return {};
   } catch (const std::exception &error) {
     GLEDITOR_LOG_WARN(kLog, "store save refused: {}", error.what());
     return std::unexpected(
         IoErrorInfo{IoErrorCode::PersistenceRefusal, kDetailSave});
   }
+}
+
+auto CapturePublisher::save() -> std::expected<void, IoErrorInfo> {
+  // A refused extension resets what the Store believes the directory holds,
+  // so the second snapshot is the whole Store: the one retry that can help.
+  std::expected<void, IoErrorInfo> last;
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    const auto taken = snapshot();
+    if (!taken) return std::unexpected(taken.error());
+    last = write(*taken);
+    if (last) return last;
+  }
+  return last;
+}
+
+auto CapturePublisher::setSnapshotWriter(
+    std::function<bool(const xanadu::StoreSnapshot &)> writer)
+    -> CapturePublisher * {
+  writer_ = std::move(writer);
+  return this;
 }
 
 } // namespace xanadu::vortex

@@ -4,8 +4,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -40,7 +42,12 @@
 // thread (the same thread that owns the arena and drives IoHost). The
 // CaptureAppendAdapter's execute() runs on scheduler worker threads and
 // synchronizes internally; the byte sink must tolerate serialized
-// appends, which the adapter's perform mutex guarantees.
+// appends, which the adapter's perform mutex guarantees. A commit's
+// blocking work -- the sink sync, the journal fsyncs and the Store snapshot
+// write -- is staged as CaptureDurable steps and runs there too, never on
+// the owner (plan §14); the owner only validates, publishes into the Store
+// in memory and copies the snapshot. The one blocking write left on the
+// owner is the Append intent in appendRequest(): see that method.
 
 namespace xanadu {
 class UserPermascroll;
@@ -111,6 +118,25 @@ private:
   xanadu::SegmentedPrimediaSpool &spool_;
 };
 
+/// What one durable step of a commit reports back to the owner. A step runs on
+/// a worker thread (a sink sync, a journal record, a snapshot write: blocking
+/// I/O the owner must not do), so it cannot return into the commit that asked
+/// for it; the owner's continuation reads this once the step's request is
+/// terminal.
+struct CaptureDurableReport {
+  /// A typed refusal: the step did not complete. Nothing it was to make
+  /// durable is claimed, and the commit may be retried.
+  std::optional<IoErrorInfo> failure;
+  /// An exception that escaped the step -- in tests, a crash point firing.
+  /// The continuation rethrows it, which is what the same hook did when the
+  /// step ran inside commit(), and the coordinator is not used afterwards.
+  std::exception_ptr thrown;
+  /// The journal sequence of the record the step wrote, when it wrote one.
+  std::optional<std::uint64_t> journalSequence;
+};
+/// A durable step. Called once, on a scheduler worker, never on the owner.
+using CaptureDurableStep = std::function<CaptureDurableReport()>;
+
 inline constexpr std::uint32_t captureSourceKind    = 5;
 inline constexpr AdapterKey captureAppendAdapterKey = {captureSourceKind, 1};
 
@@ -129,6 +155,10 @@ struct CaptureAppendSpec {
 /// request's receipt, which CaptureCoordinator::commit collects through
 /// receiptFor(). The receipt never rides the outcome's payload channel --
 /// it is permascroll metadata, not transient bytes.
+///
+/// The same adapter runs a commit's durable steps (stageDurableAt): one
+/// adapter key, so a host registers one thing, and one set of rules for what
+/// a retired capture's still-running turn may erase.
 class CaptureAppendAdapter final : public IoAdapter {
 public:
   explicit CaptureAppendAdapter(CaptureByteSink &sink);
@@ -138,6 +168,15 @@ public:
   /// in-flight request's worker turn onto the new spec.
   [[nodiscard]] auto stageAt(std::uint32_t key, CaptureAppendSpec spec)
       -> std::expected<std::uint32_t, IoErrorInfo>;
+  /// Stage a durable step under @p key (a spec cell's CellRef), with the same
+  /// refusals as stageAt. The step runs on the worker that executes the
+  /// request; its report is collected with takeDurableReport().
+  [[nodiscard]] auto stageDurableAt(std::uint32_t key, CaptureDurableStep step)
+      -> std::expected<std::uint32_t, IoErrorInfo>;
+  /// The report the step staged under @p key produced, once; std::nullopt
+  /// when its turn never ran (cancelled before start). Owner thread.
+  [[nodiscard]] auto takeDurableReport(std::uint32_t key)
+      -> std::optional<CaptureDurableReport>;
   /// Drop @p key's staged spec only. The service calls this through
   /// abandonStaged at EVERY terminal -- including requests whose worker
   /// turn already consumed the spec and stored its receipt -- so it must
@@ -182,12 +221,21 @@ private:
   CaptureByteSink &sink_;
   mutable std::mutex mutex_;
   std::unordered_map<std::uint32_t, CaptureAppendSpec> staged_;
+  std::unordered_map<std::uint32_t, CaptureDurableStep> durableStaged_;
+  std::unordered_map<std::uint32_t, CaptureDurableReport> reports_;
   std::unordered_map<std::uint32_t, xanadu::PrimediaSpan> receipts_;
   std::unordered_set<std::uint32_t> executed_;
   /// Keys whose worker turn is inside execute(): complete() must not erase
   /// what that turn is about to write, so it defers to the turn's end.
   std::unordered_set<std::uint32_t> running_;
   std::unordered_set<std::uint32_t> completeAfterTurn_;
+  /// Run a staged durable step as @p key's worker turn.
+  void executeDurable(const BackendCommand &, BackendContext &,
+                      CompletionSink &, std::uint32_t key,
+                      CaptureDurableStep step) noexcept;
+  /// Ends @p key's worker turn: a complete() that arrived meanwhile takes
+  /// effect now.
+  void endTurn(std::uint32_t key) noexcept;
   /// Serializes sink_.append across worker turns: CaptureByteSink
   /// implementations are not required to be internally locked.
   mutable std::mutex performMutex_;
@@ -229,11 +277,18 @@ struct CaptureAppend {
 struct Committed {
   CaptureReceiptCell receipt;
 };
+/// commit() or continueCommit() has submitted a durable step and returned
+/// without waiting for it: @p request is that step's CaptureDurable request.
+/// Drive it like the append (pump the service, poll it to its terminal
+/// outcome) and hand the outcome to continueCommit().
+struct CommitPending {
+  RequestCell request;
+};
 // Refused{OutcomeCell} from io_protocol.hpp is the shared refusal shape
 // for prepare() and commit().
 
 using CapturePrepareResult = std::variant<Prepared, Refused>;
-using CaptureCommitResult  = std::variant<Committed, Refused>;
+using CaptureCommitResult  = std::variant<Committed, Refused, CommitPending>;
 
 enum class CaptureRecoveryState : std::uint8_t {
   /// The journal proved the capture's final state: translations were
@@ -393,7 +448,16 @@ public:
       -> CapturePrepareResult;
 
   /// Journal the append intent, stage the frozen bytes under a fresh spec
-  /// cell and submit the CaptureAppend through IoService. The returned
+  /// cell and submit the CaptureAppend through IoService.
+  ///
+  /// The intent's fsync stays on the owner, deliberately (P3 moved the
+  /// commit's, not this): the Append record is the only evidence that bytes
+  /// may exist, so recovery's state machine, the certain-abort path (an
+  /// Aborted record closing an intent the admission refusal proved never
+  /// ran) and every restart test read it as "durable before submit". Running
+  /// it in the append's worker turn would make an admission refusal an Aborted
+  /// record with no intent, and would still leave the Aborted fsyncs of the
+  /// failure paths on the owner. The returned
   /// CaptureAppend wraps the service's SubmitResult: Admitted carries the
   /// RequestCell commit() later validates; Refused carries the typed
   /// outcome (journal failure, cell mint failure or service refusal).
@@ -401,17 +465,41 @@ public:
   /// may be retried.
   [[nodiscard]] auto appendRequest(CaptureCell capture) -> CaptureAppend;
 
-  /// Publish the capture: validate that @p successfulAppend is the
-  /// terminal outcome of THIS capture's append request (followed through
-  /// the capture cell's request occurrence, incarnation-checked, and
-  /// confirmed Complete), fsync the Appended journal record carrying the
-  /// allocated permascroll span and translation intent, publish the
-  /// CaptureReceipt cell and capture->receipt link under one arena mark,
-  /// fsync the Committed record, then commit the interval translations.
-  /// Any mismatch -- outcome of another capture, stale incarnation,
-  /// nonterminal request, non-Complete outcome, missing receipt --
-  /// refuses with a Rejected outcome and publishes nothing.
+  /// Begin publishing the capture: validate that @p successfulAppend is the
+  /// terminal outcome of THIS capture's append request (followed through the
+  /// capture cell's request occurrence, incarnation-checked, and confirmed
+  /// Complete), then move the commit's durable work -- the permascroll sync
+  /// and the fsynced Appended record, then the Store snapshot write and the
+  /// fsynced Committed record -- onto the scheduler as CaptureDurable
+  /// requests, so the owner thread never waits on a disk (plan §14).
+  ///
+  /// Returns CommitPending for the first durable step the capture still
+  /// needs. Any mismatch -- outcome of another capture, stale incarnation,
+  /// nonterminal request, non-Complete outcome, missing receipt, a durable
+  /// step already in flight -- refuses with a Rejected outcome and publishes
+  /// nothing. May be called again after a refusal: every step is idempotent.
   [[nodiscard]] auto commit(CaptureCell capture, OutcomeCell successfulAppend)
+      -> CaptureCommitResult;
+
+  /// The owner-side continuation: @p durableOutcome is the terminal outcome
+  /// of the CommitPending request commit() or an earlier continueCommit()
+  /// returned. Collects what the worker's step did and takes the commit to
+  /// its next owner step.
+  ///
+  /// Crash order, one capture, unchanged from the synchronous commit:
+  /// permascroll sync -> Appended (fsynced) [worker] -> publish into the
+  /// Store and take its snapshot [owner] -> snapshot written and fsynced ->
+  /// Committed (fsynced) [worker] -> translations committed [owner]. A crash
+  /// between any two leaves what recovery completes without re-appending or
+  /// double-publishing.
+  ///
+  /// Returns Committed when the capture is done, CommitPending for the
+  /// second step, or Refused when a step failed (the capture stays
+  /// retriable through commit()). A step that threw -- a crash point -- is
+  /// rethrown here. Refuses with InvalidRequest, leaving the step in flight,
+  /// when @p durableOutcome is not that request's terminal outcome.
+  [[nodiscard]] auto continueCommit(CaptureCell capture,
+                                    OutcomeCell durableOutcome)
       -> CaptureCommitResult;
 
   /// Reconcile capture.journal against the interval map after a restart
@@ -434,8 +522,9 @@ public:
   /// record then proves only the journal, not a published reference.
   ///
   /// Ordering, one capture: Appended (fsynced, after the permascroll sync)
-  /// -> publish into the Store -> Store save -> Committed. A crash between
-  /// any two leaves a state recovery completes without re-appending or
+  /// -> publish into the Store -> Store snapshot written and fsynced ->
+  /// Committed (the two durable steps run on a worker; see commit()). A crash
+  /// between any two leaves a state recovery completes without re-appending or
   /// double-publishing: publication is idempotent keyed by (journalId,
   /// CaptureId), found by walking the Store's receipt rank.
   auto setPublisher(CapturePublisher *publisher) -> CaptureCoordinator *;
@@ -497,8 +586,20 @@ private:
     std::optional<std::uint64_t> appendedSequence;
     std::optional<CaptureReceiptCell> receiptCell;
     bool committedRecorded{};
-    /// The Structure publication is in the Store and saved.
+    /// The Structure publication is in the Store (in memory).
+    bool publishedInStore{};
+    /// ... and a snapshot of it was written durably.
     bool published{};
+    /// The durable step in flight, from submit until its continuation.
+    struct DurableLink {
+      zigzag::CellRef spec;
+      AllocationIncarnation incarnation;
+      /// Set once admitted; the spec is decodable only until then.
+      std::optional<RequestCell> request;
+      /// What the step makes durable, to account its record when it reports.
+      CaptureJournalRecordKind record{CaptureJournalRecordKind::Appended};
+    };
+    std::optional<DurableLink> durable;
     /// Journal file budget still held for this capture's records.
     std::size_t heldJournalBytes{};
   };
@@ -635,6 +736,26 @@ private:
   [[nodiscard]] auto completePublications()
       -> std::expected<std::size_t, IoErrorInfo>;
   void erasePinnedSlots(CaptureId captureId);
+
+  /// The owner step that follows validation or a finished durable step: the
+  /// next of {Appended step, publish + snapshot + Committed step, finish}.
+  [[nodiscard]] auto
+  advanceCommit(std::map<PendingKey, PendingCapture>::iterator it,
+                const xanadu::PrimediaSpan &receipt) -> CaptureCommitResult;
+  /// Stage @p step, submit it as a CaptureDurable request through the
+  /// service and return CommitPending, or Refused when it was not admitted.
+  [[nodiscard]] auto
+  submitDurable(std::map<PendingKey, PendingCapture>::iterator it,
+                CaptureJournalRecordKind record, CaptureDurableStep step)
+      -> CaptureCommitResult;
+  /// Account a journal record a worker step wrote against the capture's held
+  /// budget, as appendJournal does for one the owner wrote.
+  void consumeHold(PendingCapture &pending, CaptureJournalRecordKind kind,
+                   std::size_t intervals);
+  /// Finish a commit whose Committed record is durable.
+  [[nodiscard]] auto
+  finishCommit(std::map<PendingKey, PendingCapture>::iterator it,
+               const xanadu::PrimediaSpan &receipt) -> CaptureCommitResult;
 
   zigzag::ArenaManifold &arena_;
   IoCellSchema schema_;

@@ -341,11 +341,13 @@ auto CaptureJournal::scanImage(const std::span<const std::byte> bytes,
 CaptureJournal::CaptureJournal(std::filesystem::path path,
                                const std::optional<std::size_t> maxBytes)
     : log_(std::move(path), kFormat, maxBytes) {
-  log_.open([this](const std::span<const std::byte> bytes) {
-    return scanImage(bytes, maxCaptureId_, nextSequence_, journalId_);
+  CaptureId scannedMax = 0;
+  log_.open([&](const std::span<const std::byte> bytes) {
+    return scanImage(bytes, scannedMax, nextSequence_, journalId_);
   });
+  maxCaptureId_    = scannedMax;
   identityWritten_ = log_.wroteHeader() && nextSequence_ > 1;
-  if (!identityWritten_) {
+  if (!identityWritten_.load()) {
     // A journal not yet written (or just repaired to nothing) names itself
     // on its first record. The identity only has to differ between journals
     // sharing one Store, so a random 64 bits suffices; it is never an
@@ -417,6 +419,7 @@ auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
                                   const CaptureJournalRecord &payload,
                                   const CaptureJournalCrashPoints &crash)
     -> std::expected<CaptureJournalRecord, IoErrorInfo> {
+  const std::lock_guard lock(mutex_);
   if (log_.poisoned()) {
     // A previous append could not prove the file still ends on a record
     // boundary; refuse rather than deepen the tear.
@@ -457,7 +460,7 @@ auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
   // still leaves a durable record counted.
   const auto counted = [&] {
     ++nextSequence_;
-    maxCaptureId_ = std::max(maxCaptureId_, captureId);
+    maxCaptureId_ = std::max(maxCaptureId_.load(), captureId);
     if (crash.afterFlush) crash.afterFlush();
   };
   if (const auto ok = log_.append(framed, crash.beforeFlush, counted); !ok) {
@@ -467,6 +470,7 @@ auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
 }
 
 auto CaptureJournal::recover() const -> CaptureJournalRecovery {
+  const std::lock_guard lock(mutex_);
   CaptureJournalRecovery recovery;
   if (log_.poisoned()) {
     // This instance already knows the file may not end on a record
@@ -530,6 +534,7 @@ auto CaptureJournal::recover() const -> CaptureJournalRecovery {
 
 auto CaptureJournal::compact(const std::span<const CaptureJournalRecord> keep)
     -> std::expected<void, IoErrorInfo> {
+  const std::lock_guard lock(mutex_);
   if (log_.poisoned()) {
     return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
   }

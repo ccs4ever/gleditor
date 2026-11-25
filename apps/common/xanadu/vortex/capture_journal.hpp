@@ -2,11 +2,13 @@
 #define XANADU_VORTEX_CAPTURE_JOURNAL_HPP
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <vector>
@@ -212,8 +214,14 @@ struct CaptureJournalCrashPoints {
 };
 
 /// Per-user append-only durable ledger backing capture transactions
-/// (§8.2). The owning CaptureCoordinator holds one instance; it never runs
-/// on a worker thread.
+/// (§8.2). The owning CaptureCoordinator holds one instance. Its durable
+/// steps (the Appended and Committed records of a commit) run on worker
+/// threads while the owner holds budget for other captures. Writers of the
+/// file (appendRecord, compact) and the recovery scan serialize on one mutex
+/// held across the fsync; the budget calls (hold, unhold, sizes) take no
+/// lock, so the owner never waits for a worker's fsync -- they read
+/// std::atomic state the writers publish after each durable record, and the
+/// held budget is the owner's alone.
 class CaptureJournal {
 public:
   /// @p maxBytes bounds the file; std::nullopt is the explicit unbounded
@@ -300,10 +308,11 @@ private:
   FramedLog log_;
   std::size_t heldBytes_{};
   std::uint64_t nextSequence_{1};
-  CaptureId maxCaptureId_{};
+  std::atomic<CaptureId> maxCaptureId_{};
   std::uint64_t journalId_{};
   /// The file already holds an Identity record: appends need not write one.
-  bool identityWritten_{};
+  std::atomic<bool> identityWritten_{};
+  mutable std::mutex mutex_;
 };
 
 } // namespace xanadu::vortex
