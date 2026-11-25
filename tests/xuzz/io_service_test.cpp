@@ -82,6 +82,9 @@ public:
       --publishTerminalFailures;
       throw std::runtime_error("publishTerminal boom");
     }
+    if (publishTerminalRefusal) {
+      return std::unexpected(*publishTerminalRefusal);
+    }
     outcomes.push_back(outcome);
     const OutcomeCell cell{nextCell++, 1};
     publishedOutcomes.push_back(cell);
@@ -124,6 +127,7 @@ public:
   bool failMintRequest{};
   bool failMintWaiter{};
   int publishTerminalFailures{};
+  std::optional<IoErrorInfo> publishTerminalRefusal;
   std::size_t completionBoundBytes{1024};
   std::size_t payloadBoundBytes{1024};
   std::optional<EndpointCell> endpoint;
@@ -228,6 +232,7 @@ public:
   auto prepare(const CellRequest &request, OwnerContext &)
       -> std::expected<PreparedOperation, IoErrorInfo> override {
     ++prepareCalls;
+    if (throwOnPrepare) throw std::runtime_error("prepare boom");
     auto bytes = request.openSpec
                      ? request.openSpec->locator
                      : std::vector<std::byte>{
@@ -256,6 +261,7 @@ public:
   std::vector<OwnerCell> abandoned;
   std::thread::id publishThread;
   bool throwOnPublish{};
+  bool throwOnPrepare{};
 };
 
 struct Harness {
@@ -1149,6 +1155,76 @@ TEST(IoServiceTest, AwaitWaiterMintFailureIsBudgetExceeded) {
   const auto *failed = std::get_if<Failed>(&harness.cells.outcomes.front());
   ASSERT_NE(failed, nullptr);
   EXPECT_EQ(failed->reason.code, IoErrorCode::BudgetExceeded);
+}
+
+TEST(IoServiceTest, ThrowingPrepareRefusesAsBackendFailureAndAbandonsSpec) {
+  Harness harness;
+  harness.adapter.throwOnPrepare = true;
+  const auto result = harness.service.submit(testCapability, testSpec);
+  ASSERT_TRUE(std::holds_alternative<Refused>(result.value));
+  // prepare() threw: admit() converts it to a typed BackendFailure
+  // refusal, starts no scheduler work, and still consumes the staged
+  // spec like every post-resolution refusal.
+  EXPECT_EQ(harness.adapter.prepareCalls, 1U);
+  EXPECT_TRUE(harness.scheduler->entries.empty());
+  EXPECT_EQ(harness.adapter.executeCalls, 0U);
+  ASSERT_EQ(harness.adapter.abandonCalls, 1U);
+  EXPECT_EQ(harness.adapter.abandoned, (std::vector<OwnerCell>{testSpec}));
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  const auto *failed = std::get_if<Failed>(&harness.cells.outcomes.front());
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::BackendFailure);
+}
+
+TEST(IoServiceTest, PublishTerminalRefusalPropagatesItsTypedError) {
+  Harness harness;
+  harness.cells.publishTerminalRefusal =
+      IoErrorInfo{IoErrorCode::InvalidRequest, 9};
+  const auto request = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+
+  // publishTerminal refused with InvalidRequest{9}: pump() must mint the
+  // refusal carrying THAT typed error -- collapsing it to BackendFailure
+  // would misreport why the terminal could not publish.
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  const auto *failed = std::get_if<Failed>(&harness.cells.outcomes.back());
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::InvalidRequest);
+  EXPECT_EQ(failed->reason.stableDetail, 9U);
+}
+
+TEST(IoServiceTest, RetireDuringPublishThrowStillFreesStateAfterMaterialize) {
+  Harness harness;
+  // pump()'s publishTerminal throws once: the terminal record stays
+  // durable in state but no outcome cell exists yet.
+  harness.cells.publishTerminalFailures = 1;
+  const auto request                    = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_TRUE(harness.cells.outcomes.empty());
+
+  // The owner retires while the outcome is still unmaterialized:
+  // retireAfterTerminal must not strand the durable terminal -- the next
+  // materialization is the last chance to drop the request state.
+  harness.service.retireRequest(request);
+
+  const auto first = harness.service.poll(request);
+  ASSERT_TRUE(first.outcome.has_value());
+  // ensureTerminalOutcome retried publishTerminal, which now succeeds;
+  // the retireAfterTerminal flag then drops the request state. The next
+  // poll resolves through the arena request->outcome link instead, which
+  // reports Terminal with no live progress.
+  const auto second = harness.service.poll(request);
+  ASSERT_TRUE(second.outcome.has_value());
+  EXPECT_EQ(*second.outcome, *first.outcome);
+  EXPECT_FALSE(second.progress.has_value());
 }
 
 } // namespace

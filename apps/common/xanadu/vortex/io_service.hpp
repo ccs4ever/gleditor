@@ -153,6 +153,11 @@ private:
   void releaseAcknowledged(BackendReleaseAck) noexcept override;
   void startLaneHead(const LaneKey &);
   void queueTerminal(RequestState &);
+  /// Drop a request from both indexes once its terminal outcome is
+  /// settled. Shared by pump()'s terminal pass and the poll/await paths
+  /// that materialize an outcome the pass could not publish; refuses
+  /// while waiters are still registered, mirroring retireRequest().
+  void eraseRequestState(std::uint64_t tokenKey);
   [[nodiscard]] auto ensureTerminalOutcome(RequestState &)
       -> std::optional<OutcomeCell>;
 

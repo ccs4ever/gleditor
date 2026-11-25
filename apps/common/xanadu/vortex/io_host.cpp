@@ -126,15 +126,26 @@ auto IoHost::awaitCell(const RequestCell request, const zigzag::CellRef cursor)
 
 auto IoHost::cancelWaiter(const WaiterCell waiter) -> WaiterCancelResult {
   requireOwner();
-  auto result = service_.cancelWaiter(waiter);
-  for (auto it = parked_.begin(); it != parked_.end(); ++it) {
-    if (it->second.waiter == waiter) {
-      vm_.retireAwait(it->second.cursor, it->second.cursorIncarnation,
-                      it->second.continuation);
-      parked_.erase(it);
-      break;
+  const auto result = service_.cancelWaiter(waiter);
+  if (result.state == WaiterCancelState::Removed) {
+    // The service actually dropped a still-pending waiter: this await can
+    // never resume, so release the VM continuation and the parked entry.
+    for (auto it = parked_.begin(); it != parked_.end(); ++it) {
+      if (it->second.waiter == waiter) {
+        vm_.retireAwait(it->second.cursor, it->second.cursorIncarnation,
+                        it->second.continuation);
+        parked_.erase(it);
+        break;
+      }
     }
   }
+  // AlreadyComplete means the service already retired the waiter -- most
+  // often because the request went terminal and pumpIo has not reached
+  // this parked entry yet (a work budget can stop the pass between
+  // service_.pump and the resume). The outcome is still deliverable
+  // through service_.poll, so the entry must stay until pumpIo resumes or
+  // abandons it; erasing it here would strand the continuation forever.
+  // Refused likewise leaves the waiter live.
   return result;
 }
 

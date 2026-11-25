@@ -206,7 +206,16 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
   }
 
   OwnerContext owner;
-  auto prepared = adapter->prepare(request, owner);
+  // prepare() is not noexcept: an adapter throw is a backend failure, and
+  // like every refusal past adapter resolution it still consumes the
+  // staged spec through refuseAdmission.
+  auto prepared = [&]() -> std::expected<PreparedOperation, IoErrorInfo> {
+    try {
+      return adapter->prepare(request, owner);
+    } catch (...) {
+      return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
+    }
+  }();
   if (!prepared) return refuseAdmission(prepared.error());
   if (prepared->bytes.size() > budget_.maxCommandBytes) {
     return refuseAdmission({IoErrorCode::BudgetExceeded, 0});
@@ -335,6 +344,18 @@ void IoService::queueTerminal(RequestState &state) {
   }
 }
 
+void IoService::eraseRequestState(const std::uint64_t tokenKey) {
+  const auto found = requests_.find(tokenKey);
+  if (found == requests_.end()) return;
+  // A live waiter still needs the request index: its await resolves
+  // through poll(), which finds the outcome via requestByCell_ or the
+  // arena link. Same rule retireRequest() keeps.
+  if (!found->second.waiters.empty()) return;
+  requestByCell_.erase(
+      std::pair{found->second.cell.cell, found->second.cell.incarnation});
+  requests_.erase(found);
+}
+
 auto IoService::ensureTerminalOutcome(RequestState &state)
     -> std::optional<OutcomeCell> {
   if (state.outcome && cells_.isOutcomeCurrent(*state.outcome))
@@ -388,10 +409,19 @@ auto IoService::poll(const RequestCell request) -> PollResult {
   if (state == requests_.end() ||
       state->second.cell.incarnation != request.incarnation)
     return {};
-  const auto outcome = ensureTerminalOutcome(state->second);
-  return {.phase    = state->second.phase,
-          .outcome  = outcome,
-          .progress = state->second.progress};
+  const auto outcome  = ensureTerminalOutcome(state->second);
+  const auto phase    = state->second.phase;
+  const auto progress = state->second.progress;
+  // A retireRequest that landed while the outcome cell could not be
+  // published is honored here: the terminal pass already ran, so this
+  // materialization is the last chance to drop the request state (the
+  // maps, indexes and terminalPayload lease would otherwise leak until
+  // ~IoService). Capture phase/progress first -- the erase invalidates
+  // the state reference.
+  if (state->second.outcome && state->second.retireAfterTerminal) {
+    eraseRequestState(state->first);
+  }
+  return {.phase = phase, .outcome = outcome, .progress = progress};
 }
 
 auto IoService::await(const RequestCell request,
@@ -407,8 +437,16 @@ auto IoService::await(const RequestCell request,
       state->second.cell.incarnation != request.incarnation) {
     return {Ready{cells_.mintRefusal({IoErrorCode::Stale, 0})}};
   }
-  if (const auto outcome = ensureTerminalOutcome(state->second))
+  if (const auto outcome = ensureTerminalOutcome(state->second)) {
+    // Same retireAfterTerminal honoring as poll(): the terminal pass
+    // already ran, so a materialized outcome is the last chance to drop
+    // the request state. The waiter this await was about to mint is
+    // moot -- the outcome is Ready now.
+    if (state->second.outcome && state->second.retireAfterTerminal) {
+      eraseRequestState(state->first);
+    }
     return {Ready{*outcome}};
+  }
   const auto duplicate =
       std::ranges::find_if(state->second.waiters, [&](const auto &waiter) {
         const auto &registered = waiter.second;
@@ -714,9 +752,12 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
       const auto materialized = cells_.publishTerminal(
           state.cell, outcome, state.progress, retainedPayload);
       if (!materialized) {
-        const auto failed =
-            cells_.mintRefusal({IoErrorCode::BackendFailure, 1});
-        state.outcome = failed;
+        // Propagate publishTerminal's typed refusal (Stale on a dead
+        // request cell, InvalidRequest on a malformed outcome) exactly
+        // like ensureTerminalOutcome does -- minting BackendFailure here
+        // would type the same terminal differently depending on which
+        // path materialized it first.
+        state.outcome = cells_.mintRefusal(materialized.error());
       } else {
         state.outcome = *materialized;
       }
@@ -781,8 +822,7 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
     --remaining;
     ++delivered;
     if (state.retireAfterTerminal) {
-      requestByCell_.erase(std::pair{state.cell.cell, state.cell.incarnation});
-      requests_.erase(key);
+      eraseRequestState(key);
     }
   }
   return delivered;

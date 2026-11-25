@@ -347,4 +347,36 @@ TEST(VortexIoVmContinuationTest,
   EXPECT_TRUE(h.service.poll(request).outcome);
 }
 
+TEST(VortexIoVmContinuationTest,
+     CancelWaiterAfterTerminalKeepsParkedAwaitDeliverable) {
+  Harness h;
+  const auto request = h.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto cursor = h.cursor();
+  // Park the await BEFORE the terminal events are pumped: the service has
+  // no outcome yet, so await mints a live waiter and parks the cursor.
+  const auto pending = h.host.awaitCell(request, cursor);
+  ASSERT_TRUE(std::holds_alternative<Pending>(pending.value));
+  const auto parkedPending = std::get<Pending>(pending.value);
+
+  // The backend completes and the whole terminal pass runs -- but the
+  // work budget is spent entirely inside service_.pump, so pumpIo never
+  // reaches its resume loop. pump() retires the waiter as part of
+  // publishing the outcome, leaving the parked entry to deliver it.
+  h.scheduler->complete(0, EndOfStream{{}});
+  static_cast<void>(h.host.pumpIo(3));
+  ASSERT_TRUE(h.service.poll(request).outcome.has_value());
+
+  // The service already retired the waiter: cancelWaiter reports
+  // AlreadyComplete. The parked entry must survive -- the outcome is
+  // still deliverable through poll(), and erasing it here would strand
+  // the continuation forever.
+  const auto cancelled = h.host.cancelWaiter(parkedPending.waiter);
+  EXPECT_EQ(cancelled.state, WaiterCancelState::AlreadyComplete);
+
+  static_cast<void>(h.host.pumpIo(8));
+  EXPECT_TRUE(h.vm.takeAwaitOutcome(cursor, *h.arena.incarnationOf(cursor),
+                                    parkedPending.continuation));
+}
+
 } // namespace
