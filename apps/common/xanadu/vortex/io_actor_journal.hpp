@@ -164,6 +164,11 @@ private:
   std::size_t writtenBytes_{};
   bool quiescent_{false};
   bool wroteHeader_{false};
+  /// Set when a failed append could not prove the file still ends on a
+  /// record boundary (the rollback truncate itself failed). Every later
+  /// append refuses and recover() reports Corrupt rather than risk
+  /// parsing records hidden behind a tolerated trailing remnant.
+  bool poisoned_{false};
 };
 
 } // namespace xanadu::vortex

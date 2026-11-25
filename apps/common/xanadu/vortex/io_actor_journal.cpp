@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <map>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace xanadu::vortex {
@@ -96,15 +97,46 @@ auto ActorIoJournal::reserve(const std::size_t recordBytes) const
 auto ActorIoJournal::appendRecord(const ActorIntentRecord &record,
                                   const ActorJournalCrashPoints &crash)
     -> std::expected<void, IoErrorInfo> {
+  if (poisoned_) {
+    // A previous append could not prove the file still ends on a record
+    // boundary; bytes written now would land behind a tail recover()
+    // reads as the tolerated trailing remnant while hiding every record
+    // after it. Refuse rather than deepen the tear.
+    return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
+  }
   const auto framed = encode(record);
   if (const auto ok = reserve(record.immutableArgs.size()); !ok) {
     return std::unexpected(ok.error());
   }
 
+  // writtenBytes_ is the offset of the last byte this journal knows is a
+  // complete record (the header counts once flushed): the boundary a
+  // failed append truncates back to.
+  const auto recordStart = static_cast<off_t>(writtenBytes_);
+
   const int fd = ::open(path_.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0600);
   if (fd < 0) {
     return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
   }
+
+  const auto failAppend = [&]() -> std::expected<void, IoErrorInfo> {
+    // recover() tolerates exactly one trailing, incomplete record, so a
+    // torn tail followed by later appends would hide those records and
+    // could report Clean over a durable admission. Roll the file back to
+    // the last known boundary; when even that cannot be proven the
+    // journal is poisoned and every later append refuses.
+    if (::ftruncate(fd, recordStart) == 0) {
+      writtenBytes_ = static_cast<std::size_t>(recordStart);
+    } else {
+      poisoned_ = true;
+      struct stat st{};
+      if (::fstat(fd, &st) == 0 && st.st_size >= 0) {
+        writtenBytes_ = static_cast<std::size_t>(st.st_size);
+      }
+    }
+    ::close(fd);
+    return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
+  };
 
   bool ok = true;
   if (!wroteHeader_) {
@@ -115,17 +147,11 @@ auto ActorIoJournal::appendRecord(const ActorIntentRecord &record,
   }
   ok = ok && writeAll(fd, framed.data(), framed.size());
 
-  if (!ok) {
-    ::close(fd);
-    return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
-  }
+  if (!ok) return failAppend();
 
   if (crash.beforeFlush) crash.beforeFlush();
   while (::fsync(fd) != 0) {
-    if (errno != EINTR) {
-      ::close(fd);
-      return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
-    }
+    if (errno != EINTR) return failAppend();
   }
   if (crash.afterFlush) crash.afterFlush();
   ::close(fd);
@@ -188,6 +214,13 @@ auto ActorIoJournal::recover() const -> ActorRestoreResult {
   if (!quiescent_) {
     return {ActorRestoreStatus::NotQuiescent, {}, {}};
   }
+  if (poisoned_) {
+    // This instance already knows the file may not end on a record
+    // boundary: a failed append's rollback could not be proven, so bytes
+    // on disk may hide records behind what would parse as the tolerated
+    // trailing remnant. Refuse rather than classify a prefix.
+    return {ActorRestoreStatus::Corrupt, {}, {}};
+  }
 
   std::vector<std::byte> bytes;
   {
@@ -231,8 +264,15 @@ auto ActorIoJournal::recover() const -> ActorRestoreResult {
   while (cursor + 4 <= bytes.size()) {
     std::uint32_t bodyLen{};
     std::memcpy(&bodyLen, bytes.data() + cursor, sizeof(bodyLen));
+    if (bodyLen < kFixedRecordBytes) {
+      // The encoder never emits a body this small, and a crash mid-flush
+      // can only truncate -- it cannot invent a short length. A fully
+      // present "record" this malformed is foreign bytes mid-stream:
+      // corruption, not the tolerated trailing remnant.
+      return {ActorRestoreStatus::Corrupt, {}, {}};
+    }
     const std::size_t recordEnd = cursor + 4 + bodyLen;
-    if (bodyLen < kFixedRecordBytes || recordEnd > bytes.size()) {
+    if (recordEnd > bytes.size()) {
       // A crash mid-flush leaves exactly one trailing, incomplete
       // record: tolerate it as the last thing on disk, not corruption.
       break;
@@ -243,6 +283,11 @@ auto ActorIoJournal::recover() const -> ActorRestoreResult {
     std::uint8_t kind{};
     std::memcpy(&kind, body + offset, 1);
     offset += 1;
+    if (kind > static_cast<std::uint8_t>(ActorIntentRecordKind::Checkpoint)) {
+      // Every record this format writes carries a kind in range; anything
+      // else means the "record" is not one the journal produced.
+      return {ActorRestoreStatus::Corrupt, {}, {}};
+    }
     record.kind = static_cast<ActorIntentRecordKind>(kind);
     std::memcpy(&record.actorGeneration, body + offset, 8);
     offset += 8;
@@ -260,7 +305,10 @@ auto ActorIoJournal::recover() const -> ActorRestoreResult {
     std::memcpy(&argsLen, body + offset, 4);
     offset += 4;
     if (offset + argsLen != static_cast<std::size_t>(bodyLen)) {
-      break; // malformed; stop at last well-formed record
+      // A complete-looking record whose args length disagrees with its
+      // body length is not a journal record; a real torn write truncates
+      // instead of producing this shape, so this is corruption.
+      return {ActorRestoreStatus::Corrupt, {}, {}};
     }
     record.immutableArgs.assign(body + offset, body + offset + argsLen);
     records.push_back(std::move(record));

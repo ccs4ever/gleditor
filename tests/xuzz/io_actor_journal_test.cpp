@@ -1,9 +1,14 @@
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <fstream>
 #include <vector>
+
+#include <fcntl.h>
+#include <sys/resource.h>
+#include <unistd.h>
 
 #include <gtest/gtest.h>
 
@@ -185,6 +190,121 @@ TEST_F(ActorIoJournalTest, SignatureAndVersionMismatchRefusesAsCorrupt) {
   ActorIoJournal journal(path_, 0);
   journal.markQuiescent();
   const auto restore = journal.recover();
+  EXPECT_EQ(restore.status, ActorRestoreStatus::Corrupt);
+}
+
+namespace {
+
+/// RLIMIT_FSIZE + SIGXFSZ guard: capping the file mid-append makes the
+/// journal's write() land a short count and then fail with EFBIG -- a
+/// real torn tail, mid-record, on disk. The limit and the (default-
+/// fatal) SIGXFSZ disposition are restored on scope exit.
+class FileSizeLimit {
+public:
+  FileSizeLimit() {
+    previousSignal_ = ::signal(SIGXFSZ, SIG_IGN);
+    ::getrlimit(RLIMIT_FSIZE, &saved_);
+  }
+  ~FileSizeLimit() {
+    ::setrlimit(RLIMIT_FSIZE, &saved_);
+    ::signal(SIGXFSZ, previousSignal_);
+  }
+  FileSizeLimit(const FileSizeLimit &)                     = delete;
+  auto operator=(const FileSizeLimit &) -> FileSizeLimit & = delete;
+
+  void capAt(std::uint64_t bytes) {
+    rlimit limit{.rlim_cur = static_cast<rlim_t>(bytes),
+                 .rlim_max = RLIM_INFINITY};
+    EXPECT_EQ(::setrlimit(RLIMIT_FSIZE, &limit), 0);
+  }
+  void uncap() {
+    rlimit limit{RLIM_INFINITY, RLIM_INFINITY};
+    ::setrlimit(RLIMIT_FSIZE, &limit);
+  }
+
+private:
+  rlimit saved_{};
+  sighandler_t previousSignal_{};
+};
+
+/// Overwrite one byte of the journal file at @p offset -- the craft half
+/// of the malformed-record recovery tests.
+void pokeByte(const std::filesystem::path &path, std::uint64_t offset,
+              const char value) {
+  const int fd = ::open(path.c_str(), O_WRONLY);
+  ASSERT_GE(fd, 0);
+  ASSERT_EQ(::pwrite(fd, &value, 1, static_cast<off_t>(offset)), 1);
+  ::close(fd);
+}
+
+} // namespace
+
+TEST_F(ActorIoJournalTest, FailedAppendRollsBackSoLaterRecordsStayVisible) {
+  FileSizeLimit limit;
+
+  ActorIoJournal journal(path_, 0);
+  ASSERT_TRUE(journal.stageIntent(intent(1)));
+  ASSERT_TRUE(journal.recordAdmission(1, 7, 100));
+  ASSERT_TRUE(journal.recordReceipt(1));
+  ASSERT_TRUE(journal.stageIntent(intent(2)));
+
+  // The next append starts at the current file size; cap the file a few
+  // bytes into the record that follows so its write() tears mid-body.
+  const auto boundary = journal.sizeBytes();
+  ASSERT_GT(boundary, 0U);
+  limit.capAt(boundary + 20);
+  const auto doomed = journal.checkpoint(1);
+  limit.uncap();
+  ASSERT_FALSE(doomed);
+  EXPECT_EQ(doomed.error().code, IoErrorCode::BackendFailure);
+
+  // The torn tail must have been truncated back to the record boundary:
+  // this append lands on a clean prefix and recovery sees it. Without
+  // the rollback the torn checkpoint bytes would sit in front of this
+  // admission, and recovery would stop at the malformed record --
+  // hiding a durable admission behind what looks like a trailing
+  // remnant and reporting Clean.
+  ASSERT_TRUE(journal.recordAdmission(2, 7, 101));
+
+  ActorIoJournal restarted(path_, 0);
+  restarted.markQuiescent();
+  const auto restore = restarted.recover();
+  EXPECT_EQ(restore.status, ActorRestoreStatus::Unknown);
+  ASSERT_EQ(restore.unknownIntents.size(), 1U);
+  EXPECT_EQ(restore.unknownIntents.front(), 2U);
+}
+
+TEST_F(ActorIoJournalTest, InvalidRecordKindRefusesAsCorrupt) {
+  {
+    ActorIoJournal journal(path_, 0);
+    ASSERT_TRUE(journal.stageIntent(intent(1)));
+  }
+  // First record's kind byte sits at header(12) + length prefix(4).
+  // Every kind the format writes is in range; a byte outside it means
+  // the "record" is not one the journal produced.
+  pokeByte(path_, 16, static_cast<char>(200));
+
+  ActorIoJournal restarted(path_, 0);
+  restarted.markQuiescent();
+  const auto restore = restarted.recover();
+  EXPECT_EQ(restore.status, ActorRestoreStatus::Corrupt);
+}
+
+TEST_F(ActorIoJournalTest, InconsistentArgsLengthRefusesAsCorrupt) {
+  {
+    ActorIoJournal journal(path_, 0);
+    ASSERT_TRUE(journal.stageIntent(intent(1)));
+  }
+  // The args-length field is the last u32 of the fixed record body:
+  // header(12) + length prefix(4) + kind(1) + 6*8(48) = 65. A
+  // complete-looking record whose args length disagrees with its body
+  // length cannot be a torn write -- a real tear truncates -- so it is
+  // corruption, not a tolerated remnant.
+  pokeByte(path_, 65, 1);
+
+  ActorIoJournal restarted(path_, 0);
+  restarted.markQuiescent();
+  const auto restore = restarted.recover();
   EXPECT_EQ(restore.status, ActorRestoreStatus::Corrupt);
 }
 
