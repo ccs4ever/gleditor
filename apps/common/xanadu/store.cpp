@@ -1,19 +1,23 @@
 #include "store.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
 #include <locale>
 #include <map>
+#include <mutex>
 #include <queue>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unistd.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -4163,9 +4167,104 @@ void Store::sealPendingMetadataAsCells() const {
   }
 }
 
-void Store::save(const std::string &directory) const {
+struct SnapshotChannel {
+  explicit SnapshotChannel(std::filesystem::path dir, const std::uint32_t held)
+      : directory(std::move(dir)), durableOps(held) {}
+  std::filesystem::path directory;
+  /// Taken by writers only, and held across their fsyncs. The owner never
+  /// takes it: it reads durableOps, which is why that is atomic.
+  std::mutex mutex;
+  /// Operations the directory durably holds. Advanced by a writer after its
+  /// write completed and never before, so a failed write leaves it where the
+  /// directory really is.
+  std::atomic<std::uint32_t> durableOps;
+  /// The sequence of the tables image the directory holds (guarded by mutex).
+  std::uint64_t tablesSequence{0};
+  std::atomic<std::uint64_t> nextSequence{1};
+};
+
+namespace {
+/// Make a directory entry (a created or renamed file) durable. Best effort on
+/// platforms where a directory cannot be opened: the file's own fsync still
+/// ran.
+void syncDirectory(const std::filesystem::path &dir) {
+#ifndef _WIN32
+  const int fd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY);
+  if (fd >= 0) {
+    static_cast<void>(::fsync(fd));
+    ::close(fd);
+  }
+#else
+  static_cast<void>(dir);
+#endif
+}
+
+/// store.tables replaced atomically and durably: written beside it, fsynced,
+/// renamed over it. The bytes are what writeStoreTables() writes -- one
+/// serializer -- but a crash can no longer leave the file half-written, which
+/// matters once the Committed record is allowed to claim it.
+void writeStoreTablesDurably(const std::filesystem::path &path,
+                             const StoreTables &tables) {
+#ifndef _WIN32
+  const auto bytes = serializeStoreTables(tables);
+  auto temp        = path;
+  temp += ".tmp";
+  const int fd = ::open(temp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd < 0) {
+    throw StoreTablesUnreadable("cannot write " + temp.string());
+  }
+  const bool ok = ::write(fd, bytes.data(), bytes.size()) ==
+                      static_cast<ssize_t>(bytes.size()) &&
+                  0 == ::fsync(fd);
+  ::close(fd);
+  if (!ok) {
+    throw StoreTablesUnreadable("cannot write " + temp.string());
+  }
+  std::filesystem::rename(temp, path);
+#else
+  writeStoreTables(path, tables);
+#endif
+}
+} // namespace
+
+StoreSnapshot Store::saveSnapshot(const std::string &directory) const {
   sealPendingMetadataAsCells();
-  const std::filesystem::path dir(directory);
+  StoreSnapshot snapshot;
+  snapshot.directory_ = std::filesystem::absolute(directory).lexically_normal();
+
+  // One channel per directory this store has been saved to. Another
+  // directory shares nothing with the last one's bookkeeping: it holds none of
+  // these operations, so the snapshot of it is the whole store.
+  if (!snapshotChannel_ || snapshotChannel_->directory != snapshot.directory_ ||
+      snapshotChannel_->durableOps.load() > opsSpool.size()) {
+    snapshotChannel_ =
+        std::make_shared<SnapshotChannel>(snapshot.directory_, 0);
+  }
+  snapshot.channel_ = snapshotChannel_;
+
+  // The count the directory durably holds, not the count last snapshotted: a
+  // snapshot taken while an earlier write is in flight then includes that
+  // write's operations and stands alone. Both may write the overlap; the
+  // writer skips what is already durable.
+  const auto base   = snapshot.channel_->durableOps.load();
+  snapshot.baseOps_ = base;
+  snapshot.nodes_   = opsSpool.copyOpsAfter(base);
+  if (0 != base) {
+    snapshot.baseTail_ = *opsSpool.get(base);
+  }
+  snapshot.tables_      = storeTables();
+  snapshot.sequence_    = snapshot.channel_->nextSequence.fetch_add(1);
+  snapshot.permascroll_ = userPermascroll_;
+  return snapshot;
+}
+
+bool SnapshotWriter::write(const StoreSnapshot &snapshot,
+                           const SnapshotDurability durability) {
+  const bool fsync = SnapshotDurability::Fsync == durability;
+  const auto &dir  = snapshot.directory_;
+  auto &channel    = *snapshot.channel_;
+  const std::lock_guard lock(channel.mutex);
+
   std::filesystem::create_directories(dir);
 
   // The content the operations below name lives in the author's permascroll,
@@ -4174,33 +4273,65 @@ void Store::save(const std::string &directory) const {
   // document a second place the author's text lived, and the addresses in it
   // only agreed with the permascroll's because every store rewrote the whole
   // thing every time.
-  userPermascroll_->flush();
-  {
+  if (snapshot.permascroll_ && !snapshot.permascroll_->flush() && fsync) {
+    throw std::runtime_error("cannot make the permascroll durable for " +
+                             dir.string());
+  }
+
+  // Everything a concurrent writer already made durable is skipped, so
+  // whichever of two overlapping snapshots is written first, the second only
+  // adds what is still missing. A base past what the directory holds means a
+  // writer reset it after a mismatch: this snapshot no longer extends it.
+  auto durable = channel.durableOps.load();
+  if (0 != durable) {
+    // A directory emptied or truncated behind the channel's back would
+    // otherwise be "already durable" and never rewritten. A stat is the price
+    // of not trusting a count; the extension's tail check covers content.
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(dir / opsNodesFile, ec);
+    if (ec ||
+        size < opsSegmentHeaderBytes + static_cast<std::uintmax_t>(durable) *
+                                           sizeof(CompactOpNode)) {
+      channel.durableOps.store(0);
+      return false;
+    }
+  }
+  if (snapshot.baseOps_ > durable) return false;
+  if (snapshot.endOps() > durable) {
+    const auto skip = durable - snapshot.baseOps_;
+    SegmentedOpsSpool::SegmentRange range{
+        .firstOpIndex = durable + 1,
+        .nodes        = snapshot.nodes().subspan(skip),
+        .priorTail    = 0 == durable ? std::nullopt
+                        : 0 == skip  ? snapshot.baseTail_
+                                    : std::optional{snapshot.nodes_[skip - 1]}};
     // The operations, as the array-backed tree they are held as: the file is
     // what the spool has in memory, so reading it back is a read rather than
-    // a parse and a replay.
-    //
-    // Costs about sixteen times what the compact binary encoding did, which
-    // for a file that never leaves the machine buys back the whole of the
-    // decode. Writing it is a copy rather than an encode, so saving got
-    // quicker as well as loading.
-    //
-    // It also settles what the emission order should be, by removing the
-    // question: FLAG_SEQUENTIAL dropped a record's name when it continued the
-    // one before it, which made the order records were written in worth
-    // arguing about. Fixed-size nodes carry no names at all -- they are worked
+    // a parse and a replay. Fixed-size nodes carry no names -- they are worked
     // out from the tree -- so there is no ordering left to choose.
     //
-    // Written by the spool rather than here. This used to be an ofstream of
-    // its own, which meant the shape of a segment file was agreed between two
-    // pieces of code instead of known by one -- and that is the arrangement
-    // that let migration step 1 change the shape and go unnoticed.
-    if (!opsSpool.writeSegmentFile(dir / opsNodesFile)) {
+    // Written by the spool rather than here: the shape of a segment file is
+    // known by one piece of code, and it is the same code whether the file is
+    // made whole or extended by a snapshot.
+    const auto result = SegmentedOpsSpool::writeSegmentRange(
+        dir / opsNodesFile, range,
+        0 == durable ? SegmentedOpsSpool::SegmentWriteMode::Replace
+                     : SegmentedOpsSpool::SegmentWriteMode::Extend,
+        fsync);
+    if (SegmentedOpsSpool::SegmentWriteResult::BaseMismatch == result) {
+      channel.durableOps.store(0);
+      return false;
+    }
+    if (SegmentedOpsSpool::SegmentWriteResult::Written != result) {
       throw std::runtime_error("cannot write the operations to " +
                                (dir / opsNodesFile).string());
     }
+    channel.durableOps.store(snapshot.endOps());
   }
-  {
+
+  // A later snapshot's tables describe a later store; an earlier one landing
+  // after it would put the directory back in time.
+  if (snapshot.sequence_ > channel.tablesSequence) {
     // The scroll table and the link table: what a span's ScrollId means, and
     // what connects one span to another. Without the first an id is a number
     // with no content behind it, so both are as much a part of the store as
@@ -4211,7 +4342,12 @@ void Store::save(const std::string &directory) const {
     // different times -- both are per-store side tables replayed at load --
     // and being plaintext was buying only that they could be read with `less`,
     // which tools/xudu-dump buys back. See R11 and store_tables.hpp.
-    writeStoreTables(dir / storeTablesName, storeTables());
+    if (fsync) {
+      writeStoreTablesDurably(dir / storeTablesName, snapshot.tables_);
+    } else {
+      writeStoreTables(dir / storeTablesName, snapshot.tables_);
+    }
+    channel.tablesSequence = snapshot.sequence_;
     // The files this container replaced, taken with it. Leaving them would
     // leave two answers to what the scrolls are, and load() refuses a
     // directory holding both rather than choosing.
@@ -4222,6 +4358,22 @@ void Store::save(const std::string &directory) const {
       std::filesystem::remove(dir / superseded, ignored);
     }
   }
+  if (fsync) syncDirectory(dir);
+  return true;
+}
+
+void Store::save(const std::string &directory) const {
+  // The one path to a directory is snapshot-then-write; this is it on the
+  // calling thread. A refused extension means the directory is not what the
+  // channel believed (and the writer has reset the belief), so the retake is
+  // the whole store -- which is what every save used to write.
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    if (SnapshotWriter::write(saveSnapshot(directory),
+                              SnapshotDurability::Buffered)) {
+      return;
+    }
+  }
+  throw std::runtime_error("cannot write the operations to " + directory);
 }
 
 StoreTables Store::storeTables() const {
@@ -4457,6 +4609,7 @@ void Store::load(const std::string &directory) {
         "and this build does not read one. See design R11.");
   }
 
+  snapshotChannel_.reset();
   opsSpool.clear();
   linkTable.clear();
   externals.clear();
@@ -4483,6 +4636,11 @@ void Store::load(const std::string &directory) {
       throw std::runtime_error("cannot read the operations in " +
                                (dir / opsNodesFile).string());
     }
+    // What the directory durably holds is what was just read from it, so the
+    // next save of it writes only what is added after this.
+    snapshotChannel_ = std::make_shared<SnapshotChannel>(
+        std::filesystem::absolute(dir).lexically_normal(),
+        static_cast<std::uint32_t>(opsSpool.size()));
   } else if (std::filesystem::exists(dir / opsExportFile)) {
     // What saveOsmicText() wrote: the operations in canonical OSMIC text.
     // Read back and written out as nodes by the next save().

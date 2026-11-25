@@ -1,6 +1,7 @@
 #include "segmented_ops_spool.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
@@ -725,27 +726,102 @@ bool SegmentedOpsSpool::flush() {
 
 bool SegmentedOpsSpool::writeSegmentFile(
     const std::filesystem::path &path) const {
-  const int fd =
-      ::open(path.string().c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  if (fd < 0) {
-    return false;
-  }
   // Index 1 because this writes the whole spool, and index 0 is the arena's
   // state-zero slot rather than an operation anything holds.
-  if (!writeSegmentHeader(fd, segmentHeaderFor(1, opCount))) {
-    ::close(fd);
-    return false;
+  return SegmentWriteResult::Written ==
+         writeSegmentRange(
+             path,
+             SegmentRange{.firstOpIndex = 1,
+                          .nodes        = std::span<const CompactOpNode>(
+                              0 != opCount ? rawOps() + 1 : nullptr, opCount),
+                          .priorTail = std::nullopt},
+             SegmentWriteMode::Replace, false);
+}
+
+namespace {
+bool syncFd(const int fd) {
+#ifdef _WIN32
+  return 0 == ::_commit(fd);
+#else
+  return 0 == ::fsync(fd);
+#endif
+}
+
+bool writeCount(const int fd, const std::uint64_t count) {
+  return ::lseek(fd, static_cast<off_t>(offsetof(OpsSegmentHeader, nodeCount)),
+                 SEEK_SET) >= 0 &&
+         ::write(fd, &count, sizeof(count)) ==
+             static_cast<ssize_t>(sizeof(count));
+}
+} // namespace
+
+SegmentedOpsSpool::SegmentWriteResult SegmentedOpsSpool::writeSegmentRange(
+    const std::filesystem::path &path, const SegmentRange &range,
+    const SegmentWriteMode mode, const bool sync) {
+  const bool extend = SegmentWriteMode::Extend == mode;
+  const auto before = static_cast<std::uint64_t>(range.firstOpIndex) - 1U;
+  const auto bytes  = range.nodes.size_bytes();
+
+  const int fd = ::open(path.string().c_str(),
+                        extend ? O_RDWR : (O_WRONLY | O_CREAT | O_TRUNC), 0644);
+  if (fd < 0) {
+    // An extension of a file that is not there is a wrong picture of the
+    // directory, which a Replace repairs; anything else is the filesystem.
+    return extend && ENOENT == errno ? SegmentWriteResult::BaseMismatch
+                                     : SegmentWriteResult::IoFailed;
   }
-  if (0 != opCount) {
-    const auto bytes = opCount * sizeof(CompactOpNode);
-    if (::lseek(fd, static_cast<off_t>(opsSegmentHeaderBytes), SEEK_SET) < 0 ||
-        ::write(fd, rawOps() + 1, bytes) != static_cast<ssize_t>(bytes)) {
-      ::close(fd);
-      return false;
+  const auto fail = [&](const SegmentWriteResult why) {
+    ::close(fd);
+    return why;
+  };
+
+  if (extend) {
+    struct stat st{};
+    std::string why;
+    if (0 != ::fstat(fd, &st)) return fail(SegmentWriteResult::IoFailed);
+    const auto shape =
+        readSegmentShape(fd, static_cast<std::uint64_t>(st.st_size), why);
+    if (!shape || shape->nodes != before || 1U != shape->header.firstOpIndex) {
+      return fail(SegmentWriteResult::BaseMismatch);
+    }
+    if (0 != before) {
+      CompactOpNode last;
+      const auto at = static_cast<off_t>(opsSegmentHeaderBytes +
+                                         (before - 1U) * sizeof(CompactOpNode));
+      if (!range.priorTail ||
+          ::pread(fd, &last, sizeof(last), at) !=
+              static_cast<ssize_t>(sizeof(last)) ||
+          0 != std::memcmp(&last, &*range.priorTail, sizeof(last))) {
+        return fail(SegmentWriteResult::BaseMismatch);
+      }
+    }
+  } else if (1U != range.firstOpIndex ||
+             !writeSegmentHeader(fd, segmentHeaderFor(1, 0))) {
+    return fail(SegmentWriteResult::IoFailed);
+  }
+
+  if (0 != bytes) {
+    const auto at = static_cast<off_t>(opsSegmentHeaderBytes +
+                                       before * sizeof(CompactOpNode));
+    if (::lseek(fd, at, SEEK_SET) < 0 ||
+        ::write(fd, range.nodes.data(), bytes) != static_cast<ssize_t>(bytes)) {
+      return fail(SegmentWriteResult::IoFailed);
     }
   }
+  // The nodes are durable before the count that names them.
+  if (sync && !syncFd(fd)) return fail(SegmentWriteResult::IoFailed);
+  if (!writeCount(fd, before + range.nodes.size()) || (sync && !syncFd(fd))) {
+    return fail(SegmentWriteResult::IoFailed);
+  }
   ::close(fd);
-  return true;
+  return SegmentWriteResult::Written;
+}
+
+std::vector<CompactOpNode>
+SegmentedOpsSpool::copyOpsAfter(const std::uint32_t sinceExclusive) const {
+  if (sinceExclusive >= opCount) return {};
+  const auto *const first = rawOps() + sinceExclusive + 1U;
+  return std::vector<CompactOpNode>(first, rawOps() + opCount + 1U);
 }
 
 void SegmentedOpsSpool::clear() {

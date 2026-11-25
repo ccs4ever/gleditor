@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -366,6 +367,63 @@ public:
    * would rewrite the tail with the identical bytes at the identical offsets.
    */
   [[nodiscard]] bool writeSegmentFile(const std::filesystem::path &path) const;
+
+  /// What writeSegmentRange() is asked to do with the file at its path.
+  enum class SegmentWriteMode : std::uint8_t {
+    /// Make the file hold exactly these operations, replacing whatever was
+    /// there. What a first save, a save to another directory and a save after
+    /// a refused extension are.
+    Replace,
+    /// Append these operations to a file that already holds exactly the ones
+    /// before them -- the incremental save.
+    Extend,
+  };
+  enum class SegmentWriteResult : std::uint8_t {
+    Written,
+    /// Extend only: the file does not hold exactly firstOpIndex - 1
+    /// operations, or its last one is not the one the caller expected. The
+    /// file is untouched; the caller's picture of it is wrong and a Replace
+    /// is the way out.
+    BaseMismatch,
+    /// The file could not be written. What it holds is unspecified.
+    IoFailed,
+  };
+  struct SegmentRange {
+    /// The spool index of nodes[0].
+    std::uint32_t firstOpIndex{1};
+    std::span<const CompactOpNode> nodes;
+    /// Extend only: the operation at firstOpIndex - 1, which the file's last
+    /// node must equal byte for byte. A header count alone cannot tell two
+    /// stores that grew to the same length apart.
+    std::optional<CompactOpNode> priorTail;
+  };
+
+  /**
+   * @brief The one writer of an operations segment file's bytes.
+   *
+   * writeSegmentFile() is this over the whole spool with Replace, and the
+   * snapshot writer is this over the operations a snapshot copied, so the
+   * shape of a segment file is still known by one piece of code. Static and
+   * taking its nodes by span because a snapshot writer runs on a thread that
+   * must not touch a spool the owner is appending to.
+   *
+   * Nodes first and the count last, as flush() does, so a crash between the
+   * two leaves a header that undercounts whole nodes -- which
+   * readSegmentShape() recovers -- never one that promises nodes that are not
+   * there. @p sync makes the nodes durable before the count and the count
+   * before returning; without it the bytes are in the page cache, which is
+   * what Store::save() has always meant.
+   */
+  [[nodiscard]] static SegmentWriteResult
+  writeSegmentRange(const std::filesystem::path &path,
+                    const SegmentRange &range, SegmentWriteMode mode,
+                    bool sync);
+
+  /// A copy of operations (sinceExclusive, size()], in index order: O(what is
+  /// copied). The copy aliases nothing -- the arena may be appended to and its
+  /// sealed segments unmapped while a snapshot holding this is written.
+  [[nodiscard]] std::vector<CompactOpNode>
+  copyOpsAfter(std::uint32_t sinceExclusive) const;
 
   /**
    * @brief Seal the active segment and start a new one at @p newActivePath.

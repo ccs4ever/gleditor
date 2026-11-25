@@ -30,12 +30,15 @@
 #define XUDU_STORE_H
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <iosfwd>
 #include <map>
+#include <memory>
 #include <memory_resource>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -119,6 +122,99 @@ struct SingleVersionDiff {
 struct MultiVersionDiffResult {
   std::vector<SingleVersionDiff> versions;
   std::size_t totalComparedVersions{0};
+};
+
+/// The durability the snapshot writer asks of the filesystem.
+enum class SnapshotDurability : std::uint8_t {
+  /// Bytes in the page cache, which is what Store::save() has always meant.
+  Buffered,
+  /// ops.nodes, store.tables and their directory fsynced: what a capture's
+  /// Committed record needs to be able to claim.
+  Fsync,
+};
+
+/// What every snapshot of one store directory shares: how many operations the
+/// directory durably holds and which tables image it holds, behind the one
+/// mutex that serializes writes into it. Opaque; Store and SnapshotWriter are
+/// its only users.
+struct SnapshotChannel;
+
+/**
+ * @brief An immutable, self-consistent copy of what a Store has not yet saved.
+ *
+ * Taken on the owner thread by Store::saveSnapshot() in O(operations added
+ * since the directory last became durable) and written by a SnapshotWriter on
+ * any thread. It copies, and aliases nothing the owner can still change: the
+ * operations are nodes copied out of the spool (the spool's sealed segments
+ * are immutable, but a segment may be unmapped and the tail is still being
+ * appended to, so sharing them by reference would buy a lifetime problem to
+ * save a copy of a delta), and the side tables are a value.
+ */
+class StoreSnapshot {
+public:
+  [[nodiscard]] const std::filesystem::path &directory() const noexcept {
+    return directory_;
+  }
+  /// Operations the snapshot's nodes come after: it holds (baseOps, endOps].
+  [[nodiscard]] std::uint32_t baseOps() const noexcept { return baseOps_; }
+  [[nodiscard]] std::uint32_t endOps() const noexcept {
+    return baseOps_ + static_cast<std::uint32_t>(nodes_.size());
+  }
+  [[nodiscard]] std::span<const CompactOpNode> nodes() const noexcept {
+    return nodes_;
+  }
+  [[nodiscard]] const StoreTables &tables() const noexcept { return tables_; }
+  /// Orders this snapshot against the others of its directory: a tables image
+  /// is only written if no later snapshot's has been.
+  [[nodiscard]] std::uint64_t sequence() const noexcept { return sequence_; }
+
+private:
+  friend class Store;
+  friend class SnapshotWriter;
+  std::filesystem::path directory_;
+  std::uint32_t baseOps_{0};
+  std::vector<CompactOpNode> nodes_;
+  /// The operation at baseOps_, which the file must end with for an extension
+  /// to be the extension of the right file.
+  std::optional<CompactOpNode> baseTail_;
+  StoreTables tables_;
+  std::uint64_t sequence_{0};
+  std::shared_ptr<SnapshotChannel> channel_;
+  /// Kept so the permascroll the operations name is flushed before they are:
+  /// UserPermascroll is thread-safe, and flushing at write time covers at
+  /// least everything the snapshot's operations can name.
+  std::shared_ptr<UserPermascroll> permascroll_;
+};
+
+/**
+ * @brief Writes a StoreSnapshot: the second half of Store::save(), safe to run
+ *        on a worker thread.
+ *
+ * Touches only the snapshot and the directory, never the Store, so the owner
+ * keeps mutating while it runs. Writes into one directory are serialized, and
+ * the directory's durable operation count advances only when a write has
+ * completed, so a refused or crashed write is retaken from where the
+ * directory really is rather than from where it was hoped to be.
+ */
+class SnapshotWriter {
+public:
+  /**
+   * @brief Make @p snapshot durable in its directory.
+   *
+   * Flushes the permascroll, writes ops.nodes through
+   * SegmentedOpsSpool::writeSegmentRange (the one writer), writes
+   * store.tables and removes the files it superseded.
+   *
+   * @return false when the directory did not hold the operations the snapshot
+   *         extends -- another writer got there first with a different
+   *         history, the file was removed, the directory is not the one the
+   *         snapshot was taken against. Nothing was changed; the directory's
+   *         bookkeeping is reset so the next Store::saveSnapshot() copies
+   *         everything.
+   * @throws std::runtime_error when the files cannot be written.
+   */
+  static bool write(const StoreSnapshot &snapshot,
+                    SnapshotDurability durability = SnapshotDurability::Fsync);
 };
 
 /**
@@ -1286,6 +1382,25 @@ public:
    */
   void save(const std::string &directory) const;
 
+  /**
+   * @brief Copy what @p directory does not durably hold yet, on the owner.
+   *
+   * O(operations since the directory last became durable), not O(store): the
+   * file already has the rest. Seals pending metadata first, as save() does,
+   * so the snapshot names every operation the store holds now. The store may
+   * be mutated freely afterwards; the snapshot is unaffected.
+   *
+   * Concurrent snapshots of one directory are chained, not serialized at
+   * snapshot time: each copies from the count the directory *durably* holds,
+   * so a snapshot taken while an earlier one is still being written
+   * includes the earlier one's operations and does not depend on it
+   * completing, whichever write finishes first. See SnapshotWriter.
+   *
+   * save() is saveSnapshot() followed by SnapshotWriter::write() on this
+   * thread, so there is one path to the directory.
+   */
+  [[nodiscard]] StoreSnapshot saveSnapshot(const std::string &directory) const;
+
   /// Construct the persistent side tables for this store.
   [[nodiscard]] StoreTables storeTables() const;
 
@@ -1445,6 +1560,10 @@ private:
   void sealPendingMetadataAsCells() const;
 
   std::shared_ptr<UserPermascroll> userPermascroll_;
+  /// How much of which directory is durably this store's operations. Shared
+  /// with the snapshots taken from it, so a write on a worker advances it.
+  /// Reset by load(), and replaced when a snapshot names another directory.
+  mutable std::shared_ptr<SnapshotChannel> snapshotChannel_;
   DocumentId documentId_;
   /// Scrolls other than the local spool, in the order they were first
   /// recorded. A span's ScrollId is one more than the index here, so that zero
