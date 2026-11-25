@@ -181,6 +181,7 @@ auto IoHost::cancelWaiter(const WaiterCell waiter) -> WaiterCancelResult {
       if (it->second.waiter == waiter) {
         vm_.retireAwait(it->second.cursor, it->second.cursorIncarnation,
                         it->second.continuation);
+        routes_.erase(it->second.continuation);
         parked_.erase(it);
         break;
       }
@@ -205,12 +206,53 @@ void IoHost::retireRequest(const RequestCell request) {
   service_.retireRequest(request);
 }
 
+auto IoHost::routeWake(FrontendToken token, FrontendRunner &runner)
+    -> std::expected<void, WakeRouteError> {
+  requireOwner();
+  const auto matches = std::ranges::any_of(parked_, [&](const auto &entry) {
+    const auto &parked = entry.second;
+    return parked.continuation == token.continuation &&
+           parked.request == token.request && parked.waiter == token.waiter;
+  });
+  if (!matches) return std::unexpected{WakeRouteError::NotParked};
+  const auto continuation = token.continuation;
+  const auto [at, inserted] =
+      routes_.try_emplace(continuation, WakeRoute{&runner, std::move(token)});
+  static_cast<void>(at);
+  if (!inserted) return std::unexpected{WakeRouteError::AlreadyRouted};
+  return {};
+}
+
+auto IoHost::takeResumedOutcome(const zigzag::CellRef cursor,
+                                const ContinuationId continuation)
+    -> std::optional<OutcomeCell> {
+  requireOwner();
+  const auto incarnation = arena_.incarnationOf(cursor);
+  if (!incarnation) return std::nullopt;
+  const auto outcome = vm_.takeAwaitOutcome(cursor, *incarnation, continuation);
+  if (outcome) vm_.retireAwait(cursor, *incarnation, continuation);
+  return outcome;
+}
+
+void IoHost::collectWake(const ContinuationId continuation,
+                         const FrontendWake why,
+                         std::vector<PendingWake> &wakes) {
+  const auto it = routes_.find(continuation);
+  if (it == routes_.end()) return;
+  wakes.push_back({std::move(it->second), why});
+  routes_.erase(it);
+}
+
 auto IoHost::pumpIo(const std::size_t workBudget) -> std::size_t {
   requireOwner();
   if (workBudget == 0) return 0;
   const auto completed  = service_.pump(workBudget);
   std::size_t work      = completed;
   std::size_t remaining = workBudget - std::min(workBudget, completed);
+  // Wakeups are delivered after the pass so a runner that re-awaits from
+  // inside wake() sees a consistent parked set and cannot be revisited by
+  // the loop that woke it.
+  std::vector<PendingWake> wakes;
 
   while (remaining > 0 && !parked_.empty()) {
     auto it = parked_.lower_bound(nextVisit_);
@@ -224,6 +266,7 @@ auto IoHost::pumpIo(const std::size_t workBudget) -> std::size_t {
 
     if (!arena_.matches(parked.cursor, parked.cursorIncarnation) ||
         !arena_.matches(parked.request.cell, parked.request.incarnation)) {
+      collectWake(parked.continuation, FrontendWake::Abandoned, wakes);
       abandon(parked);
       parked_.erase(it);
       continue;
@@ -232,6 +275,7 @@ auto IoHost::pumpIo(const std::size_t workBudget) -> std::size_t {
     if (!status.outcome) continue;
     if (!arena_.matches(status.outcome->cell, status.outcome->incarnation) ||
         !ioOutcomeTag(arena_, *status.outcome)) {
+      collectWake(parked.continuation, FrontendWake::Abandoned, wakes);
       abandon(parked);
       parked_.erase(it);
       continue;
@@ -241,12 +285,17 @@ auto IoHost::pumpIo(const std::size_t workBudget) -> std::size_t {
         vm_.resumeAwait(parked.cursor, parked.cursorIncarnation,
                         parked.continuation, *status.outcome);
     if (!resumed.success) {
+      collectWake(parked.continuation, FrontendWake::Abandoned, wakes);
       abandon(parked);
       parked_.erase(it);
       continue;
     }
     service_.retireWaiter(parked.waiter);
+    collectWake(parked.continuation, FrontendWake::Resumable, wakes);
     parked_.erase(it);
+  }
+  for (auto &wake : wakes) {
+    wake.route.runner->wake(std::move(wake.route.token), wake.why);
   }
   return work;
 }

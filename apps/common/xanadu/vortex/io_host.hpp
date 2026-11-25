@@ -3,9 +3,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <map>
+#include <optional>
 #include <thread>
+#include <vector>
 
+#include "common/xanadu/vortex/frontend_token.hpp"
 #include "common/xanadu/vortex/io_profile.hpp"
 #include "common/xanadu/vortex/io_service.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
@@ -50,6 +54,30 @@ public:
                                 zigzag::CellRef requestSpec) -> SubmitResult;
   [[nodiscard]] auto admitOpen(OpenSpec spec) -> SubmitResult;
 
+  enum class WakeRouteError : std::uint8_t {
+    NotParked,     ///< no parked await matches the token's request, waiter
+                   ///< and continuation
+    AlreadyRouted, ///< the continuation already has a runner
+  };
+  /// Bind a parked await's wakeup to its owning runner (plan §10). The
+  /// token must name an await this host parked; when `pumpIo` later resumes
+  /// (or abandons) that cursor, the same token is handed to @p runner. The
+  /// runner must outlive the route: a cancelled waiter drops it silently and
+  /// ~IoHost drops what is left without calling anyone. Host-side by nature:
+  /// the route is native state beside the parked entry it belongs to.
+  [[nodiscard]] auto routeWake(FrontendToken token, FrontendRunner &runner)
+      -> std::expected<void, WakeRouteError>;
+
+  /// A runner that is not stepping an Await opcode collects the outcome
+  /// `pumpIo` delivered to a woken token: the VM's parked outcome for
+  /// @p continuation on @p cursor, retired in the same call so it can be
+  /// taken once. nullopt when nothing was delivered (or the outcome cell was
+  /// rolled back); the runner then re-awaits the same request, which
+  /// rematerializes it.
+  [[nodiscard]] auto takeResumedOutcome(zigzag::CellRef cursor,
+                                        ContinuationId continuation)
+      -> std::optional<OutcomeCell>;
+
   /// The budget covers service completions and waiter checks/resumptions.
   /// Pending waiters are visited round-robin, so a large parked set cannot
   /// monopolize the owner thread or starve later entries.
@@ -64,7 +92,18 @@ private:
     ContinuationId continuation{};
   };
 
+  struct WakeRoute {
+    FrontendRunner *runner{};
+    FrontendToken token;
+  };
+  struct PendingWake {
+    WakeRoute route;
+    FrontendWake why{};
+  };
+
   void requireOwner() const;
+  void collectWake(ContinuationId continuation, FrontendWake why,
+                   std::vector<PendingWake> &wakes);
   void abandon(ParkedAwait &parked) noexcept;
   /// The VM-facing await handler: awaitCell with its exceptions turned into
   /// a typed refusal value.
@@ -77,6 +116,7 @@ private:
   const IoExecutionProfile profile_;
   const std::thread::id owner_;
   std::map<std::uint64_t, ParkedAwait> parked_;
+  std::map<ContinuationId, WakeRoute> routes_;
   std::uint64_t nextId_{1};
   std::uint64_t nextVisit_{1};
 };

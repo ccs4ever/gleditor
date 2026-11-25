@@ -51,6 +51,9 @@ enum class IoCellTag : std::uint8_t {
   /// intervals, map reservation and phase live in the coordinator's pending
   /// record and the journal, and the cell's decimal fields only mirror them.
   Capture,
+  /// The managed `IoSubmissionValue` tagged sum a frontend binds and matches
+  /// (plan §10): Admitted{request} or Refused{outcome}, never both.
+  Submission,
 };
 
 enum class IoOutcomeTag : std::uint8_t {
@@ -105,6 +108,7 @@ using ReadObservationCell = IoCellHandle<IoCellTag::ReadObservation>;
 using WaiterCell          = IoCellHandle<IoCellTag::Waiter>;
 using CaptureCell         = IoCellHandle<IoCellTag::Capture>;
 using CaptureReceiptCell  = IoCellHandle<IoCellTag::CaptureReceipt>;
+using SubmissionCell      = IoCellHandle<IoCellTag::Submission>;
 
 /// A private, untagged structural cell: a field occurrence, clone view or
 /// queue head.
@@ -238,6 +242,39 @@ requestCapability(const zigzag::ArenaManifold &arena,
 [[nodiscard]] std::expected<std::vector<RequestCell>, IoCellError>
 queuedRequests(const zigzag::ArenaManifold &arena, const IoCellSchema &schema,
                EndpointCell endpoint);
+
+/// Which arm of the managed `IoSubmissionValue` sum a submission cell holds.
+enum class IoSubmissionTag : std::uint8_t { Admitted, Refused };
+
+/// Mint the `Admitted{request}` arm. The request is reached through a clone
+/// view like every other reference to a request, so the sum never becomes a
+/// second inbound neighbour of the request; release it with
+/// releaseSubmissionCell before retiring the request.
+[[nodiscard]] std::expected<SubmissionCell, IoCellError>
+makeAdmittedSubmissionCell(zigzag::ArenaManifold &arena,
+                           const IoCellSchema &schema, RequestCell request);
+/// Mint the `Refused{outcome}` arm over a Rejected outcome cell.
+[[nodiscard]] std::expected<SubmissionCell, IoCellError>
+makeRefusedSubmissionCell(zigzag::ArenaManifold &arena,
+                          const IoCellSchema &schema, OutcomeCell outcome);
+/// The pattern accessors: which arm @p submission holds (MalformedGraph when
+/// it holds neither or both), and the payload of that arm. The wrong arm's
+/// accessor answers WrongTag, so an await can never be handed a refusal.
+[[nodiscard]] std::expected<IoSubmissionTag, IoCellError>
+submissionTag(const zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+              SubmissionCell submission);
+[[nodiscard]] std::expected<RequestCell, IoCellError>
+submissionRequest(const zigzag::ArenaManifold &arena,
+                  const IoCellSchema &schema, SubmissionCell submission);
+[[nodiscard]] std::expected<OutcomeCell, IoCellError>
+submissionOutcome(const zigzag::ArenaManifold &arena,
+                  const IoCellSchema &schema, SubmissionCell submission);
+/// Take the sum out of its referent's clone rank and free its cells. The
+/// referent (request or outcome) is untouched, so a request whose last view
+/// this was becomes reapable again.
+void releaseSubmissionCell(zigzag::ArenaManifold &arena,
+                           const IoCellSchema &schema,
+                           SubmissionCell submission) noexcept;
 
 /// An outcome cell. Rejected has no request, since nothing was admitted;
 /// every other tag is the one terminal outcome of @p request.

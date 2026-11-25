@@ -24,9 +24,10 @@ constexpr std::array<std::string_view, ioDimensionCount> dimensionNames{
     "d.io.waiter",  "d.io.occurrence", "d.io.queue",      "d.io.clone",
     "d.io.source",  "d.io.range",      "d.io.provenance", "d.io.lease"};
 
-constexpr std::array<std::string_view, 10> cellTagNames{
-    "Endpoint", "Capability",      "Request",        "Payload", "Progress",
-    "Outcome",  "ReadObservation", "CaptureReceipt", "Waiter",  "Capture"};
+constexpr std::array<std::string_view, 11> cellTagNames{
+    "Endpoint", "Capability", "Request",         "Payload",
+    "Progress", "Outcome",    "ReadObservation", "CaptureReceipt",
+    "Waiter",   "Capture",    "Submission"};
 
 constexpr std::array<std::string_view, 12> outcomeTagNames{
     "Rejected",        "Complete",  "EndOfStream", "Partial",
@@ -577,6 +578,129 @@ makeOutcomeCell(ArenaManifold &arena, const IoCellSchema &schema,
     return OutcomeCell{.cell        = outcome->cell,
                        .incarnation = outcome->incarnation};
   });
+}
+
+std::expected<SubmissionCell, IoCellError>
+makeAdmittedSubmissionCell(ArenaManifold &arena, const IoCellSchema &schema,
+                           const RequestCell request) {
+  if (!schemaCurrent(arena, schema)) {
+    return std::unexpected{IoCellError::StaleSchema};
+  }
+  if (const auto ok = require(arena, request); !ok) {
+    return std::unexpected{ok.error()};
+  }
+  return transact(arena, [&]() -> std::expected<SubmissionCell, IoCellError> {
+    const auto submission = mint(arena, "admitted", IoCellTag::Submission);
+    if (!submission) return std::unexpected{submission.error()};
+    const auto field = attachClonedField(arena, schema, submission->cell,
+                                         IoDimension::Request, request.cell);
+    if (!field) return std::unexpected{field.error()};
+    return SubmissionCell{.cell        = submission->cell,
+                          .incarnation = submission->incarnation};
+  });
+}
+
+std::expected<SubmissionCell, IoCellError>
+makeRefusedSubmissionCell(ArenaManifold &arena, const IoCellSchema &schema,
+                          const OutcomeCell outcome) {
+  if (!schemaCurrent(arena, schema)) {
+    return std::unexpected{IoCellError::StaleSchema};
+  }
+  if (const auto tag = ioOutcomeTag(arena, outcome); !tag) {
+    return std::unexpected{tag.error()};
+  }
+  return transact(arena, [&]() -> std::expected<SubmissionCell, IoCellError> {
+    const auto submission = mint(arena, "refused", IoCellTag::Submission);
+    if (!submission) return std::unexpected{submission.error()};
+    const auto field = attachClonedField(arena, schema, submission->cell,
+                                         IoDimension::Outcome, outcome.cell);
+    if (!field) return std::unexpected{field.error()};
+    return SubmissionCell{.cell        = submission->cell,
+                          .incarnation = submission->incarnation};
+  });
+}
+
+std::expected<IoSubmissionTag, IoCellError>
+submissionTag(const ArenaManifold &arena, const IoCellSchema &schema,
+              const SubmissionCell submission) {
+  if (!schemaCurrent(arena, schema)) {
+    return std::unexpected{IoCellError::StaleSchema};
+  }
+  if (const auto ok = require(arena, submission); !ok) {
+    return std::unexpected{ok.error()};
+  }
+  const bool admitted =
+      arena
+          .linked(submission.cell, schema.dim(IoDimension::Request),
+                  DimVector::POS)
+          .has_value();
+  const bool refused =
+      arena
+          .linked(submission.cell, schema.dim(IoDimension::Outcome),
+                  DimVector::POS)
+          .has_value();
+  if (admitted == refused) return std::unexpected{IoCellError::MalformedGraph};
+  return admitted ? IoSubmissionTag::Admitted : IoSubmissionTag::Refused;
+}
+
+std::expected<RequestCell, IoCellError>
+submissionRequest(const ArenaManifold &arena, const IoCellSchema &schema,
+                  const SubmissionCell submission) {
+  const auto tag = submissionTag(arena, schema, submission);
+  if (!tag) return std::unexpected{tag.error()};
+  if (*tag != IoSubmissionTag::Admitted) {
+    return std::unexpected{IoCellError::WrongTag};
+  }
+  const auto canonical =
+      canonicalOfField(arena, schema, submission.cell, IoDimension::Request);
+  if (!canonical) return std::unexpected{canonical.error()};
+  return handleOf<IoCellTag::Request>(arena, *canonical);
+}
+
+std::expected<OutcomeCell, IoCellError>
+submissionOutcome(const ArenaManifold &arena, const IoCellSchema &schema,
+                  const SubmissionCell submission) {
+  const auto tag = submissionTag(arena, schema, submission);
+  if (!tag) return std::unexpected{tag.error()};
+  if (*tag != IoSubmissionTag::Refused) {
+    return std::unexpected{IoCellError::WrongTag};
+  }
+  const auto canonical =
+      canonicalOfField(arena, schema, submission.cell, IoDimension::Outcome);
+  if (!canonical) return std::unexpected{canonical.error()};
+  return handleOf<IoCellTag::Outcome>(arena, *canonical);
+}
+
+void releaseSubmissionCell(ArenaManifold &arena, const IoCellSchema &schema,
+                           const SubmissionCell submission) noexcept {
+  if (!arena.matches(submission.cell, submission.incarnation)) return;
+  try {
+    std::vector<CellRef> owned{submission.cell};
+    for (const auto field : {IoDimension::Request, IoDimension::Outcome}) {
+      detachClonedField(arena, schema, submission.cell, field);
+      const auto dim = schema.dim(field);
+      const auto occurrence =
+          arena.linked(submission.cell, dim, DimVector::POS);
+      if (!occurrence) continue;
+      owned.push_back(*occurrence);
+      if (const auto view = arena.linked(*occurrence, dim, DimVector::POS)) {
+        static_cast<void>(arena.unlink(*occurrence, dim, DimVector::POS));
+        owned.push_back(*view);
+      }
+      static_cast<void>(arena.unlink(submission.cell, dim, DimVector::POS));
+    }
+    for (const auto cell : owned | std::views::reverse) {
+      const auto incarnation = arena.incarnationOf(cell);
+      if (!incarnation) continue;
+      if (const auto freed = arena.freeCell(cell, *incarnation); !freed) {
+        GLEDITOR_LOG_DEBUG("vortex.io.cells", "submission cell kept: {}",
+                           zigzag::toString(freed.error()));
+      }
+    }
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN("vortex.io.cells", "submission release stopped: {}",
+                      error.what());
+  }
 }
 
 std::expected<PayloadCell, IoCellError>
