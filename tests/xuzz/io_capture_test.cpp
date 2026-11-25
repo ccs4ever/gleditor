@@ -1946,7 +1946,11 @@ TEST_F(IoCaptureTest, UnsyncedDirectoryAfterCompactionRenameKeepsSequence) {
   // to fsync, so the replacement is in place but unacknowledged.
   std::filesystem::permissions(dir_, std::filesystem::perms::owner_write |
                                          std::filesystem::perms::owner_exec);
-  const auto compacted = journal.compact({});
+  const auto keepNothing = [](std::span<const CaptureJournalRecord>)
+      -> std::expected<std::vector<CaptureJournalRecord>, IoErrorInfo> {
+    return std::vector<CaptureJournalRecord>{};
+  };
+  const auto compacted = journal.compactWhere(keepNothing);
   std::filesystem::permissions(dir_, std::filesystem::perms::owner_all);
   ASSERT_FALSE(compacted.has_value());
   EXPECT_EQ(compacted.error().code, IoErrorCode::BackendFailure);
@@ -1958,6 +1962,68 @@ TEST_F(IoCaptureTest, UnsyncedDirectoryAfterCompactionRenameKeepsSequence) {
   CaptureJournal reopened(journalPath_, std::nullopt);
   EXPECT_EQ(reopened.recover().status, CaptureJournalStatus::Clean);
   EXPECT_EQ(reopened.maxCaptureId(), CaptureId{4});
+}
+
+TEST_F(IoCaptureTest, ACompactionNeverErasesARecordAppendedWhileItChooses) {
+  CaptureJournal journal(journalPath_, std::nullopt);
+  CaptureJournalRecord record;
+  ASSERT_TRUE(journal.appendRecord(CaptureJournalRecordKind::Append, 1, record)
+                  .has_value());
+  ASSERT_TRUE(journal.appendRecord(CaptureJournalRecordKind::Append, 2, record)
+                  .has_value());
+
+  // A worker's step appends capture 2's Appended record at the very moment
+  // the owner has read the journal and is choosing what to keep. Capture 2 is
+  // live, so the choice keeps what it saw of it. The append can only run
+  // before the read or after the rewrite; a separate read and rewrite let it
+  // land between them, where the rename erased it.
+  std::atomic<bool> started{false};
+  std::thread worker;
+  std::size_t seen  = 0;
+  const auto select = [&](const std::span<const CaptureJournalRecord> view)
+      -> std::expected<std::vector<CaptureJournalRecord>, IoErrorInfo> {
+    seen   = view.size();
+    worker = std::thread([&] {
+      started.store(true);
+      EXPECT_TRUE(
+          journal.appendRecord(CaptureJournalRecordKind::Appended, 2, record)
+              .has_value());
+    });
+    while (!started.load()) std::this_thread::yield();
+    std::vector<CaptureJournalRecord> keep;
+    for (const auto &kept : view) {
+      if (kept.captureId == 2) keep.push_back(kept);
+    }
+    return keep;
+  };
+  ASSERT_TRUE(journal.compactWhere(select).has_value());
+  worker.join();
+
+  EXPECT_EQ(seen, 2U);
+  CaptureJournal reopened(journalPath_, std::nullopt);
+  const auto view = reopened.recover();
+  ASSERT_EQ(view.status, CaptureJournalStatus::Clean);
+  ASSERT_EQ(view.records.size(), 2U);
+  EXPECT_EQ(view.records[0].kind, CaptureJournalRecordKind::Append);
+  EXPECT_EQ(view.records[1].kind, CaptureJournalRecordKind::Appended)
+      << "the worker's record survives, after the compaction";
+  EXPECT_EQ(view.records[0].captureId, CaptureId{2});
+}
+
+TEST_F(IoCaptureTest, ACompactionRefusedByItsChoiceLeavesTheFileAlone) {
+  CaptureJournal journal(journalPath_, std::nullopt);
+  CaptureJournalRecord record;
+  ASSERT_TRUE(journal.appendRecord(CaptureJournalRecordKind::Append, 1, record)
+                  .has_value());
+  const auto before = std::filesystem::file_size(journalPath_);
+  const auto refuse = [](std::span<const CaptureJournalRecord>)
+      -> std::expected<std::vector<CaptureJournalRecord>, IoErrorInfo> {
+    return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded, 77});
+  };
+  const auto refused = journal.compactWhere(refuse);
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error().stableDetail, 77U);
+  EXPECT_EQ(std::filesystem::file_size(journalPath_), before);
 }
 
 TEST_F(IoCaptureTest, ABoundOfZeroHoldsNothingAndNulloptIsUnbounded) {
@@ -2771,6 +2837,83 @@ TEST_F(IoCaptureTest, ACommitWhileAStepIsInFlightIsRefusedNotDoubled) {
   auto second = world->coordinator->continueCommit(
       prepared->capture, outcomeOf(*world, std::get<CommitPending>(first)));
   EXPECT_TRUE(std::holds_alternative<CommitPending>(second));
+}
+
+/// A sink whose sync() parks the worker until the test lets it go.
+class SyncGatedSink final : public CaptureByteSink {
+public:
+  explicit SyncGatedSink(CaptureByteSink &inner) : inner_(inner) {}
+  auto append(const std::span<const std::byte> bytes)
+      -> xanadu::PrimediaSpan override {
+    return inner_.append(bytes);
+  }
+  auto sync() -> bool override {
+    entered.store(true);
+    while (!open.load()) std::this_thread::yield();
+    return inner_.sync();
+  }
+  auto highWaterBytes() const -> std::uint64_t override {
+    return inner_.highWaterBytes();
+  }
+  auto read(const xanadu::PrimediaSpan &span) const
+      -> std::optional<std::vector<std::byte>> override {
+    return inner_.read(span);
+  }
+  std::atomic<bool> entered{false};
+  std::atomic<bool> open{false};
+
+private:
+  CaptureByteSink &inner_;
+};
+
+TEST_F(IoCaptureTest, ARetiredCapturesJournalHoldOutlivesItsRunningStep) {
+  RecordingSink recording;
+  SyncGatedSink sink(recording);
+  auto world      = boot(sink, journalPath_);
+  auto registered = registerPinned(*world, transientRef(90),
+                                   bytesOf("first capture and second capture"));
+  ASSERT_TRUE(registered.has_value());
+  const auto mark = world->arena.mark();
+  const auto one  = prepareAndAppend(*world, rangeOf(*registered, 0, 13));
+  ASSERT_TRUE(one.has_value());
+  const auto held = world->coordinator->journal().heldBytes();
+  ASSERT_GT(held, 0U);
+  // What a capture of one piece holds at prepare: every record it may write.
+  const auto worstCase =
+      captureJournalFramedBytes(CaptureJournalRecordKind::Append, 1) +
+      captureJournalFramedBytes(CaptureJournalRecordKind::Appended, 1) +
+      captureJournalFramedBytes(CaptureJournalRecordKind::Committed) +
+      captureJournalFramedBytes(CaptureJournalRecordKind::Aborted);
+
+  auto first = world->coordinator->commit(one->capture, one->outcome);
+  ASSERT_TRUE(std::holds_alternative<CommitPending>(first));
+  std::thread worker([&] { world->scheduler->runOnWorker(); });
+  while (!sink.entered.load()) std::this_thread::yield();
+
+  // The capture's cell dies while its step is parked before the Appended
+  // record. The owner notices on its next call and retires the capture.
+  ASSERT_TRUE(world->arena.release(mark));
+  // Only prepared: the parked step holds the sink, so a second append's
+  // worker turn would wait behind it.
+  const PayloadRange secondRange[]{rangeOf(*registered, 14, 14)};
+  ASSERT_TRUE(std::holds_alternative<Prepared>(
+      world->coordinator->prepare(secondRange)));
+  const auto heldWithTwo = world->coordinator->journal().heldBytes();
+  EXPECT_EQ(heldWithTwo, held + worstCase)
+      << "the dead capture's bytes are still promised to the step that is "
+         "about to append under them";
+
+  sink.open.store(true);
+  worker.join();
+  EXPECT_EQ(countKind(journalPath_, CaptureJournalRecordKind::Appended), 1U)
+      << "the record the hold was for was not refused";
+
+  // The turn has ended: the next owner call hands the bytes back.
+  const PayloadRange thirdRange[]{rangeOf(*registered, 28, 4)};
+  ASSERT_TRUE(std::holds_alternative<Prepared>(
+      world->coordinator->prepare(thirdRange)));
+  EXPECT_EQ(world->coordinator->journal().heldBytes(), worstCase * 2)
+      << "the second and third captures; the dead one's bytes came back";
 }
 
 // -- real sinks ---------------------------------------------------------------

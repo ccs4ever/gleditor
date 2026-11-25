@@ -45,6 +45,10 @@ constexpr std::string_view kindName(const CaptureJournalRecordKind kind) {
 
 /// compactJournal's stableDetail when nothing in the journal can retire.
 constexpr std::uint32_t kDetailNothingRetires = 5;
+/// prepare's stableDetail when the translation map is full and every slot in
+/// it is pending or pinned, so eviction had nothing it may take: the cause is
+/// captures in flight or awaiting reconcile(), not a bound set too low.
+constexpr std::uint32_t kDetailNothingEvictable = 6;
 
 constexpr IoDimension kOutcomeDim = IoDimension::Outcome;
 constexpr IoDimension kFieldRank  = IoDimension::Occurrence;
@@ -362,6 +366,12 @@ void CaptureAppendAdapter::complete(const std::uint32_t key) noexcept {
   reports_.erase(key);
 }
 
+auto CaptureAppendAdapter::turnRunning(const std::uint32_t key) const noexcept
+    -> bool {
+  const std::lock_guard lock(mutex_);
+  return running_.contains(key);
+}
+
 void CaptureAppendAdapter::abandonStaged(
     const OwnerCell specification) noexcept {
   abandon(static_cast<std::uint32_t>(specification));
@@ -638,7 +648,16 @@ auto CaptureCoordinator::stateCounts() const noexcept -> StateCounts {
                      .evictedCaptures     = evictedCaptures_};
 }
 
+void CaptureCoordinator::releaseDeferredHolds() {
+  std::erase_if(deferredHolds_, [&](const DeferredHold &deferred) {
+    if (adapter_.turnRunning(deferred.key)) return false;
+    journal_.unhold(deferred.bytes);
+    return true;
+  });
+}
+
 void CaptureCoordinator::sweepDead() {
+  releaseDeferredHolds();
   for (auto it = pending_.begin(); it != pending_.end();) {
     if (arena_.matches(it->first.first, it->first.second)) {
       ++it;
@@ -684,7 +703,23 @@ void CaptureCoordinator::retire(
     adapter_.complete(static_cast<std::uint32_t>(pending.spec->cell));
   }
   if (pending.durable) {
-    adapter_.complete(static_cast<std::uint32_t>(pending.durable->spec));
+    const auto key = static_cast<std::uint32_t>(pending.durable->spec);
+    adapter_.complete(key);
+    // The step is the coordinator's own request: retire it so a capture that
+    // dies mid-step does not leave its state (and a unit of the host's request
+    // budget) in the service for good. The request is cancelled if the turn
+    // has not begun; one already running ends on its own and is dropped then.
+    if (pending.durable->request) {
+      service_.retireRequest(*pending.durable->request);
+    }
+    if (pending.heldJournalBytes != 0 && adapter_.turnRunning(key)) {
+      // The worker's step is still appending this capture's record under the
+      // budget held for it. Freeing the hold now would let another capture
+      // take the same bytes, and the record already promised durable could
+      // then be refused. It is freed once the turn has ended.
+      deferredHolds_.push_back({key, pending.heldJournalBytes});
+      pending.heldJournalBytes = 0;
+    }
   }
   releaseLeases(pending);
   journal_.unhold(pending.heldJournalBytes);
@@ -780,61 +815,67 @@ auto CaptureCoordinator::hasCommittedSlotOver(
 }
 
 auto CaptureCoordinator::compactJournal() -> std::expected<void, IoErrorInfo> {
-  const auto view = journal_.recover();
-  if (view.status != CaptureJournalStatus::Clean) {
-    return std::unexpected(
-        view.refusal.value_or(IoErrorInfo{IoErrorCode::PersistenceRefusal, 0}));
-  }
-  // A capture's records are kept whole or not at all, so recovery sees the
-  // same attempt it saw before. Kept: anything not yet resolved (live,
-  // pinned, awaiting publication) and a capture whose translations survive a
-  // restart, which only a durable origin's can (a process-local source id
-  // means nothing to the next process). Dropped: resolved and published
-  // captures, certain aborts and released pins -- plan §9, records retire
-  // once their capture is resolved.
-  std::unordered_set<CaptureId> live;
-  for (const auto &[key, pending] : pending_) {
-    static_cast<void>(key);
-    live.insert(pending.captureId);
-  }
-  for (const auto &entry : pinned_) live.insert(entry.first);
-  for (const auto &entry : unpublished_) live.insert(entry.first);
-  // A durable capture is kept only while a committed translation still
-  // backs it: a durable origin is reachable by address forever, so what
-  // retires its records is eviction of the translation, not the source's
-  // death. Records whose translations were all evicted drop whole.
-  std::unordered_set<CaptureId> restartStable;
+  // The view is read, filtered and rewritten under one hold of the journal's
+  // lock (compactWhere): a worker's Appended or Committed that lands between
+  // a separate read and the rewrite would be erased by the rename.
+  std::size_t viewRecords = 0;
   std::unordered_set<CaptureId> evictedDurable;
-  for (const auto &record : view.records) {
-    if (record.kind != CaptureJournalRecordKind::Appended) continue;
-    const auto durable = [](const auto &interval) {
-      return interval.sourceKind == PayloadSourceKind::Durable;
-    };
-    if (!std::ranges::any_of(record.intervals, durable)) continue;
-    if (std::ranges::any_of(record.intervals, [&](const auto &interval) {
-          return durable(interval) && hasCommittedSlotOver(interval);
-        })) {
-      restartStable.insert(record.captureId);
-    } else if (!live.contains(record.captureId)) {
-      evictedDurable.insert(record.captureId);
+  std::size_t keptRecords = 0;
+  const auto select = [&](const std::span<const CaptureJournalRecord> view)
+      -> std::expected<std::vector<CaptureJournalRecord>, IoErrorInfo> {
+    viewRecords = view.size();
+    // A capture's records are kept whole or not at all, so recovery sees the
+    // same attempt it saw before. Kept: anything not yet resolved (live,
+    // pinned, awaiting publication) and a capture whose translations survive a
+    // restart, which only a durable origin's can (a process-local source id
+    // means nothing to the next process). Dropped: resolved and published
+    // captures, certain aborts and released pins -- plan §9, records retire
+    // once their capture is resolved.
+    std::unordered_set<CaptureId> live;
+    for (const auto &[key, pending] : pending_) {
+      static_cast<void>(key);
+      live.insert(pending.captureId);
     }
-  }
-  std::vector<CaptureJournalRecord> keep;
-  for (const auto &record : view.records) {
-    if (live.contains(record.captureId) ||
-        restartStable.contains(record.captureId)) {
-      keep.push_back(record);
+    for (const auto &entry : pinned_) live.insert(entry.first);
+    for (const auto &entry : unpublished_) live.insert(entry.first);
+    // A durable capture is kept only while a committed translation still
+    // backs it: a durable origin is reachable by address forever, so what
+    // retires its records is eviction of the translation, not the source's
+    // death. Records whose translations were all evicted drop whole.
+    std::unordered_set<CaptureId> restartStable;
+    for (const auto &record : view) {
+      if (record.kind != CaptureJournalRecordKind::Appended) continue;
+      const auto durable = [](const auto &interval) {
+        return interval.sourceKind == PayloadSourceKind::Durable;
+      };
+      if (!std::ranges::any_of(record.intervals, durable)) continue;
+      if (std::ranges::any_of(record.intervals, [&](const auto &interval) {
+            return durable(interval) && hasCommittedSlotOver(interval);
+          })) {
+        restartStable.insert(record.captureId);
+      } else if (!live.contains(record.captureId)) {
+        evictedDurable.insert(record.captureId);
+      }
     }
-  }
-  std::unordered_set<CaptureId> kept;
-  for (const auto &record : keep) kept.insert(record.captureId);
-  retainedCaptures_ = kept.size();
-  if (keep.size() == view.records.size()) {
-    // Nothing retires: a rewrite would only churn the disk.
-    return std::unexpected(
-        IoErrorInfo{IoErrorCode::BudgetExceeded, kDetailNothingRetires});
-  }
-  auto compacted = journal_.compact(keep);
+    std::vector<CaptureJournalRecord> keep;
+    for (const auto &record : view) {
+      if (live.contains(record.captureId) ||
+          restartStable.contains(record.captureId)) {
+        keep.push_back(record);
+      }
+    }
+    std::unordered_set<CaptureId> kept;
+    for (const auto &record : keep) kept.insert(record.captureId);
+    retainedCaptures_ = kept.size();
+    keptRecords       = keep.size();
+    if (keep.size() == view.size()) {
+      // Nothing retires: a rewrite would only churn the disk.
+      return std::unexpected(
+          IoErrorInfo{IoErrorCode::BudgetExceeded, kDetailNothingRetires});
+    }
+    return keep;
+  };
+  auto compacted = journal_.compactWhere(select);
   if (!compacted) {
     GLEDITOR_LOG_WARN(kLog, "journal compaction refused: code {}",
                       toString(compacted.error().code));
@@ -844,7 +885,7 @@ auto CaptureCoordinator::compactJournal() -> std::expected<void, IoErrorInfo> {
   GLEDITOR_LOG_INFO(kLog,
                     "journal compacted: {} of {} records kept, {} evicted "
                     "durable captures dropped",
-                    keep.size(), view.records.size(), evictedDurable.size());
+                    keptRecords, viewRecords, evictedDurable.size());
   return {};
 }
 
@@ -1161,13 +1202,20 @@ auto CaptureCoordinator::prepare(const std::span<const PayloadRange> selection,
       if (translationSlots_ + added > limits_.maxMapEntries) {
         reapUnreachableSlots();
       }
+      bool nothingEvictable = false;
       if (translationSlots_ + added > limits_.maxMapEntries) {
-        evictColdTranslations(translationSlots_ + added - limits_.maxMapEntries,
-                              protectFrom);
+        nothingEvictable =
+            0 ==
+            evictColdTranslations(
+                translationSlots_ + added - limits_.maxMapEntries, protectFrom);
       }
       if (translationSlots_ + added > limits_.maxMapEntries ||
           pieces.size() > policy.maxPieces) {
-        failure = {IoErrorCode::BudgetExceeded, 3};
+        failure = {IoErrorCode::BudgetExceeded,
+                   nothingEvictable &&
+                           translationSlots_ + added > limits_.maxMapEntries
+                       ? kDetailNothingEvictable
+                       : 3};
         failed  = true;
         break;
       }

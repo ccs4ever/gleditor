@@ -188,6 +188,9 @@ public:
   /// until then the entries are what commit() and wasExecuted() prove
   /// against.
   void complete(std::uint32_t key) noexcept;
+  /// Whether @p key's worker turn is inside execute() right now: the one
+  /// moment a retired capture's step may still be writing its journal record.
+  [[nodiscard]] auto turnRunning(std::uint32_t key) const noexcept -> bool;
   void abandonStaged(OwnerCell specification) noexcept override;
 
   /// The permascroll span execute() allocated for @p key, when the append
@@ -634,6 +637,9 @@ private:
   using PendingKey = std::pair<zigzag::CellRef, AllocationIncarnation>;
 
   void sweepDead();
+  /// Free journal holds a retired capture could not give back while its
+  /// worker step was still appending under them (see retire()). Owner only.
+  void releaseDeferredHolds();
   /// Make room when a bound is about to refuse (plan §14: no unbounded
   /// capture maps, and no ceiling a user works around by deleting the
   /// journal): forget committed translations of origins nothing can read
@@ -768,6 +774,12 @@ private:
   AdapterKey appendKey_{captureAppendAdapterKey};
   CaptureCoordinatorLimits limits_;
   std::map<PendingKey, PendingCapture> pending_;
+  /// Journal budget of retired captures whose worker step has not ended.
+  struct DeferredHold {
+    std::uint32_t key;
+    std::size_t bytes;
+  };
+  std::vector<DeferredHold> deferredHolds_;
   CapturePublisher *publisher_{};
   std::map<CaptureId, PinnedCapture> pinned_;
   std::map<CaptureId, UnpublishedCapture> unpublished_;

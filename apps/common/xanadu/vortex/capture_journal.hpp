@@ -13,6 +13,8 @@
 #include <span>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/vortex/framed_log.hpp"
 #include "common/xanadu/vortex/io_error.hpp"
@@ -276,13 +278,27 @@ public:
   /// first record).
   [[nodiscard]] auto journalId() const noexcept -> std::uint64_t;
 
+  /// What compactWhere() is given: every record on disk, under the journal's
+  /// lock. Returns the records to keep (a capture's whole or not at all), or
+  /// the refusal that ends the compaction untouched.
+  using CompactionSelector = gleditor::cpp26::function_ref<
+      std::expected<std::vector<CaptureJournalRecord>, IoErrorInfo>(
+          std::span<const CaptureJournalRecord>)>;
+
   /// Retire records (plan §9: records retire once their capture is
-  /// resolved). Atomically replaces the file with a fresh Identity record
-  /// (carrying the current id floor) followed by @p keep, renumbered gapless;
-  /// a crash before the rename leaves the old journal whole. Holds are
-  /// untouched. Refuses when the file is poisoned or the rewrite would not
-  /// fit the journal's own budget.
-  [[nodiscard]] auto compact(std::span<const CaptureJournalRecord> keep)
+  /// resolved). Reads the file, lets @p select choose what to keep from what
+  /// it read, and atomically replaces the file with a fresh Identity record
+  /// (carrying the current id floor) followed by the choice, renumbered
+  /// gapless -- all under one hold of the journal's mutex, because a worker
+  /// appends Appended and Committed records and a choice made from an earlier
+  /// read would erase one that landed since. @p select runs under that mutex:
+  /// it must not call the journal. A crash before the rename leaves the old
+  /// journal whole. Holds are untouched. Refuses when the file is poisoned,
+  /// unreadable, or the rewrite would not fit the journal's own budget.
+  ///
+  /// May wait for a worker's in-flight fsync (the mutex is held across it);
+  /// the owner's compaction under bound pressure is the one place it does.
+  [[nodiscard]] auto compactWhere(CompactionSelector select)
       -> std::expected<void, IoErrorInfo>;
 
   [[nodiscard]] auto path() const -> const std::filesystem::path &;
@@ -299,6 +315,11 @@ private:
   static auto scanImage(std::span<const std::byte> bytes, CaptureId &maxId,
                         std::uint64_t &nextSequence, std::uint64_t &journalId)
       -> FramedLogScan;
+  /// recover() and the rewrite of compactWhere(), for a caller already
+  /// holding mutex_.
+  [[nodiscard]] auto recoverLocked() const -> CaptureJournalRecovery;
+  [[nodiscard]] auto compactLocked(std::span<const CaptureJournalRecord> keep)
+      -> std::expected<void, IoErrorInfo>;
   /// Bytes the Identity record will add to a journal not yet written.
   [[nodiscard]] auto pendingIdentityBytes() const noexcept -> std::size_t;
   [[nodiscard]] auto identityRecord() const -> CaptureJournalRecord;

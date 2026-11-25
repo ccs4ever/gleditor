@@ -471,6 +471,10 @@ auto CaptureJournal::appendRecord(const CaptureJournalRecordKind kind,
 
 auto CaptureJournal::recover() const -> CaptureJournalRecovery {
   const std::lock_guard lock(mutex_);
+  return recoverLocked();
+}
+
+auto CaptureJournal::recoverLocked() const -> CaptureJournalRecovery {
   CaptureJournalRecovery recovery;
   if (log_.poisoned()) {
     // This instance already knows the file may not end on a record
@@ -532,9 +536,25 @@ auto CaptureJournal::recover() const -> CaptureJournalRecovery {
   return recovery;
 }
 
-auto CaptureJournal::compact(const std::span<const CaptureJournalRecord> keep)
+auto CaptureJournal::compactWhere(const CompactionSelector select)
     -> std::expected<void, IoErrorInfo> {
+  // The scan, the choice and the rewrite are one critical section: a worker's
+  // fsynced record cannot land between the view the choice was made from and
+  // the rename that replaces the file, so no record is ever erased unseen.
   const std::lock_guard lock(mutex_);
+  const auto view = recoverLocked();
+  if (view.status != CaptureJournalStatus::Clean) {
+    return std::unexpected(
+        view.refusal.value_or(IoErrorInfo{IoErrorCode::PersistenceRefusal, 0}));
+  }
+  const auto keep = select(view.records);
+  if (!keep) return std::unexpected(keep.error());
+  return compactLocked(*keep);
+}
+
+auto CaptureJournal::compactLocked(
+    const std::span<const CaptureJournalRecord> keep)
+    -> std::expected<void, IoErrorInfo> {
   if (log_.poisoned()) {
     return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
   }
