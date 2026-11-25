@@ -302,6 +302,34 @@ TEST(IoCellsTest, transientIoGraphRefusesSerializationByName) {
             zigzag::ArenaRefusal::RuntimeOnlyState);
 }
 
+TEST(IoCellsTest, requestGraphMintsOverAnArenaWithAShadowedBase) {
+  xanadu::Store store;
+  auto at          = store.sliceGenesis(xanadu::MicroversionId{});
+  at               = store.makeCell(at, "base");
+  const auto first = store.cellRefOf(at).value();
+  const auto base  = store.rebuildManifold(at);
+  ArenaManifold arena{&base, &store};
+  // Writing the base cell shadows it, which used to skew every later mint's
+  // incarnation lookup and make each handle read as stale.
+  ASSERT_TRUE(arena.setValueBits(first, xanadu::ValueKind::Int64, 1));
+  ASSERT_EQ(arena.shadowCount(), 1U);
+
+  const auto schema = makeIoCellSchema(arena);
+  ASSERT_TRUE(schema);
+  const auto endpoint = makeEndpointCell(arena, *schema);
+  ASSERT_TRUE(endpoint);
+  const auto capability = makeCapabilityCell(arena, *schema, *endpoint);
+  ASSERT_TRUE(capability);
+  const auto request = appendIoRequest(arena, *schema, *endpoint, *capability);
+  ASSERT_TRUE(request);
+  EXPECT_EQ(
+      ioCellTag(arena, request->request.cell, request->request.incarnation),
+      IoCellTag::Request);
+  EXPECT_TRUE(
+      arena.matches(request->request.cell, request->request.incarnation));
+  EXPECT_FALSE(arena.matches(first, request->request.incarnation));
+}
+
 TEST(IoCellsTest, exceptionMidRequestLeavesNoPartialGraph) {
   Topology t;
   const auto before = t.arena.cellCount();

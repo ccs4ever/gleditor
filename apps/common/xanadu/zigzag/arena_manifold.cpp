@@ -2452,7 +2452,20 @@ std::optional<std::uint32_t> ArenaManifold::shadow(const CellRef ref) {
   copy.spanCount   = 0;
   copy.linkOffset  = static_cast<std::uint32_t>(links_.size());
   copy.linkCount   = 0;
+  // incarnations_ is parallel to slots_ (release() truncates both to the same
+  // count), so a shadow takes one too. Without it every later mint's identity
+  // is read from the wrong index, and a base cell aliases a runtime cell's.
+  const auto incarnation = nextAllocationIncarnation();
+  if (!incarnation) {
+    throw std::overflow_error("ArenaManifold allocation incarnation exhausted");
+  }
   slots_.push_back(copy);
+  try {
+    incarnations_.push_back(*incarnation);
+  } catch (...) {
+    slots_.pop_back();
+    throw;
+  }
 
   // birthOp comes across untouched, so the shadow's name is the base cell's
   // ref and not refOf(dense): an overlaid cell is the *same* cell.

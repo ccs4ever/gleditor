@@ -2028,4 +2028,54 @@ TEST(ArenaManifoldTest, promoteStillWorksAfterAReleaseDetachedASpace) {
   EXPECT_EQ(after.textOf(promoted->cells.front(), doc.store), "fresh");
 }
 
+TEST(ArenaManifoldTest, shadowedBaseCellsKeepIncarnationsParallelToSlots) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  const auto mark = arena.mark();
+  ASSERT_TRUE(arena.setValueBits(doc.first, ValueKind::Int64, 5));
+  ASSERT_TRUE(arena.setValueBits(doc.second, ValueKind::Int64, 6));
+  ASSERT_EQ(arena.shadowCount(), 2U);
+
+  const auto shadowFirst  = arena.incarnationOf(doc.first);
+  const auto shadowSecond = arena.incarnationOf(doc.second);
+  ASSERT_TRUE(shadowFirst);
+  ASSERT_TRUE(shadowSecond);
+  EXPECT_NE(*shadowFirst, *shadowSecond);
+
+  // The mint after two shadows must read its own identity, not the shadows'.
+  const auto fresh            = arena.makeCell("fresh");
+  const auto freshIncarnation = arena.incarnationOf(fresh);
+  ASSERT_TRUE(freshIncarnation);
+  EXPECT_TRUE(arena.matches(fresh, *freshIncarnation));
+  EXPECT_FALSE(arena.matches(doc.first, *freshIncarnation));
+  EXPECT_FALSE(arena.matches(doc.second, *freshIncarnation));
+  EXPECT_NE(*freshIncarnation, *shadowFirst);
+  EXPECT_NE(*freshIncarnation, *shadowSecond);
+
+  ASSERT_TRUE(arena.release(mark));
+  EXPECT_FALSE(arena.matches(fresh, *freshIncarnation));
+  EXPECT_FALSE(arena.matches(doc.first, *shadowFirst));
+}
+
+TEST(ArenaManifoldTest, runtimeOnlyGuardHoldsOverAShadowedBase) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  ASSERT_TRUE(arena.setValueBits(doc.first, ValueKind::Int64, 5));
+  const auto runtime = arena.makeCell("runtime");
+  ASSERT_TRUE(arena.incarnationOf(runtime));
+  ASSERT_TRUE(arena.markRuntimeOnly(runtime));
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, runtime));
+
+  const auto before = doc.store.opCount();
+  const auto refused =
+      zigzag::promoteOrRefuse(doc.store, doc.at, arena, doc.first);
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error(), zigzag::PromotionRefusal::RuntimeOnlyState);
+  EXPECT_EQ(doc.store.opCount(), before);
+  EXPECT_EQ(arena.exportPrefix(arena.mark()).error(),
+            zigzag::ArenaRefusal::RuntimeOnlyState);
+}
+
 } // namespace
