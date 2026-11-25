@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <memory>
+#include <ranges>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include <gleditor/logging.hpp>
 
@@ -229,6 +232,59 @@ void reapIoRequest(ArenaManifold &arena, const IoCellSchema &schema,
   detachFromRank(arena, request.cell, schema.dim(IoDimension::Queue));
   detachClonedField(arena, schema, request.cell, IoDimension::Endpoint);
   detachClonedField(arena, schema, request.cell, IoDimension::Capability);
+  // Only the request's own subgraph is freed, and only once nothing else
+  // holds it. A capture's Request field is a view on the request's clone rank;
+  // it names the request until the capture detaches, and the request's outcome
+  // is how the capture's commit finds the append's result. Freeing under it
+  // would strand both, so the request stays whole until the views are gone.
+  const auto cloneDim = schema.dim(IoDimension::Clone);
+  try {
+    if (arena.linked(request.cell, cloneDim, DimVector::POS) ||
+        arena.linked(request.cell, cloneDim, DimVector::NEG)) {
+      GLEDITOR_LOG_DEBUG("vortex.io.cells",
+                         "request still has clone views; not freed");
+      return;
+    }
+    // The cells hanging off the request by the dimensions only a request
+    // owns: its endpoint and capability fields, its outcome and what an
+    // outcome carries. Clone, queue and the waiter and request fields are the
+    // shared ranks, so a walk along them would leave the request's graph.
+    constexpr std::array ownedDims{
+        IoDimension::Endpoint, IoDimension::Capability, IoDimension::Outcome,
+        IoDimension::Payload,  IoDimension::Source,     IoDimension::Occurrence,
+        IoDimension::State,    IoDimension::Progress,   IoDimension::Range};
+    std::vector<CellRef> owned{request.cell};
+    std::unordered_set<CellRef> seen{request.cell};
+    for (std::size_t at = 0; at < owned.size(); ++at) {
+      for (const auto which : ownedDims) {
+        const auto next =
+            arena.linked(owned[at], schema.dim(which), DimVector::POS);
+        if (next && seen.insert(*next).second) owned.push_back(*next);
+      }
+    }
+    for (const auto cell : owned) {
+      // A view this graph filed on a canonical cell's clone rank, such as an
+      // outcome's endpoint field, leaves the rank with the cell.
+      if (cell != request.cell) detachFromRank(arena, cell, cloneDim);
+      for (const auto which : ownedDims) {
+        if (arena.linked(cell, schema.dim(which), DimVector::POS)) {
+          static_cast<void>(
+              arena.unlink(cell, schema.dim(which), DimVector::POS));
+        }
+      }
+    }
+    for (const auto cell : owned | std::views::reverse) {
+      const auto incarnation = arena.incarnationOf(cell);
+      if (!incarnation) continue;
+      if (const auto freed = arena.freeCell(cell, *incarnation); !freed) {
+        GLEDITOR_LOG_DEBUG("vortex.io.cells", "request cell kept: {}",
+                           zigzag::toString(freed.error()));
+      }
+    }
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN("vortex.io.cells", "request reap stopped: {}",
+                      error.what());
+  }
 }
 
 std::string_view toString(const IoCellTag tag) noexcept {

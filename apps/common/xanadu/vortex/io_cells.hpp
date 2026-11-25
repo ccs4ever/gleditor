@@ -185,11 +185,15 @@ void detachClonedField(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
                        zigzag::CellRef owner, IoDimension field) noexcept;
 /// Take a retired request out of its endpoint's queue and its endpoint and
 /// capability clone ranks, so those ranks (walked on every submit) stay as
-/// long as the live requests rather than every request ever made. The
-/// request keeps its outcome link: a late poll still resolves. The request,
-/// occurrence and view cells themselves are not freed: an ArenaManifold
-/// releases cells only by truncating to a mark, so arena cell count still
-/// grows with every request; only the rank walks are bounded here.
+/// long as the live requests rather than every request ever made, then free
+/// the request's own graph (its field occurrences and views, its outcome and
+/// what the outcome carries) with ArenaManifold::freeCell, so a long-lived
+/// arena holds the live requests' cells and not every request's. Retiring is
+/// the consumer saying it has read the outcome: a late poll of a reaped
+/// request finds a stale handle, and an outcome's payload and observation
+/// leases are dropped with its cells. A request that still has views on its
+/// clone rank (a capture's Request field) is detached from the queue and the
+/// endpoint and capability ranks but kept whole until the views leave.
 void reapIoRequest(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
                    RequestCell request) noexcept;
 

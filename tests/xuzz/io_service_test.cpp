@@ -811,10 +811,10 @@ TEST(IoServiceTest, RealArenaBridgeMintsAndPublishesTypedRequestOutcome) {
   EXPECT_EQ(ioOutcomeTag(arena, *poll.outcome), IoOutcomeTag::Failed);
 }
 
-TEST(IoServiceTest, RetiredRequestPollResolvesOutcomeThroughArenaStore) {
-  // The FakeCells outcomeFor scans a vector; this drives the real
-  // ArenaIoCellStore::outcomeFor -- request -d.io.outcome-> outcome cell --
-  // through the same poll-after-retire path.
+TEST(IoServiceTest, RetiredRequestIsFreedAndALatePollFindsItStale) {
+  // The real ArenaIoCellStore, not FakeCells: retiring is the consumer saying
+  // it has read the outcome, and the reaper frees the request's cells through
+  // ArenaManifold::freeCell (P4), so a late poll has nothing left to resolve.
   zigzag::ArenaManifold arena;
   const auto schema = makeIoCellSchema(arena);
   ASSERT_TRUE(schema);
@@ -855,12 +855,74 @@ TEST(IoServiceTest, RetiredRequestPollResolvesOutcomeThroughArenaStore) {
   ASSERT_TRUE(outcome.has_value());
   EXPECT_EQ(ioOutcomeTag(arena, *outcome), IoOutcomeTag::Complete);
 
+  const auto liveBefore = arena.liveCells();
   service.retireRequest(request);
+  EXPECT_LT(arena.liveCells(), liveBefore) << "the request's cells are freed";
+  EXPECT_FALSE(arena.matches(request.cell, request.incarnation));
+  EXPECT_FALSE(arena.matches(outcome->cell, outcome->incarnation));
   const auto late = service.poll(request);
-  EXPECT_EQ(late.phase, IoPhase::Terminal);
-  ASSERT_TRUE(late.outcome.has_value());
-  EXPECT_EQ(*late.outcome, *outcome);
-  EXPECT_EQ(ioOutcomeTag(arena, *late.outcome), IoOutcomeTag::Complete);
+  EXPECT_FALSE(late.outcome.has_value());
+  EXPECT_EQ(ioOutcomeTag(arena, *outcome).error(), IoCellError::StaleCell);
+}
+
+TEST(IoServiceTest, TenThousandSubmitAndRetireCyclesLeaveTheArenaBounded) {
+  // P4: a service that retires what it serves does not grow its arena. The
+  // request's cells (request, field occurrences and views, outcome) are freed
+  // by the reaper and the slots reused; only the caller's own spec cell is
+  // the test's to free.
+  zigzag::ArenaManifold arena;
+  const auto schema = makeIoCellSchema(arena);
+  ASSERT_TRUE(schema);
+  const auto endpoint = makeEndpointCell(arena, *schema);
+  ASSERT_TRUE(endpoint);
+  const auto capability = makeCapabilityCell(arena, *schema, *endpoint);
+  ASSERT_TRUE(capability);
+  PayloadResolver payloads;
+  auto scheduler          = std::make_unique<FakeScheduler>();
+  FakeScheduler *scripted = scheduler.get();
+  FakeAdapter adapter;
+  ArenaIoCellStore cells(
+      arena, *schema, payloads,
+      [endpoint = *endpoint](CapabilityCell requestCapability, OwnerCell spec)
+          -> std::expected<CellRequest, IoErrorInfo> {
+        return CellRequest{.key                  = testKey,
+                           .capability           = requestCapability,
+                           .endpoint             = endpoint,
+                           .completionBoundBytes = 1024,
+                           .payloadBoundBytes    = 1024,
+                           .direction            = CellRequest::Direction::Read,
+                           .specification        = spec};
+      });
+  IoService service({8, 1024, 1024, 1024, 8}, std::move(scheduler), payloads,
+                    cells);
+  service.registerAdapter(testKey, adapter);
+
+  const auto cycle = [&](const std::size_t index) {
+    const auto specification = arena.makeCell("io request spec");
+    const auto submitted     = service.submit(*capability, specification);
+    ASSERT_TRUE(std::holds_alternative<Admitted>(submitted.value));
+    const auto request = std::get<Admitted>(submitted.value).request;
+    const auto token   = tokenOf(*scripted, index);
+    scripted->candidate(token, Complete{{}, {}, {}});
+    scripted->acknowledge(token);
+    static_cast<void>(service.pump(8));
+    ASSERT_TRUE(service.poll(request).outcome.has_value());
+    service.retireRequest(request);
+    ASSERT_TRUE(arena.freeCell(specification,
+                               arena.incarnationOf(specification).value()));
+  };
+
+  cycle(0);
+  const auto liveAfterOne      = arena.liveCells();
+  const auto slotsAfterOne     = arena.cellCount();
+  constexpr std::size_t stream = 10'000;
+  for (std::size_t i = 1; i <= stream; ++i) {
+    cycle(i);
+    if (::testing::Test::HasFatalFailure()) return;
+  }
+  EXPECT_EQ(arena.liveCells(), liveAfterOne);
+  EXPECT_EQ(arena.cellCount(), slotsAfterOne);
+  EXPECT_EQ(queuedRequests(arena, *schema, *endpoint)->size(), 0U);
 }
 
 TEST(IoSchedulerTest, BoundedPoolNeverRunsAdapterOnTheSubmittingThread) {

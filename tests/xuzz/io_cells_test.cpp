@@ -208,6 +208,85 @@ TEST(IoCellsTest, reapedRequestsLeaveTheRanksEverySubmitWalks) {
             capabilityCloneBefore);
 }
 
+TEST(IoCellsTest, reapedRequestsAreFreedSoTheArenaIsBoundedByLiveRequests) {
+  Topology t;
+  // A request with a terminal outcome, as the service reaps it.
+  const auto cycle = [&] {
+    const auto graph =
+        appendIoRequest(t.arena, t.schema, t.endpoint, t.capability).value();
+    const auto outcome = makeOutcomeCell(t.arena, t.schema, graph.request,
+                                         IoOutcomeTag::Complete)
+                             .value();
+    return std::pair{graph, outcome};
+  };
+  const auto warm = cycle();
+  reapIoRequest(t.arena, t.schema, warm.first.request);
+  const auto liveBefore  = t.arena.liveCells();
+  const auto slotsBefore = t.arena.cellCount();
+
+  // What one request costs while it is live, counted rather than assumed: the
+  // request, two field occurrences and two views, and its outcome.
+  const auto live = cycle();
+  EXPECT_EQ(t.arena.liveCells() - liveBefore, 6U);
+  reapIoRequest(t.arena, t.schema, live.first.request);
+  EXPECT_EQ(t.arena.liveCells(), liveBefore);
+
+  constexpr std::size_t stream = 10'000;
+  for (std::size_t i = 0; i < stream; ++i) {
+    const auto [graph, outcome] = cycle();
+    reapIoRequest(t.arena, t.schema, graph.request);
+    EXPECT_FALSE(
+        t.arena.matches(graph.request.cell, graph.request.incarnation));
+    EXPECT_FALSE(t.arena.matches(outcome.cell, outcome.incarnation));
+  }
+  EXPECT_EQ(t.arena.liveCells(), liveBefore);
+  EXPECT_EQ(t.arena.cellCount(), slotsBefore);
+  EXPECT_EQ(queuedRequests(t.arena, t.schema, t.endpoint)->size(), 0U);
+}
+
+TEST(IoCellsTest, aReapedHandleIsStaleEvenWhenItsSlotsAreReused) {
+  Topology t;
+  const auto first =
+      appendIoRequest(t.arena, t.schema, t.endpoint, t.capability).value();
+  reapIoRequest(t.arena, t.schema, first.request);
+  const auto second =
+      appendIoRequest(t.arena, t.schema, t.endpoint, t.capability).value();
+  // The slot came back under a new incarnation: the old handle names nothing,
+  // so the reaper cannot be turned on the new request through it.
+  EXPECT_EQ(second.request.cell, first.request.cell);
+  EXPECT_NE(second.request.incarnation, first.request.incarnation);
+  reapIoRequest(t.arena, t.schema, first.request);
+  EXPECT_TRUE(t.arena.matches(second.request.cell, second.request.incarnation));
+  EXPECT_EQ(queuedRequests(t.arena, t.schema, t.endpoint)->size(), 1U);
+  EXPECT_EQ(requestEndpoint(t.arena, t.schema, second.request), t.endpoint);
+}
+
+TEST(IoCellsTest, aRequestWithAViewOnItsCloneRankIsKeptWhole) {
+  Topology t;
+  const auto graph =
+      appendIoRequest(t.arena, t.schema, t.endpoint, t.capability).value();
+  const auto outcome =
+      makeOutcomeCell(t.arena, t.schema, graph.request, IoOutcomeTag::Complete)
+          .value();
+  // A capture's Request field: a view of the request on its clone rank.
+  const auto owner = t.arena.makeCell("capture");
+  ASSERT_TRUE(attachClonedField(t.arena, t.schema, owner, IoDimension::Request,
+                                graph.request.cell));
+  reapIoRequest(t.arena, t.schema, graph.request);
+  // Out of the queue and the endpoint ranks, but the request and its outcome
+  // stay until the view leaves: the capture reads the append's result there.
+  EXPECT_EQ(queuedRequests(t.arena, t.schema, t.endpoint)->size(), 0U);
+  EXPECT_TRUE(t.arena.matches(graph.request.cell, graph.request.incarnation));
+  EXPECT_TRUE(t.arena.matches(outcome.cell, outcome.incarnation));
+  EXPECT_EQ(t.arena.linked(graph.request.cell,
+                           t.schema.dim(IoDimension::Outcome), DimVector::POS),
+            outcome.cell);
+  detachClonedField(t.arena, t.schema, owner, IoDimension::Request);
+  reapIoRequest(t.arena, t.schema, graph.request);
+  EXPECT_FALSE(t.arena.matches(graph.request.cell, graph.request.incarnation));
+  EXPECT_FALSE(t.arena.matches(outcome.cell, outcome.incarnation));
+}
+
 TEST(IoCellsTest, capabilityOfAnotherEndpointIsRefusedUntouched) {
   Topology t;
   const auto other = makeEndpointCell(t.arena, t.schema);
