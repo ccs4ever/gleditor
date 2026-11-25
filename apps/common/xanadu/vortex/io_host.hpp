@@ -31,6 +31,13 @@ public:
       -> AwaitResult;
   [[nodiscard]] auto cancelWaiter(WaiterCell waiter) -> WaiterCancelResult;
   void retireWaiter(WaiterCell waiter);
+  /// Retire a request whose outcome the owner has fully consumed. Await-
+  /// driven requests have no other retirement path, so without this the
+  /// service's request index grows monotonically; call it only when the
+  /// outcome will never be polled or awaited again (a rolled-back outcome
+  /// cell may still need `ensureTerminalOutcome` rematerialization, so
+  /// retire after the arena state that could invalidate it is committed).
+  void retireRequest(RequestCell request);
 
   /// The immutable per-run profile applied before every admission below.
   [[nodiscard]] auto profile() const noexcept -> IoExecutionProfile;

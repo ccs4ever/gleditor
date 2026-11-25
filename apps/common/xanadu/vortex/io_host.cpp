@@ -137,6 +137,11 @@ void IoHost::retireWaiter(const WaiterCell waiter) {
   static_cast<void>(cancelWaiter(waiter));
 }
 
+void IoHost::retireRequest(const RequestCell request) {
+  requireOwner();
+  service_.retireRequest(request);
+}
+
 auto IoHost::pumpIo(const std::size_t workBudget) -> std::size_t {
   requireOwner();
   if (workBudget == 0) return 0;

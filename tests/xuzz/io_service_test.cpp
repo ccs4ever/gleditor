@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -36,9 +37,14 @@ public:
       -> std::expected<CellRequest, IoErrorInfo> override {
     if (rejectFreeze)
       return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+    // Per-submit endpoints let lane tests give each request its own
+    // endpoint; once the queue drains, `endpoint` is the fallback.
+    const auto endpointCell = endpointQueueIndex < endpointQueue.size()
+                                  ? endpointQueue[endpointQueueIndex++]
+                                  : endpoint;
     return CellRequest{.key                  = testKey,
                        .capability           = capability,
-                       .endpoint             = endpoint,
+                       .endpoint             = endpointCell,
                        .completionBoundBytes = completionBoundBytes,
                        .payloadBoundBytes    = payloadBoundBytes,
                        .direction            = direction,
@@ -68,13 +74,21 @@ public:
                Failed{error, {}, IoProgress{.phase = IoPhase::Terminal}})
         .value();
   }
-  auto publishTerminal(RequestCell, const IoOutcome &outcome,
+  auto publishTerminal(RequestCell request, const IoOutcome &outcome,
                        const IoProgress &, const std::optional<PayloadLease> &)
       -> std::expected<OutcomeCell, IoErrorInfo> override {
     outcomes.push_back(outcome);
     const OutcomeCell cell{nextCell++, 1};
     publishedOutcomes.push_back(cell);
+    requestOutcomes.emplace_back(request, cell);
     return cell;
+  }
+  [[nodiscard]] auto outcomeFor(const RequestCell request)
+      -> std::optional<OutcomeCell> override {
+    for (const auto &[req, cell] : requestOutcomes) {
+      if (req == request) return cell;
+    }
+    return std::nullopt;
   }
   auto mintOutcome(const IoOutcome &outcome)
       -> std::expected<OutcomeCell, IoErrorInfo> {
@@ -90,6 +104,7 @@ public:
   }
   auto mintWaiter(RequestCell request, OwnerWaiterRegistration registration)
       -> WaiterCell override {
+    if (failMintWaiter) return {};
     const WaiterCell waiter{nextCell++, 1};
     waiters.emplace_back(waiter, request, registration);
     return waiter;
@@ -100,14 +115,18 @@ public:
 
   bool rejectFreeze{};
   bool failMintRequest{};
+  bool failMintWaiter{};
   std::size_t completionBoundBytes{1024};
   std::size_t payloadBoundBytes{1024};
   std::optional<EndpointCell> endpoint;
+  std::vector<EndpointCell> endpointQueue;
+  std::size_t endpointQueueIndex{};
   CellRequest::Direction direction{CellRequest::Direction::Control};
   std::uint32_t nextCell{100};
   std::vector<RequestCell> mintedRequests;
   std::vector<IoOutcome> outcomes;
   std::vector<OutcomeCell> publishedOutcomes;
+  std::vector<std::pair<RequestCell, OutcomeCell>> requestOutcomes;
   std::size_t mintedEndpoints{};
   std::size_t mintedCapabilities{};
   std::vector<std::tuple<WaiterCell, RequestCell, OwnerWaiterRegistration>>
@@ -217,9 +236,15 @@ public:
     publishThread = std::this_thread::get_id();
     return OwnerPublication{completion.result.outcome};
   }
+  void abandonStaged(OwnerCell specification) noexcept override {
+    ++abandonCalls;
+    abandoned.push_back(specification);
+  }
   std::size_t prepareCalls{};
   std::size_t executeCalls{};
   std::size_t publishCalls{};
+  std::size_t abandonCalls{};
+  std::vector<OwnerCell> abandoned;
   std::thread::id publishThread;
 };
 
@@ -559,11 +584,13 @@ TEST(IoServiceTest, RealArenaBridgeMintsAndPublishesTypedRequestOutcome) {
       arena, *schema, payloads,
       [endpoint = *endpoint](CapabilityCell requestCapability, OwnerCell spec)
           -> std::expected<CellRequest, IoErrorInfo> {
-        return CellRequest{.key           = testKey,
-                           .capability    = requestCapability,
-                           .endpoint      = endpoint,
-                           .direction     = CellRequest::Direction::Read,
-                           .specification = spec};
+        return CellRequest{.key                  = testKey,
+                           .capability           = requestCapability,
+                           .endpoint             = endpoint,
+                           .completionBoundBytes = 1024,
+                           .payloadBoundBytes    = 1024,
+                           .direction            = CellRequest::Direction::Read,
+                           .specification        = spec};
       });
   IoService service({8, 1024, 1024, 1024, 8}, std::move(scheduler), payloads,
                     cells);
@@ -756,6 +783,232 @@ TEST(IoServiceTest, CloseWaitsForEndpointWorkAndBlocksLaterRequests) {
   const auto afterClose = harness.service.submit(testCapability, OwnerCell{13});
   EXPECT_TRUE(std::holds_alternative<Refused>(afterClose.value));
   EXPECT_EQ(harness.scheduler->entries.size(), 2U);
+}
+
+// -- M2/H2/M3/M4/M5/M12/M14/M15 regression coverage (plan §8.1) ------------
+
+TEST(IoServiceTest, RequestDeclaringNoOutputEnvelopeIsRefused) {
+  Harness harness;
+  harness.cells.completionBoundBytes = 0;
+  harness.cells.payloadBoundBytes    = 0;
+  const auto result = harness.service.submit(testCapability, testSpec);
+  ASSERT_TRUE(std::holds_alternative<Refused>(result.value));
+  EXPECT_TRUE(harness.scheduler->entries.empty());
+  EXPECT_TRUE(harness.cells.mintedRequests.empty());
+  // The refusal still mints a typed Rejected outcome for the caller.
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  const auto *failed = std::get_if<Failed>(&harness.cells.outcomes.front());
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::InvalidRequest);
+}
+
+TEST(IoServiceTest, OneZeroBoundStillAdmitsTheOtherChannel) {
+  Harness harness;
+  harness.cells.payloadBoundBytes = 0; // the completion channel stays open
+  const auto request              = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  EXPECT_EQ(harness.scheduler->entries.size(), 1U);
+}
+
+TEST(IoServiceTest, MintedRefusalCarriesItsTypedErrorFields) {
+  zigzag::ArenaManifold arena;
+  const auto schema = makeIoCellSchema(arena);
+  ASSERT_TRUE(schema);
+  PayloadResolver payloads;
+  ArenaIoCellStore cells(
+      arena, *schema, payloads,
+      [](CapabilityCell, OwnerCell) -> std::expected<CellRequest, IoErrorInfo> {
+        return CellRequest{};
+      });
+  const auto refusal = cells.mintRefusal({IoErrorCode::BudgetExceeded, 7});
+  ASSERT_TRUE(ioCellTag(arena, refusal.cell, refusal.incarnation));
+  EXPECT_EQ(*ioCellTag(arena, refusal.cell, refusal.incarnation),
+            IoCellTag::Outcome);
+  EXPECT_EQ(ioOutcomeTag(arena, refusal), IoOutcomeTag::Rejected);
+
+  // §3.2: a Rejected outcome names the IoErrorInfo that refused it, so
+  // BudgetExceeded and Unsupported stay distinguishable to readers.
+  const auto fieldValue =
+      [&](const std::string_view label) -> std::optional<std::string> {
+    auto at = arena.linked(refusal.cell, schema->dim(IoDimension::Occurrence),
+                           zigzag::DimVector::POS);
+    while (at) {
+      if (arena.textOf(*at) == label) {
+        const auto value = arena.linked(*at, schema->dim(IoDimension::State),
+                                        zigzag::DimVector::POS);
+        return value ? std::optional{arena.textOf(*value)} : std::nullopt;
+      }
+      at = arena.linked(*at, schema->dim(IoDimension::Occurrence),
+                        zigzag::DimVector::POS);
+    }
+    return std::nullopt;
+  };
+  EXPECT_EQ(fieldValue("errorCode"),
+            std::optional<std::string>{"BudgetExceeded"});
+  EXPECT_EQ(fieldValue("stableDetail"), std::optional<std::string>{"7"});
+}
+
+TEST(IoServiceTest, RefusedAdmissionAbandonsTheStagedSpecification) {
+  Harness harness;
+  harness.scheduler->reservationRefusal =
+      IoErrorInfo{IoErrorCode::BudgetExceeded};
+  const auto result = harness.service.submit(testCapability, testSpec);
+  ASSERT_TRUE(std::holds_alternative<Refused>(result.value));
+  // A refused submission consumes its staged entry exactly like execute
+  // would have, so staging tables cannot fill with dead specs.
+  ASSERT_EQ(harness.adapter.abandonCalls, 1U);
+  EXPECT_EQ(harness.adapter.abandoned, (std::vector<OwnerCell>{testSpec}));
+}
+
+TEST(IoServiceTest, TerminalWithoutExecuteStillAbandonsStagedSpecification) {
+  Harness harness;
+  const auto request = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  // Cancel before the worker turn: execute never consumes the staged
+  // entry, so the terminal path must hand it back to the adapter.
+  EXPECT_EQ(harness.service.cancelRequest(request).state,
+            RequestCancelState::Accepted);
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_TRUE(harness.service.poll(request).outcome.has_value());
+  ASSERT_EQ(harness.adapter.abandonCalls, 1U);
+  EXPECT_EQ(harness.adapter.abandoned, (std::vector<OwnerCell>{testSpec}));
+}
+
+TEST(IoServiceTest, PayloadOnPayloadlessOutcomeBecomesTypedRefusal) {
+  Harness harness;
+  const auto request = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto token = tokenOf(*harness.scheduler);
+  const auto bytes = publishTransientBytes(
+      harness.payloads, std::array<std::byte, 1>{std::byte{'x'}});
+  ASSERT_TRUE(bytes.has_value());
+  auto *entry = harness.scheduler->find(token);
+  ASSERT_NE(entry, nullptr);
+  // EndOfStream has no payload field (§3.2): a lease attached to it is a
+  // contract violation and must surface as a typed refusal, not a cell
+  // the schema says cannot carry bytes.
+  entry->sink->terminalCandidate(token, BackendResult{EndOfStream{{}}, {}},
+                                 *bytes);
+  entry->sink->releaseAcknowledged({PrivateReleaseToken{token}});
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  const auto *failed = std::get_if<Failed>(&harness.cells.outcomes.front());
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::InvalidRequest);
+  EXPECT_EQ(failed->reason.stableDetail, 4U);
+}
+
+TEST(IoServiceTest, DuplicateTerminalCandidateReleasesItsPayloadLease) {
+  Harness harness;
+  const auto request = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto token = tokenOf(*harness.scheduler);
+  const auto first = publishTransientBytes(
+      harness.payloads, std::array<std::byte, 1>{std::byte{'a'}});
+  const auto second = publishTransientBytes(
+      harness.payloads, std::array<std::byte, 1>{std::byte{'b'}});
+  ASSERT_TRUE(first.has_value() && second.has_value());
+  EXPECT_EQ(harness.payloads.liveLeases(), 2U);
+  auto *entry = harness.scheduler->find(token);
+  ASSERT_NE(entry, nullptr);
+  entry->sink->terminalCandidate(token, BackendResult{Complete{{}, {}, {}}, {}},
+                                 *first);
+  // The second candidate loses to the first, but its payload lease must
+  // still be released -- a dropped candidate cannot pin bytes forever.
+  entry->sink->terminalCandidate(token, BackendResult{Complete{{}, {}, {}}, {}},
+                                 *second);
+  entry->sink->releaseAcknowledged({PrivateReleaseToken{token}});
+  static_cast<void>(harness.service.pump(8));
+  // Only the winning candidate's payload survives, as the outcome's
+  // owner token.
+  EXPECT_EQ(harness.payloads.liveLeases(), 1U);
+  harness.service.retireRequest(request);
+  EXPECT_EQ(harness.payloads.liveLeases(), 0U);
+}
+
+TEST(IoServiceTest, DeferredLaneHeadsDoNotStarveEndpointConcurrency) {
+  // maxEndpointConcurrency = 1 with three endpoints: E1 runs, E2 and E3
+  // defer. Deferred heads must not count as busy -- otherwise every
+  // waiting head sees cap+1 endpoints and none ever starts.
+  Harness harness({8, 1024, 1024, 1024, 1});
+  harness.cells.direction     = CellRequest::Direction::Read;
+  harness.cells.endpointQueue = {EndpointCell{50, 1}, EndpointCell{51, 1},
+                                 EndpointCell{52, 1}};
+  const auto first            = harness.submit(OwnerCell{1});
+  const auto second           = harness.submit(OwnerCell{2});
+  const auto third            = harness.submit(OwnerCell{3});
+  ASSERT_NE(first.incarnation, 0U);
+  ASSERT_NE(second.incarnation, 0U);
+  ASSERT_NE(third.incarnation, 0U);
+  ASSERT_EQ(harness.scheduler->entries.size(), 1U);
+
+  const auto token = tokenOf(*harness.scheduler, 0);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+
+  // E1's slot admits exactly one deferred head: the next endpoint in
+  // lane order, while the third keeps waiting.
+  ASSERT_EQ(harness.scheduler->entries.size(), 2U);
+  EXPECT_EQ(harness.scheduler->entries[1].command.operation.bytes.front(),
+            std::byte{2});
+  EXPECT_FALSE(harness.service.poll(second).outcome.has_value());
+  EXPECT_FALSE(harness.service.poll(third).outcome.has_value());
+}
+
+TEST(IoServiceTest, ClosingEndpointTombstonesAreBounded) {
+  Harness harness({2048, 1024, 1024, 1024, 8});
+  // Each Admitted close leaves a tombstone; the requests stay outstanding
+  // because FakeScheduler never runs them. Past 1024 the oldest tombstone
+  // is evicted so endpoint churn cannot grow the set forever.
+  for (std::uint32_t i = 1; i <= 1025; ++i) {
+    const auto closed =
+        harness.service.closeEndpoint(EndpointCell{i, 1}, CloseMode::Graceful);
+    ASSERT_TRUE(std::holds_alternative<Admitted>(closed.value)) << i;
+  }
+  // Endpoint {1,1} was the first tombstone minted and the smallest key,
+  // so it is the one evicted: its pre-check no longer refuses Conflict
+  // and admission proceeds to the lane/adapter layer (which still fails
+  // typed on a truly closed endpoint in production adapters).
+  harness.cells.endpoint = EndpointCell{1, 1};
+  const auto reopened    = harness.service.submit(testCapability, OwnerCell{9});
+  EXPECT_TRUE(std::holds_alternative<Admitted>(reopened.value));
+}
+
+TEST(IoServiceTest, PollAfterRetireStillResolvesThePublishedOutcome) {
+  Harness harness;
+  const auto request = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+  const auto outcome = harness.service.poll(request).outcome;
+  ASSERT_TRUE(outcome.has_value());
+
+  harness.service.retireRequest(request);
+  // The live request state is gone, but the arena request->outcome link
+  // survives retirement: a late poll still resolves the terminal cell.
+  const auto late = harness.service.poll(request);
+  EXPECT_EQ(late.phase, IoPhase::Terminal);
+  ASSERT_TRUE(late.outcome.has_value());
+  EXPECT_EQ(*late.outcome, *outcome);
+  EXPECT_FALSE(late.progress.has_value());
+}
+
+TEST(IoServiceTest, AwaitWaiterMintFailureIsBudgetExceeded) {
+  Harness harness;
+  const auto request = harness.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  harness.cells.failMintWaiter = true;
+  const auto result = harness.service.await(request, {OwnerCell{22}, 1, 31});
+  ASSERT_TRUE(std::holds_alternative<Ready>(result.value));
+  // mintWaiter refuses by returning an empty handle: arena exhaustion is
+  // a budget refusal, not a backend failure.
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  const auto *failed = std::get_if<Failed>(&harness.cells.outcomes.front());
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::BudgetExceeded);
 }
 
 } // namespace

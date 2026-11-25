@@ -51,6 +51,11 @@ public:
       -> bool {
     return true;
   }
+  /// Resolve the terminal outcome cell a request published by reading the
+  /// cell graph, independent of service state. `poll` consults this for
+  /// requests already retired: the arena link outlives the service index.
+  [[nodiscard]] virtual auto outcomeFor(const RequestCell)
+      -> std::optional<OutcomeCell> = 0;
   virtual auto mintOpenedEndpoint(const OpenSpec &)
       -> std::expected<OpenedEndpoint, IoErrorInfo> = 0;
   virtual auto mintWaiter(RequestCell, OwnerWaiterRegistration)
@@ -101,6 +106,10 @@ private:
     IoAdapter *adapter{};
     std::optional<OpenSpec> open;
     std::optional<PreparedOperation> prepared;
+    /// The owner cell whose staged entry this request consumed at prepare;
+    /// handed back to the adapter via abandonStaged if the request ends
+    /// without execute.
+    OwnerCell specification{};
     std::optional<LaneKey> lane;
     bool enqueued{};
     IoPhase phase{IoPhase::Queued};

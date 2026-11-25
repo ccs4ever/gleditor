@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <ranges>
+#include <set>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -57,6 +58,18 @@ auto outcomePayloadRange(const IoOutcome &outcome) noexcept
         return std::nullopt;
       },
       outcome);
+}
+
+/// Whether the outcome variant has a payload field at all (§3.2): Complete,
+/// Failed, Cancelled and TimedOut carry an optional one, Partial a required
+/// one; every other variant is byte-free and a payload lease attached to it
+/// is a contract violation.
+auto outcomeCanCarryPayload(const IoOutcome &outcome) noexcept -> bool {
+  return std::holds_alternative<Complete>(outcome) ||
+         std::holds_alternative<Partial>(outcome) ||
+         std::holds_alternative<Failed>(outcome) ||
+         std::holds_alternative<Cancelled>(outcome) ||
+         std::holds_alternative<TimedOut>(outcome);
 }
 
 class LeaseRelease final {
@@ -118,7 +131,15 @@ auto IoService::admitOpen(OpenSpec spec) -> SubmitResult {
   if (adapter == adapters_.end()) {
     return {Refused{cells_.mintRefusal({IoErrorCode::Unsupported, 0})}};
   }
-  CellRequest request{.key = spec.adapterKey, .open = true, .openSpec = spec};
+  // An open's real output is the minted endpoint cells, not bytes, but it
+  // still declares a small nonzero envelope: a zero envelope would hand the
+  // backend an unlimited byte budget while every produced byte failed the
+  // terminal bound.
+  CellRequest request{.key                  = spec.adapterKey,
+                      .completionBoundBytes = 256,
+                      .payloadBoundBytes    = 256,
+                      .open                 = true,
+                      .openSpec             = spec};
   return admit(std::move(request), &spec);
 }
 
@@ -147,23 +168,40 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
   if (adapterPosition == adapters_.end()) {
     return {Refused{cells_.mintRefusal({IoErrorCode::Unsupported, 0})}};
   }
+  IoAdapter *const adapter = adapterPosition->second;
+  // Every refusal past adapter resolution abandons the staged entry the
+  // request's specification names: a refused submission consumes it exactly
+  // like execute would have, so staging tables cannot fill with dead specs.
+  const auto refuseAdmission = [this, adapter,
+                                &request](const IoErrorInfo error) {
+    adapter->abandonStaged(request.specification);
+    return SubmitResult{Refused{cells_.mintRefusal(error)}};
+  };
   if (requests_.size() >= budget_.maxRequests) {
-    return {Refused{cells_.mintRefusal({IoErrorCode::BudgetExceeded, 0})}};
+    return refuseAdmission({IoErrorCode::BudgetExceeded, 0});
+  }
+  // The decoder must declare at least one real byte channel. A zero bound
+  // forbids that channel at the terminal check; zero on BOTH would hand the
+  // backend an unlimited byte budget (BackendBudget::maxBytes == 0 reads as
+  // unbounded to adapters) while guaranteeing every produced byte fails --
+  // refuse instead of admitting a doomed request.
+  if (request.completionBoundBytes == 0 && request.payloadBoundBytes == 0) {
+    return refuseAdmission({IoErrorCode::InvalidRequest, 0});
   }
 
   OwnerContext owner;
-  auto prepared = adapterPosition->second->prepare(request, owner);
-  if (!prepared) return {Refused{cells_.mintRefusal(prepared.error())}};
+  auto prepared = adapter->prepare(request, owner);
+  if (!prepared) return refuseAdmission(prepared.error());
   if (prepared->bytes.size() > budget_.maxCommandBytes) {
-    return {Refused{cells_.mintRefusal({IoErrorCode::BudgetExceeded, 0})}};
+    return refuseAdmission({IoErrorCode::BudgetExceeded, 0});
   }
   if (request.completionBoundBytes > budget_.maxCompletionBytes ||
       request.payloadBoundBytes > budget_.maxPayloadBytes) {
-    return {Refused{cells_.mintRefusal({IoErrorCode::BudgetExceeded, 1})}};
+    return refuseAdmission({IoErrorCode::BudgetExceeded, 1});
   }
   if (request.payloadBoundBytes >
       std::numeric_limits<std::size_t>::max() - request.completionBoundBytes) {
-    return {Refused{cells_.mintRefusal({IoErrorCode::BudgetExceeded, 1})}};
+    return refuseAdmission({IoErrorCode::BudgetExceeded, 1});
   }
   const auto cost =
       AdmissionCost{.commandBytes    = prepared->bytes.size(),
@@ -171,12 +209,12 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
                     .completionBytes = request.completionBoundBytes +
                                        request.payloadBoundBytes};
   auto reservation = scheduler_->reserve(cost);
-  if (!reservation) return {Refused{cells_.mintRefusal(reservation.error())}};
+  if (!reservation) return refuseAdmission(reservation.error());
 
   const auto requestCell = cells_.mintRequest(request);
   if (!requestCell) {
     scheduler_->releaseUnused(*reservation);
-    return {Refused{cells_.mintRefusal(requestCell.error())}};
+    return refuseAdmission(requestCell.error());
   }
   const auto token = reservation->token;
   {
@@ -186,11 +224,12 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
     event.completionLimit = request.completionBoundBytes;
     event.payloadLimit    = request.payloadBoundBytes;
   }
-  RequestState state{.cell        = *requestCell,
-                     .token       = token,
-                     .reservation = *reservation,
-                     .adapter     = adapterPosition->second,
-                     .prepared    = std::move(*prepared)};
+  RequestState state{.cell          = *requestCell,
+                     .token         = token,
+                     .reservation   = *reservation,
+                     .adapter       = adapter,
+                     .prepared      = std::move(*prepared),
+                     .specification = request.specification};
   state.closingEndpoint = request.closeOperation;
   if (open) state.open = std::move(*open);
   if (request.endpoint) {
@@ -227,16 +266,21 @@ void IoService::startLaneHead(const LaneKey &lane) {
     return;
   }
   if (lane.endpoint != 0) {
-    std::map<std::pair<zigzag::CellRef, AllocationIncarnation>, bool>
-        activeEndpoints;
+    // Only endpoints whose head the scheduler actually holds occupy a
+    // concurrency slot. Counting deferred heads too would let cap+1 waiting
+    // endpoints each see the others and defer forever; the candidate lane's
+    // own endpoint is the one being admitted here.
+    std::set<std::pair<zigzag::CellRef, AllocationIncarnation>> busyEndpoints;
     for (const auto &[activeLane, token] : activeLanes_) {
-      static_cast<void>(token);
-      if (activeLane.endpoint != 0) {
-        activeEndpoints.emplace(
-            std::pair{activeLane.endpoint, activeLane.incarnation}, true);
+      const auto running = requests_.find(token);
+      if (running != requests_.end() && running->second.enqueued &&
+          activeLane.endpoint != 0) {
+        busyEndpoints.emplace(
+            std::pair{activeLane.endpoint, activeLane.incarnation});
       }
     }
-    if (activeEndpoints.size() > budget_.maxEndpointConcurrency) return;
+    busyEndpoints.emplace(std::pair{lane.endpoint, lane.incarnation});
+    if (busyEndpoints.size() > budget_.maxEndpointConcurrency) return;
   }
   auto &state = found->second;
   if (state.closingEndpoint) {
@@ -301,7 +345,16 @@ auto IoService::ensureTerminalOutcome(RequestState &state)
 
 auto IoService::poll(const RequestCell request) -> PollResult {
   const auto found = requestByCell_.find(request.cell);
-  if (found == requestByCell_.end()) return {};
+  if (found == requestByCell_.end()) {
+    // A retired request keeps its arena outcome link: report the terminal
+    // cell with no live progress (phase/progress died with the state).
+    if (const auto outcome = cells_.outcomeFor(request)) {
+      return {.phase    = IoPhase::Terminal,
+              .outcome  = outcome,
+              .progress = std::nullopt};
+    }
+    return {};
+  }
   const auto state = requests_.find(found->second);
   if (state == requests_.end() ||
       state->second.cell.incarnation != request.incarnation)
@@ -338,9 +391,9 @@ auto IoService::await(const RequestCell request,
   }
   const auto waiter = cells_.mintWaiter(request, registration);
   if (waiter.incarnation == AllocationIncarnation{}) {
-    // mintWaiter refuses by returning an empty handle (arena exhaustion);
-    // registering it would pin a bogus waiterToToken_ entry forever.
-    return {Ready{cells_.mintRefusal({IoErrorCode::BackendFailure, 0})}};
+    // mintWaiter refuses by returning an empty handle; arena exhaustion is a
+    // budget refusal, not a backend failure.
+    return {Ready{cells_.mintRefusal({IoErrorCode::BudgetExceeded, 0})}};
   }
   state->second.waiters.emplace_back(waiter, registration);
   waiterToToken_.insert_or_assign(waiter.cell, found->second);
@@ -394,8 +447,12 @@ auto IoService::cancelRequest(const RequestCell request)
           std::erase(queue->second, found->second);
         }
       }
+      // A terminal outcome must not carry a non-Terminal progress phase;
+      // copy the last reported counters but force the phase.
+      auto terminalProgress  = state->second.progress;
+      terminalProgress.phase = IoPhase::Terminal;
       state->second.candidate =
-          BackendResult{Cancelled{{}, state->second.progress, false}, {}};
+          BackendResult{Cancelled{{}, terminalProgress, false}, {}};
       state->second.released  = true;
       state->second.synthetic = true;
       queueTerminal(state->second);
@@ -447,6 +504,14 @@ auto IoService::closeEndpoint(const EndpointCell endpoint, const CloseMode mode)
   auto result            = admit(std::move(*frozen), nullptr);
   if (std::holds_alternative<Admitted>(result.value)) {
     closingEndpoints_.emplace(endpointKey, true);
+    // A completed close keeps its tombstone so later submits keep refusing
+    // Conflict; bound the set so endpoint churn cannot grow it forever.
+    // Eviction only weakens the pre-check -- the adapter still fails typed
+    // on the closed endpoint.
+    constexpr std::size_t maxClosingTombstones = 1024;
+    while (closingEndpoints_.size() > maxClosingTombstones) {
+      closingEndpoints_.erase(closingEndpoints_.begin());
+    }
   }
   return result;
 }
@@ -482,6 +547,11 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
       if (event.candidate && !state.candidate) {
         state.candidate = std::move(event.candidate);
         state.payload   = std::move(event.payload);
+      } else if (event.payload) {
+        // A second candidate for an already-decided request is dropped with
+        // its result; its payload lease must still be released or the chunk
+        // stays pinned forever.
+        payloads_.release(event.payload->lease);
       }
       if (event.release) state.released = true;
       queueTerminal(state);
@@ -525,6 +595,12 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
           outcome = errorOutcome(opened.error());
         }
       }
+    }
+    // A payload lease may only ride an outcome variant that has a payload
+    // field; attaching one to EndOfStream/Overflow/... would mint a cell the
+    // §3.2 contract says cannot carry bytes.
+    if (completion.payload && !outcomeCanCarryPayload(outcome)) {
+      outcome = errorOutcome({IoErrorCode::InvalidRequest, 4});
     }
     auto payloadRange = outcomePayloadRange(outcome);
     if (completion.payload && payloadRange &&
@@ -572,6 +648,11 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
     } else {
       state.outcome = *materialized;
     }
+    // Terminal reached: if execute never ran -- cancel-before-start, a
+    // scheduler-side removal, an enqueue-invariant failure -- the staged
+    // entry this request's specification named is still sitting in the
+    // adapter. Hand it back so staging tables cannot fill with dead specs.
+    state.adapter->abandonStaged(state.specification);
     for (const auto &[waiter, registration] : state.waiters) {
       static_cast<void>(registration);
       cells_.retireWaiter(waiter);

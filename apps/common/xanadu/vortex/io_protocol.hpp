@@ -180,7 +180,16 @@ struct CellRequest {
   AdapterKey key;
   CapabilityCell capability;
   std::optional<EndpointCell> endpoint;
+  /// Declared bound on staged diagnostic bytes the adapter may attach to the
+  /// terminal outcome; 0 forbids staged bytes on this request. The
+  /// RequestDecoder MUST declare a bound covering everything the adapter may
+  /// emit -- the service cannot know per-adapter, so an undeclared channel
+  /// fails every outcome that touches it.
   std::size_t completionBoundBytes{};
+  /// Declared bound on payload bytes the request may retain, including on
+  /// Failed/Cancelled/TimedOut outcomes; 0 forbids payload bytes outright.
+  /// At least one of the two bounds must be nonzero for a non-open request --
+  /// the service refuses a request that declares no output envelope at all.
   std::size_t payloadBoundBytes{};
   bool closeOperation{};
   enum class Direction : std::uint8_t {
@@ -250,7 +259,14 @@ public:
                        CompletionSink &) noexcept      = 0;
   virtual auto publish(const NativeCompletion &, OwnerContext &)
       -> std::expected<OwnerPublication, IoErrorInfo> = 0;
-  virtual ~IoAdapter()                                = default;
+  /// A request whose `specification` named a staged entry but that never
+  /// reaches execute -- refused at admission, cancelled before start, or
+  /// failed an enqueue invariant -- would otherwise pin that entry until the
+  /// adapter is destroyed. The service calls this once per such request so
+  /// staging adapters can drop the entry; adapters that stage nothing (and
+  /// requests whose specification names no entry) inherit the no-op.
+  virtual void abandonStaged(OwnerCell) noexcept {}
+  virtual ~IoAdapter() = default;
 };
 
 } // namespace xanadu::vortex
