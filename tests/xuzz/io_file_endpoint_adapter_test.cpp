@@ -295,6 +295,26 @@ TEST_F(FileEndpointAdapterTest, OpenOfMissingFileFailsWithTypedOutcome) {
   EXPECT_EQ(fixture.adapter.openedCount(), 0U);
 }
 
+TEST_F(FileEndpointAdapterTest, OpenOfAFifoIsRefusedWithoutBlockingTheWorker) {
+  const auto path = (dir_ / "pipe").string();
+  ASSERT_EQ(::mkfifo(path.c_str(), 0600), 0);
+  FileEndpointFixture fixture;
+
+  OpenSpec spec{.adapterKey      = fileOpenAdapterKey,
+                .locator         = bytesOf(path),
+                .requestedRights = fileRightRead,
+                .consistency     = ioConsistencyLive,
+                .deadline =
+                    std::chrono::steady_clock::now() + std::chrono::seconds(5)};
+  const auto submitted = fixture.service->admitOpen(spec);
+  ASSERT_TRUE(std::holds_alternative<Admitted>(submitted.value));
+  const auto outcome = awaitOutcome(
+      *fixture.service, std::get<Admitted>(submitted.value).request);
+  ASSERT_TRUE(outcome.has_value());
+  EXPECT_EQ(ioOutcomeTag(fixture.arena, *outcome), IoOutcomeTag::Failed);
+  EXPECT_EQ(fixture.adapter.openedCount(), 0U);
+}
+
 TEST_F(FileEndpointAdapterTest,
        StableConsistencyRequestIsRefusedBeforeAdmission) {
   const auto path = makeFile("stable please");

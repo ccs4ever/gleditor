@@ -62,13 +62,13 @@ public:
 
   /// Owner-thread: stage one operation's bounded arguments and return the
   /// key to place in the request's `specification` cell/value before
-  /// calling `IoService::submit`. Returns 0 when the staging table is full
-  /// (bounded at 4096 live specs) or when the spec's `writeBytes` would push
-  /// the table's total staged bytes past the byte bound -- a request staged
-  /// under key 0 then fails `prepare` as InvalidRequest. Keys are never
-  /// recycled within the adapter's lifetime; the 32-bit wrap is a documented
-  /// M4 limit.
-  [[nodiscard]] std::uint32_t stage(StreamOpSpec spec);
+  /// calling `IoService::submit`. Returns std::nullopt when the staging table
+  /// is full (bounded at 4096 live specs) or when the spec's `writeBytes`
+  /// would push the table's total staged bytes past the byte bound. Key 0
+  /// is never issued: a request whose specification names nothing fails
+  /// `prepare` as InvalidRequest. Keys are never recycled within the
+  /// adapter's lifetime; the 32-bit wrap is a documented M4 limit.
+  [[nodiscard]] std::optional<std::uint32_t> stage(StreamOpSpec spec);
 
   /// Owner-thread: drop a staged spec that will never reach `execute`
   /// (the submission was refused, or the caller abandoned it). Bounds the

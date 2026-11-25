@@ -13,6 +13,12 @@
 namespace xanadu::vortex {
 namespace {
 
+/// Settled close tombstones kept to refuse a submit on a closed endpoint
+/// before it reaches the adapter. A tombstone is a pair of ids, so the cap
+/// prices the pre-check at tens of KiB; the adapter's typed failure on a
+/// closed endpoint is the backstop once one is evicted.
+constexpr std::size_t kClosingTombstoneBound = 1024;
+
 auto tokenKey(const PrivateRequestToken token) noexcept -> std::uint64_t {
   return token.value;
 }
@@ -232,7 +238,8 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
       AdmissionCost{.commandBytes    = prepared->bytes.size(),
                     .terminalEntries = 1,
                     .completionBytes = request.completionBoundBytes +
-                                       request.payloadBoundBytes};
+                                       request.payloadBoundBytes,
+                    .payloadBytes    = request.payloadBoundBytes};
   auto reservation = scheduler_->reserve(cost);
   if (!reservation) return refuseAdmission(reservation.error());
 
@@ -244,10 +251,10 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
   const auto token = reservation->token;
   {
     std::scoped_lock lock(sinkState_->mutex);
-    auto &event           = sinkState_->events[tokenKey(token)];
-    event.token           = token;
-    event.completionLimit = request.completionBoundBytes;
-    event.payloadLimit    = request.payloadBoundBytes;
+    auto &event = sinkState_->events[tokenKey(token)];
+    event.token = token;
+    sinkState_->limits[tokenKey(token)] = {request.completionBoundBytes,
+                                           request.payloadBoundBytes};
   }
   RequestState state{.cell          = *requestCell,
                      .token         = token,
@@ -369,6 +376,10 @@ void IoService::eraseRequestState(const std::uint64_t tokenKey) {
   if (!linked) return;
   requestByCell_.erase(
       std::pair{found->second.cell.cell, found->second.cell.incarnation});
+  {
+    std::scoped_lock lock(sinkState_->mutex);
+    sinkState_->limits.erase(tokenKey);
+  }
   requests_.erase(found);
 }
 
@@ -604,14 +615,37 @@ auto IoService::closeEndpoint(const EndpointCell endpoint, const CloseMode mode)
   frozen->closeOperation = true;
   auto result            = admit(std::move(*frozen), nullptr);
   if (std::holds_alternative<Admitted>(result.value)) {
-    closingEndpoints_.emplace(endpointKey, true);
+    closingEndpoints_[endpointKey] = {++closingSequence_, false};
+    closingOrder_.emplace_back(endpointKey, closingSequence_);
     // A completed close keeps its tombstone so later submits keep refusing
     // Conflict; bound the set so endpoint churn cannot grow it forever.
     // Eviction only weakens the pre-check -- the adapter still fails typed
-    // on the closed endpoint.
-    constexpr std::size_t maxClosingTombstones = 1024;
-    while (closingEndpoints_.size() > maxClosingTombstones) {
-      closingEndpoints_.erase(closingEndpoints_.begin());
+    // on the closed endpoint -- and takes the oldest *settled* entry, never
+    // a close still in flight. When every entry is in flight the set is as
+    // large as the closes the admission budget allows at once.
+    const auto stale = [this](const auto &entry) {
+      const auto found = closingEndpoints_.find(entry.first);
+      return found == closingEndpoints_.end() ||
+             found->second.sequence != entry.second;
+    };
+    if (closingOrder_.size() > 2 * kClosingTombstoneBound) {
+      // Closes that failed erase their map entry but leave an order record;
+      // drop them in bulk so the order list cannot outgrow the set.
+      std::erase_if(closingOrder_, stale);
+    }
+    for (auto at = closingOrder_.begin();
+         closingEndpoints_.size() > kClosingTombstoneBound &&
+         at != closingOrder_.end();) {
+      const auto entry = closingEndpoints_.find(at->first);
+      if (entry == closingEndpoints_.end() ||
+          entry->second.sequence != at->second) {
+        at = closingOrder_.erase(at);
+      } else if (entry->second.settled) {
+        closingEndpoints_.erase(entry);
+        at = closingOrder_.erase(at);
+      } else {
+        ++at;
+      }
     }
   }
   return result;
@@ -681,6 +715,10 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
     IoOutcome outcome = Failed{{IoErrorCode::BackendFailure, 0},
                                {},
                                IoProgress{.phase = IoPhase::Terminal}};
+    // An open's adapter binds its native resource (a descriptor) to the
+    // endpoint in openSettled or drops it; a throw before that hook ran would
+    // leave the resource open with nothing able to address it.
+    bool openReported = false;
     try {
       NativeCompletion completion{
           .token    = state.token,
@@ -710,6 +748,7 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
             outcome = errorOutcome(opened.error());
           }
         }
+        openReported = true; // the hook is noexcept: it runs exactly once
         state.adapter->openSettled(state.token, minted);
       }
       // A payload lease may only ride an outcome variant that has a
@@ -762,6 +801,9 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
         state.payload.reset();
       }
       state.terminalPayload.reset();
+      if (state.open && !openReported) {
+        state.adapter->openSettled(state.token, std::nullopt);
+      }
       state.phase          = IoPhase::Terminal;
       state.progress.phase = IoPhase::Terminal;
       outcome              = Failed{{IoErrorCode::BackendFailure, 0},
@@ -815,6 +857,7 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
     {
       std::scoped_lock lock(sinkState_->mutex);
       sinkState_->events.erase(key);
+      sinkState_->limits.erase(key);
     }
     if (state.reservation) scheduler_->releaseUnused(*state.reservation);
     if (state.lane) {
@@ -839,6 +882,10 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
           (cancelled != nullptr && !cancelled->uncertain)) {
         closingEndpoints_.erase(
             {state.lane->endpoint, state.lane->incarnation});
+      } else if (const auto closing = closingEndpoints_.find(
+                     {state.lane->endpoint, state.lane->incarnation});
+                 closing != closingEndpoints_.end()) {
+        closing->second.settled = true;
       }
     }
     {
@@ -898,10 +945,10 @@ void IoService::terminalCandidate(
   std::size_t payloadLimit    = 0;
   {
     std::scoped_lock lock(sinkState_->mutex);
-    const auto found = sinkState_->events.find(tokenKey(token));
-    if (found != sinkState_->events.end()) {
-      completionLimit = found->second.completionLimit;
-      payloadLimit    = found->second.payloadLimit;
+    const auto found = sinkState_->limits.find(tokenKey(token));
+    if (found != sinkState_->limits.end()) {
+      completionLimit = found->second.completion;
+      payloadLimit    = found->second.payload;
     }
   }
   const bool oversizedResult = resultBytes(result) > completionLimit;

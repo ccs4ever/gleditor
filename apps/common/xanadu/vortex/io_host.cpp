@@ -1,6 +1,7 @@
 #include "common/xanadu/vortex/io_host.hpp"
 
 #include <algorithm>
+#include <gleditor/logging.hpp>
 #include <stdexcept>
 #include <utility>
 
@@ -15,7 +16,7 @@ IoHost::IoHost(IoService &service, zigzag::ArenaManifold &arena,
   }
   vm_.setAwaitHandler(
       [this](const RequestCell request, const zigzag::CellRef cursor) {
-        return awaitCell(request, cursor);
+        return awaitForVm(request, cursor);
       });
 }
 
@@ -62,6 +63,31 @@ auto IoHost::admitOpen(OpenSpec spec) -> SubmitResult {
   return service_.admitOpen(std::move(spec));
 }
 
+auto IoHost::awaitForVm(const RequestCell request, const zigzag::CellRef cursor)
+    -> AwaitResult {
+  // VortexVM::step reports every failure as a value, but it calls this
+  // handler outside the try that converts exceptions: whatever escapes here
+  // propagates out of run() on the owner thread. awaitCell's documented
+  // throws (stale cursor, arena allocation limit, identity exhaustion) are
+  // therefore turned into the same typed refusal a profile gate yields.
+  try {
+    return awaitCell(request, cursor);
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN("vortex.io.host", "await refused: {}", error.what());
+  }
+  try {
+    return {Ready{service_.refuse(IoErrorInfo{IoErrorCode::BackendFailure, 0})}};
+  } catch (const std::exception &error) {
+    // Minting the refusal can fail for the very reason the await did (an
+    // exhausted arena). The request is a live cell that is not an outcome,
+    // so handing it back as the outcome makes the VM fail the step by value
+    // -- "stale or invalid OutcomeCell" -- instead of throwing.
+    GLEDITOR_LOG_WARN("vortex.io.host", "await refusal not minted: {}",
+                      error.what());
+  }
+  return {Ready{OutcomeCell{request.cell, request.incarnation}}};
+}
+
 auto IoHost::awaitCell(const RequestCell request, const zigzag::CellRef cursor)
     -> AwaitResult {
   requireOwner();
@@ -89,7 +115,16 @@ auto IoHost::awaitCell(const RequestCell request, const zigzag::CellRef cursor)
                                              .cursorIncarnation =
                                                  *cursorIncarnation,
                                              .continuation = continuation};
-  auto result   = service_.await(request, registration);
+  // The continuation is issued before the service can refuse or throw; every
+  // exit that does not park it must retire it or it sits in the VM until
+  // ~IoHost.
+  AwaitResult result;
+  try {
+    result = service_.await(request, registration);
+  } catch (...) {
+    vm_.retireAwait(cursor, *cursorIncarnation, continuation);
+    throw;
+  }
   auto *pending = std::get_if<Pending>(&result.value);
   if (!pending) {
     vm_.retireAwait(cursor, *cursorIncarnation, continuation);

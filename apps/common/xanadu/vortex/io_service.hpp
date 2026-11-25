@@ -134,15 +134,22 @@ private:
   struct SinkState {
     struct Event {
       PrivateRequestToken token;
-      std::size_t completionLimit{};
-      std::size_t payloadLimit{};
       std::optional<IoProgress> progress;
       std::optional<BackendResult> candidate;
       std::optional<PayloadLease> payload;
       std::optional<BackendReleaseAck> release;
       bool queued{};
     };
+    /// A request's admitted byte bounds, kept apart from its Event: the
+    /// owner's pump moves an Event out and erases it as soon as it has
+    /// delivered one progress or release, but a terminal candidate arriving
+    /// afterwards must still be checked against the bounds.
+    struct Limits {
+      std::size_t completion{};
+      std::size_t payload{};
+    };
     std::mutex mutex;
+    std::unordered_map<std::uint64_t, Limits> limits;
     std::unordered_map<std::uint64_t, Event> events;
     std::deque<std::uint64_t> ready;
   };
@@ -181,8 +188,19 @@ private:
       waiterToToken_;
   std::map<LaneKey, std::uint64_t> activeLanes_;
   std::map<LaneKey, std::deque<std::uint64_t>> laneQueues_;
-  std::map<std::pair<zigzag::CellRef, AllocationIncarnation>, bool>
-      closingEndpoints_;
+  using EndpointKey = std::pair<zigzag::CellRef, AllocationIncarnation>;
+  /// An endpoint with a close admitted. `settled` flips once the close's
+  /// terminal outcome is recorded; only a settled entry may be evicted to
+  /// bound the set, so an in-flight close always keeps refusing a second.
+  struct ClosingEndpoint {
+    std::uint64_t sequence{};
+    bool settled{};
+  };
+  std::map<EndpointKey, ClosingEndpoint> closingEndpoints_;
+  /// Admission order of closingEndpoints_ entries; an element whose sequence
+  /// no longer matches the map's is stale (erased and re-closed) and skipped.
+  std::deque<std::pair<EndpointKey, std::uint64_t>> closingOrder_;
+  std::uint64_t closingSequence_{};
   std::deque<std::uint64_t> terminalQueue_;
   std::unique_ptr<SinkState> sinkState_;
   bool shuttingDown_{};

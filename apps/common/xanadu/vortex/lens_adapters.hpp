@@ -42,6 +42,7 @@
 #include <expected>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -96,10 +97,10 @@ public:
 
   /// Owner-thread: stage one operation's bounded arguments and return the
   /// key to place in the request's `specification` field before calling
-  /// `IoService::submit`. Returns 0 when the staging table is full
-  /// (bounded at 4096 live specs); a request staged under key 0 then fails
-  /// `prepare` as InvalidRequest.
-  [[nodiscard]] std::uint32_t stage(LensOpSpec spec);
+  /// `IoService::submit`. Returns std::nullopt when the staging table is full
+  /// (bounded at 4096 live specs). Key 0 is never issued: a request whose
+  /// specification names nothing fails `prepare` as InvalidRequest.
+  [[nodiscard]] std::optional<std::uint32_t> stage(LensOpSpec spec);
 
   /// Stage under a caller-chosen @p key instead of the auto-increment
   /// sequence, for callers whose request `specification` must name a

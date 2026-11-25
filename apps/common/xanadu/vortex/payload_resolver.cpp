@@ -53,6 +53,11 @@ auto copyBytes(const std::vector<std::byte> &bytes, const std::uint64_t offset,
                                 begin + static_cast<std::ptrdiff_t>(length));
 }
 
+/// Registered durable origins before the first sweep of expired ones; below
+/// this the registry is small enough that carrying a few dead entries costs
+/// less than scanning for them.
+constexpr std::size_t kSourceSweepFloor = 64;
+
 } // namespace
 
 struct PayloadResolver::State {
@@ -74,9 +79,17 @@ struct PayloadResolver::State {
   };
 
   mutable std::mutex mutex;
-  /// Durable origins only: permascroll bytes are persistent by design and
-  /// stay resolvable for the resolver's lifetime.
-  std::unordered_map<PayloadRef, Chunk, PayloadRefHash> sources;
+  /// Durable origins only, keyed by (scroll, start). The registry holds a
+  /// weak reference: a chunk is a copy of bytes that stay in the permascroll,
+  /// so it lives exactly as long as some lease or owner token holds it and a
+  /// later resolveDurable simply reads it again. Keeping every copy for the
+  /// resolver's lifetime grew with each distinct span ever resolved.
+  std::unordered_map<PayloadRef, std::weak_ptr<const std::vector<std::byte>>,
+                     PayloadRefHash>
+      sources;
+  /// Registry size at which expired durable entries are next swept, so a
+  /// sweep costs O(1) amortised per registration instead of one pass each.
+  std::size_t sweepAt{kSourceSweepFloor};
   std::unordered_map<PayloadRef, TransientSource, PayloadRefHash>
       transientSources;
   std::unordered_map<LeaseId, Held> leases;
@@ -98,15 +111,17 @@ struct PayloadResolver::State {
   auto retain(const PayloadRange &range)
       -> std::expected<PayloadLease, IoError> {
     const auto found = sources.find(range.origin);
-    if (found == sources.end()) {
+    Chunk chunk      = found == sources.end() ? nullptr : found->second.lock();
+    if (!chunk) {
+      if (found != sources.end()) sources.erase(found);
       GLEDITOR_LOG_DEBUG("vortex.io", "payload origin unresolved (kind {})",
                          static_cast<int>(range.origin.kind));
       return refuse(IoErrorCode::Unresolved);
     }
-    if (!within(range.offset, range.length, found->second->size())) {
+    if (!within(range.offset, range.length, chunk->size())) {
       return refuse(IoErrorCode::InvalidRequest);
     }
-    return lease(range, found->second);
+    return lease(range, std::move(chunk));
   }
 
   /// Caller holds mutex. Drops expired transient entries; called on the
@@ -157,15 +172,25 @@ struct PayloadResolver::State {
     return found->second;
   }
 
-  /// Register @p bytes under @p ref, or reuse what is already there; durable
-  /// bytes at one address are the same bytes by construction.
+  /// Caller holds mutex. Register @p bytes under @p ref, or reuse a live
+  /// chunk that already covers them: durable bytes at one address are the
+  /// same bytes by construction, so a longer read at the same start replaces
+  /// a shorter chunk (leases on the old one keep it alive) and a shorter one
+  /// is served from the longer.
   auto adopt(const PayloadRef &ref, std::vector<std::byte> bytes) -> Chunk {
-    const auto [at, inserted] = sources.try_emplace(ref);
-    if (inserted) {
-      at->second =
-          std::make_shared<const std::vector<std::byte>>(std::move(bytes));
+    auto &slot = sources[ref];
+    if (Chunk live = slot.lock(); live && live->size() >= bytes.size()) {
+      return live;
     }
-    return at->second;
+    auto chunk =
+        std::make_shared<const std::vector<std::byte>>(std::move(bytes));
+    slot = chunk;
+    if (sources.size() >= sweepAt) {
+      std::erase_if(sources,
+                    [](const auto &entry) { return entry.second.expired(); });
+      sweepAt = std::max(kSourceSweepFloor, 2 * sources.size());
+    }
+    return chunk;
   }
 };
 
@@ -225,9 +250,6 @@ auto PayloadResolver::resolveDurable(const xanadu::SpanReader &reader,
                           .occurrence = span.start};
   const std::lock_guard lock(state_->mutex);
   auto chunk = state_->adopt(origin, std::move(bytes));
-  if (chunk->size() != span.length) {
-    return refuse(IoErrorCode::Conflict);
-  }
   return state_->lease(
       PayloadRange{.origin = origin, .offset = 0, .length = span.length},
       std::move(chunk));
@@ -417,7 +439,11 @@ auto PayloadResolver::liveLeases() const -> std::size_t {
 
 auto PayloadResolver::liveSources() const -> std::size_t {
   const std::lock_guard lock(state_->mutex);
-  std::size_t live = state_->sources.size();
+  std::size_t live = 0;
+  for (const auto &[ref, source] : state_->sources) {
+    static_cast<void>(ref);
+    if (!source.expired()) ++live;
+  }
   for (const auto &[ref, source] : state_->transientSources) {
     static_cast<void>(ref);
     if (source.pinned || !source.bytes.expired()) {

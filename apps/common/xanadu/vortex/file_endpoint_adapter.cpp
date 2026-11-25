@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <string>
 #include <unistd.h>
 #include <utility>
@@ -178,7 +179,21 @@ void FileEndpointAdapter::execute(const BackendCommand &command,
     // The open itself runs here, on the scheduler worker -- never the
     // owner thread (plan §7.2). The descriptor is adopted by the per-file
     // adapter so every later op stays on this inode.
-    const int fd = ::open(locator.c_str(), writable ? O_RDWR : O_RDONLY);
+    // O_NONBLOCK keeps a FIFO or device locator from parking this worker in
+    // open() with no way to cancel it; O_CLOEXEC keeps the descriptor from
+    // leaking into a child process. Only a regular file is a file endpoint.
+    const int fd = ::open(locator.c_str(), (writable ? O_RDWR : O_RDONLY) |
+                                               O_CLOEXEC | O_NONBLOCK);
+    if (fd >= 0) {
+      struct stat st{};
+      if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        ::close(fd);
+        reportTerminal(
+            sink, command.token,
+            Failed{{IoErrorCode::InvalidRequest, 0}, {}, terminalProgress()});
+        return;
+      }
+    }
     if (fd < 0) {
       GLEDITOR_LOG_DEBUG(fileLogCategory, "open failed (errno {})", errno);
       reportTerminal(sink, command.token,

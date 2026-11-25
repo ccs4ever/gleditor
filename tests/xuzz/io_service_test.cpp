@@ -254,6 +254,14 @@ public:
     ++abandonCalls;
     abandoned.push_back(specification);
   }
+  void
+  openSettled(PrivateRequestToken,
+              const std::optional<OpenedEndpoint> &opened) noexcept override {
+    ++openSettledCalls;
+    openSettledBound += opened.has_value() ? 1U : 0U;
+  }
+  std::size_t openSettledCalls{};
+  std::size_t openSettledBound{};
   std::size_t prepareCalls{};
   std::size_t executeCalls{};
   std::size_t publishCalls{};
@@ -416,6 +424,40 @@ TEST(IoServiceTest, ProgressCoalescesWhileTerminalReserveRemainsAvailable) {
   EXPECT_TRUE(harness.service.poll(request).outcome.has_value());
 }
 
+TEST(IoServiceTest, PumpedProgressDoesNotEraseTheRequestsByteBounds) {
+  Harness harness;
+  const auto request = harness.submit();
+  const auto token   = tokenOf(*harness.scheduler);
+  const std::vector<std::byte> bytes(16, std::byte{'x'});
+  const auto origin = harness.payloads.registerSource(
+      PayloadRef{.kind       = PayloadSourceKind::Transient,
+                 .source     = 1,
+                 .generation = 1,
+                 .occurrence = 1},
+      bytes);
+  ASSERT_TRUE(origin);
+
+  // The owner drains the progress event -- which used to carry the admitted
+  // limits and erase them -- before the worker's terminal candidate lands.
+  harness.scheduler->progress(token, {1, 1, 0, 1, IoPhase::Running});
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_TRUE(harness.service.poll(request).progress.has_value());
+
+  const IoProgress done{.transferredBytes = bytes.size(),
+                        .phase            = IoPhase::Terminal};
+  harness.scheduler->candidate(
+      token,
+      Partial{
+          PayloadRange{.origin = *origin, .offset = 0, .length = bytes.size()},
+          PartialCause::BackendFailure, done});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_TRUE(harness.service.poll(request).outcome.has_value());
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<Partial>(harness.cells.outcomes.front()))
+      << "a payload within the admitted bound must not become BudgetExceeded";
+}
+
 TEST(IoServiceTest, EnqueueInvariantFailurePublishesTypedSchedulerUnavailable) {
   Harness harness;
   harness.scheduler->enqueueFailure = true;
@@ -538,6 +580,28 @@ TEST(IoServiceTest, OpenIsAdmittedAndAwaitedThroughTheSameRequestLifecycle) {
   EXPECT_TRUE(std::holds_alternative<OpenedEndpoint>(complete->value));
 }
 
+TEST(IoServiceTest, OpenWhosePublishThrowsStillSettlesTheOpenUnbound) {
+  Harness harness;
+  harness.adapter.throwOnPublish = true;
+  OpenSpec spec{.adapterKey      = testKey,
+                .locator         = {std::byte{0x2f}},
+                .requestedRights = 1,
+                .consistency     = 0,
+                .deadline =
+                    std::chrono::steady_clock::now() + std::chrono::seconds(5)};
+  const auto submitted = harness.service.admitOpen(spec);
+  ASSERT_TRUE(std::holds_alternative<Admitted>(submitted.value));
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+
+  // The worker already opened a native resource for this request; the hook is
+  // how the adapter learns that no endpoint will ever name it.
+  EXPECT_EQ(harness.adapter.openSettledCalls, 1U);
+  EXPECT_EQ(harness.adapter.openSettledBound, 0U);
+}
+
 TEST(IoServiceTest,
      ShutdownStopsAdmissionAndCancelsQueuedRequestsWithoutRunning) {
   Harness harness;
@@ -551,6 +615,37 @@ TEST(IoServiceTest,
   EXPECT_TRUE(std::holds_alternative<Refused>(refused.value));
   static_cast<void>(harness.service.pump(8));
   EXPECT_TRUE(harness.service.poll(request).outcome.has_value());
+}
+
+TEST(IoServiceTest, TombstoneEvictionNeverDropsACloseStillInFlight) {
+  Harness harness({2048, 1024, 1024, 1024, 8});
+  const auto closeAndSettle = [&](const EndpointCell endpoint,
+                                  const std::size_t index) {
+    const auto closed = harness.service.closeEndpoint(endpoint, CloseMode{});
+    EXPECT_TRUE(std::holds_alternative<Admitted>(closed.value));
+    const auto token = tokenOf(*harness.scheduler, index);
+    harness.scheduler->candidate(token, Complete{{}, {}, {}});
+    harness.scheduler->acknowledge(token);
+    static_cast<void>(harness.service.pump(8));
+  };
+
+  // The lowest-keyed endpoint closes first and never completes: its entry is
+  // the one an eviction by key order used to pick.
+  const EndpointCell inFlight{1, 1};
+  const auto first = harness.service.closeEndpoint(inFlight, CloseMode{});
+  ASSERT_TRUE(std::holds_alternative<Admitted>(first.value));
+  constexpr std::size_t kMoreThanTheBound = 1100;
+  for (std::size_t i = 0; i < kMoreThanTheBound; ++i) {
+    closeAndSettle(EndpointCell{static_cast<zigzag::CellRef>(100 + i), 1},
+                   i + 1);
+  }
+
+  const auto second = harness.service.closeEndpoint(inFlight, CloseMode{});
+  ASSERT_TRUE(std::holds_alternative<Refused>(second.value));
+  const auto refusal = harness.cells.outcomes.back();
+  const auto *failed = std::get_if<Failed>(&refusal);
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->reason.code, IoErrorCode::Conflict);
 }
 
 TEST(IoServiceTest, EndpointQueuesFifoPerDirectionAndPermitFullDuplex) {
@@ -1103,21 +1198,29 @@ TEST(IoServiceTest, DeferredLaneHeadsDoNotStarveEndpointConcurrency) {
 }
 
 TEST(IoServiceTest, ClosingEndpointTombstonesAreBounded) {
-  Harness harness({2048, 1024, 1024, 1024, 8});
-  // Each Admitted close leaves a tombstone; the requests stay outstanding
-  // because FakeScheduler never runs them. Past 1024 the oldest tombstone
-  // is evicted so endpoint churn cannot grow the set forever.
+  Harness harness({4096, 1024, 1024, 1024, 8});
+  // Each Admitted close leaves a tombstone; every close below stays in
+  // flight because FakeScheduler never runs them, so none may be evicted
+  // even past the bound -- an in-flight close keeps refusing a second.
   for (std::uint32_t i = 1; i <= 1025; ++i) {
     const auto closed =
         harness.service.closeEndpoint(EndpointCell{i, 1}, CloseMode::Graceful);
     ASSERT_TRUE(std::holds_alternative<Admitted>(closed.value)) << i;
   }
-  // Endpoint {1,1} was the first tombstone minted and the smallest key,
-  // so it is the one evicted: its pre-check no longer refuses Conflict
-  // and admission proceeds to the lane/adapter layer (which still fails
-  // typed on a truly closed endpoint in production adapters).
   harness.cells.endpoint = EndpointCell{1, 1};
-  const auto reopened    = harness.service.submit(testCapability, OwnerCell{9});
+  EXPECT_TRUE(std::holds_alternative<Refused>(
+      harness.service.submit(testCapability, OwnerCell{9}).value));
+
+  // Once the oldest close settles it is the one a later close evicts, so
+  // endpoint churn cannot grow the set forever.
+  const auto token = tokenOf(*harness.scheduler, 0);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+  const auto next =
+      harness.service.closeEndpoint(EndpointCell{2000, 1}, CloseMode::Graceful);
+  ASSERT_TRUE(std::holds_alternative<Admitted>(next.value));
+  const auto reopened = harness.service.submit(testCapability, OwnerCell{9});
   EXPECT_TRUE(std::holds_alternative<Admitted>(reopened.value));
 }
 

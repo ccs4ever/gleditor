@@ -165,6 +165,40 @@ TEST(PayloadResolverTest, RolledBackScratchIsUnresolved) {
             IoErrorCode::Unresolved);
 }
 
+TEST(PayloadResolverTest, DurableSpansAtOneStartAreNotRefusedForTheirLength) {
+  PayloadResolver resolver;
+  const FixedScroll scroll(std::string("0123456789abcdef"));
+  const auto spanAt = [](const std::uint64_t length) {
+    return xanadu::PrimediaSpan{
+        .scroll = FixedScroll::scroll, .start = 2, .length = length};
+  };
+
+  // A prefix first, then the whole run, then a shorter prefix again: the
+  // origin is the address, so none of these is a Conflict.
+  const auto prefix = resolver.resolveDurable(scroll, spanAt(4));
+  ASSERT_TRUE(prefix);
+  const auto whole = resolver.resolveDurable(scroll, spanAt(10));
+  ASSERT_TRUE(whole) << toString(whole.error().code);
+  const auto again = resolver.resolveDurable(scroll, spanAt(3));
+  ASSERT_TRUE(again);
+  EXPECT_EQ(resolver.read(*prefix, 0, 4), bytesOf("2345"));
+  EXPECT_EQ(resolver.read(*whole, 0, 10), bytesOf("23456789ab"));
+  EXPECT_EQ(resolver.read(*again, 0, 3), bytesOf("234"));
+  EXPECT_EQ(resolver.requirePersistable(*whole), spanAt(10));
+
+  // Durable chunks are copies of permascroll bytes, so they are held only by
+  // leases: once every lease is gone the registry holds nothing.
+  EXPECT_GT(resolver.liveSources(), 0U);
+  const auto origin = whole->range.origin;
+  resolver.release(prefix->lease);
+  resolver.release(whole->lease);
+  resolver.release(again->lease);
+  EXPECT_EQ(resolver.liveSources(), 0U);
+  EXPECT_EQ(resolver.retain({origin, 0, 4}).error().code,
+            IoErrorCode::Unresolved);
+  EXPECT_TRUE(resolver.resolveDurable(scroll, spanAt(4)));
+}
+
 TEST(PayloadResolverTest, ScratchChunkLivesOnlyThroughLeasesAndOwners) {
   PayloadResolver resolver;
   zigzag::ArenaManifold arena;

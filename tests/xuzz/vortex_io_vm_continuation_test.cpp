@@ -379,4 +379,38 @@ TEST(VortexIoVmContinuationTest,
                                     parkedPending.continuation));
 }
 
+TEST(VortexIoVmContinuationTest,
+     AwaitHostFailureIsAStepFailureNotAnExceptionAndLeaksNoContinuation) {
+  Harness h;
+  const auto request = h.submit();
+  ASSERT_NE(request.incarnation, 0U);
+  const auto await  = h.vm.mintOpcode(OpcodeKind::Await);
+  const auto halt   = h.vm.mintOpcode(OpcodeKind::Halt);
+  const auto output = h.arena.makeCell();
+  h.core.bindInput(await, request.cell);
+  h.core.bindOutput(await, output);
+  ASSERT_TRUE(h.arena.link(await, h.core.dims().spin, DimVector::POS, halt));
+  const auto cursor = h.vm.spawnCursor(await);
+  const auto inc    = *h.arena.incarnationOf(cursor);
+
+  // No cell can be minted any more, so the waiter the await needs cannot be
+  // either: the host throws from inside the VM's handler call.
+  const auto limit = h.arena.allocationLimit();
+  h.arena.setAllocationLimitForTesting(
+      static_cast<std::uint32_t>(h.arena.cellCount()));
+  zigzag::vortex::VmExecutionResult stepped;
+  EXPECT_NO_THROW(stepped = h.vm.step(cursor));
+  h.arena.setAllocationLimitForTesting(limit);
+  EXPECT_FALSE(stepped.success);
+  EXPECT_EQ(stepped.disposition, zigzag::vortex::StepDisposition::Failed);
+  EXPECT_EQ(h.vm.getCursorOpcode(cursor), await);
+
+  // The continuation the host issued for the failed await was retired: the
+  // VM no longer recognises it as belonging to the cursor.
+  const auto parked = h.vm.parkAwait(cursor, inc, 1, WaiterCell{});
+  EXPECT_FALSE(parked.success);
+  EXPECT_NE(parked.errorMessage.find("does not belong"), std::string::npos)
+      << parked.errorMessage;
+}
+
 } // namespace

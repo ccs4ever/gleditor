@@ -59,13 +59,14 @@ inline auto payloadOutcome(PayloadResolver &payloads,
 
 } // namespace
 
-std::uint32_t StagedByteSourceAdapter::stage(StreamOpSpec spec) {
+std::optional<std::uint32_t>
+StagedByteSourceAdapter::stage(StreamOpSpec spec) {
   const std::lock_guard lock(mutex_);
   if (staged_.size() >= maxStagedSpecs ||
       spec.writeBytes.size() > maxStagedWriteBytes - stagedWriteBytes_)
-    return 0;
-  // Skip 0 (the table-full sentinel a request reports as InvalidRequest)
-  // and any still-live key a wrapped nextKey_ could revisit.
+    return std::nullopt;
+  // Skip 0 (the key that names nothing, which a request reports as
+  // InvalidRequest) and any still-live key a wrapped nextKey_ could revisit.
   auto key = nextKey_++;
   while (key == 0 || staged_.contains(key)) key = nextKey_++;
   const auto byteCount = spec.writeBytes.size();

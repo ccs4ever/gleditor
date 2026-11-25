@@ -229,6 +229,12 @@ struct CellRequest {
 struct OwnerContext {};
 struct BackendBudget {
   std::size_t maxBytes{};
+  /// The part of `maxBytes` the request's payload bound allows a published
+  /// payload to occupy; a payload larger than this is refused by the service
+  /// after the backend has already read and allocated it, so an adapter that
+  /// sizes a read clamps to it. std::nullopt: the caller named no separate
+  /// payload bound.
+  std::optional<std::size_t> maxPayloadBytes{};
 };
 struct BackendContext {
   std::stop_token stop;
@@ -237,6 +243,8 @@ struct BackendContext {
 };
 struct AdmissionCost {
   std::size_t commandBytes{}, terminalEntries{1}, completionBytes{};
+  /// Of `completionBytes`, the share a published payload may occupy.
+  std::optional<std::size_t> payloadBytes{};
 };
 struct PreparedOperation {
   AdapterKey key;

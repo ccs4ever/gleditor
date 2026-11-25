@@ -403,6 +403,13 @@ void FileSourceAdapter::execute(const BackendCommand &command,
               auto toRead = op->range.length == 0
                                 ? 0
                                 : std::min(op->range.length, maxBytes);
+              // The service rejects a payload over the request's payload
+              // bound after the read; stop at the bound instead of reading
+              // and publishing bytes that are certain to be refused.
+              if (context.budget.maxPayloadBytes) {
+                toRead = std::min<std::uint64_t>(toRead,
+                                                 *context.budget.maxPayloadBytes);
+              }
               // A stat-able file bounds the read by what is actually
               // there: range.length or an unbounded budget can name far
               // more than the file holds past offset, and the vector

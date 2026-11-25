@@ -66,6 +66,10 @@ private:
 
   void requireOwner() const;
   void abandon(ParkedAwait &parked) noexcept;
+  /// The VM-facing await handler: awaitCell with its exceptions turned into
+  /// a typed refusal value.
+  [[nodiscard]] auto awaitForVm(RequestCell request, zigzag::CellRef cursor)
+      -> AwaitResult;
 
   IoService &service_;
   zigzag::ArenaManifold &arena_;

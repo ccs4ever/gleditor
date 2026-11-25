@@ -48,6 +48,7 @@ struct BoundedIoScheduler::Job final : CompletionSink {
   PrivateRequestToken token{};
   std::size_t reservedBytes{};
   std::size_t backendBytes{};
+  std::optional<std::size_t> backendPayloadBytes{};
   BackendCommand command{};
   IoAdapter *adapter{};
   CompletionSink *sink{};
@@ -129,6 +130,7 @@ auto BoundedIoScheduler::reserve(const AdmissionCost cost)
   job.token         = PrivateRequestToken{nextToken_++};
   job.reservedBytes = bytes;
   job.backendBytes  = cost.completionBytes;
+  job.backendPayloadBytes = cost.payloadBytes;
   job.hasProgress   = false;
   job.cancellation  = std::stop_source{};
   reservedBytes_ += bytes;
@@ -180,6 +182,7 @@ void BoundedIoScheduler::releaseUnused(
   job->sink          = nullptr;
   job->reservedBytes = 0;
   job->backendBytes  = 0;
+  job->backendPayloadBytes.reset();
   job->hasProgress   = false;
   job->state         = Job::State::Free;
 }
@@ -326,7 +329,8 @@ void BoundedIoScheduler::workerLoop() {
 
     BackendContext context{
         job->cancellation.get_token(), payloads_,
-        BackendBudget{std::min(options_.backendMaxBytes, job->backendBytes)}};
+        BackendBudget{std::min(options_.backendMaxBytes, job->backendBytes),
+                      job->backendPayloadBytes}};
     job->adapter->execute(job->command, context, *job);
 
     const auto token = job->token;

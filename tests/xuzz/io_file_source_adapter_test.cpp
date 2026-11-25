@@ -205,6 +205,28 @@ TEST_F(FileSourceAdapterTest, ReadBeyondBudgetIsBounded) {
   EXPECT_LE(bytes->size(), 16U);
 }
 
+TEST_F(FileSourceAdapterTest, ReadStopsAtThePayloadBoundNotTheBackendBudget) {
+  writeFile(std::string(4096, 'x'));
+  FileSourceAdapter adapter(path_);
+  OwnerContext owner;
+  PayloadResolver payloads;
+  // The backend budget is completion + payload bound; a read sized by it
+  // would pull payload+completion bytes the service then refuses.
+  BackendContext context{.stop     = {},
+                         .payloads = payloads,
+                         .budget   = BackendBudget{.maxBytes        = 4096,
+                                                   .maxPayloadBytes = 16}};
+
+  const auto key      = adapter.stageRead(MediaRange{0, 4096}, std::nullopt);
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  ASSERT_TRUE(sink.candidate);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  EXPECT_EQ(sink.payloadLease->range.length, 16U);
+}
+
 TEST_F(FileSourceAdapterTest,
        OversizedRangeClampsToFileSizeInsteadOfAllocatingIt) {
   writeFile("hello");

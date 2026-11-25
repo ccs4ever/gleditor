@@ -54,10 +54,10 @@ LensOpOutcome opRefused(std::string_view detail) {
 
 } // namespace
 
-std::uint32_t StagedLensSourceAdapter::stage(LensOpSpec spec) {
+std::optional<std::uint32_t> StagedLensSourceAdapter::stage(LensOpSpec spec) {
   const std::lock_guard lock(mutex_);
-  if (staged_.size() >= maxStagedSpecs) return 0;
-  // Skip 0 (the table-full sentinel) and any stageAt'd key an auto key could
+  if (staged_.size() >= maxStagedSpecs) return std::nullopt;
+  // Skip 0 (the key that names nothing) and any stageAt'd key an auto key could
   // otherwise overwrite; the table bound keeps the skip short.
   auto key = nextKey_++;
   while (key == 0 || staged_.contains(key)) key = nextKey_++;
@@ -68,8 +68,8 @@ std::uint32_t StagedLensSourceAdapter::stage(LensOpSpec spec) {
 std::expected<std::uint32_t, std::string>
 StagedLensSourceAdapter::stageAt(std::uint32_t key, LensOpSpec spec) {
   const std::lock_guard lock(mutex_);
-  // Key 0 is the table-full sentinel stage() reports; an entry there would
-  // be found by a request whose specification names nothing.
+  // Key 0 is the key a request whose specification names nothing carries;
+  // an entry there would be found by it.
   if (key == 0) return std::unexpected("staging key 0 is reserved");
   if (staged_.contains(key))
     return std::unexpected("staging key already in use");
