@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <array>
+#include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -7,7 +10,9 @@
 #include <filesystem>
 #include <sstream>
 #include <string>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -586,6 +591,250 @@ TEST_F(FileSourceAdapterTest, ObservationCapEvictsOldestFirst) {
   EXPECT_TRUE(adapter.observation(2).has_value());
   EXPECT_TRUE(adapter.observation(4096).has_value());
   EXPECT_TRUE(adapter.observation(4097).has_value());
+}
+
+// -- declared source identity (plan §7.2: locator + capabilities) -----------
+
+TEST_F(FileSourceAdapterTest, OpenedInodeIdentitySurvivesRename) {
+  writeFile("inode pinned");
+  FileSourceAdapter adapter(path_);
+  const auto caps = adapter.probeCapabilities();
+  ASSERT_TRUE(caps.has_value());
+  // The capability must SAY which identity semantics the source has: this
+  // adapter holds one fd, so operations address the opened inode.
+  EXPECT_EQ(caps->identity, FileSourceIdentity::OpenedInode);
+  EXPECT_EQ(caps->consistency, SourceConsistency::Live);
+
+  const auto generationBefore = adapter.currentGeneration();
+
+  // Replace the path with a new inode; the held fd -- and therefore every
+  // staged op -- stays on the original.
+  const auto replacement = (dir_ / "renamed-over.bin").string();
+  {
+    FILE *f = std::fopen(replacement.c_str(), "wb");
+    ASSERT_NE(f, nullptr);
+    std::fwrite("other inode", 1, 11, f);
+    std::fclose(f);
+  }
+  ASSERT_EQ(::rename(replacement.c_str(), path_.c_str()), 0);
+
+  // fstat on the held fd sees the ORIGINAL inode: size, mtime and st_ino
+  // are all unchanged by the rename, so the declared generation is too --
+  // a CAS staged against it is still honoured.
+  EXPECT_EQ(adapter.currentGeneration(), generationBefore);
+
+  OwnerContext owner;
+  PayloadResolver payloads;
+  auto context        = makeContext(payloads);
+  const auto key      = adapter.stageRead(MediaRange{0, 12}, generationBefore);
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  ASSERT_TRUE(sink.candidate);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
+  EXPECT_EQ(textOf(*bytes), "inode pinned");
+}
+
+// -- same-size in-place rewrite: the stat-generation blind spot -------------
+
+TEST_F(FileSourceAdapterTest,
+       SameSizeRewriteWithRestoredMtimeSharesTheGeneration) {
+  writeFile("aaaa");
+  FileSourceAdapter adapter(path_);
+  const auto generationBefore = adapter.currentGeneration();
+
+  // Rewrite the same 4 bytes in place, then restore the exact timestamps:
+  // size, mtime and inode all match the pre-rewrite stat, so
+  // generationFromStat cannot tell the content moved. This is the documented
+  // blind spot -- it is WHY Stable/CAS is refused rather than synthesized
+  // from stat (file_source_adapter.cpp's generationFromStat comment).
+  int fd = ::open(path_.c_str(), O_RDWR);
+  ASSERT_GE(fd, 0);
+  struct stat before{};
+  ASSERT_EQ(::fstat(fd, &before), 0);
+  ASSERT_EQ(::pwrite(fd, "bbbb", 4, 0), 4);
+  const std::array times{before.st_atim, before.st_mtim};
+  ASSERT_EQ(::futimens(fd, times.data()), 0);
+  ::close(fd);
+
+  EXPECT_EQ(adapter.currentGeneration(), generationBefore);
+
+  // A read staged against the OLD generation is therefore admitted, and the
+  // new bytes arrive under the SAME generation value -- two Live reads can
+  // legitimately share a generation while differing in content, which is
+  // exactly why observations are never collapsed by generation/range.
+  OwnerContext owner;
+  PayloadResolver payloads;
+  auto context        = makeContext(payloads);
+  const auto key      = adapter.stageRead(MediaRange{0, 4}, generationBefore);
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  ASSERT_TRUE(sink.candidate);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
+  EXPECT_EQ(textOf(*bytes), "bbbb");
+
+  const auto observation = adapter.observation(1);
+  ASSERT_TRUE(observation.has_value());
+  EXPECT_EQ(observation->sourceGeneration, generationBefore);
+  EXPECT_EQ(observation->consistency, SourceConsistency::Live);
+}
+
+// -- stageAt: caller-chosen keys for the cell-store path --------------------
+
+TEST_F(FileSourceAdapterTest, StageAtUsesCallerKeyAndRefusesBadKeys) {
+  writeFile("keyed ops");
+  FileSourceAdapter adapter(path_);
+  OwnerContext owner;
+  PayloadResolver payloads;
+  auto context = makeContext(payloads);
+
+  // The minted spec cell's ref IS the staged key: freezeRequest refuses
+  // OwnerCells with no arena incarnation, so the key must be a real cell.
+  const auto staged =
+      adapter.stageAt(77, FileOpSpec{.kind  = FileOpSpec::Kind::Read,
+                                     .range = MediaRange{0, 4}});
+  ASSERT_TRUE(staged);
+  EXPECT_EQ(*staged, 77U);
+
+  // Key 0 and an occupied key are both refused.
+  EXPECT_FALSE(adapter.stageAt(0, FileOpSpec{}));
+  EXPECT_FALSE(adapter.stageAt(77, FileOpSpec{.kind  = FileOpSpec::Kind::Read,
+                                              .range = MediaRange{0, 1}}));
+
+  // The caller-keyed entry drives the ordinary prepare/execute path.
+  const auto prepared = adapter.prepare(requestFor(77), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  ASSERT_TRUE(sink.candidate);
+  ASSERT_TRUE(sink.payloadLease.has_value());
+  const auto bytes = readPayload(payloads, *sink.payloadLease);
+  ASSERT_TRUE(bytes.has_value());
+  EXPECT_EQ(textOf(*bytes), "keye");
+}
+
+// -- cancel evidence: mid-read and mid-write exit outcomes ------------------
+
+TEST_F(FileSourceAdapterTest, CancelDuringReadYieldsCancelledNotComplete) {
+  // A sparse 256 MiB file: the staging vector's value-init plus one large
+  // pread keeps execute() busy far longer than the stop request's lead time,
+  // so the cancel lands while the transfer is in flight -- the mid-read
+  // exit the audit asks evidence for. Sparse keeps the fixture cheap; the
+  // read still moves real bytes through the payload channel.
+  constexpr std::uint64_t size = 256ULL * 1024 * 1024;
+  {
+    const int fd = ::open(path_.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(::ftruncate(fd, static_cast<off_t>(size)), 0);
+    ::close(fd);
+  }
+  FileSourceAdapter adapter(path_);
+  PayloadResolver payloads;
+  std::stop_source stop;
+  // maxBytes must cover the whole range or toRead clamps below it.
+  BackendContext context{.stop     = stop.get_token(),
+                         .payloads = payloads,
+                         .budget   = BackendBudget{size}};
+
+  const auto key = adapter.stageRead(MediaRange{0, size}, 0);
+  OwnerContext owner;
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+
+  std::thread worker(
+      [&] { adapter.execute(BackendCommand{{1}, *prepared}, context, sink); });
+  // 256 MiB cannot memset+pread in 5 ms on any supported host, so the stop
+  // always lands mid-execute; whether it precedes the first loop check or
+  // the in-flight pread only decides if the Cancelled carries the payload.
+  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  stop.request_stop();
+  worker.join();
+
+  ASSERT_TRUE(sink.candidate);
+  EXPECT_TRUE(std::holds_alternative<Cancelled>(sink.candidate->outcome));
+  // A cancelled read records no observation: only a Complete read mints one.
+  EXPECT_FALSE(adapter.observation(1).has_value());
+  ASSERT_TRUE(sink.released);
+  if (sink.payloadLease) {
+    // When the pread had already run, the Cancelled retains exactly the
+    // bytes it moved -- all zeros from the sparse file.
+    const auto bytes = readPayload(payloads, *sink.payloadLease);
+    ASSERT_TRUE(bytes.has_value());
+    EXPECT_EQ(bytes->size(), size);
+    EXPECT_EQ(bytes->front(), std::byte{0});
+    EXPECT_EQ(bytes->back(), std::byte{0});
+  }
+}
+
+TEST_F(FileSourceAdapterTest, CancelDuringWriteReportsUncertainPartial) {
+  writeFile("x");
+  FileSourceAdapter adapter(path_, /*writable=*/true);
+  PayloadResolver payloads;
+  std::stop_source stop;
+  BackendContext context{.stop     = stop.get_token(),
+                         .payloads = payloads,
+                         .budget   = BackendBudget{64ULL * 1024 * 1024}};
+
+  // RLIMIT_FSIZE caps the file at 48 MiB: the first pwrite of the 64 MiB
+  // staged write (the largest stageWrite accepts) returns a SHORT count
+  // (the limit), the loop iterates, and the stop request -- landed while
+  // that first pwrite is in flight -- is seen at the top of the second
+  // iteration. That is the genuinely partial write the Cancelled.uncertain
+  // flag exists for: bytes may have landed and the caller cannot tell how
+  // many without revalidating.
+  constexpr std::uint64_t fileLimit = 48ULL * 1024 * 1024;
+  constexpr std::uint64_t writeSize = 64ULL * 1024 * 1024;
+  struct rlimit oldLimit{};
+  ASSERT_EQ(::getrlimit(RLIMIT_FSIZE, &oldLimit), 0);
+  const struct rlimit newLimit{fileLimit, fileLimit};
+  ASSERT_EQ(::setrlimit(RLIMIT_FSIZE, &newLimit), 0);
+  const auto oldXfsz = ::signal(SIGXFSZ, SIG_IGN);
+
+  std::vector<std::byte> payload(writeSize, std::byte{'w'});
+  const auto key = adapter.stageWrite(0, std::move(payload), 0);
+  ASSERT_NE(key, 0U);
+  OwnerContext owner;
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  ASSERT_TRUE(prepared);
+  CapturingSink sink{&payloads};
+
+  std::thread worker(
+      [&] { adapter.execute(BackendCommand{{1}, *prepared}, context, sink); });
+  // The first pwrite moves fileLimit bytes (~5-15 ms); stopping at 1 ms
+  // lands inside it on any realistic host, so iteration two observes the
+  // stop. Even a stop that beats the worker to the first check still
+  // yields Cancelled -- only the transferred byte count differs.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  stop.request_stop();
+  worker.join();
+
+  // Restore process state BEFORE asserting: a failed ASSERT must not leak
+  // the file-size limit or the ignored signal into the rest of the suite.
+  static_cast<void>(::setrlimit(RLIMIT_FSIZE, &oldLimit));
+  static_cast<void>(::signal(SIGXFSZ, oldXfsz));
+
+  ASSERT_TRUE(sink.candidate);
+  const auto *cancelled = std::get_if<Cancelled>(&sink.candidate->outcome);
+  ASSERT_NE(cancelled, nullptr);
+  EXPECT_TRUE(cancelled->uncertain);
+  // written is all-or-nothing per pwrite: either the stop beat the first
+  // iteration (0) or the full RLIMIT-capped chunk landed (fileLimit).
+  EXPECT_TRUE(cancelled->progress.transferredBytes == 0 ||
+              cancelled->progress.transferredBytes == fileLimit);
+  ASSERT_TRUE(sink.released);
+
+  // The file never grew past the rlimit, whatever landed.
+  struct stat st{};
+  ASSERT_EQ(::stat(path_.c_str(), &st), 0);
+  EXPECT_LE(static_cast<std::uint64_t>(st.st_size), fileLimit);
 }
 
 } // namespace

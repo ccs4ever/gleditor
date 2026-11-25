@@ -441,4 +441,109 @@ TEST(IoCellsTest, stalePayloadLeaseIsRefusedAndArenaMayOutliveResolver) {
   SUCCEED();
 }
 
+TEST(IoCellsTest, readObservationCellBindsRecordAndPayloadIndependently) {
+  PayloadFixture p;
+  Topology t;
+  const ReadObservationRecord record{.observationId    = 42,
+                                     .sourceGeneration = 7,
+                                     .locator          = "/tmp/source.bin",
+                                     .consistency = SourceConsistency::Live,
+                                     .offset      = 3,
+                                     .length      = 5,
+                                     .payload     = p.lease.range};
+
+  const auto observation = makeReadObservationCell(t.arena, p.resolver, record);
+  ASSERT_TRUE(observation);
+  EXPECT_EQ(ioCellTag(t.arena, observation->cell, observation->incarnation),
+            IoCellTag::ReadObservation);
+
+  const auto read = readObservationOf(t.arena, *observation);
+  ASSERT_TRUE(read);
+  EXPECT_EQ(read->observationId, 42U);
+  EXPECT_EQ(read->sourceGeneration, 7U);
+  EXPECT_EQ(read->locator, "/tmp/source.bin");
+  EXPECT_EQ(read->consistency, SourceConsistency::Live);
+  EXPECT_EQ(read->offset, 3U);
+  EXPECT_EQ(read->length, 5U);
+  ASSERT_TRUE(read->payload);
+  EXPECT_EQ(*read->payload, p.lease.range);
+
+  // The observation holds its OWN owner lease on the bound bytes: releasing
+  // the caller's lease and the fixture pin leaves the observation's pin
+  // alive, and the bound range still resolves through the token.
+  p.resolver.release(p.lease.lease);
+  p.resolver.release(p.pin.lease);
+  const auto reread = readObservationOf(t.arena, *observation);
+  ASSERT_TRUE(reread);
+  ASSERT_TRUE(reread->payload);
+  EXPECT_EQ(*reread->payload, p.lease.range);
+}
+
+TEST(IoCellsTest, readObservationWithoutPayloadNeedsNoResolverPin) {
+  Topology t;
+  PayloadResolver resolver;
+  const ReadObservationRecord record{.observationId    = 1,
+                                     .sourceGeneration = 0,
+                                     .locator          = "/tmp/empty.bin",
+                                     .consistency = SourceConsistency::Live,
+                                     .offset      = 0,
+                                     .length      = 0,
+                                     .payload     = std::nullopt};
+  const auto observation = makeReadObservationCell(t.arena, resolver, record);
+  ASSERT_TRUE(observation);
+  const auto read = readObservationOf(t.arena, *observation);
+  ASSERT_TRUE(read);
+  EXPECT_FALSE(read->payload);
+  EXPECT_EQ(read->length, 0U);
+}
+
+TEST(IoCellsTest, outcomeCellReadObservationWalksSourceField) {
+  PayloadFixture p;
+  Topology t;
+  const ReadObservationRecord record{.observationId    = 9,
+                                     .sourceGeneration = 4,
+                                     .locator          = "/tmp/walk.bin",
+                                     .consistency = SourceConsistency::Live,
+                                     .offset      = 0,
+                                     .length      = 3,
+                                     .payload     = p.lease.range};
+  const auto observation = makeReadObservationCell(t.arena, p.resolver, record);
+  ASSERT_TRUE(observation);
+
+  // The cell store links outcome -d.io.source-> occurrence -d.io.source->
+  // observation cell; rebuild that exact shape to exercise the walk.
+  const auto request = makeOpenRequestCell(t.arena);
+  ASSERT_TRUE(request);
+  const auto outcome =
+      makeOutcomeCell(t.arena, t.schema, *request, IoOutcomeTag::Complete);
+  ASSERT_TRUE(outcome);
+  const auto occurrence = t.arena.makeCell("io observation occurrence");
+  const auto occInc     = t.arena.incarnationOf(occurrence);
+  ASSERT_TRUE(occInc);
+  ASSERT_TRUE(t.arena.markRuntimeOnly(occurrence));
+  const auto sourceDim = t.schema.dim(IoDimension::Source);
+  ASSERT_TRUE(
+      t.arena.link(outcome->cell, sourceDim, DimVector::POS, occurrence));
+  ASSERT_TRUE(
+      t.arena.link(occurrence, sourceDim, DimVector::POS, observation->cell));
+
+  const auto found = outcomeCellReadObservation(t.arena, t.schema, *outcome);
+  ASSERT_TRUE(found);
+  EXPECT_EQ(found->observationId, 9U);
+  EXPECT_EQ(found->locator, "/tmp/walk.bin");
+
+  // An outcome with no observation link reads nullopt, as does a payload
+  // outcome (d.io.payload is a different dimension).
+  const auto bare =
+      makeOutcomeCell(t.arena, t.schema, *request, IoOutcomeTag::Complete);
+  ASSERT_FALSE(bare); // request already terminal: mint a second request
+  auto secondRequest =
+      appendIoRequest(t.arena, t.schema, t.endpoint, t.capability);
+  ASSERT_TRUE(secondRequest);
+  const auto bareOutcome = makeOutcomeCell(
+      t.arena, t.schema, secondRequest->request, IoOutcomeTag::Complete);
+  ASSERT_TRUE(bareOutcome);
+  EXPECT_FALSE(outcomeCellReadObservation(t.arena, t.schema, *bareOutcome));
+}
+
 } // namespace
