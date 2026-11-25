@@ -1,0 +1,418 @@
+#ifndef XANADU_VORTEX_CAPTURE_COORDINATOR_HPP
+#define XANADU_VORTEX_CAPTURE_COORDINATOR_HPP
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <span>
+#include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <variant>
+#include <vector>
+
+#include "common/xanadu/spool.hpp"
+#include "common/xanadu/vortex/capture_journal.hpp"
+#include "common/xanadu/vortex/io_cells.hpp"
+#include "common/xanadu/vortex/io_protocol.hpp"
+#include "common/xanadu/vortex/io_service.hpp"
+#include "common/xanadu/vortex/payload_resolver.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
+
+// design/vortex-io-implementation-plan.md §8.2 +
+// design/vortex-io-redesign.md §9.1-9.3: capture is a two-resource
+// transaction -- append the selected transient bytes to the author's one
+// permascroll, then commit the bounded interval translation plus the
+// Structure references under one owner mark. This header is the
+// file-agnostic machinery: it consumes PayloadRanges and produces
+// permascroll spans, journal records and owner cells. File/media capture
+// sources feed the same path through their materialized read observations
+// (M5); nothing here knows what a file is.
+//
+// Threading: every public CaptureCoordinator method runs on the owner
+// thread (the same thread that owns the arena and drives IoHost). The
+// CaptureAppendAdapter's execute() runs on scheduler worker threads and
+// synchronizes internally; the byte sink must tolerate serialized
+// appends, which the adapter's perform mutex guarantees.
+
+namespace xanadu {
+class UserPermascroll;
+class SegmentedPrimediaSpool;
+} // namespace xanadu
+
+namespace xanadu::vortex {
+
+/// The durable append target a capture writes into: the author's one
+/// permascroll (design §9.1 "registers content in the author's one
+/// permascroll"). Implementations return the canonical PrimediaSpan the
+/// bytes landed at; appends are serialized by CaptureAppendAdapter, so a
+/// sink need only be internally consistent, not internally locked.
+class CaptureByteSink {
+public:
+  virtual xanadu::PrimediaSpan append(std::span<const std::byte> bytes) = 0;
+  virtual ~CaptureByteSink() = default;
+};
+
+/// CaptureByteSink over the author's UserPermascroll (the production
+/// target). UserPermascroll::append takes its own lock, so concurrent
+/// capture appends and ordinary typing interleave safely.
+class UserPermascrollCaptureSink final : public CaptureByteSink {
+public:
+  explicit UserPermascrollCaptureSink(xanadu::UserPermascroll &permascroll);
+  auto append(std::span<const std::byte> bytes)
+      -> xanadu::PrimediaSpan override;
+
+private:
+  xanadu::UserPermascroll &permascroll_;
+};
+
+/// CaptureByteSink over a SegmentedPrimediaSpool (tests and spool-backed
+/// stores). SegmentedPrimediaSpool::append is single-appender; the adapter
+/// mutex supplies that serialization.
+class SegmentedPrimediaCaptureSink final : public CaptureByteSink {
+public:
+  explicit SegmentedPrimediaCaptureSink(xanadu::SegmentedPrimediaSpool &spool);
+  auto append(std::span<const std::byte> bytes)
+      -> xanadu::PrimediaSpan override;
+
+private:
+  xanadu::SegmentedPrimediaSpool &spool_;
+};
+
+inline constexpr std::uint32_t captureSourceKind    = 5;
+inline constexpr AdapterKey captureAppendAdapterKey = {captureSourceKind, 1};
+
+/// The frozen payload one CaptureAppend request carries: the uncovered
+/// bytes to append, plus the capture identity for diagnostics. Staged
+/// under the spec cell's CellRef, the StagedLensSourceAdapter pattern --
+/// ArenaIoCellStore::freezeRequest requires a live spec cell, so the
+/// staging key IS that cell's ref.
+struct CaptureAppendSpec {
+  std::vector<std::byte> bytes;
+  CaptureId captureId{};
+};
+
+/// IoAdapter for the CaptureAppend operation: appends one frozen byte
+/// string to the sink and records the allocated PrimediaSpan as the
+/// request's receipt, which CaptureCoordinator::commit collects through
+/// receiptFor(). The receipt never rides the outcome's payload channel --
+/// it is permascroll metadata, not transient bytes.
+class CaptureAppendAdapter final : public IoAdapter {
+public:
+  explicit CaptureAppendAdapter(CaptureByteSink &sink);
+
+  /// Stage append bytes under @p key (the spec cell's CellRef). Refuses
+  /// an occupied key or a full table rather than silently redirecting an
+  /// in-flight request's worker turn onto the new spec.
+  [[nodiscard]] auto stageAt(std::uint32_t key, CaptureAppendSpec spec)
+      -> std::expected<std::uint32_t, IoErrorInfo>;
+  /// Drop @p key's staged spec only. The service calls this through
+  /// abandonStaged at EVERY terminal -- including requests whose worker
+  /// turn already consumed the spec and stored its receipt -- so it must
+  /// never touch receipts_/executed_, the evidence commit() validates.
+  void abandon(std::uint32_t key) noexcept;
+  /// Drop all of @p key's append state -- staged spec, receipt and the
+  /// executed mark. The coordinator calls this once the append's outcome
+  /// is journaled (Committed or Aborted) or the capture is swept dead;
+  /// until then the entries are what commit() and wasExecuted() prove
+  /// against.
+  void complete(std::uint32_t key) noexcept;
+  void abandonStaged(OwnerCell specification) noexcept override;
+
+  /// The permascroll span execute() allocated for @p key, when the append
+  /// completed. Owner thread; the entry stays until complete() or
+  /// destruction -- commit() correlates it to the request's terminal
+  /// Complete outcome before trusting it.
+  [[nodiscard]] auto receiptFor(std::uint32_t key) const
+      -> std::optional<xanadu::PrimediaSpan>;
+  /// Whether execute() ever attempted the sink append for @p key. A
+  /// request cancelled before its worker turn never reaches execute, so
+  /// wasExecuted()==false proves no bytes can exist; true means the
+  /// append was attempted and bytes may have landed even on a non-Complete
+  /// outcome.
+  [[nodiscard]] auto wasExecuted(std::uint32_t key) const noexcept -> bool;
+
+  auto prepare(const CellRequest &, OwnerContext &)
+      -> std::expected<PreparedOperation, IoErrorInfo> override;
+  void execute(const BackendCommand &, BackendContext &,
+               CompletionSink &) noexcept override;
+  auto publish(const NativeCompletion &, OwnerContext &)
+      -> std::expected<OwnerPublication, IoErrorInfo> override;
+
+private:
+  CaptureByteSink &sink_;
+  mutable std::mutex mutex_;
+  std::unordered_map<std::uint32_t, CaptureAppendSpec> staged_;
+  std::unordered_map<std::uint32_t, xanadu::PrimediaSpan> receipts_;
+  std::unordered_set<std::uint32_t> executed_;
+  /// Serializes sink_.append across worker turns: CaptureByteSink
+  /// implementations are not required to be internally locked.
+  std::mutex performMutex_;
+  static constexpr std::size_t maxStagedAppends = 4096;
+};
+
+/// Bounds prepare() applies to one selection, on top of the coordinator's
+/// map/journal limits.
+struct CapturePolicy {
+  /// Selected PayloadRanges accepted per capture.
+  std::size_t maxIntervals{128};
+  /// Uncovered bytes accepted per capture (the append payload bound).
+  std::size_t maxAppendBytes{1u << 20};
+  /// Uncovered pieces accepted per capture (each becomes a translation
+  /// entry and a journal interval record).
+  std::size_t maxPieces{1024};
+};
+
+/// Bounds the coordinator's own state: live pending captures, live
+/// translation-map slots (committed + pending + pinned) and the journal
+/// file's byte budget.
+struct CaptureCoordinatorLimits {
+  std::size_t maxPendingCaptures{32};
+  std::size_t maxMapEntries{8192};
+  std::size_t journalMaxBytes{4u << 20};
+};
+
+/// prepare() success: the owner-only capture cell naming this transaction.
+struct Prepared {
+  CaptureCell capture;
+};
+/// appendRequest() result: the service's own admission verdict. Refusals
+/// -- pre-submit journal/cell failures and service refusals alike -- ride
+/// the same SubmitResult::Refused outcome channel.
+struct CaptureAppend {
+  SubmitResult admission;
+};
+/// commit() success: the minted CaptureReceipt cell.
+struct Committed {
+  CaptureReceiptCell receipt;
+};
+// Refused{OutcomeCell} from io_protocol.hpp is the shared refusal shape
+// for prepare() and commit().
+
+using CapturePrepareResult = std::variant<Prepared, Refused>;
+using CaptureCommitResult  = std::variant<Committed, Refused>;
+
+enum class CaptureRecoveryState : std::uint8_t {
+  /// The journal proved the capture's final state: translations were
+  /// rebuilt into the interval map (or the capture resolved without
+  /// bytes). Nothing is pinned.
+  Reconciled,
+  /// Ordering or completeness could not be proven: the capture's source
+  /// intervals are pinned against new overlapping captures until explicit
+  /// reconciliation (a later milestone) resolves them, and any append
+  /// bytes it may have written are reported as potential orphans --
+  /// unreachable, never guessed into identity.
+  NeedsReconciliation,
+};
+
+struct CaptureRecoveryEntry {
+  CaptureId capture;
+  CaptureRecoveryState state;
+};
+
+struct CaptureRecoveryReport {
+  std::vector<CaptureRecoveryEntry> entries;
+  /// Bytes appends may have written without a proven commit: the sum of
+  /// appendLength over captures whose intent is open or whose abort is
+  /// uncertain. Reported, never aliased.
+  std::uint64_t orphanBytes{};
+};
+
+/// The per-user capture owner (plan §8.2): owns the interval translation
+/// map, the versioned capture.journal and the CaptureAppendAdapter, and
+/// drives the two-resource transaction through IoService. One instance
+/// per user/permascroll pair; all methods run on the owner thread.
+class CaptureCoordinator {
+public:
+  /// @p journalPath names the user's capture.journal; @p journalMaxBytes
+  /// bounds it (0 = unbounded, matching the journal's own convention).
+  /// The host must register appendAdapter() with the IoService under
+  /// appendKey() and route its RequestDecoder through
+  /// decodeAppendRequest() for capture spec cells.
+  CaptureCoordinator(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+                     PayloadResolver &payloads, IoService &service,
+                     CaptureByteSink &sink, std::filesystem::path journalPath,
+                     std::size_t journalMaxBytes     = 4u << 20,
+                     CaptureCoordinatorLimits limits = {});
+  ~CaptureCoordinator()                                              = default;
+  CaptureCoordinator(const CaptureCoordinator &)                     = delete;
+  auto operator=(const CaptureCoordinator &) -> CaptureCoordinator & = delete;
+
+  [[nodiscard]] auto appendAdapter() noexcept -> CaptureAppendAdapter &;
+  [[nodiscard]] auto appendKey() const noexcept -> AdapterKey;
+  [[nodiscard]] auto journal() noexcept -> CaptureJournal &;
+
+  /// RequestDecoder hook: when @p specification names the live spec cell
+  /// of a capture append awaiting admission, returns the frozen
+  /// CellRequest for captureAppendAdapterKey; std::nullopt otherwise so
+  /// the host's decoder falls through to its own operations.
+  [[nodiscard]] auto decodeAppendRequest(CapabilityCell capability,
+                                         OwnerCell specification)
+      -> std::optional<CellRequest>;
+
+  /// Freeze @p selection against the translation map and reserve bounded
+  /// map/journal capacity, then mint the CaptureCell. Covered intervals
+  /// reuse their committed or same-capture-pending translations; only
+  /// uncovered bytes are appended. Refuses -- minting nothing durable --
+  /// on an unresolvable range, a pinned (needs-reconciliation) overlap,
+  /// another capture's pending overlap, or any bound exceeded.
+  [[nodiscard]] auto prepare(std::span<const PayloadRange> selection,
+                             const CapturePolicy &policy = {})
+      -> CapturePrepareResult;
+
+  /// Journal the append intent, stage the frozen bytes under a fresh spec
+  /// cell and submit the CaptureAppend through IoService. The returned
+  /// CaptureAppend wraps the service's SubmitResult: Admitted carries the
+  /// RequestCell commit() later validates; Refused carries the typed
+  /// outcome (journal failure, cell mint failure or service refusal).
+  /// A capture whose append was refused at admission stays Prepared and
+  /// may be retried.
+  [[nodiscard]] auto appendRequest(CaptureCell capture) -> CaptureAppend;
+
+  /// Publish the capture: validate that @p successfulAppend is the
+  /// terminal outcome of THIS capture's append request (followed through
+  /// the capture cell's request occurrence, incarnation-checked, and
+  /// confirmed Complete), fsync the Appended journal record carrying the
+  /// allocated permascroll span and translation intent, publish the
+  /// CaptureReceipt cell and capture->receipt link under one arena mark,
+  /// fsync the Committed record, then commit the interval translations.
+  /// Any mismatch -- outcome of another capture, stale incarnation,
+  /// nonterminal request, non-Complete outcome, missing receipt --
+  /// refuses with a Rejected outcome and publishes nothing.
+  [[nodiscard]] auto commit(CaptureCell capture, OutcomeCell successfulAppend)
+      -> CaptureCommitResult;
+
+  /// Reconcile capture.journal against the interval map after a restart
+  /// (or on demand): committed and provably-appended captures rebuild
+  /// their translations; open intents, uncertain aborts and anomalies pin
+  /// their source intervals against overlapping captures and report
+  /// potential orphan bytes. A journal that fails its format checks is a
+  /// typed PersistenceRefusal. Never resubmits an append and never
+  /// guesses ambiguous overlap into identity.
+  [[nodiscard]] auto recover()
+      -> std::expected<CaptureRecoveryReport, IoErrorInfo>;
+
+private:
+  enum class PendingPhase : std::uint8_t {
+    Prepared,
+    AppendRequested,
+    Committed,
+    Aborted,
+  };
+
+  /// One uncovered source interval: the bytes at [srcOffset, srcOffset +
+  /// srcLength) of `origin` were appended at dstOffset within the single
+  /// append payload, so the permanent span is span.start + dstOffset.
+  struct CapturePiece {
+    PayloadRef origin;
+    std::uint64_t srcOffset{};
+    std::uint64_t srcLength{};
+    std::uint64_t dstOffset{};
+    std::size_t leaseIndex{};
+  };
+
+  struct PendingCapture {
+    CaptureId captureId{};
+    CaptureCell cell{};
+    PendingPhase phase{PendingPhase::Prepared};
+    /// Leases pinning the selected source bytes until commit/abandon;
+    /// translation entries never pin bytes, only this record does.
+    std::vector<PayloadLease> leases;
+    std::vector<CapturePiece> pieces;
+    std::vector<std::byte> appendBytes;
+    std::uint64_t appendLength{};
+    std::array<std::byte, 32> appendDigest{};
+    // Append-request linkage, set by appendRequest():
+    zigzag::CellRef specCell{};
+    AllocationIncarnation specIncarnation{};
+    bool hasSpec{};
+    std::optional<RequestCell> appendRequest;
+    std::uint64_t appendedSequence{};
+    bool appendedRecorded{};
+    bool publishedReceipt{};
+    std::optional<CaptureReceiptCell> receiptCell;
+    bool committedRecorded{};
+  };
+
+  /// One interval-map slot. Committed slots name the permanent span;
+  /// Pending slots reserve an interval for an in-flight capture (its dst
+  /// is unknown until the append lands); Pinned slots mark intervals a
+  /// NeedsReconciliation capture may have appended -- new overlapping
+  /// captures are refused until explicit reconciliation.
+  struct TranslationSlot {
+    enum class Kind : std::uint8_t { Committed, Pending, Pinned };
+    Kind kind{Kind::Committed};
+    std::uint64_t srcOffset{};
+    std::uint64_t srcLength{};
+    xanadu::PrimediaSpan dst{};
+    CaptureId pendingCapture{};
+  };
+  /// Per-origin non-overlapping slots keyed by srcOffset.
+  using OriginMap = std::map<std::uint64_t, TranslationSlot>;
+  struct PayloadRefLess {
+    bool operator()(const PayloadRef &a, const PayloadRef &b) const {
+      return std::tie(a.kind, a.source, a.generation, a.occurrence) <
+             std::tie(b.kind, b.source, b.generation, b.occurrence);
+    }
+  };
+  using TranslationMap = std::map<PayloadRef, OriginMap, PayloadRefLess>;
+  /// pending_ is keyed by the capture cell's (ref, incarnation) pair so a
+  /// stale handle can never alias a recycled allocation.
+  using PendingKey = std::pair<zigzag::CellRef, AllocationIncarnation>;
+
+  void sweepDead();
+  void releaseLeases(PendingCapture &pending);
+  void erasePendingSlots(CaptureId captureId);
+  [[nodiscard]] auto pendingFor(CaptureCell capture)
+      -> std::map<PendingKey, PendingCapture>::iterator;
+  [[nodiscard]] auto pendingFor(CaptureCell capture) const
+      -> std::map<PendingKey, PendingCapture>::const_iterator;
+
+  /// Compute the uncovered gaps of [offset, offset+length) on @p origin
+  /// against the translation map, appending pieces (with running
+  /// dstOffset) for each gap. Refuses on pinned overlap or another
+  /// capture's pending overlap; same-capture pending slots (inserted by
+  /// earlier ranges of this prepare) count as covered so overlapping
+  /// selections coalesce.
+  [[nodiscard]] auto
+  uncoveredPieces(const PayloadRef &origin, std::uint64_t offset,
+                  std::uint64_t length, CaptureId selfCapture,
+                  std::vector<CapturePiece> &pieces, std::uint64_t &appendBytes,
+                  std::size_t leaseIndex) -> std::expected<void, IoErrorInfo>;
+  void insertPendingSlots(CaptureId captureId,
+                          const std::vector<CapturePiece> &pieces,
+                          std::size_t begin, std::size_t end);
+  void finalizeTranslations(PendingCapture &pending,
+                            const xanadu::PrimediaSpan &span);
+  void coalesceOrigin(OriginMap &slots);
+  void rebuildFromAppended(const CaptureJournalRecord &record, bool &conflict);
+  void pinFromRecord(const CaptureJournalRecord &record);
+  [[nodiscard]] auto liveCaptureIds() const -> std::unordered_set<CaptureId>;
+  /// Pieces -> journal intervals: the translation intent each Append and
+  /// Appended record carries (private CapturePiece needs member access).
+  [[nodiscard]] static auto
+  journalIntervals(const std::vector<CapturePiece> &pieces)
+      -> std::vector<CaptureSourceInterval>;
+
+  zigzag::ArenaManifold &arena_;
+  IoCellSchema schema_;
+  PayloadResolver &payloads_;
+  IoService &service_;
+  CaptureJournal journal_;
+  CaptureAppendAdapter adapter_;
+  AdapterKey appendKey_{captureAppendAdapterKey};
+  CaptureCoordinatorLimits limits_;
+  std::map<PendingKey, PendingCapture> pending_;
+  TranslationMap translations_;
+  std::size_t translationSlots_{};
+  CaptureId nextCaptureId_{1};
+};
+
+} // namespace xanadu::vortex
+
+#endif
