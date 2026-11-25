@@ -699,6 +699,27 @@ TEST(IoFrontendLayeringTest, TheAwaitPathHasNoLanguageBranches) {
   EXPECT_EQ(header.substr(at, 160).find("frontend"), std::string::npos);
 }
 
+TEST(IoFrontendLayeringTest, TheSubmitPathHasNoLanguageBranches) {
+  const auto text  = vortexSource("vortex_vm.cpp");
+  const auto begin = text.find("VmExecutionResult VortexVM::stepSubmit(");
+  const auto end   = text.find("xanadu::vortex::ContinuationId "
+                                 "VortexVM::createContinuation(");
+  ASSERT_NE(begin, std::string::npos);
+  ASSERT_NE(end, std::string::npos);
+  ASSERT_LT(begin, end);
+  const auto submitPath = lowered(text.substr(begin, end - begin));
+  for (const auto name :
+       {"vql", "vpl", "prolog", "vlace", "vicon", "vagent", "frontend", "xuzz",
+        "ioservice", "iohost", "read_bytes", "readbytes"}) {
+    EXPECT_EQ(submitPath.find(name), std::string::npos) << name;
+  }
+  const auto header = lowered(vortexSource("vortex_vm.hpp"));
+  const auto at     = header.find("struct vmsubmission");
+  ASSERT_NE(at, std::string::npos);
+  EXPECT_EQ(header.substr(at, 400).find("frontend"), std::string::npos);
+  EXPECT_EQ(header.substr(at, 400).find("iosubmission"), std::string::npos);
+}
+
 TEST(IoFrontendLayeringTest, IoHostRoutesTokensWithoutNamingALanguage) {
   for (const auto *file : {"io_host.hpp", "io_host.cpp", "frontend_token.hpp",
                            "frontend_bridge.hpp", "frontend_bridge.cpp"}) {

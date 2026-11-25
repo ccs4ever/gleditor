@@ -287,6 +287,7 @@ bool pureOpcode(OpcodeKind opcode) {
   case OpcodeKind::DimByName:
   case OpcodeKind::Hypertime:
   case OpcodeKind::Await:
+  case OpcodeKind::Submit:
     return false;
   }
   return false;
@@ -546,7 +547,7 @@ VortexProgram decodeProgram(std::string_view bytes, SyntaxLimits limits) {
   for (const auto &item : instructions) {
     dictionary(item, 5);
     const auto opcode = required(item, "opcode").asInteger();
-    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::Await))
+    if (opcode < 0 || opcode > static_cast<std::int64_t>(OpcodeKind::Submit))
       throw std::runtime_error("Unknown Vortex artifact opcode");
     const auto &next = required(item, "next").asList();
     if (next.size() > 1)

@@ -310,6 +310,10 @@ VQLCompiler::opcodeMnemonic(zigzag::vortex::OpcodeKind kind) noexcept {
     return "SAMECELL";
   case OpcodeKind::PinHistorical:
     return "PINHISTORICAL";
+  case OpcodeKind::Await:
+    return "AWAIT";
+  case OpcodeKind::Submit:
+    return "SUBMIT";
   default:
     return "UNKNOWN";
   }

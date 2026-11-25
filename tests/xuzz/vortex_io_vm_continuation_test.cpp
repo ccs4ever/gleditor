@@ -443,4 +443,282 @@ TEST(VortexIoVmContinuationTest, AwaitFromAForeignThreadThrowsAndMintsNothing) {
   EXPECT_EQ(h.arena.cellCount(), cellsBefore);
 }
 
+// ---- The Submit opcode over a counting fake host --------------------------
+
+/// A Submit host that admits through the harness service (so an Await over its
+/// request is real) and counts every call; `refuseNext` turns the arm to a
+/// Rejected outcome, `throwNext` makes the host throw.
+struct SubmitProbe {
+  Harness &h;
+  std::size_t calls{};
+  bool refuseNext{};
+  bool throwNext{};
+  std::vector<CellRef> submissions;
+
+  explicit SubmitProbe(Harness &harness) : h(harness) {
+    h.vm.setSubmitHandler(
+        [this](const CapabilityCell capability, const CellRef description,
+               const CellRef) -> zigzag::vortex::VmSubmission {
+          ++calls;
+          if (throwNext) throw std::runtime_error("fake submit host failed");
+          if (refuseNext) {
+            const auto outcome = h.service.refuse(IoErrorInfo{});
+            const auto sum =
+                makeRefusedSubmissionCell(h.arena, h.schema, outcome);
+            submissions.push_back(sum->cell);
+            return {*sum, 1, outcome.cell};
+          }
+          auto result          = h.service.submit(capability, description);
+          const auto &admitted = std::get<Admitted>(result.value);
+          const auto sum =
+              makeAdmittedSubmissionCell(h.arena, h.schema, admitted.request);
+          submissions.push_back(sum->cell);
+          return {*sum, 0, admitted.request.cell};
+        });
+  }
+  ~SubmitProbe() { h.vm.setSubmitHandler({}); }
+};
+
+struct SubmitOps {
+  CellRef submit;
+  CellRef submission;
+  CellRef arm;
+  CellRef payload;
+};
+
+auto mintSubmit(Harness &h) -> SubmitOps {
+  SubmitOps ops{.submit     = h.vm.mintOpcode(OpcodeKind::Submit),
+                .submission = h.arena.makeCell(),
+                .arm        = h.arena.makeCell(),
+                .payload    = h.arena.makeCell()};
+  h.core.bindInput(ops.submit, h.capability.cell);
+  h.core.bindInput(ops.submit, h.arena.makeCell("description"));
+  h.core.bindOutput(ops.submit, ops.submission);
+  h.core.bindOutput(ops.submit, ops.arm);
+  h.core.bindOutput(ops.submit, ops.payload);
+  return ops;
+}
+
+auto armOf(Harness &h, const SubmitOps &ops) -> std::int64_t {
+  const auto value = h.core.render(ops.arm);
+  const auto *arm  = value ? std::get_if<std::int64_t>(&*value) : nullptr;
+  return arm ? *arm : -1;
+}
+
+void spinTo(Harness &h, const CellRef from, const CellRef to) {
+  ASSERT_TRUE(h.arena.link(from, h.core.dims().spin, DimVector::POS, to));
+}
+
+TEST(VortexSubmitOpcodeTest, AdmissionLeavesTheSumItsArmAndItsPayload) {
+  Harness h;
+  SubmitProbe host(h);
+  const auto ops  = mintSubmit(h);
+  const auto halt = h.vm.mintOpcode(OpcodeKind::Halt);
+  spinTo(h, ops.submit, halt);
+  const auto cursor = h.vm.spawnCursor(ops.submit);
+
+  const auto cycles  = h.vm.totalCycles();
+  const auto stepped = h.vm.step(cursor);
+  ASSERT_TRUE(stepped.success) << stepped.errorMessage;
+  EXPECT_EQ(stepped.disposition, zigzag::vortex::StepDisposition::Progress);
+  EXPECT_EQ(host.calls, 1U);
+  EXPECT_EQ(h.vm.getCursorOpcode(cursor), halt);
+  EXPECT_EQ(h.vm.totalCycles(), cycles + 1);
+  ASSERT_EQ(host.submissions.size(), 1U);
+  EXPECT_EQ(h.vm.cellReferenceOf(ops.submission), host.submissions.front());
+  EXPECT_EQ(armOf(h, ops), 0);
+  const auto payload = h.vm.cellReferenceOf(ops.payload);
+  ASSERT_TRUE(payload);
+  EXPECT_EQ(ioCellTag(h.arena, *payload, *h.arena.incarnationOf(*payload)),
+            IoCellTag::Request);
+}
+
+TEST(VortexSubmitOpcodeTest, RefusalIsAValueOnTheSecondArmNeverATrap) {
+  Harness h;
+  SubmitProbe host(h);
+  host.refuseNext = true;
+  const auto ops  = mintSubmit(h);
+  const auto halt = h.vm.mintOpcode(OpcodeKind::Halt);
+  spinTo(h, ops.submit, halt);
+  const auto cursor = h.vm.spawnCursor(ops.submit);
+
+  const auto stepped = h.vm.step(cursor);
+  ASSERT_TRUE(stepped.success) << stepped.errorMessage;
+  EXPECT_EQ(armOf(h, ops), 1);
+  const auto payload = h.vm.cellReferenceOf(ops.payload);
+  ASSERT_TRUE(payload);
+  EXPECT_EQ(ioCellTag(h.arena, *payload, *h.arena.incarnationOf(*payload)),
+            IoCellTag::Outcome);
+  EXPECT_EQ(h.vm.getCursorOpcode(cursor), halt);
+}
+
+TEST(VortexSubmitOpcodeTest, AHostThatThrowsIsATypedStepFailure) {
+  Harness h;
+  SubmitProbe host(h);
+  host.throwNext  = true;
+  const auto ops  = mintSubmit(h);
+  const auto halt = h.vm.mintOpcode(OpcodeKind::Halt);
+  spinTo(h, ops.submit, halt);
+  const auto cursor = h.vm.spawnCursor(ops.submit);
+
+  const auto cycles = h.vm.totalCycles();
+  zigzag::vortex::VmExecutionResult stepped;
+  EXPECT_NO_THROW(stepped = h.vm.step(cursor));
+  EXPECT_FALSE(stepped.success);
+  EXPECT_EQ(stepped.disposition, zigzag::vortex::StepDisposition::Failed);
+  EXPECT_NE(stepped.errorMessage.find("fake submit host failed"),
+            std::string::npos);
+  EXPECT_EQ(host.calls, 1U);
+  EXPECT_EQ(h.vm.getCursorOpcode(cursor), ops.submit) << "no advance";
+  EXPECT_EQ(h.vm.totalCycles(), cycles);
+  EXPECT_FALSE(h.vm.cellReferenceOf(ops.submission)) << "nothing published";
+  EXPECT_TRUE(host.submissions.empty());
+}
+
+TEST(VortexSubmitOpcodeTest, AnInputThatIsNotACapabilityFailsBeforeTheHost) {
+  Harness h;
+  SubmitProbe host(h);
+  const auto ops = mintSubmit(h);
+  // Rebind the capability slot to an ordinary cell.
+  const auto other = h.vm.mintOpcode(OpcodeKind::Submit);
+  h.core.bindInput(other, h.arena.makeCell("plain"));
+  h.core.bindInput(other, h.arena.makeCell("description"));
+  h.core.bindOutput(other, h.arena.makeCell());
+  h.core.bindOutput(other, h.arena.makeCell());
+  h.core.bindOutput(other, h.arena.makeCell());
+  const auto cursor  = h.vm.spawnCursor(other);
+  const auto stepped = h.vm.step(cursor);
+  EXPECT_FALSE(stepped.success);
+  EXPECT_EQ(host.calls, 0U);
+  static_cast<void>(ops);
+
+  Harness bare;
+  const auto lone    = mintSubmit(bare);
+  const auto cursor2 = bare.vm.spawnCursor(lone.submit);
+  const auto noHost  = bare.vm.step(cursor2);
+  EXPECT_FALSE(noHost.success);
+  EXPECT_NE(noHost.errorMessage.find("no I/O host"), std::string::npos);
+}
+
+/// Submit, then Branch on the arm: the admitted arm falls through to an Await
+/// of the payload, the refusal arm jumps over it; both end in Halt.
+struct MatchProgram {
+  SubmitOps ops;
+  CellRef branch;
+  CellRef await;
+  CellRef awaitOut;
+  CellRef admittedHalt;
+  CellRef refusedHalt;
+  CellRef cursor;
+};
+
+auto matchProgram(Harness &h) -> MatchProgram {
+  MatchProgram p;
+  p.ops          = mintSubmit(h);
+  p.branch       = h.vm.mintOpcode(OpcodeKind::Branch);
+  p.await        = h.vm.mintOpcode(OpcodeKind::Await);
+  p.awaitOut     = h.arena.makeCell();
+  p.admittedHalt = h.vm.mintOpcode(OpcodeKind::Halt);
+  p.refusedHalt  = h.vm.mintOpcode(OpcodeKind::Halt);
+  h.core.bindInput(p.branch, p.ops.arm);
+  h.core.bindInput(p.branch, h.arena.makeScalarCell(
+                                 static_cast<std::int64_t>(p.refusedHalt)));
+  h.core.bindInput(p.await, p.ops.payload);
+  h.core.bindOutput(p.await, p.awaitOut);
+  spinTo(h, p.ops.submit, p.branch);
+  spinTo(h, p.branch, p.await);
+  spinTo(h, p.await, p.admittedHalt);
+  p.cursor = h.vm.spawnCursor(p.ops.submit);
+  return p;
+}
+
+TEST(VortexSubmitOpcodeTest, ABranchOnTheArmMatchesAdmittedAndRefusedArms) {
+  {
+    Harness h;
+    SubmitProbe host(h);
+    const auto p = matchProgram(h);
+    const auto r = h.vm.run(p.cursor, 100);
+    ASSERT_TRUE(r.success) << r.errorMessage;
+    EXPECT_EQ(r.disposition, zigzag::vortex::StepDisposition::Pending)
+        << "the admitted arm falls through to the Await and parks";
+    EXPECT_EQ(host.calls, 1U);
+    EXPECT_EQ(h.vm.getCursorOpcode(p.cursor), p.await);
+  }
+  {
+    Harness h;
+    SubmitProbe host(h);
+    host.refuseNext = true;
+    const auto p    = matchProgram(h);
+    const auto r    = h.vm.run(p.cursor, 100);
+    ASSERT_TRUE(r.success) << r.errorMessage;
+    EXPECT_EQ(r.errorMessage, "Halted");
+    EXPECT_EQ(h.vm.getCursorOpcode(p.cursor), p.refusedHalt)
+        << "the refusal arm never reaches the Await";
+    EXPECT_EQ(host.calls, 1U);
+  }
+}
+
+TEST(VortexSubmitOpcodeTest, ResumingAfterTheAwaitParkNeverSubmitsAgain) {
+  Harness h;
+  SubmitProbe host(h);
+  const auto p     = matchProgram(h);
+  const auto first = h.vm.run(p.cursor, 100);
+  ASSERT_EQ(first.disposition, zigzag::vortex::StepDisposition::Pending);
+  ASSERT_EQ(host.calls, 1U);
+
+  // Running again while parked is the same park, not a re-execution.
+  const auto again = h.vm.run(p.cursor, 100);
+  EXPECT_EQ(again.disposition, zigzag::vortex::StepDisposition::Pending);
+  EXPECT_EQ(host.calls, 1U);
+  EXPECT_EQ(h.vm.getCursorOpcode(p.cursor), p.await)
+      << "the continuation resumes at the Await, after the Submit";
+
+  h.scheduler->complete(0, EndOfStream{{}});
+  static_cast<void>(h.host.pumpIo(8));
+  const auto resumed = h.vm.run(p.cursor, 100);
+  ASSERT_TRUE(resumed.success) << resumed.errorMessage;
+  EXPECT_EQ(resumed.errorMessage, "Halted");
+  EXPECT_EQ(host.calls, 1U) << "one Submit executed, one host admission";
+  EXPECT_TRUE(h.vm.cellReferenceOf(p.awaitOut));
+}
+
+TEST(VortexSubmitOpcodeTest, BacktrackingOverASubmitSubmitsAgainOnReexecution) {
+  // Choice leaves the second Submit as the alternative; the first Submit then
+  // Fails into it. Each executed Submit is its own admission: a request is an
+  // effect on the world and backtracking does not recall it, so a new
+  // execution creates a new operation (plan §5).
+  Harness h;
+  SubmitProbe host(h);
+  const auto choice = h.vm.mintOpcode(OpcodeKind::Choice);
+  const auto first  = mintSubmit(h);
+  const auto fail   = h.vm.mintOpcode(OpcodeKind::Fail);
+  const auto second = mintSubmit(h);
+  const auto halt   = h.vm.mintOpcode(OpcodeKind::Halt);
+  h.core.bindInput(
+      choice, h.arena.makeScalarCell(static_cast<std::int64_t>(second.submit)));
+  spinTo(h, choice, first.submit);
+  spinTo(h, first.submit, fail);
+  spinTo(h, second.submit, halt);
+  const auto cursor = h.vm.spawnCursor(choice);
+
+  const auto r = h.vm.run(cursor, 100);
+  ASSERT_TRUE(r.success) << r.errorMessage;
+  EXPECT_EQ(r.errorMessage, "Halted");
+  EXPECT_EQ(host.calls, 2U) << "each executed Submit admits once";
+
+  // And the same Submit instruction executed twice (a loop body, a re-entered
+  // frame) is two admissions, not one cached one.
+  Harness again;
+  SubmitProbe loopHost(again);
+  const auto op   = mintSubmit(again);
+  const auto stop = again.vm.mintOpcode(OpcodeKind::Halt);
+  spinTo(again, op.submit, stop);
+  const auto loopCursor = again.vm.spawnCursor(op.submit);
+  ASSERT_TRUE(again.vm.step(loopCursor).success);
+  again.vm.setCursorOpcode(loopCursor, op.submit);
+  ASSERT_TRUE(again.vm.step(loopCursor).success);
+  EXPECT_EQ(loopHost.calls, 2U);
+  EXPECT_NE(loopHost.submissions[0], loopHost.submissions[1]);
+}
+
 } // namespace

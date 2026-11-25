@@ -313,7 +313,7 @@ VortexVM::registerProgramOps(std::span<const CellRef> enumeration) {
     // ceiling with the generated-vocabulary bound in meta.cpp.
     if (!kind || *kind < 0 ||
         static_cast<std::uint64_t>(*kind) >
-            static_cast<std::uint64_t>(OpcodeKind::Await)) {
+            static_cast<std::uint64_t>(OpcodeKind::Submit)) {
       return std::unexpected("registerProgramOps: recorded cell " +
                              std::to_string(opCell) +
                              " does not decode to an opcode kind");
@@ -585,7 +585,7 @@ std::optional<OpcodeKind> VortexVM::getOpcodeKind(CellRef opCell) const {
   auto val = core_.arena().asInt64(opCell);
   if (val && *val >= 0 &&
       static_cast<std::uint64_t>(*val) <=
-          static_cast<std::uint64_t>(OpcodeKind::Await)) {
+          static_cast<std::uint64_t>(OpcodeKind::Submit)) {
     return static_cast<OpcodeKind>(*val);
   }
   return std::nullopt;
@@ -2537,6 +2537,10 @@ VortexVM::executeOpcodeBody(OpcodeKind kind, CellRef opcode,
     return {.success       = false,
             .failingClause = opcode,
             .errorMessage  = "Await requires a VM cursor"};
+  if (kind == OpcodeKind::Submit)
+    return {.success       = false,
+            .failingClause = opcode,
+            .errorMessage  = "Submit requires a VM cursor"};
   if (kind == OpcodeKind::InvokeFrame || kind == OpcodeKind::ReturnFrame)
     return {.success      = false,
             .errorMessage = "activation-frame opcodes require a VM cursor"};
@@ -3906,6 +3910,9 @@ VmExecutionResult VortexVM::step(CellRef cursor) {
   if (const auto op = getCursorOpcode(cursor);
       op && getOpcodeKind(*op) == OpcodeKind::Await)
     return stepAwait(cursor, *op);
+  if (const auto op = getCursorOpcode(cursor);
+      op && getOpcodeKind(*op) == OpcodeKind::Submit)
+    return stepSubmit(cursor, *op);
   if (const auto groups = mutationGroups_.find(cursor);
       groups != mutationGroups_.end() && groups->second &&
       !groups->second->empty() && guardLimits_.maxMutationGroupCycles == 0) {
@@ -4036,6 +4043,72 @@ VmExecutionResult VortexVM::stepAwait(const CellRef cursor,
   VmExecutionResult vmResult{ExecutionResult{}, StepDisposition::Pending};
   vmResult.pending = PendingAwait{pending.continuation, pending.waiter};
   return vmResult;
+}
+
+VmExecutionResult VortexVM::stepSubmit(const CellRef cursor,
+                                       const CellRef opcode) {
+  const auto fail = [opcode](std::string message) {
+    return VmExecutionResult{
+        ExecutionResult{.success       = false,
+                        .failingClause = opcode,
+                        .errorMessage  = std::move(message)},
+        StepDisposition::Failed};
+  };
+  // Everything that can be wrong with the instruction is wrong before the host
+  // is called, so a failed step never leaves an admitted request behind.
+  const auto inputs  = inputsOf(opcode);
+  const auto outputs = outputsOf(opcode);
+  if (inputs.size() != 2 || outputs.size() != 3)
+    return fail("Submit requires a capability and a request description input "
+                "and submission, arm and payload outputs");
+  if (!submitHandler_) return fail("Submit has no I/O host installed");
+  const auto capabilityRef =
+      resolveCell(inputs, {}, cellReferences_, 0, core_.arena());
+  const auto descriptionRef =
+      resolveCell(inputs, {}, cellReferences_, 1, core_.arena());
+  if (!capabilityRef || !descriptionRef)
+    return fail("Submit input reference is stale or invalid");
+  const auto capabilityIncarnation =
+      core_.arena().incarnationOf(*capabilityRef);
+  if (!capabilityIncarnation ||
+      xanadu::vortex::ioCellTag(core_.arena(), *capabilityRef,
+                                *capabilityIncarnation) !=
+          xanadu::vortex::IoCellTag::Capability)
+    return fail("Submit input is not a live CapabilityCell");
+  if (mutationGroupActive(cursor))
+    return fail("Submit cannot run inside an active mutation group");
+
+  VmSubmission admitted;
+  try {
+    admitted = submitHandler_(
+        xanadu::vortex::CapabilityCell{*capabilityRef, *capabilityIncarnation},
+        *descriptionRef, cursor);
+  } catch (const std::exception &error) {
+    return fail(std::string{"Submit host failed: "} + error.what());
+  } catch (...) {
+    return fail("Submit host failed");
+  }
+  const auto sumTag = xanadu::vortex::ioCellTag(
+      core_.arena(), admitted.submission.cell, admitted.submission.incarnation);
+  if (!sumTag || *sumTag != xanadu::vortex::IoCellTag::Submission ||
+      !core_.arena().contains(admitted.payload))
+    return fail("Submit host returned a stale or invalid submission");
+  try {
+    writeCellReferences(outputs.span().subspan(0, 1),
+                        {static_cast<std::int64_t>(admitted.submission.cell)});
+    clearTypedRegister(outputs[1]);
+    cellReferences_.erase(outputs[1]);
+    core_.writeValue(outputs[1], 0, std::nullopt,
+                     static_cast<std::int64_t>(admitted.arm));
+    writeCellReferences(outputs.span().subspan(2, 1),
+                        {static_cast<std::int64_t>(admitted.payload)});
+    setCursorOpcode(cursor, core_.arena().linked(opcode, core_.dims().spin,
+                                                 DimVector::POS));
+  } catch (const std::exception &error) {
+    return fail(error.what());
+  }
+  ++totalCycles_;
+  return VmExecutionResult{ExecutionResult{}, StepDisposition::Progress};
 }
 
 xanadu::vortex::ContinuationId VortexVM::createContinuation(

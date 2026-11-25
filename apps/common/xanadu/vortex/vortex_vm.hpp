@@ -50,6 +50,17 @@ struct PendingAwait {
   xanadu::vortex::WaiterCell waiter;
 };
 
+/// What a Submit host hands back: the managed sum cell, the ordinal of its
+/// arm and that arm's payload cell, already decoded so the VM never reads an
+/// I/O schema. A refusal is just another arm, never an exception. By the
+/// host's convention arm 0 is the admitted arm, so a Branch on the ordinal
+/// takes its target only for the refusal.
+struct VmSubmission {
+  xanadu::vortex::SubmissionCell submission;
+  std::uint8_t arm{};
+  CellRef payload{};
+};
+
 struct VmExecutionResult : ExecutionResult {
   StepDisposition disposition{StepDisposition::Progress};
   std::optional<PendingAwait> pending;
@@ -228,6 +239,13 @@ enum class OpcodeKind : std::uint8_t {
   // One RequestCell input and one OutcomeCell output. Appended to preserve
   // persisted opcode ordinals.
   Await,
+
+  // Language-neutral admission: a CapabilityCell input and a request
+  // description cell input; three outputs, the managed submission sum cell,
+  // its arm ordinal as an Int64 (0 first arm, 1 second; Branch takes its target
+  // on a nonzero ordinal), and the arm's payload cell. Appended to preserve
+  // persisted opcode ordinals.
+  Submit,
 };
 
 /// One RelationNext lookup, as handed to a relation provider.
@@ -753,6 +771,20 @@ public:
   [[nodiscard]] bool hasAwaitHandler() const noexcept {
     return static_cast<bool>(awaitHandler_);
   }
+  /// Installs the owner-thread admission boundary used by Submit: called once
+  /// per executed Submit with the capability, the request description cell and
+  /// the executing cursor. An exception is contained as a typed step failure.
+  /// An empty function removes it.
+  VortexVM *
+  setSubmitHandler(std::function<VmSubmission(xanadu::vortex::CapabilityCell,
+                                              CellRef, CellRef)>
+                       handler) {
+    submitHandler_ = std::move(handler);
+    return this;
+  }
+  [[nodiscard]] bool hasSubmitHandler() const noexcept {
+    return static_cast<bool>(submitHandler_);
+  }
   [[nodiscard]] FrameLimits frameLimits() const noexcept {
     return frameLimits_;
   }
@@ -826,6 +858,7 @@ private:
                                      CellRef cursor);
   ExecutionResult stepImpl(CellRef cursor);
   VmExecutionResult stepAwait(CellRef cursor, CellRef opcode);
+  VmExecutionResult stepSubmit(CellRef cursor, CellRef opcode);
   ExecutionResult invokeFramePrepared(
       CellRef descriptorCell, std::span<const std::vector<CellRef>> arguments,
       std::span<const CellRef> resultSlots, CellRef cursor,
@@ -952,6 +985,8 @@ private:
   std::function<xanadu::vortex::AwaitResult(xanadu::vortex::RequestCell,
                                             CellRef)>
       awaitHandler_;
+  std::function<VmSubmission(xanadu::vortex::CapabilityCell, CellRef, CellRef)>
+      submitHandler_;
   std::unordered_map<CellRef, ActivationStack> activationFrames_;
   GuardStackMap guardStacks_;
   PendingGuardMap pendingGuardChecks_;
