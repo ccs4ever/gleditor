@@ -29,7 +29,7 @@ namespace xanadu::vortex {
 
 inline constexpr char kCaptureJournalSignature[8]     = {'\x89', 'X', 'U', 'D',
                                                          'C',    'A', 'P', '\n'};
-inline constexpr std::uint32_t kCaptureJournalVersion = 1;
+inline constexpr std::uint32_t kCaptureJournalVersion = 2;
 
 // On-disk frame sizes, exported so reservations are computed from the format
 // and cannot drift from it. Every record is u32 bodyLen + body.
@@ -47,6 +47,9 @@ inline constexpr std::size_t kCaptureJournalAppendFixedBytes = 32 + 8 + 4;
 inline constexpr std::size_t kCaptureJournalSpanBytes = 4 + 8 + 8;
 /// abortReason(1) + abortUncertain(1)
 inline constexpr std::size_t kCaptureJournalAbortedBytes = 1 + 1;
+/// promoted(1) + span(scroll, start, length)
+inline constexpr std::size_t kCaptureJournalReconciledBytes =
+    1 + kCaptureJournalSpanBytes;
 
 /// Private opaque capture identity, minted monotonically by the owning
 /// CaptureCoordinator and never reused (including across restarts: recovery
@@ -71,6 +74,13 @@ enum class CaptureJournalRecordKind : std::uint8_t {
   /// successful Complete (uncertain flag reports whether bytes may have
   /// landed anyway).
   Aborted,
+  /// The owner's explicit decision about a capture whose bytes could not be
+  /// proven (plan §8.2 "explicit reconciliation"): either Promoted -- the
+  /// bytes were verified at the carried span, so the capture proceeds as if
+  /// an Appended record had named it -- or Released -- the capture's
+  /// intervals are unpinned and its bytes, if any, stay unreachable. Version
+  /// 2 of the journal; version 1 had no such record and is refused.
+  Reconciled,
 };
 
 /// Bytes one record of @p kind carrying @p intervalCount intervals occupies
@@ -94,6 +104,9 @@ captureJournalFramedBytes(const CaptureJournalRecordKind kind,
     break;
   case CaptureJournalRecordKind::Aborted:
     payload = kCaptureJournalAbortedBytes;
+    break;
+  case CaptureJournalRecordKind::Reconciled:
+    payload = kCaptureJournalReconciledBytes;
     break;
   }
   return kCaptureJournalFrameBytes + kCaptureJournalFixedBodyBytes + payload;
@@ -121,7 +134,8 @@ struct CaptureSourceInterval {
 /// time and verified gapless on recovery. Fields meaningful per kind:
 /// Append/Appended carry appendDigest, appendLength and intervals;
 /// Appended additionally carries span; Committed carries neither;
-/// Aborted carries abortReason/abortUncertain.
+/// Aborted carries abortReason/abortUncertain; Reconciled carries
+/// reconciledPromoted and, when promoted, span.
 struct CaptureJournalRecord {
   CaptureJournalRecordKind kind{CaptureJournalRecordKind::Append};
   CaptureId captureId{};
@@ -138,6 +152,9 @@ struct CaptureJournalRecord {
   /// (a non-Complete terminal outcome cannot prove the permascroll
   /// append did not partially land).
   bool abortUncertain{};
+  /// Reconciled only: true when the owner promoted the capture at `span`,
+  /// false when it released the pinned intervals (span is then unused).
+  bool reconciledPromoted{};
   friend bool operator==(const CaptureJournalRecord &,
                          const CaptureJournalRecord &) = default;
 };

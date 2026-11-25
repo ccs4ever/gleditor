@@ -22,11 +22,12 @@ constexpr std::size_t kIntervalBytes    = kCaptureJournalIntervalBytes;
 constexpr std::size_t kAppendFixedBytes = kCaptureJournalAppendFixedBytes;
 constexpr std::size_t kSpanBytes        = kCaptureJournalSpanBytes;
 constexpr std::size_t kAbortedBytes     = kCaptureJournalAbortedBytes;
+constexpr std::size_t kReconciledBytes  = kCaptureJournalReconciledBytes;
 // Where intervalCount sits in an Append/Appended body: after the fixed
 // header, the digest and the append length.
 constexpr std::size_t kIntervalCountOffset = kFixedBodyBytes + 32 + 8;
 constexpr std::size_t kMaxKindValue =
-    static_cast<std::size_t>(CaptureJournalRecordKind::Aborted);
+    static_cast<std::size_t>(CaptureJournalRecordKind::Reconciled);
 
 void appendBytes(std::vector<std::byte> &out, const void *data,
                  const std::size_t size) {
@@ -79,6 +80,8 @@ std::optional<std::size_t> payloadBytesFor(const CaptureJournalRecordKind kind,
     return std::size_t{0};
   case CaptureJournalRecordKind::Aborted:
     return kAbortedBytes;
+  case CaptureJournalRecordKind::Reconciled:
+    return kReconciledBytes;
   }
   return std::nullopt;
 }
@@ -126,6 +129,13 @@ std::vector<std::byte> encodeBody(const CaptureJournalRecord &record) {
   case CaptureJournalRecordKind::Aborted:
     appendValue(body, record.abortReason);
     appendValue(body, static_cast<std::uint8_t>(record.abortUncertain ? 1 : 0));
+    break;
+  case CaptureJournalRecordKind::Reconciled:
+    appendValue(body,
+                static_cast<std::uint8_t>(record.reconciledPromoted ? 1 : 0));
+    appendValue(body, record.span.scroll);
+    appendValue(body, record.span.start);
+    appendValue(body, record.span.length);
     break;
   }
 
@@ -251,6 +261,21 @@ std::optional<CaptureJournalRecord> decodeBody(const std::byte *body,
       record.abortUncertain = uncertain != 0;
     }
     break;
+  case CaptureJournalRecordKind::Reconciled: {
+    if (bodyLen != kFixedBodyBytes + kReconciledBytes) return std::nullopt;
+    std::uint8_t promoted{};
+    std::memcpy(&promoted, body + offset, 1);
+    offset += 1;
+    if (promoted > 1) return std::nullopt;
+    record.reconciledPromoted = promoted != 0;
+    std::memcpy(&record.span.scroll, body + offset, sizeof(record.span.scroll));
+    offset += sizeof(record.span.scroll);
+    std::memcpy(&record.span.start, body + offset, sizeof(record.span.start));
+    offset += sizeof(record.span.start);
+    std::memcpy(&record.span.length, body + offset, sizeof(record.span.length));
+    offset += sizeof(record.span.length);
+    break;
+  }
   }
   return record;
 }
@@ -317,6 +342,9 @@ bool tornTailPlausible(const std::span<const std::byte> partial,
     break;
   case CaptureJournalRecordKind::Aborted:
     if (bodyLen != kFixedBodyBytes + kAbortedBytes) return false;
+    break;
+  case CaptureJournalRecordKind::Reconciled:
+    if (bodyLen != kFixedBodyBytes + kReconciledBytes) return false;
     break;
   case CaptureJournalRecordKind::Append:
   case CaptureJournalRecordKind::Appended: {
