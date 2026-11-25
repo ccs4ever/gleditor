@@ -898,8 +898,9 @@ TEST(IoServiceTest, TenThousandSubmitAndRetireCyclesLeaveTheArenaBounded) {
   service.registerAdapter(testKey, adapter);
 
   const auto cycle = [&](const std::size_t index) {
-    const auto specification = arena.makeCell("io request spec");
-    const auto submitted     = service.submit(*capability, specification);
+    const auto liveBeforeSubmit = arena.liveCells() + 1U;
+    const auto specification    = arena.makeCell("io request spec");
+    const auto submitted        = service.submit(*capability, specification);
     ASSERT_TRUE(std::holds_alternative<Admitted>(submitted.value));
     const auto request = std::get<Admitted>(submitted.value).request;
     const auto token   = tokenOf(*scripted, index);
@@ -907,6 +908,12 @@ TEST(IoServiceTest, TenThousandSubmitAndRetireCyclesLeaveTheArenaBounded) {
     scripted->acknowledge(token);
     static_cast<void>(service.pump(8));
     ASSERT_TRUE(service.poll(request).outcome.has_value());
+    if (index == 0) {
+      // What one served request holds while it is live, for the plan's price:
+      // everything it minted but the caller's own spec cell.
+      RecordProperty("liveCellsPerServedRequest",
+                     static_cast<int>(arena.liveCells() - liveBeforeSubmit));
+    }
     service.retireRequest(request);
     ASSERT_TRUE(arena.freeCell(specification,
                                arena.incarnationOf(specification).value()));
