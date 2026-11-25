@@ -394,8 +394,11 @@ ArenaManifold::denseOf(const CellRef ref) const noexcept {
                : std::optional<std::uint32_t>{found->second};
   }
   const auto dense = ref & ~ephemeralBit;
-  return dense < slots_.size() ? std::optional<std::uint32_t>{dense}
-                               : std::nullopt;
+  // The slot is read next by every caller, so the freed bit costs no extra
+  // cache line; a parallel vector of incarnations would.
+  return dense < slots_.size() && 0 == (slots_[dense].flags & freedSlotFlag)
+             ? std::optional<std::uint32_t>{dense}
+             : std::nullopt;
 }
 
 bool ArenaManifold::holdsOwn(const CellRef ref) const noexcept {
@@ -2077,6 +2080,28 @@ xanadu::PrimediaSpan ArenaManifold::intern(const std::string_view text) {
       .scroll = xanadu::scratchScroll, .start = start, .length = text.size()};
 }
 
+ArenaManifold::AllocationIncarnation ArenaManifold::takeIncarnation() {
+  const auto incarnation = nextAllocationIncarnation();
+  if (!incarnation) {
+    throw std::overflow_error("ArenaManifold allocation incarnation exhausted");
+  }
+  newestIncarnation_ = *incarnation;
+  return *incarnation;
+}
+
+namespace {
+CellSlot freedSlotAt(const std::uint32_t dense, const std::size_t linkTail,
+                     const std::size_t contentTail) noexcept {
+  return CellSlot{
+      .spanOffset = static_cast<std::uint32_t>(contentTail),
+      .birthOp    = ArenaManifold::refOf(dense),
+      .lastOp     = ArenaManifold::refOf(dense),
+      .linkOffset = static_cast<std::uint32_t>(linkTail),
+      .flags      = ArenaManifold::freedSlotFlag,
+  };
+}
+} // namespace
+
 CellRef
 ArenaManifold::mintSlot(const xanadu::ValueKind kind, const std::uint64_t bits,
                         const std::span<const xanadu::PrimediaSpan> content) {
@@ -2084,16 +2109,53 @@ ArenaManifold::mintSlot(const xanadu::ValueKind kind, const std::uint64_t bits,
     throw std::length_error("ArenaManifold content run exceeds CellSlot");
   }
   consumeWork();
+  if (!freeSlots_.empty()) {
+    // Reuse. A slot below an outstanding mark is not truncated by release(),
+    // so its old header is trailed and the reuse journalled: undoing both puts
+    // the slot back on the free list as the freed slot it was.
+    const auto dense       = freeSlots_.back();
+    const auto incarnation = takeIncarnation();
+    if (outstandingMarks_ != 0) {
+      freeTrail_.push_back(FreeTrailEntry{.dense = dense, .freed = false});
+      try {
+        trail(dense);
+      } catch (...) {
+        freeTrail_.pop_back();
+        throw;
+      }
+    }
+    freeSlots_.pop_back();
+    slots_[dense] = CellSlot{
+        .spanOffset  = static_cast<std::uint32_t>(content_.size()),
+        .spanCount   = 0,
+        .formatFlags = 0,
+        .birthOp     = refOf(dense),
+        .lastOp      = refOf(dense),
+        .linkOffset  = static_cast<std::uint32_t>(links_.size()),
+        .linkCount   = 0,
+        .valueKind   = static_cast<std::uint8_t>(kind),
+        .flags       = 0,
+        .valueBits   = bits,
+    };
+    incarnations_[dense] = incarnation;
+    try {
+      if (!content.empty()) setContentAt(dense, content);
+    } catch (...) {
+      slots_[dense]        = freedSlotAt(dense, links_.size(), content_.size());
+      incarnations_[dense] = 0;
+      freeSlots_.push_back(dense);
+      if (outstandingMarks_ != 0) freeTrail_.pop_back();
+      throw;
+    }
+    return refOf(dense);
+  }
   if (slots_.size() >= allocationLimit_) {
     throw std::runtime_error(
         "ArenaManifold exhausted: cannot allocate beyond " +
         std::to_string(allocationLimit_));
   }
   const auto dense       = static_cast<std::uint32_t>(slots_.size());
-  const auto incarnation = nextAllocationIncarnation();
-  if (!incarnation) {
-    throw std::overflow_error("ArenaManifold allocation incarnation exhausted");
-  }
+  const auto incarnation = takeIncarnation();
   slots_.push_back(CellSlot{
       .spanOffset  = static_cast<std::uint32_t>(content_.size()),
       .spanCount   = 0,
@@ -2110,7 +2172,7 @@ ArenaManifold::mintSlot(const xanadu::ValueKind kind, const std::uint64_t bits,
       .valueBits  = bits,
   });
   try {
-    incarnations_.push_back(*incarnation);
+    incarnations_.push_back(incarnation);
   } catch (...) {
     slots_.pop_back();
     throw;
@@ -2455,13 +2517,11 @@ std::optional<std::uint32_t> ArenaManifold::shadow(const CellRef ref) {
   // incarnations_ is parallel to slots_ (release() truncates both to the same
   // count), so a shadow takes one too. Without it every later mint's identity
   // is read from the wrong index, and a base cell aliases a runtime cell's.
-  const auto incarnation = nextAllocationIncarnation();
-  if (!incarnation) {
-    throw std::overflow_error("ArenaManifold allocation incarnation exhausted");
-  }
+  const auto incarnation = takeIncarnation();
+  copy.flags &= static_cast<std::uint8_t>(~freedSlotFlag);
   slots_.push_back(copy);
   try {
-    incarnations_.push_back(*incarnation);
+    incarnations_.push_back(incarnation);
   } catch (...) {
     slots_.pop_back();
     throw;
@@ -2564,17 +2624,19 @@ Mark ArenaManifold::mark() {
           static_cast<std::uint32_t>(runtimeOnlyTrail_.size()),
       .runtimeTagTrailSize =
           static_cast<std::uint32_t>(runtimeTagTrail_.size()),
-      .liveLinks   = static_cast<std::uint32_t>(liveLinks_),
-      .liveContent = static_cast<std::uint32_t>(liveContent_),
-      .shadowCount = static_cast<std::uint32_t>(shadowOrder_.size()),
-      .proxyCount  = static_cast<std::uint32_t>(proxyOrder_.size()),
+      .freeTrailSize = static_cast<std::uint32_t>(freeTrail_.size()),
+      .liveLinks     = static_cast<std::uint32_t>(liveLinks_),
+      .liveContent   = static_cast<std::uint32_t>(liveContent_),
+      .shadowCount   = static_cast<std::uint32_t>(shadowOrder_.size()),
+      .proxyCount    = static_cast<std::uint32_t>(proxyOrder_.size()),
       .quoteOccurrenceCount =
           static_cast<std::uint32_t>(quoteOccurrenceOrder_.size()),
       .proxyShadowedEdgeCount =
           static_cast<std::uint32_t>(proxyShadowedEdgeOrder_.size()),
-      .quoteSpaceCount = static_cast<std::uint32_t>(quoteSpaceOrder_.size()),
-      .dimensionCount  = static_cast<std::uint32_t>(dimensionOrder_.size()),
-      .spaceCount      = static_cast<std::uint32_t>(spaces_.size()),
+      .quoteSpaceCount   = static_cast<std::uint32_t>(quoteSpaceOrder_.size()),
+      .dimensionCount    = static_cast<std::uint32_t>(dimensionOrder_.size()),
+      .spaceCount        = static_cast<std::uint32_t>(spaces_.size()),
+      .newestIncarnation = newestIncarnation_,
   };
   taken.serial = ++lastMarkSerial_;
   floors_.push_back(Floors{.serial  = taken.serial,
@@ -2629,6 +2691,7 @@ MarkResult ArenaManifold::discard(const Mark &m) noexcept {
                   [](const auto &entry) { return !entry.second; });
     runtimeOnlyTrail_.clear();
     runtimeTagTrail_.clear();
+    freeTrail_.clear();
     dimensionOrder_.clear();
   }
   return this;
@@ -2746,7 +2809,12 @@ MarkResult ArenaManifold::release(const Mark &m) noexcept {
   ownerLeaseTrail_.resize(m.ownerLeaseTrailSize);
   for (std::size_t i = runtimeOnlyTrail_.size(); i > m.runtimeOnlyTrailSize;
        i--) {
-    runtimeOnly_.erase(runtimeOnlyTrail_[i - 1].incarnation);
+    const auto &entry = runtimeOnlyTrail_[i - 1];
+    if (entry.wasMarked) {
+      runtimeOnly_.insert(entry.incarnation);
+    } else {
+      runtimeOnly_.erase(entry.incarnation);
+    }
   }
   runtimeOnlyTrail_.resize(m.runtimeOnlyTrailSize);
   for (std::size_t i = runtimeTagTrail_.size(); i > m.runtimeTagTrailSize;
@@ -2759,6 +2827,20 @@ MarkResult ArenaManifold::release(const Mark &m) noexcept {
     }
   }
   runtimeTagTrail_.resize(m.runtimeTagTrailSize);
+  // The slot headers came back with trail_ above; what is left is which slots
+  // are free and which incarnation each live one holds. Reverse order restores
+  // the free list stack to exactly its depth when the mark was taken.
+  for (std::size_t i = freeTrail_.size(); i > m.freeTrailSize; i--) {
+    const auto &entry = freeTrail_[i - 1];
+    if (entry.freed) {
+      incarnations_[entry.dense] = entry.incarnation;
+      freeSlots_.pop_back();
+    } else {
+      incarnations_[entry.dense] = 0;
+      freeSlots_.push_back(entry.dense);
+    }
+  }
+  freeTrail_.resize(m.freeTrailSize);
 
   // Dropping a shadow is the undo, for an overlaid cell: the slot goes and the
   // reads fall through to the base again, which is where the cell's unmodified
@@ -2770,15 +2852,15 @@ MarkResult ArenaManifold::release(const Mark &m) noexcept {
 
   slots_.resize(m.cellCount);
   incarnations_.resize(m.cellCount);
-  // Incarnations are handed out in ascending order and slots only grow at the
-  // tail, so everything truncated here is newer than the last survivor; a
-  // search of incarnations_ per entry would make each backtrack quadratic.
-  const auto truncated = [newest = incarnations_.empty()
-                                       ? std::optional<AllocationIncarnation>{}
-                                       : std::optional{incarnations_.back()}](
-                             const AllocationIncarnation incarnation) {
-    return !newest || incarnation > *newest;
-  };
+  // Incarnations are handed out in ascending order, so everything allocated
+  // after the mark is newer than the mark's newest; a search of incarnations_
+  // per entry would make each backtrack quadratic.
+  // Not incarnations_.back(): a freed slot below the mark that a mint reused
+  // after it holds an incarnation newer than the slots that survive above it.
+  const auto truncated =
+      [newest = m.newestIncarnation](const AllocationIncarnation incarnation) {
+        return incarnation > newest;
+      };
   std::erase_if(ownerLeases_,
                 [&](const auto &entry) { return truncated(entry.first); });
   std::erase_if(runtimeOnly_, truncated);
@@ -2825,6 +2907,86 @@ MarkResult ArenaManifold::release(const Mark &m) noexcept {
     if (outstandingMarks_ == 0) {
       dimensionOrder_.clear();
     }
+  }
+  return this;
+}
+
+void ArenaManifold::forgetRuntimeState(
+    const AllocationIncarnation incarnation) {
+  if (runtimeOnly_.contains(incarnation)) {
+    if (outstandingMarks_ != 0) {
+      runtimeOnlyTrail_.push_back(
+          RuntimeOnlyTrailEntry{.incarnation = incarnation, .wasMarked = true});
+    }
+    runtimeOnly_.erase(incarnation);
+  }
+  if (const auto tag = runtimeTags_.find(incarnation);
+      tag != runtimeTags_.end()) {
+    if (outstandingMarks_ != 0) {
+      runtimeTagTrail_.push_back(RuntimeTagTrailEntry{
+          .incarnation = incarnation, .previous = tag->second});
+    }
+    runtimeTags_.erase(tag);
+  }
+}
+
+bool ArenaManifold::namedByArenaState(const CellRef ref) const noexcept {
+  // The few cells other state holds by ref. A dimension's cell is named by
+  // every link run that uses it, and these are the rest. Scanning the
+  // dimension names is O(dimensions), a few tens, never O(cells).
+  return isProxy(ref) || isQuoteOccurrence(ref) || quoteSpace_.contains(ref) ||
+         provenanceCells_.contains(ref) || authorshipRoot_ == ref ||
+         storesRankTail_ == ref || boundDimensions_.contains(ref) ||
+         std::ranges::any_of(
+             arenaDims_,
+             [&](const auto &entry) { return entry.second == ref; }) ||
+         std::ranges::any_of(spaces_, [&](const Space &space) {
+           return space.storeCell == ref;
+         });
+}
+
+ArenaResult ArenaManifold::freeCell(const CellRef ref,
+                                    const AllocationIncarnation incarnation) {
+  if (!matches(ref, incarnation)) {
+    return std::unexpected{ArenaRefusal::UnknownCell};
+  }
+  // A shadow keeps its base cell's ref, so a ref that is not ephemeral is one.
+  if (!isEphemeral(ref) || namedByArenaState(ref)) {
+    return std::unexpected{ArenaRefusal::NotReleasable};
+  }
+  const auto dense = *denseOf(ref);
+  {
+    const auto &cell = slots_[dense];
+    for (std::uint16_t i = 0; i < cell.linkCount; i++) {
+      const auto &edge = links_[static_cast<std::size_t>(cell.linkOffset) + i];
+      if (edge.pos != noCell || edge.neg != noCell) {
+        return std::unexpected{ArenaRefusal::CellLinked};
+      }
+    }
+  }
+
+  // Everything that can throw comes before the first change to the cell, so a
+  // failure leaves it live.
+  freeSlots_.reserve(freeSlots_.size() + 1);
+  if (outstandingMarks_ != 0) {
+    freeTrail_.reserve(freeTrail_.size() + 1);
+    trail(dense);
+  }
+  if (const auto lease = ownerLeases_.find(incarnation);
+      lease != ownerLeases_.end()) {
+    expectWritten(setOwnerLease(ref, incarnation, nullptr));
+  }
+  forgetRuntimeState(incarnation);
+
+  auto &cell = slots_[dense];
+  liveLinks_ -= cell.linkCount;
+  liveContent_ -= cell.spanCount;
+  cell                 = freedSlotAt(dense, links_.size(), content_.size());
+  incarnations_[dense] = 0;
+  freeSlots_.push_back(dense);
+  if (outstandingMarks_ != 0) {
+    freeTrail_.push_back(FreeTrailEntry{
+        .dense = dense, .incarnation = incarnation, .freed = true});
   }
   return this;
 }
@@ -3373,7 +3535,9 @@ bool prefixRunsAreWellFormed(
   std::uint64_t liveLinks   = 0;
   std::uint64_t liveContent = 0;
   for (std::size_t dense = 0; dense < snapshot.slots.size(); dense++) {
-    const auto &slot              = snapshot.slots[dense];
+    const auto &slot = snapshot.slots[dense];
+    // A freed slot is not a cell; exportPrefix() refuses to carry one.
+    if (0 != (slot.flags & ArenaManifold::freedSlotFlag)) return false;
     const std::uint64_t linkBegin = slot.linkOffset;
     const std::uint64_t spanBegin = slot.spanOffset;
     if (linkBegin > snapshot.links.size() ||
@@ -3463,6 +3627,11 @@ bool ArenaManifold::hasUnsupportedUntrackedPrefixIdentity() const noexcept {
 
 std::expected<ArenaManifold::PrefixSnapshot, ArenaRefusal>
 ArenaManifold::exportPrefix(const Mark &m) const {
+  // A freed slot is in neither the cells nor the wire; hydrating one would
+  // revive it as a cell, so the prefix of an arena that freed is refused.
+  if (!freeSlots_.empty() || !freeTrail_.empty()) {
+    return std::unexpected{ArenaRefusal::UnsupportedPrefixState};
+  }
   if (m.cellCount > slots_.size() || m.linkSize > links_.size() ||
       m.contentSize > content_.size() || m.scratchSize > scratch_.size() ||
       m.trailSize > trail_.size() || m.shadowCount > shadowOrder_.size() ||
@@ -3636,7 +3805,10 @@ ArenaResult ArenaManifold::hydratePrefix(const PrefixSnapshot &snapshot) {
           "ArenaManifold allocation incarnation exhausted");
     }
     incarnations_.push_back(*incarnation);
+    newestIncarnation_ = *incarnation;
   }
+  freeSlots_.clear();
+  freeTrail_.clear();
   ownerLeases_.clear();
   ownerLeaseTrail_.clear();
   runtimeOnly_.clear();

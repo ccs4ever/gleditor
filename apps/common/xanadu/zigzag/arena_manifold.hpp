@@ -210,6 +210,7 @@ struct Mark {
   std::uint32_t ownerLeaseTrailSize{0};
   std::uint32_t runtimeOnlyTrailSize{0};
   std::uint32_t runtimeTagTrailSize{0};
+  std::uint32_t freeTrailSize{0};
   std::uint32_t liveLinks{0};
   std::uint32_t liveContent{0};
   /// How many base cells had been shadowed. Release drops the shadows taken
@@ -225,6 +226,11 @@ struct Mark {
   /// failed branch that pinned a historical space leaves none behind; discard
   /// keeps them, as it keeps the cells.
   std::uint32_t spaceCount{0};
+  /// The newest allocation incarnation this arena had handed out. Release
+  /// forgets the runtime state of every incarnation above it. Slot order no
+  /// longer says which allocations are younger than the mark, because a freed
+  /// slot below the mark may be reused after it.
+  std::uint64_t newestIncarnation{0};
   /// Which choice point this is, so release() and discard() can tell the
   /// innermost one from an earlier one. Counts and sizes cannot: two marks
   /// taken with nothing between them are equal in every other field. Not part
@@ -261,6 +267,9 @@ enum class ArenaRefusal : std::uint8_t {
   UnsupportedPrefixState, ///< the prefix would omit foreign identity state
   PrefixLimitExceeded,    ///< the prefix exceeds the APF2 decoder's size limits
   RuntimeOnlyState, ///< owner leases or runtime-only cells cannot be exported
+  CellLinked,       ///< freeCell() of a cell that still has a live link
+  NotReleasable,    ///< freeCell() of a shadow, proxy, dimension or other cell
+                    ///< that other arena state names
 };
 
 class ArenaManifold;
@@ -293,6 +302,10 @@ toString(const ArenaRefusal refusal) noexcept {
     return "arena prefix exceeds codec limits";
   case ArenaRefusal::RuntimeOnlyState:
     return "runtime-only arena state";
+  case ArenaRefusal::CellLinked:
+    return "cell still linked";
+  case ArenaRefusal::NotReleasable:
+    return "cell cannot be released";
   }
   return "unknown refusal";
 }
@@ -707,12 +720,63 @@ public:
   [[nodiscard]] std::optional<std::uint32_t>
   runtimeTagOf(CellRef ref, AllocationIncarnation incarnation) const noexcept;
 
+  /// Slots the arena holds: its high-water mark, freed slots included. A walk
+  /// bound, not a count of cells; liveCells() is the count. Code that predicts
+  /// the next minted ref as refOf(cellCount()) is wrong for an arena that has
+  /// freed a cell, because the next mint reuses a freed slot first.
   [[nodiscard]] std::size_t cellCount() const noexcept { return slots_.size(); }
 
   /// Live arena-local cells for the grant's `vagent.max_live_cells` bound —
-  /// minted minus rolled-back (release() truncates dead tail slots). Durable
-  /// base cells are not live allocations, so the count stays arena-local.
-  [[nodiscard]] std::size_t liveCells() const noexcept { return cellCount(); }
+  /// minted minus rolled-back (release() truncates dead tail slots) minus
+  /// freed (freeCell()). Durable base cells are not live allocations, so the
+  /// count stays arena-local.
+  [[nodiscard]] std::size_t liveCells() const noexcept {
+    return slots_.size() - freeSlots_.size();
+  }
+
+  /// Slots freeCell() has released that a later mint will reuse.
+  [[nodiscard]] std::size_t freeSlotCount() const noexcept {
+    return freeSlots_.size();
+  }
+
+  /// Slot flag of a freed slot. cells() still lists it, as an empty slot with
+  /// this bit set, so a walk over cells() can tell it from a cell.
+  static constexpr std::uint8_t freedSlotFlag = 0x80U;
+
+  /**
+   * @brief Free one cell of this arena so that a later mint reuses its slot.
+   *
+   * Truncating to a mark is the only other way a cell leaves an arena, and a
+   * long-lived arena that serves requests has no mark to truncate to: the
+   * request graph a reaper has detached would otherwise stay for the arena's
+   * lifetime. The slot goes on a free list (LIFO) and the next mint pops it, so
+   * the arena's size is bounded by its peak live cells, not by its history.
+   * Free-list reuse rather than tombstone-then-compact(): a ref is the slot's
+   * index, so compact() can reclaim a freed cell's runs and never its slot.
+   *
+   * @p incarnation must name the live allocation, so a holder of a stale handle
+   * cannot free the cell that reused its slot. Freed means: the cell's owner
+   * lease, runtime-only mark and tag are dropped and every read of the old ref
+   * (contains(), slot(), incarnationOf(), links) answers as for a cell that was
+   * never minted, until a mint reuses the slot under a new incarnation.
+   *
+   * Refused, changing nothing:
+   * - UnknownCell: the ref is not a live cell of this arena, or @p incarnation
+   *   is not its incarnation. A base cell the arena only reads is this too.
+   * - CellLinked: the cell has a live link on any dimension. The caller
+   *   detaches it first, which keeps every rank two-degree: a freed cell can
+   *   never be the neighbour a rank walk lands on.
+   * - NotReleasable: a copy-on-write shadow (dropping a shadow is the undo, by
+   *   releasing the mark it was taken under; the base is never freed), a proxy,
+   *   quote, dimension, provenance or space cell, which other state names.
+   *
+   * Under a mark the free is journalled and release(mark) undoes it, as it
+   * undoes the reuse of a slot that was freed before the mark; discard(mark)
+   * keeps both. compact() stays refused while a mark is outstanding. The
+   * cost is O(1) plus the dimension-name scan, which is O(dimensions).
+   * exportPrefix() refuses an arena that holds a freed slot.
+   */
+  ArenaResult freeCell(CellRef ref, AllocationIncarnation incarnation);
 
   /// How many cells a walk through this arena could visit: its own and every
   /// base cell it reads through. cellCount() alone would cut a walk over base
@@ -1001,6 +1065,13 @@ private:
   CellRef mintSlot(xanadu::ValueKind kind, std::uint64_t bits,
                    std::span<const xanadu::PrimediaSpan> content);
 
+  /// A fresh incarnation, recorded as this arena's newest.
+  AllocationIncarnation takeIncarnation();
+  /// Drop @p incarnation's runtime-only mark and tag, journalled under a mark.
+  void forgetRuntimeState(AllocationIncarnation incarnation);
+  /// Whether other arena state names @p ref, so freeCell() must refuse it.
+  [[nodiscard]] bool namedByArenaState(CellRef ref) const noexcept;
+
   std::vector<CellSlot> slots_;
   /// Monotonic allocation identities, parallel to slots_. Values are never
   /// reused when rollback truncates slots and a later allocation reuses a ref.
@@ -1023,6 +1094,16 @@ private:
     bool wasMarked{false};
   };
   std::vector<RuntimeOnlyTrailEntry> runtimeOnlyTrail_;
+  /// Freed slots, popped by the next mint. LIFO: undoing the journal below in
+  /// reverse restores the stack exactly.
+  std::vector<std::uint32_t> freeSlots_;
+  struct FreeTrailEntry {
+    std::uint32_t dense{0};
+    AllocationIncarnation incarnation{0}; ///< a freed slot's, to restore it
+    bool freed{true};                     ///< false: a mint reused the slot
+  };
+  std::vector<FreeTrailEntry> freeTrail_;
+  AllocationIncarnation newestIncarnation_{0};
   std::unordered_map<AllocationIncarnation, std::uint32_t> runtimeTags_;
   struct RuntimeTagTrailEntry {
     AllocationIncarnation incarnation{0};
