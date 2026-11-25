@@ -434,16 +434,18 @@ TEST_F(VQueryE2ETest, AMissingIoFileIsATypedOpenFailure) {
       << result.output;
 }
 
-TEST_F(VQueryE2ETest, TheCompilerCliRefusesAScriptActionWithoutLowering) {
+TEST_F(VQueryE2ETest, TheCompilerCliLowersAScriptActionToSubmitAndAwait) {
   const auto script = testDir / "action.vql";
   std::ofstream(script) << readAction << "\n";
-  const auto cmd = "./build/vqueryc '" + script.string() + "' 2>&1";
+  const auto cmd = "./build/vqueryc --dump-asm '" + script.string() + "' 2>&1";
   FILE *pipe     = popen(cmd.c_str(), "r");
   ASSERT_NE(pipe, nullptr);
   std::string out;
   char buffer[256];
   while (fgets(buffer, sizeof(buffer), pipe) != nullptr) out += buffer;
   const auto status = pclose(pipe);
-  EXPECT_NE(WEXITSTATUS(status), 0);
-  EXPECT_NE(out.find("VQL_IO_EFFECT_NOT_COMPILABLE"), std::string::npos) << out;
+  EXPECT_EQ(WEXITSTATUS(status), 0) << out;
+  EXPECT_NE(out.find("SUBMIT"), std::string::npos) << out;
+  EXPECT_NE(out.find("AWAIT"), std::string::npos) << out;
+  EXPECT_EQ(out.find("NOT_COMPILABLE"), std::string::npos) << out;
 }

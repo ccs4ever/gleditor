@@ -169,9 +169,45 @@ TEST(VqlIoGrammarTest, AQueryWithoutAnActionParsesAsBefore) {
   EXPECT_FALSE(hasIoEffect(query));
 }
 
-// ---- No bytecode form, no blocking fallback ------------------------------
+// ---- Bytecode form, no blocking fallback ---------------------------------
 
-TEST(VqlIoCompileRefusalTest, TheExecutorAndTheCompilerRefuseAnAction) {
+TEST(VqlIoCompileTest, AnActionLowersToSubmitABranchAndAnAwait) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::vortex::VortexVM vm(core);
+  xanadu::vql::VQLCompiler compiler(core, vm);
+  const auto compiled =
+      compiler.compile(std::string{"return ##; "} + std::string{readOnCap});
+  ASSERT_TRUE(compiled.success) << compiled.errorMessage;
+  ASSERT_EQ(compiled.ioActions.size(), 1U);
+  EXPECT_EQ(compiled.ioActions.front().statement, 1U);
+  EXPECT_TRUE(compiled.finalIsIoEffect);
+  EXPECT_NE(compiled.disassembly.find("SUBMIT"), std::string::npos);
+  EXPECT_NE(compiled.disassembly.find("AWAIT"), std::string::npos);
+  EXPECT_NE(compiled.disassembly.find("MAKETERM"), std::string::npos);
+  using zigzag::vortex::OpcodeKind;
+  EXPECT_EQ(vm.getOpcodeKind(compiled.ioActions.front().submitOpcode),
+            OpcodeKind::Submit);
+  EXPECT_EQ(vm.getOpcodeKind(compiled.ioActions.front().awaitOpcode),
+            OpcodeKind::Await);
+}
+
+TEST(VqlIoCompileTest, EachActionIsItsOwnSite) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::vortex::VortexVM vm(core);
+  xanadu::vql::VQLCompiler compiler(core, vm);
+  const auto compiled =
+      compiler.compile(std::string{readOnCap} + "; " + std::string{readOnCap});
+  ASSERT_TRUE(compiled.success) << compiled.errorMessage;
+  ASSERT_EQ(compiled.ioActions.size(), 2U);
+  EXPECT_EQ(compiled.ioActions[0].statement, 0U);
+  EXPECT_EQ(compiled.ioActions[1].statement, 1U);
+  EXPECT_NE(compiled.ioActions[0].awaitOpcode,
+            compiled.ioActions[1].awaitOpcode);
+}
+
+TEST(VqlIoCompileTest, ASynchronousExecutorRefusesAScriptThatCanPark) {
   zigzag::ArenaManifold arena;
   zigzag::vortex::VortexCore core(arena);
   zigzag::vortex::VortexVM vm(core);
@@ -181,14 +217,20 @@ TEST(VqlIoCompileRefusalTest, TheExecutorAndTheCompilerRefuseAnAction) {
   ASSERT_FALSE(executed);
   EXPECT_EQ(executed.error().category,
             QueryExecutionError::Category::Unsupported);
-  EXPECT_NE(executed.error().message.find("VQL_IO_EFFECT_NOT_COMPILABLE"),
+  EXPECT_NE(executed.error().message.find("VQL_IO_EFFECT_NEEDS_RUNNER"),
             std::string::npos);
+  EXPECT_EQ(executed.error().message.find("NOT_COMPILABLE"), std::string::npos);
+}
 
-  xanadu::vql::VQLCompiler compiler(core, vm);
-  const auto compiled = compiler.compile(std::string{readOnCap});
-  EXPECT_FALSE(compiled.success);
-  EXPECT_NE(compiled.errorMessage.find("VQL_IO_EFFECT_NOT_COMPILABLE"),
-            std::string::npos);
+TEST(VqlIoCompileTest, AProgramRunWithoutAnIoHostFailsByValueAtItsSubmit) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::vortex::VortexVM vm(core);
+  VQLEngine engine(core);
+  QueryExecutor executor(engine, vm);
+  const auto begun = executor.begin(Parser(readOnCap).parseQuery());
+  ASSERT_FALSE(begun);
+  EXPECT_EQ(begun.error().statement, std::optional<std::size_t>{0U});
 }
 
 // ---- The runner over the delayed fake backend -----------------------------
