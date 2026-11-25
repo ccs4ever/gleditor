@@ -1055,16 +1055,34 @@ M6 implementation notes and deliberate deferrals:
     fsync (the intent is what recovery's state machine and the certain-abort path read as "durable
     before submit", and moving it into the append's worker turn would make an admission refusal an
     `Aborted` record with no intent); the `Aborted` records of the failure paths; journal compaction
-    under bound pressure; and `recover()`, `reconcile()` and `resumePublications()`, which run at
-    open or on an explicit owner decision with nothing else in flight and save through the same
-    snapshot writer on the calling thread. None of these is on a commit's happy path.
+    under bound pressure, which takes the journal mutex a worker holds across its fsync and so _may
+    wait on a worker_, not only do an fsync itself; and `recover()`, `reconcile()` and
+    `resumePublications()`, which run at open or on an explicit owner decision with nothing else in
+    flight and save through the same snapshot writer on the calling thread. None of these is on a
+    commit's happy path.
+  - Review round 3 corrected P3 in four places (`r3-disposition.md`): journal compaction reads,
+    chooses and rewrites in one hold of the journal mutex (`CaptureJournal::compactWhere`), so a
+    worker's `Appended` or `Committed` cannot land between the read and the rename; the snapshot
+    writer tracks what is fsynced apart from what is written, so a `Fsync` write after a `Buffered`
+    save still fsyncs `ops.nodes` and `store.tables` before `Committed` claims them; a `Replace` of
+    `ops.nodes` is written beside the file and renamed over it, never truncated in place; and one
+    writer mutex per directory identity, not per `Store` object. A retired capture's journal hold
+    outlives its running step, and a capture that dies mid-step retires the step's request.
+  - **P4, priced:** reaped requests leave three runtime-only cells each (request, outcome,
+    occurrence) in the ephemeral arena, about 3 x (32 + 12 x 3 linked dimensions) = 200 bytes per
+    request, so a process that serves a million requests holds about 200 MB it cannot free; the rank
+    walks are bounded, the cells are not. The owed change is a request-scoped mark or a per-cell
+    release in `ArenaManifold` (a core file, not approved). Escalate if M7 hosts long-lived
+    services.
 - Remaining, deliberately: moving the `capture_defaults` bounds into `system://settings` (M8); there
   is no UI or keymap command invoking `reconcile` yet (it is an owner API); an ambiguous journal
   order is reconcilable only by the same promote/release decisions, with no tool that explains why
   it was ambiguous; a commit's snapshot copies and writes only the operations the directory lacks,
-  but `store.tables` is rewritten whole each time; and source chunks are not pinned by the map, so a
-  capture of a transient origin whose last lease dropped is refused `Unresolved` by design (the
-  tests hold a standing lease).
+  but `store.tables` is rewritten whole each time (it is O(scrolls), not O(operations)), and the
+  first snapshot into a fresh directory, or the first after a refused write, copies the whole store
+  on the owner (about 64 MB per million operations, a memcpy and no I/O); and source chunks are not
+  pinned by the map, so a capture of a transient origin whose last lease dropped is refused
+  `Unresolved` by design (the tests hold a standing lease).
 
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per
 repository policy. Run source-level focused tests while implementing and full `make -j$(nproc) test`

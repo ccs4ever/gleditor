@@ -12,3 +12,4 @@ Workflow brief: [`brief-common.md`](brief-common.md).
 | ----- | ------------- | ------- | -------- | ----- | ----- | ---------------------------------------------------------- |
 | 1     | `757cd55b`    | 4       | 2        | 15    | 25    | Fixed (A, B)                                               |
 | 2     | `dbe8e40c`    | 4       | 0        | 4     | 13    | Fixed ([disposition](r2-disposition.md)); vortex CONVERGED |
+| 3     | `e16ec377`    | 4       | 1        | 4     | 8     | Fixed ([disposition](r3-disposition.md))                   |

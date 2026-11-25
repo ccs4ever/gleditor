@@ -12,10 +12,32 @@ fsyncs and a whole `Store::save` on the owner. It now runs none of them.
 - `Store::saveSnapshot(dir)` runs on the owner and copies what `dir` does not durably hold into an
   immutable `StoreSnapshot`: the operation nodes above the directory's durable count, the node the
   file must end with, the `store.tables` image, a sequence number and a handle to the permascroll.
-  It costs O(operations added since the directory last became durable), not O(store).
+  It costs O(operations added since the directory last became durable), not O(store); the first
+  snapshot into a directory, and the retake after a refused write, copy the whole store on the owner
+  (64 bytes per operation, about 64 MB per million, a memcpy with no I/O). A step-2 retry takes a
+  fresh snapshot each attempt and drops the last, so a long outage costs one copy per attempt, not a
+  growing pile.
 - `SnapshotWriter::write(snapshot, durability)` runs on any thread. It flushes the permascroll,
   writes `ops.nodes` and `store.tables`, and removes the files `store.tables` superseded. Nothing in
   it reads the `Store`.
+- **Written is not synced (round 3).** The directory's channel records, apart from the count of
+  operations it holds, how many of them and which tables image an `Fsync` write has made durable. A
+  `Fsync` snapshot whose operations are all already written (by a `Buffered` `save()` that landed
+  first) still fsyncs `ops.nodes`, and still fsyncs `store.tables` when the image on disk is newer
+  but unsynced, before the directory; a `Buffered` Replace resets what it knew was synced. `write()`
+  can report what it fsynced (`SnapshotWriter::SnapshotSyncs`), which is what the test reads.
+- **Both files are replaced atomically (round 3).** A `Replace` of `ops.nodes` is written to
+  `ops.nodes.tmp`, fsynced when asked, renamed over the file, and the directory fsynced after:
+  truncating in place left a short file while the journal still claimed the captures in it.
+  `store.tables` is written the same way for `Buffered` as for `Fsync` (only the fsync differs).
+  `Extend` still appends in place; a crash there leaves a header that undercounts whole nodes.
+- **One channel per directory identity (round 3).** `Store`s and path spellings share one channel
+  (count, mutex, sequences) through a process-wide registry keyed by the directory's device and
+  inode, held weakly. Two writers can no longer interleave a Replace and an Extend on one file. The
+  alternative, refusing a second writer, was rejected: a symlink, a relative spelling and the
+  capture publisher's own `Store` all name one directory legitimately, and a refusal would fail the
+  editor's save. `saveSnapshot()` creates the directory if absent (a metadata syscall on the owner)
+  to have an identity to key by.
 - `Store::save()` is `saveSnapshot()` then `SnapshotWriter::write(Buffered)` on the calling thread,
   retried once as a whole-store snapshot when the extension was refused. There is one path to both
   files. `Buffered` is what `save()` always meant (page cache); `Fsync`, which the capture uses,
@@ -80,10 +102,12 @@ sync) -> publish -> save -> `Committed`.
   host's request budget three times as fast. (The existing 60-capture bound tests, run against a
   64-request service, found this.)
 - `CaptureJournal` is now used from workers while the owner holds budget for other captures. Appends
-  (`appendRecord`), `compact` and the recovery scan serialize on one mutex held across the fsync;
-  the budget calls (`hold`, `unhold`, sizes) take no lock and read atomics the writers publish after
-  each durable record (`FramedLog`'s written size and header flag, the identity flag, the max
-  `CaptureId`), so the owner never waits for a worker's fsync. `heldBytes_` stays the owner's alone.
+  (`appendRecord`), `compactWhere` and the recovery scan serialize on one mutex held across the
+  fsync; compaction reads, chooses and rewrites inside one hold (round 3: a separate read and
+  rewrite let a worker's record land between them and be erased by the rename); the budget calls
+  (`hold`, `unhold`, sizes) take no lock and read atomics the writers publish after each durable
+  record (`FramedLog`'s written size and header flag, the identity flag, the max `CaptureId`), so
+  the owner never waits for a worker's fsync. `heldBytes_` stays the owner's alone.
 - `CapturePublisher` gains `snapshot()` (owner), `write()` (any thread) and a `setSnapshotWriter()`
   test seam; `save()` is snapshot-then-write with the one retry, used by recovery.
 
@@ -95,10 +119,12 @@ state machine, the certain-abort path (an `Aborted` record closing an intent tha
 refusal proved never ran) and every restart test read it as "durable before submit". Running it in
 the append's worker turn would turn an admission refusal into an `Aborted` record with no intent
 (ambiguous to recovery) and would still leave the `Aborted` fsyncs of the failure paths on the
-owner. Also on the owner: journal compaction under bound pressure, and `recover()`, `reconcile()`
-and `resumePublications()`, which run at open or on an explicit owner decision with nothing else in
-flight (they save through the same snapshot writer on the calling thread). None is on a commit's
-happy path. Moving the intent would be a journal-protocol change and wants its own proposal.
+owner. Also on the owner: journal compaction under bound pressure (which takes the mutex a worker
+holds across its fsync, so it may wait on a worker as well as fsync itself), and `recover()`,
+`reconcile()` and `resumePublications()`, which run at open or on an explicit owner decision with
+nothing else in flight (they save through the same snapshot writer on the calling thread). None is
+on a commit's happy path. Moving the intent would be a journal-protocol change and wants its own
+proposal.
 
 ## Files
 
@@ -157,10 +183,21 @@ New tests: 12 in `store_snapshot_test.cpp` (11 `StoreSnapshotTest`, 1 `Segmented
 7 new `IoCaptureTest` cases (70 now, 63 before). `gleditor_test` was not built or run: the library
 (`src/`, `include/`) is untouched. No fixture under `tests/samples` changed.
 
+## Round 3 tests
+
+`StoreSnapshotTest`: `aBufferedSaveDoesNotLetALaterFsyncWriteSkipTheFsync`,
+`aBufferedReplaceAfterAnFsyncWriteIsSyncedAgain` (fsync report),
+`twoSpellingsOfOneDirectoryShareOneChannel`, `twoStoresOfOneDirectoryTakeTheSameMutex`,
+`aReplaceAfterARefusedExtensionKeepsTheOldFileOnFailure`;
+`SegmentedOpsSpoolRangeTest.aReplaceThatDiesHalfwayLeavesTheOldFileWhole` (a short write injected
+with `RLIMIT_FSIZE`). `IoCaptureTest`: `ACompactionNeverErasesARecordAppendedWhileItChooses`,
+`ACompactionRefusedByItsChoiceLeavesTheFileAlone`,
+`ARetiredCapturesJournalHoldOutlivesItsRunningStep`.
+
 ## Not done
 
 - `appendRequest()`'s intent fsync, for the reason above.
-- No ThreadSanitizer run; the concurrent tests were repeated 100 times under the normal build with
-  no failure.
+- ThreadSanitizer: run in round 3 over the capture and snapshot suites, no reports
+  (`r3-disposition.md`).
 - `store.tables` is still rewritten whole on every snapshot (it is small and it is what makes the
   snapshot self-consistent); only the operations are incremental.
