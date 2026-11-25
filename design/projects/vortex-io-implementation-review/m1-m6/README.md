@@ -26,8 +26,9 @@ Workflow brief: [`brief-common.md`](brief-common.md).
 
 ## Open proposals
 
-Applied: P1 and P3. Not needed: P2. Unapplied, owner approval required, carried into M7 planning:
+Applied: P1, P3, P4 and P5. Not needed: P2. Nothing is open.
 
-- P4: per-cell `ArenaManifold` release for reaped request cells, about 200 B per reaped request
-  (about 200 MB per million), a core change.
-- P5: move the Append-intent fsync off the owner. It needs a journal-protocol change.
+- P4: per-cell `ArenaManifold` release (`freeCell`) and the request reaper that uses it. Applied
+  with owner approval; see [`p4-p5-implementation.md`](p4-p5-implementation.md).
+- P5: the `Append` intent fsync moved off the owner into the append's worker turn, with
+  `capture.journal` version 4. Applied with owner approval; same document.

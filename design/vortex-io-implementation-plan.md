@@ -907,17 +907,18 @@ M6 implementation notes and deliberate deferrals:
   allocation incarnation, and requires `successfulAppend` to be linked from that request as a
   terminal `Complete`; another capture's outcome, a stale incarnation, a nonterminal request or a
   non-`Complete` outcome returns `Refused` with no journal record, cell or translation published.
-- Journal records are `Append` (intent, before submission), `Appended` (span plus full translation
-  intent, fsynced before the receipt cell is minted), `Committed` (after Structure publication and
-  the Store save), `Aborted` (with an uncertain flag), from version 2 `Reconciled` (the owner's
-  promote-or-release decision for a pinned capture) and, from version 3, `Identity`, always the
-  first record: the journal's own random 64-bit identity plus the highest `CaptureId` minted so far.
-  Versions 1 and 2 are refused by number. `recover()` rebuilds translations from
-  `Appended`/`Committed` (durable origins only; see the review-r1 bullets below), pins the source
-  intervals of open intents and uncertain aborts (`NeedsReconciliation`, overlapping prepare then
-  refuses with `Conflict`), and reports `orphanBytes` as the sum of append lengths that may have
-  landed without a proven commit. It never resubmits. Corruption, bad signature/version and sequence
-  gaps are `PersistenceRefusal` naming the 1-based record; a torn tail is cut by the constructor.
+- Journal records are `Append` (intent, written and fsynced by the append's own worker turn before
+  the sink sees a byte, from version 4), `Appended` (span plus full translation intent, fsynced
+  before the receipt cell is minted), `Committed` (after Structure publication and the Store save),
+  `Aborted` (with an uncertain flag), from version 2 `Reconciled` (the owner's promote-or-release
+  decision for a pinned capture) and, from version 3, `Identity`, always the first record: the
+  journal's own random 64-bit identity plus the highest `CaptureId` minted so far. Versions 1 to 3
+  are refused by number. `recover()` rebuilds translations from `Appended`/`Committed` (durable
+  origins only; see the review-r1 bullets below), pins the source intervals of open intents and
+  uncertain aborts (`NeedsReconciliation`, overlapping prepare then refuses with `Conflict`), and
+  reports `orphanBytes` as the sum of append lengths that may have landed without a proven commit.
+  It never resubmits. Corruption, bad signature/version and sequence gaps are `PersistenceRefusal`
+  naming the 1-based record; a torn tail is cut by the constructor.
 - Journal frame sizes are exported from `capture_journal.hpp` (`kCaptureJournal*Bytes`,
   `captureJournalFramedBytes`), and the coordinator derives its reservations from them; nothing
   hardcodes the format. Fallback bounds (`maxIntervals`, `maxAppendBytes`, `maxPieces`,
@@ -940,8 +941,9 @@ M6 implementation notes and deliberate deferrals:
   zero-length piece or slot is ever emitted.
 - Journal budget is held, not just checked: `prepare` holds the capture's worst-case record set
   (`Append` + `Appended` + `Committed` + `Aborted`) against `written + held`, so N pending captures
-  cannot jointly exhaust it; holds are consumed as records land and returned on retirement. A retry
-  after a refused admission tops the hold up before submitting.
+  cannot jointly exhaust it; holds are consumed as records land and returned on retirement (the
+  `Append` intent's when `commit()` sees the append `Complete`, since the worker writes it). A retry
+  after a refused attempt tops the hold up before submitting.
 - Terminal captures leave `pending_`: a committed capture frees its pending slot at once; a certain
   abort erases its `Pending` slots and releases its leases (the range can be retried immediately);
   an uncertain abort (and a swept capture whose append was requested) turns its slots `Pinned`
@@ -1051,15 +1053,12 @@ M6 implementation notes and deliberate deferrals:
     translations. The durable order on disk is unchanged: `Appended` after the sink sync, then the
     save, then `Committed`. A step that threw (a crash point) is rethrown by `continueCommit()`; a
     step that failed refuses it and leaves the capture retriable.
-  - What still blocks the owner, by design: `appendRequest()` journals its `Append` intent with an
-    fsync (the intent is what recovery's state machine and the certain-abort path read as "durable
-    before submit", and moving it into the append's worker turn would make an admission refusal an
-    `Aborted` record with no intent); the `Aborted` records of the failure paths; journal compaction
-    under bound pressure, which takes the journal mutex a worker holds across its fsync and so _may
-    wait on a worker_, not only do an fsync itself; and `recover()`, `reconcile()` and
+  - What still blocks the owner, by design: the `Aborted` records of the failure paths; journal
+    compaction under bound pressure, which takes the journal mutex a worker holds across its fsync
+    and so _may wait on a worker_, not only do an fsync itself; and `recover()`, `reconcile()` and
     `resumePublications()`, which run at open or on an explicit owner decision with nothing else in
     flight and save through the same snapshot writer on the calling thread. None of these is on a
-    commit's happy path.
+    commit's happy path. (`appendRequest()` is no longer on this list: see P5 below.)
   - Review round 3 corrected P3 in four places (`r3-disposition.md`): journal compaction reads,
     chooses and rewrites in one hold of the journal mutex (`CaptureJournal::compactWhere`), so a
     worker's `Appended` or `Committed` cannot land between the read and the rename; the snapshot
@@ -1068,12 +1067,23 @@ M6 implementation notes and deliberate deferrals:
     `ops.nodes` is written beside the file and renamed over it, never truncated in place; and one
     writer mutex per directory identity, not per `Store` object. A retired capture's journal hold
     outlives its running step, and a capture that dies mid-step retires the step's request.
-  - **P4, priced:** reaped requests leave three runtime-only cells each (request, outcome,
-    occurrence) in the ephemeral arena, about 3 x (32 + 12 x 3 linked dimensions) = 200 bytes per
-    request, so a process that serves a million requests holds about 200 MB it cannot free; the rank
-    walks are bounded, the cells are not. The owed change is a request-scoped mark or a per-cell
-    release in `ArenaManifold` (a core file, not approved). Escalate if M7 hosts long-lived
-    services.
+  - **P4, applied** (owner-approved core change; details, tests and counts in
+    [`p4-p5-implementation.md`](projects/vortex-io-implementation-review/m1-m6/p4-p5-implementation.md)).
+    `ArenaManifold::freeCell(ref, incarnation)` frees one cell onto a LIFO free list that the next
+    mint reuses under a new incarnation; `reapIoRequest` frees a reaped request's whole graph (the
+    request, its field occurrences and views, its outcome and what the outcome carries), so an arena
+    that serves requests holds its live requests' cells and not every request's (measured at 18 live
+    cells, about 1.2 KB, per served request: six times the earlier price of three cells). A request
+    that a capture still views on its clone rank is kept until the view leaves. Retiring is the
+    consumer saying the outcome is read: a late poll of a reaped request finds a stale handle.
+  - **P5, applied** (owner-approved journal-protocol change; `capture.journal` version 4). The
+    `Append` intent is written and fsynced by the append's own worker turn, after the turn's last
+    chance to be cancelled and before it hands a byte to the sink, so no journal fsync of a commit
+    transaction runs on the owner except the `Aborted` records of the failure paths. An admission
+    refusal leaves no record at all (there is no intent to close); an `Aborted` may stand with no
+    intent before it and recovery reads that as nothing having landed, while an intent that lands
+    after an owner `Aborted` (a worker that raced the owner) opens an attempt recovery pins. The
+    intent's journal budget stays held until `commit()` sees the append `Complete`.
 - Remaining, deliberately: moving the `capture_defaults` bounds into `system://settings` (M8); there
   is no UI or keymap command invoking `reconcile` yet (it is an owner API); an ambiguous journal
   order is reconcilable only by the same promote/release decisions, with no tool that explains why

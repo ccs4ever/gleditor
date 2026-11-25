@@ -113,6 +113,9 @@ sync) -> publish -> save -> `Committed`.
 
 ### What still blocks the owner, and why
 
+_Update: the `appendRequest()` intent described below was moved off the owner by P5, see
+[`p4-p5-implementation.md`](p4-p5-implementation.md). The rest of this section stands._
+
 `appendRequest()` does not move its `Append` intent fsync, and this is deliberate rather than
 unfinished. The intent is the only durable evidence that bytes may exist, and recovery's attempt
 state machine, the certain-abort path (an `Aborted` record closing an intent that an admission
