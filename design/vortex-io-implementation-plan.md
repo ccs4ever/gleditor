@@ -163,11 +163,10 @@ enum class OversizeDisposition { Retained, Consumed, Unknown };
 struct Generation { std::uint64_t value; };
 struct GapRange { std::uint64_t firstSequence, lastSequence; };
 struct OpenedEndpoint { CellRef endpoint; CellRef initialCapability; };
-struct CaptureAppendReceipt { CaptureCell capture; std::uint64_t permascrollEnd; };
-struct ProbeValue { CellRef value; };
-struct CommitReceipt { CellRef receipt; };
-using IoResultValue = std::variant<std::monostate, OpenedEndpoint, CaptureAppendReceipt,
-                                  ProbeValue, CommitReceipt>;
+// M4 reduced this to monostate|OpenedEndpoint: produced bytes and receipt
+// details travel through the PayloadResolver channel and the outcome's
+// payload field instead of dedicated result variants (see M4 notes).
+using IoResultValue = std::variant<std::monostate, OpenedEndpoint>;
 struct Complete { std::optional<PayloadRange> payload; IoResultValue value; IoProgress progress; };
 struct EndOfStream { IoProgress progress; };
 struct Partial { PayloadRange payload; PartialCause cause; IoProgress progress; };
@@ -332,12 +331,22 @@ struct IoAdapter {
 };
 class IoCellStore {
 public:
+  virtual std::expected<void, IoErrorInfo> authorizeOpen(const OpenSpec&) = 0;
+  virtual std::expected<CellRequest, IoErrorInfo>
+  freezeRequest(CapabilityCell, OwnerCell) = 0;
+  virtual std::expected<CellRequest, IoErrorInfo>
+  freezeClose(EndpointCell, CloseMode) = 0;
   virtual std::expected<RequestCell, IoErrorInfo> mintRequest(const CellRequest&) = 0;
-  virtual std::expected<OutcomeCell, IoErrorInfo> mintOutcome(const IoOutcome&) = 0;
-  virtual std::expected<EndpointCell, IoErrorInfo> mintEndpoint(const OpenedEndpoint&) = 0;
-  virtual std::expected<CapabilityCell, IoErrorInfo> mintCapability(const EndpointCell&,
-                                                                     const OpenSpec&) = 0;
-  virtual WaiterCell mintWaiter(RequestCell, OwnerWaiterRegistration) = 0;
+  virtual OutcomeCell mintRefusal(IoErrorInfo) = 0;
+  virtual std::expected<OutcomeCell, IoErrorInfo>
+  publishTerminal(RequestCell, const IoOutcome&, const IoProgress&,
+                  const std::optional<PayloadLease>&) = 0;
+  virtual bool isOutcomeCurrent(OutcomeCell) const noexcept { return true; }
+  virtual std::optional<OutcomeCell> outcomeFor(const RequestCell) = 0;
+  virtual std::expected<OpenedEndpoint, IoErrorInfo>
+  mintOpenedEndpoint(const OpenSpec&) = 0;
+  virtual std::expected<WaiterCell, IoErrorInfo>
+  mintWaiter(RequestCell, OwnerWaiterRegistration) = 0;
   virtual void retireWaiter(WaiterCell) noexcept = 0;
 };
 ```
@@ -772,25 +781,44 @@ completion until both its language expert reviewer and the Vortex expert reviewe
 
 M4 implementation notes and deliberate deferrals:
 
-- Byte output never rides `IoResultValue` (which is `std::monostate` or
-  `OpenedEndpoint` only): adapters publish produced bytes through
-  `publishTransientBytes`, place the retained `PayloadRange` in the terminal
-  outcome's payload field, and hand the `PayloadLease` to
-  `CompletionSink::terminalCandidate`. Owner-side consumers resolve the range
-  through `PayloadResolver` (or `outcomeCellPayloadRange` on the outcome cell).
-- `ProjectionSession::publishRefresh`/`publishCommit` trust the caller to hand
-  them the outcome their staged request produced; binding the outcome cell
-  back to the staged spec cell needs outcome→request→specification readers
-  the I/O cell layer does not yet expose, so cross-session outcome mix-ups are
-  a caller-contract matter for M4 (revisit if a second staged consumer lands).
-- `CommandMailboxAdapter` carries one bounded reply per command as a payload;
-  streaming or multi-message command replies are not framed and stay deferred
-  to the file/media milestone that needs them.
-- `ProcessIoAdapter` cannot kill a `popen` child mid-read (`context.stop` is
-  honored between `fread` chunks); `NetIoAdapter` serializes per fd because
-  concurrent ops would interleave on one stream; the lens adapters' fetch
-  generation is an adapter-local watermark, not the underlying store's own
+- Byte output never rides `IoResultValue` (which is `std::monostate` or `OpenedEndpoint` only):
+  adapters publish produced bytes through `publishTransientBytes`, place the retained `PayloadRange`
+  in the terminal outcome's payload field, and hand the `PayloadLease` to
+  `CompletionSink::terminalCandidate`. Owner-side consumers resolve the range through
+  `PayloadResolver` (or `outcomeCellPayloadRange` on the outcome cell).
+- `ProjectionSession::publishRefresh`/`publishCommit` trust the caller to hand them the outcome
+  their staged request produced; binding the outcome cell back to the staged spec cell needs
+  outcome→request→specification readers the I/O cell layer does not yet expose, so cross-session
+  outcome mix-ups are a caller-contract matter for M4 (revisit if a second staged consumer lands).
+- `CommandMailboxAdapter` carries one bounded reply per command as a payload; streaming or
+  multi-message command replies are not framed and stay deferred to the file/media milestone that
+  needs them.
+- `ProcessIoAdapter` cannot kill a `popen` child mid-read (`context.stop` is honored between `fread`
+  chunks); `NetIoAdapter` serializes per fd because concurrent ops would interleave on one stream;
+  the lens adapters' fetch generation is an adapter-local watermark, not the underlying store's own
   change detection.
+
+M4 known gaps carried forward (recorded 2026-11-24, review fix round):
+
+- `NetStreamRing`, `JournalLens` and `SwarmLens` have no `IoAdapter` yet; only the staged lens
+  adapter, the file/process/net/stream sources, the union/router wrappers and
+  `CommandMailboxAdapter` landed.
+- `OwnerPublication` carries `IoOutcome` only: the `ProjectionDelta` half of the publish contract is
+  unimplemented, so a lens commit's arena-side delta is not published through the outcome cell.
+- `CommandMailboxAdapter` exists but its call sites have not migrated to request cells and owner
+  publication; only the single bounded reply is framed (previous bullet).
+- `retireRequest` has no production caller wired yet: await-driven requests retire only through it,
+  so `requests_`/`requestByCell_` grow monotonically until shutdown without it (the same gap
+  `ensureTerminalOutcome`'s re-mint-on-refusal note in `io_service.cpp` shares).
+- `ensureTerminalOutcome` re-mints a refusal cell on every poll/await while `publishTerminal` keeps
+  refusing, instead of caching one; request retirement bounds the growth but the re-mint itself is
+  deliberate, not redesigned.
+- `OpenSpec.deadline` is frozen on the request but nothing enforces it; no adapter or scheduler path
+  reads it, so expiry never produces `TimedOut`.
+- `UnionSourceAdapter` members must present disjoint staged-key spaces for concurrently in-flight
+  requests: `abandonStaged` sees only the spec cell, so two live same-key specs on different members
+  misroute the earlier abandon onto the other's live staged entry (documented on the class;
+  `StagedLensSourceAdapter` members mint unique cells and satisfy it).
 
 Every milestone has unit and integration tests in the owning layer. Keep tests headless per
 repository policy. Run source-level focused tests while implementing and full `make -j$(nproc) test`
