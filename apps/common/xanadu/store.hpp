@@ -150,6 +150,12 @@ struct SnapshotChannel;
  * appended to, so sharing them by reference would buy a lifetime problem to
  * save a copy of a delta), and the side tables are a value.
  */
+/// A save would replace operations another history committed to a directory.
+class StoreDirectoryDiverged : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
 class StoreSnapshot {
 public:
   [[nodiscard]] const std::filesystem::path &directory() const noexcept {

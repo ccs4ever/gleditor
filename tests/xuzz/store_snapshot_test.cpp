@@ -251,6 +251,59 @@ TEST_F(StoreSnapshotTest, anExtensionOfAForeignFileIsRefusedNotAppended) {
   EXPECT_TRUE(SnapshotWriter::write(again));
 }
 
+TEST_F(StoreSnapshotTest, aDivergentShorterHistoryIsRefusedNotReplaced) {
+  Store longer(perma);
+  const auto text = longer.insert(MicroversionId{}, 0, "long");
+  longer.insert(longer.latest(), 4, " history");
+  longer.save(path("dir"));
+  const auto before = slurp(root / "dir" / "ops.nodes");
+
+  Store shorter(perma);
+  shorter.insert(MicroversionId{}, 0, "x");
+  ASSERT_LT(shorter.opCount(), longer.opCount());
+  EXPECT_THROW(static_cast<void>(shorter.saveSnapshot(path("dir"))),
+               StoreDirectoryDiverged);
+  EXPECT_THROW(shorter.save(path("dir")), StoreDirectoryDiverged);
+  EXPECT_EQ(slurp(root / "dir" / "ops.nodes"), before);
+  EXPECT_EQ(reloadedText(path("dir"), text), "long");
+}
+
+TEST_F(StoreSnapshotTest, aLoadedStoreMayStillSaveBackToItsDirectory) {
+  Store longer(perma);
+  longer.insert(MicroversionId{}, 0, "long");
+  const auto text = longer.insert(longer.latest(), 4, " history");
+  longer.save(path("dir"));
+
+  Store loaded(perma);
+  loaded.load(path("dir"));
+  EXPECT_NO_THROW(loaded.save(path("dir")));
+  EXPECT_EQ(reloadedText(path("dir"), text), "long history");
+}
+
+TEST_F(StoreSnapshotTest, aStaleTempFileIsRemovedWhenAStoreLoads) {
+  Store store(perma);
+  store.insert(MicroversionId{}, 0, "one");
+  store.save(path("dir"));
+  std::ofstream(root / "dir" / "ops.nodes.tmp") << "stale";
+  std::ofstream(root / "dir" / "store.tables.tmp") << "stale";
+  Store reloaded(perma);
+  reloaded.load(path("dir"));
+  EXPECT_FALSE(std::filesystem::exists(root / "dir" / "ops.nodes.tmp"));
+  EXPECT_FALSE(std::filesystem::exists(root / "dir" / "store.tables.tmp"));
+}
+
+TEST_F(StoreSnapshotTest, aRepeatSnapshotKeepsTheSameChannelThroughASymlink) {
+  Store store(perma);
+  store.insert(MicroversionId{}, 0, "one");
+  store.save(path("dir"));
+  std::filesystem::create_directory_symlink(root / "dir", root / "link");
+  const auto first = store.saveSnapshot(path("dir"));
+  const auto again = store.saveSnapshot(path("dir"));
+  EXPECT_EQ(first.baseOps(), again.baseOps());
+  const auto viaLink = store.saveSnapshot(path("link"));
+  EXPECT_EQ(viaLink.baseOps(), first.baseOps());
+}
+
 TEST(SegmentedOpsSpoolRangeTest, extendingAFileThatIsNotThereIsAMismatch) {
   const auto file =
       std::filesystem::temp_directory_path() / "xuzz-spool-range-missing.nodes";
@@ -298,14 +351,17 @@ TEST_F(StoreSnapshotTest, aBufferedSaveDoesNotLetALaterFsyncWriteSkipTheFsync) {
 }
 
 TEST_F(StoreSnapshotTest, aBufferedReplaceAfterAnFsyncWriteIsSyncedAgain) {
-  Store store(perma);
-  const auto one = store.insert(MicroversionId{}, 0, "first");
-  const auto two = store.insert(one, 5, " second");
-  store.insert(two, 12, " third");
-  ASSERT_TRUE(SnapshotWriter::write(store.saveSnapshot(path("dir")),
-                                    SnapshotDurability::Fsync));
-  // A shorter, different history replaces the file through a Buffered write:
-  // the new file has had no fsync, whatever the old one had.
+  {
+    Store store(perma);
+    const auto one = store.insert(MicroversionId{}, 0, "first");
+    const auto two = store.insert(one, 5, " second");
+    store.insert(two, 12, " third");
+    ASSERT_TRUE(SnapshotWriter::write(store.saveSnapshot(path("dir")),
+                                      SnapshotDurability::Fsync));
+  }
+  // The first store is gone, so nothing live holds its history: a shorter,
+  // different one replaces the file through a Buffered write, and the new
+  // file has had no fsync, whatever the old one had.
   Store other(perma);
   other.insert(MicroversionId{}, 0, "short");
   const auto snapshot = other.saveSnapshot(path("dir"));

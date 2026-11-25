@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <gleditor/logging.hpp>
 #include <iterator>
 #include <limits>
 #include <locale>
@@ -4169,11 +4170,18 @@ void Store::sealPendingMetadataAsCells() const {
 }
 
 struct SnapshotChannel {
-  explicit SnapshotChannel(std::filesystem::path dir, const std::uint32_t held)
-      : directory(std::move(dir)), durableOps(held) {}
+  explicit SnapshotChannel(std::filesystem::path dir, const std::uint32_t held,
+                           const std::pair<std::uint64_t, std::uint64_t> id)
+      : directory(std::move(dir)), identity(id), durableOps(held) {}
   std::filesystem::path directory;
+  /// The directory's (device, inode), or a path hash with device 0 where it
+  /// could not be stat-ed: what channelFor() compares to know a cached channel
+  /// still names the directory without recomputing a canonical path.
+  std::pair<std::uint64_t, std::uint64_t> identity;
   /// Taken by writers only, and held across their fsyncs. The owner never
-  /// takes it: it reads durableOps, which is why that is atomic.
+  /// takes it (it would wait on an fsync): it reads durableOps, which is why
+  /// that is atomic, and it never writes a counter -- every write happens in
+  /// the writer, under this.
   std::mutex mutex;
   /// Operations the directory durably holds. Advanced by a writer after its
   /// write completed and never before, so a failed write leaves it where the
@@ -4261,31 +4269,49 @@ namespace {
 /// The directory is created if absent -- an identity needs something to name,
 /// and the writer would create it first thing anyway.
 std::shared_ptr<SnapshotChannel>
-channelFor(const std::filesystem::path &directory) {
+channelFor(const std::filesystem::path &directory,
+           const std::shared_ptr<SnapshotChannel> &cached = nullptr) {
   using Key = std::pair<std::uint64_t, std::uint64_t>;
   static std::mutex registryMutex;
   static std::map<Key, std::weak_ptr<SnapshotChannel>> registry;
 
-  // A directory that cannot be made keeps its key by path: the writer is
-  // where that is reported, as it always was.
+  // What remains on the owner per snapshot of a directory already seen is one
+  // stat; a first sight (or a changed directory) also pays create_directories
+  // and a canonical path. A directory that cannot be made keeps its key by
+  // path: the writer is where that is reported, as it always was.
   std::error_code ignored;
-  std::filesystem::create_directories(directory, ignored);
-  Key key{0,
-          std::hash<std::string>{}(
-              std::filesystem::weakly_canonical(directory, ignored).string())};
+  std::optional<Key> key;
 #ifndef _WIN32
   struct stat st{};
   if (0 == ::stat(directory.c_str(), &st)) {
-    key = {static_cast<std::uint64_t>(st.st_dev),
-           static_cast<std::uint64_t>(st.st_ino)};
+    key = Key{static_cast<std::uint64_t>(st.st_dev),
+              static_cast<std::uint64_t>(st.st_ino)};
   }
 #endif
+  if (cached && key && cached->directory == directory &&
+      cached->identity == *key) {
+    return cached;
+  }
+  if (!key) {
+    std::filesystem::create_directories(directory, ignored);
+#ifndef _WIN32
+    if (0 == ::stat(directory.c_str(), &st)) {
+      key = Key{static_cast<std::uint64_t>(st.st_dev),
+                static_cast<std::uint64_t>(st.st_ino)};
+    }
+#endif
+  }
+  if (!key) {
+    key = Key{
+        0, std::hash<std::string>{}(
+               std::filesystem::weakly_canonical(directory, ignored).string())};
+  }
   const std::lock_guard lock(registryMutex);
   std::erase_if(registry,
                 [](const auto &entry) { return entry.second.expired(); });
-  auto &slot = registry[key];
+  auto &slot = registry[*key];
   if (auto channel = slot.lock()) return channel;
-  auto channel = std::make_shared<SnapshotChannel>(directory, 0);
+  auto channel = std::make_shared<SnapshotChannel>(directory, 0, *key);
   slot         = channel;
   return channel;
 }
@@ -4299,12 +4325,19 @@ StoreSnapshot Store::saveSnapshot(const std::string &directory) const {
   // One channel per directory this store has been saved to. Another
   // directory shares nothing with the last one's bookkeeping: it holds none of
   // these operations, so the snapshot of it is the whole store.
-  snapshotChannel_ = channelFor(snapshot.directory_);
-  if (snapshotChannel_->durableOps.load() > opsSpool.size()) {
-    // Held by another history that is longer than this one: this store's
-    // save is a Replace, which the writer will do atomically.
-    snapshotChannel_->durableOps.store(0);
+  auto channel = channelFor(snapshot.directory_, snapshotChannel_);
+  if (channel->durableOps.load() > opsSpool.size()) {
+    // The directory durably holds more operations than this store has, and an
+    // append-only history cannot get shorter, so they are another history's:
+    // replacing them would destroy committed operations this store never saw.
+    // (load() sets the count to what it read, so a loaded store never lands
+    // here.) Refused before the channel is claimed or any counter touched.
+    throw StoreDirectoryDiverged(
+        snapshot.directory_.string() +
+        " holds more operations than this store, which did not write or "
+        "load them; refusing to replace another history");
   }
+  snapshotChannel_  = std::move(channel);
   snapshot.channel_ = snapshotChannel_;
 
   // The count the directory durably holds, not the count last snapshotted: a
@@ -4701,6 +4734,17 @@ void Store::load(const std::string &directory) {
         (dir / legacyOpsFile).string() +
         " is an operations spool from before operations were kept as nodes, "
         "and this build does not read one. See design R11.");
+  }
+
+  // A writer that died between its temp file and the rename leaves the temp
+  // behind; nothing reads it, so it is only clutter -- and a stale
+  // ops.nodes.tmp is worth not leaving where a later writer truncates it.
+  for (const auto *const leftover : {"ops.nodes.tmp", "store.tables.tmp"}) {
+    std::error_code removeError;
+    if (std::filesystem::remove(dir / leftover, removeError)) {
+      GLEDITOR_LOG_DEBUG("xanadu.store", "removed stale {} in {}", leftover,
+                         dir.string());
+    }
   }
 
   snapshotChannel_.reset();
