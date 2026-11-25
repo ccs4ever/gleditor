@@ -170,11 +170,24 @@ public:
   [[nodiscard]] auto readImage() const
       -> std::expected<std::optional<std::vector<std::byte>>, IoErrorInfo>;
 
+  /// What a replacement that reached its rename reports.
+  struct Replacement {
+    /// Whether the directory sync that makes the new name durable was
+    /// acknowledged. When false the journal on disk (and in this object's
+    /// bookkeeping) IS the new one, but a crash before the entry reaches
+    /// stable storage may bring the previous file back: still a complete,
+    /// self-consistent journal, so recovery stays sound, yet retirements
+    /// and records appended since may be lost. The caller must adopt the new
+    /// image's state either way and treat the retirement as not durable.
+    bool directoryDurable{};
+  };
+
   /// Atomically replace the file's records with @p framedRecords (header
   /// added): write a temp file, fsync it, rename over the journal, fsync the
-  /// directory. A crash before the rename leaves the original intact.
+  /// directory. A crash before the rename leaves the original intact. An
+  /// error means nothing changed; a value means the rename happened.
   [[nodiscard]] auto replaceRecords(std::span<const std::byte> framedRecords)
-      -> std::expected<void, IoErrorInfo>;
+      -> std::expected<Replacement, IoErrorInfo>;
 
 private:
   void repairTornHeader();

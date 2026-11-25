@@ -689,4 +689,48 @@ TEST_F(ActorIoJournalTest, StaleCompactionTempFromACrashIsDiscarded) {
   EXPECT_EQ(restarted.recover().status, ActorRestoreStatus::Clean);
 }
 
+TEST_F(ActorIoJournalTest,
+       UnsyncedDirectoryAfterCompactionRenameKeepsSequence) {
+  if (::geteuid() == 0) GTEST_SKIP() << "root ignores directory permissions";
+  ActorIoJournal journal(path_, std::nullopt);
+  for (std::uint64_t n = 1; n <= 3; ++n) {
+    ASSERT_TRUE(journal.stageIntent(intent(n)));
+    ASSERT_TRUE(journal.recordAdmission(n, 7, 100 + n));
+    ASSERT_TRUE(journal.recordReceipt(n));
+  }
+  ASSERT_TRUE(journal.checkpoint(3));
+  ASSERT_TRUE(journal.stageIntent(intent(4)));
+  ASSERT_TRUE(journal.recordAdmission(4, 7, 104));
+
+  // Write+search without read: the temp file can be created and renamed but
+  // the directory cannot be opened to fsync, so the rename happens and its
+  // durability is unacknowledged.
+  std::filesystem::permissions(dir_, std::filesystem::perms::owner_write |
+                                         std::filesystem::perms::owner_exec);
+  const auto compacted = journal.compact();
+  std::filesystem::permissions(dir_, std::filesystem::perms::owner_all);
+  ASSERT_FALSE(compacted);
+  EXPECT_EQ(compacted.error().code, IoErrorCode::BackendFailure);
+
+  // The file is the compacted image, so the next append must continue its
+  // sequence; a stale counter would write a gap the next open refuses.
+  ASSERT_TRUE(journal.recordReceipt(4));
+  ActorIoJournal restarted(path_, std::nullopt);
+  restarted.markQuiescent();
+  EXPECT_EQ(restarted.recover().status, ActorRestoreStatus::Clean);
+}
+
+TEST_F(ActorIoJournalTest, CheckpointCompactionNeverExceedsTheByteBound) {
+  // Two unreleased intents fill the journal exactly; the checkpoint releases
+  // nothing, so rewriting them plus the checkpoint cannot fit.
+  const auto budget = kFramedLogHeaderBytes + 2 * kRecordBytes;
+  ActorIoJournal journal(path_, budget);
+  ASSERT_TRUE(journal.stageIntent(intent(1)));
+  ASSERT_TRUE(journal.stageIntent(intent(2)));
+  const auto refused = journal.checkpoint(0);
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error().code, IoErrorCode::BudgetExceeded);
+  EXPECT_LE(journal.sizeBytes(), budget);
+}
+
 } // namespace

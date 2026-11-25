@@ -275,10 +275,20 @@ auto ActorIoJournal::compactTo(const ActorIntentRecord *pending)
     rewritten.insert(rewritten.end(), framed.begin(), framed.end());
   }
   const auto before = log_.sizeBytes();
-  if (const auto ok = log_.replaceRecords(rewritten); !ok) {
-    return std::unexpected(ok.error());
+  // A rewrite that keeps everything plus a pending checkpoint can be larger
+  // than the file it replaces; the bound holds for it like for any append.
+  if (log_.maxBytes() &&
+      kFramedLogHeaderBytes + rewritten.size() > *log_.maxBytes()) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded, 0});
   }
+  const auto replaced = log_.replaceRecords(rewritten);
+  if (!replaced) return std::unexpected(replaced.error());
+  // Bookkeeping follows the rename, not the directory sync (see
+  // FramedLog::Replacement).
   nextSequence_ = sequence;
+  if (!replaced->directoryDurable) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
+  }
   return before > log_.sizeBytes() ? before - log_.sizeBytes() : std::size_t{0};
 }
 

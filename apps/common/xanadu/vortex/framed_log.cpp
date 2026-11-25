@@ -404,7 +404,7 @@ auto FramedLog::readImage() const
 }
 
 auto FramedLog::replaceRecords(const std::span<const std::byte> framedRecords)
-    -> std::expected<void, IoErrorInfo> {
+    -> std::expected<Replacement, IoErrorInfo> {
   const auto failure = [] {
     return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
   };
@@ -433,12 +433,11 @@ auto FramedLog::replaceRecords(const std::span<const std::byte> framedRecords)
   }
   // The rename has happened: the journal on disk is the new one whether or
   // not the directory sync below is acknowledged, so bookkeeping follows the
-  // rename. An unacknowledged directory sync is still a refusal -- the caller
-  // must not treat the retirement as durable.
+  // rename and the caller is told both facts instead of one error that hides
+  // the first.
   writtenBytes_ = image.size();
   wroteHeader_  = true;
-  if (!syncParentDirectory(path_)) return failure();
-  return {};
+  return Replacement{.directoryDurable = syncParentDirectory(path_)};
 }
 
 } // namespace xanadu::vortex

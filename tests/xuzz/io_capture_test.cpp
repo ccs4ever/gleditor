@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
@@ -1798,6 +1800,33 @@ TEST_F(IoCaptureTest, CompactionKeepsWhatIsUnresolvedAndWhatSurvivesARestart) {
   EXPECT_TRUE(ids.contains(2)) << "a durable-origin translation survives";
   EXPECT_TRUE(ids.contains(3)) << "an open intent is never dropped";
   EXPECT_EQ(view.maxCaptureId, CaptureId{4});
+}
+
+TEST_F(IoCaptureTest, UnsyncedDirectoryAfterCompactionRenameKeepsSequence) {
+  if (::geteuid() == 0) GTEST_SKIP() << "root ignores directory permissions";
+  CaptureJournal journal(journalPath_, std::nullopt);
+  CaptureJournalRecord record;
+  for (CaptureId id = 1; id <= 3; ++id) {
+    ASSERT_TRUE(
+        journal.appendRecord(CaptureJournalRecordKind::Append, id, record)
+            .has_value());
+  }
+  // Write+search without read: rename works, the directory cannot be opened
+  // to fsync, so the replacement is in place but unacknowledged.
+  std::filesystem::permissions(dir_, std::filesystem::perms::owner_write |
+                                         std::filesystem::perms::owner_exec);
+  const auto compacted = journal.compact({});
+  std::filesystem::permissions(dir_, std::filesystem::perms::owner_all);
+  ASSERT_FALSE(compacted.has_value());
+  EXPECT_EQ(compacted.error().code, IoErrorCode::BackendFailure);
+
+  // The next append continues the compacted file's sequence, and a reopen
+  // reads the whole journal instead of refusing a gap.
+  ASSERT_TRUE(journal.appendRecord(CaptureJournalRecordKind::Append, 4, record)
+                  .has_value());
+  CaptureJournal reopened(journalPath_, std::nullopt);
+  EXPECT_EQ(reopened.recover().status, CaptureJournalStatus::Clean);
+  EXPECT_EQ(reopened.maxCaptureId(), CaptureId{4});
 }
 
 TEST_F(IoCaptureTest, ABoundOfZeroHoldsNothingAndNulloptIsUnbounded) {

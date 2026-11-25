@@ -548,9 +548,16 @@ auto CaptureJournal::compact(const std::span<const CaptureJournalRecord> keep)
       kCaptureJournalHeaderBytes + image.size() > *log_.maxBytes()) {
     return std::unexpected(IoErrorInfo{IoErrorCode::BudgetExceeded, 4});
   }
-  if (const auto ok = log_.replaceRecords(image); !ok) return ok;
+  const auto replaced = log_.replaceRecords(image);
+  if (!replaced) return std::unexpected(replaced.error());
+  // The file is the new image from the rename on, so the sequence follows it
+  // even when the directory sync was not acknowledged; otherwise the next
+  // append would leave a gap the next open refuses as corruption.
   identityWritten_ = true;
   nextSequence_    = sequence;
+  if (!replaced->directoryDurable) {
+    return std::unexpected(IoErrorInfo{IoErrorCode::BackendFailure, 0});
+  }
   return {};
 }
 
