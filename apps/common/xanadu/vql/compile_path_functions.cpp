@@ -20,13 +20,15 @@
 // opcode does either (see .logs/w1/q1b-text-opcode-proposal.md). Zero-argument
 // count() as a path step needs the whole incoming walk, so compileSteps hands
 // it to compilePathFunctionWalk ahead of the per-cell emitMap.
-#include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vortex/frontend_diagnostics.hpp"
+#include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/join_relation.hpp"
 
 #include <algorithm>
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 
 namespace xanadu::vql {
@@ -356,61 +358,57 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
   }
 
   if (fn.name == "join") {
-    // join(rows, separator): the rows' scalars as text, one separator between
-    // each pair, as a single text cell. The text is a fold of the text `+`
-    // (VqlAdd), so it is what `a + sep + b + ...` would have been; an empty
-    // walk is the empty text, present, like a zero count. The first row is
-    // taken outside the loop so no separator is pending before it.
+    // join(rows, separator): the rows' text with one separator between each
+    // pair, as a single cell. The host relations (join_relation.hpp) assemble
+    // the spans, so a row that quotes text keeps quoting it and a lone row is
+    // returned itself; only a number or a separator is new text. An empty walk
+    // is the empty text, present, like a zero count. The running byte count
+    // is checked on every row, so a join past the bound is refused before it
+    // is built, never truncated.
     const auto rows       = compileArgument(fn.args[0], context);
     const auto separators = compileArgument(fn.args[1], context);
     const auto zero       = emitConstant(std::int64_t{0});
-    const auto one        = emitConstant(std::int64_t{1});
-    const auto emptyText  = emitConstant(std::string{});
-    const auto asText     = [&](CellRef scalar) {
-      const auto opcode = emitOp(OpcodeKind::VqlString, "#JOIN_TEXT");
-      emitInput(opcode, scalar);
-      const auto text = fresh();
-      emitOutput(opcode, text);
-      return text;
+    const auto separator  = exactlyOne(
+        separators, "VQL path function 'join' takes exactly one separator");
+    const auto bound =
+        emitConstant(static_cast<std::int64_t>(maxJoinedTextBytes_));
+    const auto taken  = arithmetic(OpcodeKind::Add, zero, zero);
+    const auto relate = [&](std::string_view relation, const CellRef position,
+                            const std::vector<CellRef> &arguments) {
+      const auto call = emitOp(OpcodeKind::RelationNext, "#JOIN_RELATION");
+      emitInputConstant(call, std::string{relation});
+      emitInput(call, position);
+      emitInput(call, bound);
+      for (const auto argument : arguments) emitInput(call, argument);
+      const auto found = fresh();
+      const auto next  = fresh();
+      emitOutput(call, found);
+      emitOutput(call, next);
+      emitOutput(call, fresh());
+      std::vector<CellRef> answers;
+      for (std::size_t i = 0; i < arguments.size(); ++i) {
+        answers.push_back(fresh());
+        emitOutput(call, answers.back());
+      }
+      return std::tuple{found, next, answers};
     };
-    const auto concat = [&](CellRef left, CellRef right, CellRef destination) {
-      const auto opcode = emitOp(OpcodeKind::VqlAdd, "#JOIN_ADD");
-      emitInput(opcode, left);
-      emitInput(opcode, right);
-      emitOutput(opcode, destination);
-    };
-    const auto separator = asText(exactlyOne(
-        separators, "VQL path function 'join' takes exactly one separator"));
-    const auto joined = arithmetic(OpcodeKind::Add, emptyText, emptyText);
-    const auto begin  = emitOp(OpcodeKind::StreamBegin, "#JOIN_BEGIN");
+    const auto begin = emitOp(OpcodeKind::StreamBegin, "#JOIN_BEGIN");
     for (const auto input : rows) emitInput(begin, input);
     const auto iterator = fresh();
     emitOutput(begin, iterator);
-    const auto firstNext = emitOp(OpcodeKind::IteratorNext, "#JOIN_FIRST");
-    emitInput(firstNext, iterator);
-    const auto first        = fresh();
-    const auto firstPresent = fresh();
-    emitOutput(firstNext, first);
-    emitOutput(firstNext, firstPresent);
-    const auto finished = label("#JOIN_END");
-    branchFalse(firstPresent, finished);
-    concat(emptyText, asText(first), joined);
     emitIteratorLoop(iterator, [&](CellRef item) {
-      const auto piece = fresh();
-      concat(separator, asText(item), piece);
-      concat(joined, piece, joined);
+      const auto [found, next, answers] =
+          relate(joinStepRelation, taken, {item, separator});
+      assertThat(found, std::string{vortex::frontend_codes::vqlBound} +
+                            ": a joined text is longer than " +
+                            std::to_string(maxJoinedTextBytes_) + " bytes");
+      arithmetic(OpcodeKind::Add, next, zero, taken);
     });
-    appendOpcode(finished);
-    // One slice past the bound, read once at the end: text beyond the bound
-    // is a refusal, never a truncation. A join this long cannot be a write.
-    const auto bound  = emitConstant(static_cast<std::int64_t>(maxJoinedTextBytes_));
-    const auto beyond = slice(asText(joined), bound, one);
-    assertThat(arithmetic(OpcodeKind::Eq, beyond, emptyText),
-               std::string{vortex::frontend_codes::vqlBound} +
-                   ": a joined text is longer than " +
-                   std::to_string(maxJoinedTextBytes_) + " bytes");
-    static_cast<void>(zero);
-    return box(joined);
+    const auto [found, next, answers] =
+        relate(joinEndRelation, taken, {separator});
+    static_cast<void>(found);
+    static_cast<void>(next);
+    return {answers.front()};
   }
 
   if (fn.name == "count") {

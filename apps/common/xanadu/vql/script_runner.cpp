@@ -4,8 +4,8 @@
 #include <array>
 #include <charconv>
 #include <chrono>
-#include <concepts>
 #include <cmath>
+#include <concepts>
 #include <gleditor/logging.hpp>
 #include <limits>
 #include <memory>
@@ -459,8 +459,8 @@ bool ScriptRunner::retire(const Admitted &entry, const bool force) noexcept {
     }
     ports_.bridge.retire(entry.submission);
     if (refusal) {
-      vortex::OwnedOutcome::freeOutcomeGraph(
-          session_.coordinator().arena(), ports_.bridge.schema(), *refusal);
+      vortex::OwnedOutcome::freeOutcomeGraph(session_.coordinator().arena(),
+                                             ports_.bridge.schema(), *refusal);
     }
     // The file is closed and nothing names its cells any more: they are not a
     // request's, so no reaper takes them, and left alone they cost an arena

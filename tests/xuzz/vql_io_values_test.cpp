@@ -140,8 +140,8 @@ TEST(VqlIoMatchGrammarTest, ATagTheOperationCannotEndWithIsRefused) {
   // `conflict` ends a write (generation CAS) and a read (the generation moved
   // around the transfer), so both accept an arm for it.
   EXPECT_EQ(parseFailure(write + "match $w { conflict => (1), _ => (2) }"), "");
-  EXPECT_EQ(parseFailure(readAs("r") + "match $r { conflict => (1), _ => (2) }"),
-            "");
+  EXPECT_EQ(
+      parseFailure(readAs("r") + "match $r { conflict => (1), _ => (2) }"), "");
   // Without it a read's exhaustive match is refused by name.
   const auto message = parseFailure(
       readAs("r") + "match $r { rejected(_, _) => (1), complete(_) => (1), "
@@ -748,8 +748,8 @@ TEST(VqlIoAwaitRecordTest, ManyRefusedNamedAwaitRunsLeaveTheArenaBounded) {
   ValueWorld s;
   s.w.refuseAdmission = true;
   const auto once     = [&] {
-    auto result = s.run(detachedAs("h") + "effect { await($h) } as $r; "
-                                              "return io_tag($r)");
+    auto result      = s.run(detachedAs("h") + "effect { await($h) } as $r; "
+                                                            "return io_tag($r)");
     const auto *done = std::get_if<ScriptRunResult::Completed>(&result.value);
     ASSERT_NE(done, nullptr) << ValueWorld::failure(result);
     for (const auto row : done->value) {
@@ -1107,6 +1107,65 @@ TEST_F(JoinWorld, ATenThousandRowJoinEqualsTheFoldOfPlus) {
   // raise for a script this size, which is the point of having one.
   constexpr std::size_t cycles = 1'000'000;
   EXPECT_EQ(one("join($rows, \",\")", cycles), expected);
+}
+
+// ---- join keeps what its rows quote ----------------------------------------
+
+constexpr xanadu::PrimediaSpan quotedHome{
+    .scroll = xanadu::localScroll, .start = 140, .length = 4};
+constexpr xanadu::PrimediaSpan quotedAway{
+    .scroll = xanadu::localScroll, .start = 900, .length = 6};
+
+TEST_F(JoinWorld, ALoneQuotingRowIsReturnedItselfNotRetyped) {
+  const auto row = arena.makeCell(quotedHome);
+  engine.setVariable("rows", std::vector{row});
+  const auto result = exec("join($rows, \",\")");
+  ASSERT_TRUE(result.has_value()) << result.error().message;
+  ASSERT_EQ(result->size(), 1U);
+  EXPECT_EQ(result->front(), row) << "the quotation, not a copy of its text";
+  const auto spans = arena.contentOf(row);
+  ASSERT_EQ(spans.size(), 1U);
+  EXPECT_EQ(spans[0].start, quotedHome.start);
+}
+
+TEST_F(JoinWorld, QuotingRowsAreJoinedAsTheRunOfTheirOwnSpans) {
+  const auto home = arena.makeCell(quotedHome);
+  const auto away = arena.makeCell(quotedAway);
+  engine.setVariable("rows", std::vector{home, away});
+  const auto result = exec("join($rows, \"; \")");
+  ASSERT_TRUE(result.has_value()) << result.error().message;
+  ASSERT_EQ(result->size(), 1U);
+  EXPECT_NE(result->front(), home);
+  EXPECT_NE(result->front(), away);
+  const auto spans = std::vector<xanadu::PrimediaSpan>(
+      arena.contentOf(result->front()).begin(),
+      arena.contentOf(result->front()).end());
+  ASSERT_EQ(spans.size(), 3U) << "row, separator, row";
+  EXPECT_EQ(spans[0].start, quotedHome.start);
+  EXPECT_EQ(spans[0].length, quotedHome.length);
+  EXPECT_EQ(arena.scratchTextOf(spans[1]), "; ")
+      << "only the separator is new text";
+  EXPECT_EQ(spans[2].start, quotedAway.start);
+  EXPECT_EQ(spans[2].length, quotedAway.length);
+  EXPECT_EQ(arena.contentOf(home).size(), 1U) << "the sources are untouched";
+}
+
+TEST_F(JoinWorld, ANumberBesideAQuotingRowIsTheOnlyOtherNewText) {
+  const auto home  = arena.makeCell(quotedHome);
+  const auto count = arena.makeScalarCell(std::int64_t{42});
+  engine.setVariable("rows", std::vector{home, count});
+  const auto result = exec("join($rows, \"\")");
+  ASSERT_TRUE(result.has_value()) << result.error().message;
+  const auto spans = arena.contentOf(result->front());
+  ASSERT_EQ(spans.size(), 2U);
+  EXPECT_EQ(spans[0].start, quotedHome.start);
+  EXPECT_EQ(arena.scratchTextOf(spans[1]), "42");
+}
+
+TEST_F(JoinWorld, ALoneNumberIsItsTextNotTheNumberCell) {
+  const auto count = arena.makeScalarCell(std::int64_t{42});
+  engine.setVariable("rows", std::vector{count});
+  EXPECT_EQ(one("join($rows, \",\")"), "42");
 }
 
 TEST_F(JoinWorld, AJoinPastTheBoundIsRefusedByCodeNotTruncated) {

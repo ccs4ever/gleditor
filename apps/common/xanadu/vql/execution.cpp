@@ -20,6 +20,7 @@
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/frame_eligibility.hpp"
+#include "common/xanadu/vql/join_relation.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/prose_hits.hpp"
 #include "common/xanadu/vql/script_runner.hpp"
@@ -451,9 +452,21 @@ QueryExecutor::beginVortex(const QueryExpression &query,
               }};
         });
 
+    // JOIN REGISTRATION SITE: the walk is per execution, so a refusal undoes
+    // both providers with the rest.
+    const auto walk = std::make_shared<JoinWalk>();
+    undo.push_back([this] {
+      vm_.setRelationProvider(std::string{joinStepRelation}, nullptr);
+      vm_.setRelationProvider(std::string{joinEndRelation}, nullptr);
+    });
+    vm_.setRelationProvider(std::string{joinStepRelation},
+                            joinStepProvider(vm_, walk));
+    vm_.setRelationProvider(std::string{joinEndRelation},
+                            joinEndProvider(walk));
+
     VQLCompiler compiler(coordinator_, vm_);
     CompilationOptions compilation;
-    compilation.contextCells = contextCells;
+    compilation.contextCells              = contextCells;
     compilation.limits.maxJoinedTextBytes = options_.maxJoinedTextBytes;
     compilation.initialBindings =
         bindingSource_ ? bindingSource_->get() : bindings_;

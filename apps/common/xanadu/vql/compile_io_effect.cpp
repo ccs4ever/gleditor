@@ -359,9 +359,9 @@ CellRef VQLCompiler::ioBoundCell(const std::string &name) {
   const auto refuse = [&](const CellRef condition, const char *what) {
     const auto assertion = emitOp(OpcodeKind::Assert, "#IO_LET_ASSERT");
     emitInput(assertion, condition);
-    emitInputConstant(
-        assertion, std::string{vortex::frontend_codes::vqlEffectArgument} +
-                       ": $" + name + " " + what);
+    emitInputConstant(assertion,
+                      std::string{vortex::frontend_codes::vqlEffectArgument} +
+                          ": $" + name + " " + what);
   };
   const auto begin = emitOp(OpcodeKind::StreamBegin, "#IO_LET_BEGIN");
   for (const auto cell : found->second) emitInput(begin, cell);
@@ -408,9 +408,9 @@ VQLCompiler::compileIoMatch(const IoMatchStatement &match,
   // no outcome schema and adds no opcode. An arm after the last tag a typed
   // exhaustive match names cannot run, and the parser has already refused a
   // match that could fall through.
-  const auto subject    = ioBoundCell(match.subject);
+  const auto subject      = ioBoundCell(match.subject);
   const auto resultStream = emitStreamClear();
-  const auto dispatched = ioRelate(matchTagRelation, {subject});
+  const auto dispatched   = ioRelate(matchTagRelation, {subject});
   ioActions_.push_back({.submitOpcode = dispatched.opcode,
                         .awaitOpcode  = std::nullopt,
                         .requestSlot  = std::nullopt,
