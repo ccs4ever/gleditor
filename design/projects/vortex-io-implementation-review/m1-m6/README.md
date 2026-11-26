@@ -26,8 +26,12 @@ Workflow brief: [`brief-common.md`](brief-common.md).
 
 ## Open proposals
 
-Applied: P1, P3, P4, P5 and P6. Not needed: P2. Nothing is open.
+Applied: P1, P3, P4, P5, P6 and P7. Not needed: P2. Nothing is open.
 
+- P7: one ZigZag cell-deletion algorithm (`zigzag/cell_deletion`, `ArenaManifold::deleteCell`):
+  break connections, remove, leave broken or repair; shared by xuzz delete, the I/O reapers and the
+  VQL script program reclamation; cursor move-off rule. Applied with owner approval; see
+  [`../m7-vql/p7-cell-deletion.md`](../m7-vql/p7-cell-deletion.md).
 - P6: a language-neutral `Submit` opcode in `VortexVM` (`vortex_vm.{hpp,cpp}` only), with a submit
   hook beside the await hook. Applied with owner approval: two inputs (capability, request
   description), three outputs (submission sum, arm ordinal, arm payload), once per executed

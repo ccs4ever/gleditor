@@ -1298,14 +1298,10 @@ Deferred, by design:
   backtracked action is accounted for, a running orphan never cancelled); a second runner on a VM is
   refused; `vquery` refuses `-o`, `--in-place` and `:save` of action rows with
   `VQL_IO_PERSIST_NEEDS_CAPTURE` until a capture command exists (deferred); payload read failures
-  and non-UTF-8 bytes are `VQL_SCRIPT_FAILED`. **Priced retention (deferred, proposal P7):** a
-  parked script cuts its pre-compile mark, so each action keeps its compiled program, about 37-40
-  cells per run (pinned by `AnEffectScriptRunRetainsAPricedConstantNumberOfCells`). Reclaiming them
-  needs the arena to name a cell's ranks (an `ArenaManifold` core change), because compile cells sit
-  in spin/grab/step ranks shared with cells outside the program; a bounded-by-construction attempt
-  with only the known system dimensions freed 2-3 of 27 cells and was dropped. P7 proposes
-  `ArenaManifold::detachAll(CellRef)` (join neighbours on every rank) so `freeCell` can reclaim a
-  program's region at completion.
+  and non-UTF-8 bytes are `VQL_SCRIPT_FAILED`. **Compiled programs are freed (P7):** a run that
+  ends, fails or is abandoned detaches and frees its own cells with the shared cell deletion (Repair
+  mode), except the I/O service's cells and the rows; `ManyEffectScriptRunsLeaveTheArenaBounded`
+  pins 10^4 runs (`m7-vql/p7-cell-deletion.md`).
 - Retiring the request: the outcome cell is the script's value, so a finished script's request is
   retired through `FrontendBridge::retire` only when the next action is admitted (or the runner
   ends), never earlier.

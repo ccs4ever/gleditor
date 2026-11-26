@@ -5,12 +5,12 @@ MINOR). Target `8711aa1c`. Every finding was checked against the code first.
 
 ## MAJOR findings
 
-| id        | verdict                 | fix and regression test                                                                                                                                                                                                                                  |
-| --------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| vortex M1 | CONFIRMED, fixed        | Rollback notice plus orphaning (below). `VortexSubmitOpcodeTest.ARetryLoopOverASubmitLeavesTheServiceAndArenaBounded`: six Choice/Submit/Fail passes, six notices, arena cell count unchanged, budget whole after the requests end.                      |
-| vortex M2 | CONFIRMED, fixed        | Submissions are per activation (`Activation::admitted`), the hook finds its activation through the stepping scope. `SeveralParkedScriptsKeepTheirOwnRequestsInEitherOrder` (five scripts, both resume orders), `AnAbandonedActivationRetiresItsRequest`. |
-| vortex M3 | CONFIRMED, **deferred** | Reclamation needs a core API (proposal P7). The price is measured and pinned: `AnEffectScriptRunRetainsAPricedConstantNumberOfCells` (37-40 cells per run). Not bounded; recorded in the plan with its rate.                                             |
-| vql M1    | CONFIRMED, fixed        | `-o`, `--in-place`, `:save` refuse action rows with `VQL_IO_PERSIST_NEEDS_CAPTURE`; e2e `ActionRowsAreNotWrittenByOutputStoreInPlaceOrSave`, `AQueryAfterAnActionIsSavableAgain`. Capture routing is deferred (no capture command exists in the CLI).    |
+| id        | verdict               | fix and regression test                                                                                                                                                                                                                                  |
+| --------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| vortex M1 | CONFIRMED, fixed      | Rollback notice plus orphaning (below). `VortexSubmitOpcodeTest.ARetryLoopOverASubmitLeavesTheServiceAndArenaBounded`: six Choice/Submit/Fail passes, six notices, arena cell count unchanged, budget whole after the requests end.                      |
+| vortex M2 | CONFIRMED, fixed      | Submissions are per activation (`Activation::admitted`), the hook finds its activation through the stepping scope. `SeveralParkedScriptsKeepTheirOwnRequestsInEitherOrder` (five scripts, both resume orders), `AnAbandonedActivationRetiresItsRequest`. |
+| vortex M3 | CONFIRMED, fixed (P7) | The run frees its compiled program with the shared cell deletion when it ends, fails or is abandoned ([`p7-cell-deletion.md`](p7-cell-deletion.md)). `ManyEffectScriptRunsLeaveTheArenaBounded`: 10^4 runs, slot count and live cells unchanged.         |
+| vql M1    | CONFIRMED, fixed      | `-o`, `--in-place`, `:save` refuse action rows with `VQL_IO_PERSIST_NEEDS_CAPTURE`; e2e `ActionRowsAreNotWrittenByOutputStoreInPlaceOrSave`, `AQueryAfterAnActionIsSavableAgain`. Capture routing is deferred (no capture command exists in the CLI).    |
 
 ### Backtracking semantics (vortex M1)
 
@@ -25,13 +25,9 @@ part is a small extension of the approved P6 (`vortex_vm`); `IoService` is not a
 
 ### vortex M3 detail
 
-A parked program cuts its pre-compile mark because marks end in order and several scripts park at
-once. Releasing the compile cells later needs each cell's ranks. With only the known system
-dimensions, a closed-region free reclaimed 2-3 of 27 compile cells (the rest sit in spin/grab/step
-ranks shared with cells outside the program), so the attempt was dropped rather than risk cutting a
-foreign rank. **Proposal P7 (needs approval):** `ArenaManifold::detachAll(CellRef)`, which unlinks a
-cell from every rank it sits in while joining its neighbours, so `freeCell` can reclaim a program's
-region on completion; then re-run the 10^4 test as a bound.
+Resolved by proposal P7, applied with owner approval as the general cell-deletion algorithm rather
+than `detachAll`: break every connection, remove the cell, leave broken or repair. See
+[`p7-cell-deletion.md`](p7-cell-deletion.md).
 
 ## MINOR findings
 
