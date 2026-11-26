@@ -19,7 +19,7 @@ None.
 
 ## MAJOR
 
-### M1. The persist rule is evaluated only for the script that ran an action, so any later query reaches durable output with uncaptured text, receipts and capabilities
+### M1. The persist rule is checked only for the script that ran an action
 
 **Problem.** `refuseDurableAction` begins with `if (!resultsFromAction) return false;`
 (`apps/vquery/main.cpp:766`), and `resultsFromAction = ranAction` where `ranAction` is only
@@ -83,14 +83,14 @@ scenario.** An author who meant `promote 5 11` and forgot the length promotes th
 the remainder as a whole: no tokens, or exactly two integers, and nothing left over; otherwise print
 the usage line.
 
-### m2. A byte source or offset bound by a `let` in the same script is refused as "not bound", so a script cannot write text it computed
+### m2. A byte source or offset bound by a `let` of the same script is refused as "not bound"
 
 **Problem.** The pre-flight accepts a `$name` only if an earlier *action* of the script named it
 (`named`) or it is already a session variable (`script_runner.cpp:1040-1054`, same for offsets in
-`operand`, `:1107-1111`). A `let` earlier in the same script is neither, so
-`let $t := "hello"; effect { open(".../out") for write create } as $o; effect { ... submit($o, write_bytes(0, $t)) ... }`
-fails with `VQL_IO_EFFECT_ARGUMENT: $t is not bound to exactly one cell to write` (reproduced; also
-with `let $t := io_payload($r)`, and with the `let` after the open). Design §3/§4.2 offers
+`operand`, `:1107-1111`). A `let` earlier in the same script is neither, so `let $t := "hello"`
+followed by an `open(".../out") for write create` and a `write_bytes(0, $t)` fails with
+`VQL_IO_EFFECT_ARGUMENT: $t is not bound to exactly one cell to write` (reproduced; also with
+`let $t := io_payload($r)`, and with the `let` after the open). Design §3/§4.2 offers
 `write_bytes(off, $text)` and calls a `$variable` "bound to one cell (the same rule the read offset
 uses)". The read offset has the same limit, so this is consistent, but the message is false (the
 variable is bound) and the first-use journey "write a report built in the script" is unreachable in
@@ -99,7 +99,7 @@ belongs to any exposure check (see M1). **Fix.** Say "is bound only inside this 
 an earlier script or use `as`" in the message, and record the limit in §19 deferrals; or resolve
 script-local `let` cells at the Submit.
 
-### m3. A named `await`/`cancel` outcome dangles as a session binding after the next admission, with an unrelated error
+### m3. A named `await`/`cancel` outcome dangles as a session binding after the next admission
 
 **Problem.** Only `Kind::Read` is copied to an owned record (`compile_io_effect.cpp:305`, recorded
 as C1b deviation 1). `effect { await($h) } as $r` therefore binds the service's outcome cell, which
@@ -113,7 +113,7 @@ reader cannot tell this is a stale name. **Fix.** At minimum make `liveOutcome`/
 or reused cell the same typed message (`$r no longer names a live outcome`); better, copy the
 awaited outcome into a record when the request has no other outstanding handle.
 
-### m4. `io_bytes($r)` of a record carried to a later script answers `0` instead of what the read moved
+### m4. `io_bytes($r)` of a record carried to a later script answers `0`
 
 **Problem.** `gated()` supplies a record's payload only while its lease is held
 (`script_runner.cpp:1144-1156`); the lease is returned at script end (`finish`, `:1650`). Later,

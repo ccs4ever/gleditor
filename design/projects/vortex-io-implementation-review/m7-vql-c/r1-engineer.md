@@ -51,7 +51,7 @@ destructor call `capture_->abandonAll()`/reset `capture_` explicitly after `requ
 before `service_` is destroyed, with workers joined by an explicit service shutdown step. Add a test
 that begins a capture, never releases it, and destroys the host (run it under ASan).
 
-### M2. `:reconcile ID promote N` promotes the journal's span instead of refusing the malformed command
+### M2. A half-typed `:reconcile ID promote N` promotes the journal's span
 
 **Problem.** The argument parser treats "no second number" as "no span given" whenever the stream
 hit EOF, so a missing LEN is not distinguished from no arguments, and trailing tokens after START

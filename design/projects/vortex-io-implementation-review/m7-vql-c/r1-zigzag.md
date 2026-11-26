@@ -20,7 +20,7 @@ None.
 
 ## MAJOR
 
-### M1. A session variable naming a freed record or receipt silently aliases whichever cell reuses the slot
+### M1. A session variable naming a freed record or receipt aliases the cell that reuses the slot
 
 **Problem.** `ScriptRunner` frees a finished script's owned records and capture receipts at the next
 admission (`freeFinishedRecords`, `script_runner.cpp:1253-1262`; called from `captureBegin` at
@@ -60,7 +60,7 @@ the free, but not what happens to the name.
 refuse a mismatch with a stale-handle diagnostic (`tokenStale`). Add a REPL-sequence test: two named
 reads in two scripts, then `io_tag($first)`.
 
-### M2. Transient input is typed into the permascroll through a session variable bound by an earlier script
+### M2. Transient input is typed into the permascroll through a session variable
 
 **Problem.** The coverage gate is evaluated only for the script that ran an action
 (`main.cpp:823,848`: `resultsFromAction = ranAction`; `refuseDurableAction` returns false when it is
@@ -97,7 +97,7 @@ sticky until the session is cleared. At minimum `refuseDurableAction` must refus
 
 ## MINOR
 
-### m1. `owned_` is keyed by `CellRef` only and `insert_or_assign` drops an entry without releasing its lease
+### m1. `owned_` is keyed by `CellRef` only; `insert_or_assign` drops a lease
 
 `script_runner.cpp:1223` (`owned_.insert_or_assign(cell, ...)`), `script_runner.hpp:445`. The design
 says the table is keyed `(cell, incarnation)` (§12.1). If a record's cell is rolled back by the VM

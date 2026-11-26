@@ -18,7 +18,7 @@ None.
 
 ## MAJOR
 
-### M1. A parked capture whose token the caller dropped is never released when the runner is destroyed, and the host then frees it against a destroyed service
+### M1. A parked capture whose token was dropped is never released; the host then frees it late
 
 **Problem.** `~ScriptRunner` clears `parked_` (`script_runner.cpp:209`) and unroutes the runner
 (`:212`) before it walks `live_` to release captures (`:236-237`). `live_` holds weak pointers. If
