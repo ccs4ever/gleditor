@@ -1398,6 +1398,20 @@ TEST_F(VQueryE2ETest, ForgetLiftsTheRefusalAndUnbindsTheUncapturedText) {
       << result.output;
 }
 
+TEST_F(VQueryE2ETest, ForgetPrintsUnboundNamesInSortedOrder) {
+  const auto session = captureSession(testDir, "ordered bytes");
+  const auto result =
+      repl(session, testDir,
+           {":open src " + session.source.string(),
+            readAll64 + "let $zeta := io_payload($r); " +
+                "let $alpha := io_payload($r); let $mid := io_payload($r); " +
+                "return 1",
+            ":forget"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("unbound $alpha $mid $zeta"), std::string::npos)
+      << result.output;
+}
+
 TEST_F(VQueryE2ETest, ForgetNeverReachesWhatACaptureCovered) {
   const auto session = captureSession(testDir, "kept bytes");
   const auto saved   = testDir / "kept.store";

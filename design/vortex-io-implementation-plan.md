@@ -1418,7 +1418,7 @@ Deferred in M7-VQL-b:
   the host's open deadline (`FileReadHostOptions::openDeadline`).
 - Write, capture, `message` and frame modes, and per-row reads, remain refused.
 
-M7-VQL-c implementation notes (built in stages C1-C5; gate pending):
+M7-VQL-c implementation notes (built in stages C1-C5; **gate passed** in round 3):
 
 - Stages: C1 adapter and host (write bytes in the prepared command and charged, `Append`/`Sync`
   kinds, `writeGrant`), C1b owned outcome records, C2 VQL writes, C3 capture wiring (`CaptureHost`,
@@ -1439,8 +1439,10 @@ M7-VQL-c implementation notes (built in stages C1-C5; gate pending):
   their end without freeing; the coordinator and `FileReadHost::pump` now free them once the step
   ends. 10^3 abandoned runs of each kind stay bounded; the pins stay by design.
 - Deferred: the other deferrals of the design note's §19.
-- Gate status: **pending** (a VQL expert and a Vortex expert; reports under
-  `projects/vortex-io-implementation-review/m7-vql-c/`).
+- Gate status: **M7-VQL-c gate passed** in round 3 (final target `e2b23837`; VQL, Vortex and zigzag
+  CONVERGED in r3, the engineer in r2, all with zero BLOCKING and zero MAJOR); the r3 MINORs were
+  fixed in the gate polish commit. See
+  [`m7-vql-c/README.md`](projects/vortex-io-implementation-review/m7-vql-c/README.md).
 
 M7-VQL-c design (the first draft): write effects (`write_bytes`, `append_bytes`, `sync`,
 `open ... for write|append`, behind a host write grant) and explicit capture

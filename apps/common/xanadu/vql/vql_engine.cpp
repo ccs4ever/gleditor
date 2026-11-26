@@ -122,6 +122,9 @@ VQLEngine::getVariable(std::string_view name) const {
 }
 
 void VQLEngine::eraseVariable(const std::string_view name) {
+  // env_ only: functors_, putGetLenses_ and dynamicViews_ hold path steps
+  // keyed by a let-bound name and cannot be named by a session variable a
+  // payload cell reaches, so :forget has nothing to release there.
   env_.erase(std::string{name});
 }
 

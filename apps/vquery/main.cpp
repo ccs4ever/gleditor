@@ -1290,7 +1290,9 @@ int main(int argc, char *argv[]) {
       } else {
         std::cout << "Forgot " << report.exposures << " uncaptured payload"
                   << (1 == report.exposures ? "" : "s") << "; unbound";
-        for (const auto &name : report.unbound) std::cout << " $" << name;
+        auto unbound = report.unbound;
+        std::ranges::sort(unbound);
+        for (const auto &name : unbound) std::cout << " $" << name;
         if (report.unbound.empty()) std::cout << " nothing";
         std::cout << "\n";
         // Rows may be built from the text just dropped.

@@ -2,10 +2,10 @@
 
 Status: design note; **all stages of §18 are built** (C1 adapter and host, C1b owned records, C2 VQL
 writes, C3 capture wiring, C4 persistence, C5 recovery surface, leaks, crash tests and journeys);
-the milestone gate (a VQL expert and a Vortex expert) is pending. It specifies the third M7-VQL
-slice of the [Vortex I/O implementation plan](vortex-io-implementation-plan.md): script **write
-effects** to a file endpoint, and **capture**, the explicit act that makes a script's input durable
-so results built from it may be persisted. It extends
+the milestone gate (VQL, Vortex, engineer and zigzag experts) is **passed**. It specifies the third
+M7-VQL slice of the [Vortex I/O implementation plan](vortex-io-implementation-plan.md): script
+**write effects** to a file endpoint, and **capture**, the explicit act that makes a script's input
+durable so results built from it may be persisted. It extends
 [`vql-query-language.md`](vql-query-language.md) §4.13 and changes no on-disk format and no core
 file (§14 lists the proposals considered and refused).
 

@@ -636,10 +636,10 @@ void ScriptRunner::installProviders() {
         name,
         [this, provider = std::move(provider)](
             const RelationQuery &query) -> RelationResult {
-          // A name made by a plain line is recorded here, and a handle freed
-          // by a pump inside a running script is caught by incarnation, not
-          // only at the next entry point.
-          noteBindings();
+          // Names are recorded at script entry and after each plain line
+          // (not here: rebuilding the table per call made a per-row relation
+          // O(rows x variables) with allocation). The incarnation each name
+          // recorded is what catches a handle freed by a pump mid-script.
           if (std::ranges::any_of(query.arguments, [&](const CellRef argument) {
                 return isStaleBinding(query.arena, argument) ||
                        namesFreedHandle(argument);
