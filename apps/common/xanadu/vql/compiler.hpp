@@ -48,17 +48,19 @@ namespace xanadu::vql {
 /// answers them (ScriptRunner), since the VM and the compiler name no I/O
 /// schema. An outcome's payload is answered only where the shared terminal
 /// status gate exposes one.
-inline constexpr const char *outcomeTagRelation     = "io_outcome_tag";
-inline constexpr const char *outcomePayloadRelation = "io_outcome_payload";
-inline constexpr const char *outcomeBytesRelation   = "io_outcome_bytes";
-inline constexpr const char *outcomeErrorRelation   = "io_outcome_error";
-inline constexpr const char *outcomeDetailRelation  = "io_outcome_detail";
+inline constexpr const char *outcomeTagRelation       = "io_outcome_tag";
+inline constexpr const char *outcomePayloadRelation   = "io_outcome_payload";
+inline constexpr const char *outcomeBytesRelation     = "io_outcome_bytes";
+inline constexpr const char *outcomeErrorRelation     = "io_outcome_error";
+inline constexpr const char *outcomeDetailRelation    = "io_outcome_detail";
+inline constexpr const char *outcomeUncertainRelation = "io_outcome_uncertain";
 /// Which arm an action's handle is: 0 a request still to await, 1 an outcome
 /// (a refusal or a finished request) that is already the value.
 inline constexpr const char *handleArmRelation = "io_handle_arm";
 /// The same, after asking the handle's request to stop.
 inline constexpr const char *handleCancelRelation = "io_handle_cancel";
-/// Admit an open of a path: answers the request, or the Rejected outcome.
+/// Admit an open of a path in a mode (IoOpenMode): answers the request, or
+/// the Rejected outcome.
 inline constexpr const char *openRelation = "io_open";
 /// The capability an Complete open outcome minted, when it minted one.
 inline constexpr const char *openCapabilityRelation = "io_open_capability";
@@ -68,7 +70,8 @@ inline constexpr const char *openCapabilityRelation = "io_open_capability";
 inline constexpr const char *ownOutcomeRelation = "io_own_outcome";
 
 /// The relation an outcome path function (`io_tag`, `io_payload`, `io_bytes`,
-/// `io_error`, `io_detail`) compiles to; nullptr for any other name.
+/// `io_error`, `io_detail`, `io_uncertain`) compiles to; nullptr for any other
+/// name.
 [[nodiscard]] constexpr const char *
 outcomeFunctionRelation(const std::string_view name) noexcept {
   if (name == "io_tag") return outcomeTagRelation;
@@ -76,6 +79,7 @@ outcomeFunctionRelation(const std::string_view name) noexcept {
   if (name == "io_bytes") return outcomeBytesRelation;
   if (name == "io_error") return outcomeErrorRelation;
   if (name == "io_detail") return outcomeDetailRelation;
+  if (name == "io_uncertain") return outcomeUncertainRelation;
   return nullptr;
 }
 

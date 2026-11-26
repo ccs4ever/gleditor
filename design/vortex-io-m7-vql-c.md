@@ -1,7 +1,7 @@
 # M7-VQL-c: VQL write and capture
 
-Status: design note; stages C1 (adapter and host) and C1b (owned records) of §18 are built, the rest
-is not. It specifies the third M7-VQL slice of the
+Status: design note; stages C1 (adapter and host), C1b (owned records) and C2 (VQL writes) of §18
+are built, the rest is not. It specifies the third M7-VQL slice of the
 [Vortex I/O implementation plan](vortex-io-implementation-plan.md): script **write effects** to a
 file endpoint, and **capture**, the explicit act that makes a script's input durable so results
 built from it may be persisted. It extends [`vql-query-language.md`](vql-query-language.md) §4.13
@@ -798,7 +798,7 @@ expert, reports under `design/projects/vortex-io-implementation-review/m7-vql-c/
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
 | C1    | Adapter and host: write bytes carried in the prepared command and charged; `FileOpSpec::Sync`; rights bits for append and create; `O_NOFOLLOW`; `FileReadHostOptions::writeGrant` and `writeBytes`; owner-side staging for `Write`                                                                   | adapter tests, criteria 2-4  |
 | C1b   | Owned records (§12.1): `OwnedOutcome::copy`, the runner's owned-record table with leases and `retainedPayloadBytes`, early `retire` of a named request, `io_payload` and the gate reading records, `auditLanguageValue` knowing the `Owned` field; independent of writes and testable on reads alone | criteria 14, 15              |
-| C2    | VQL writes: grammar, reserved names, compile, `ScriptRunner::admit` decodes `write_bytes`/`append_bytes`/`sync`, `open ... for`, `io_uncertain`, `vquery --io-write-root`/`--io-write-bytes`/`:open -w -a`                                                                                           | criteria 1, 5, 12 for writes |
+| C2    | VQL writes (built, §18.3): grammar, reserved names, compile, `ScriptRunner::admit` decodes `write_bytes`/`append_bytes`/`sync`, `open ... for`, `io_uncertain`, `vquery --io-write-root`/`--io-write-bytes`/`:open -w -a`                                                                            | criteria 1, 5, 12 for writes |
 | C3    | Capture core wiring: `FileReadHost`-sibling capture host (`CaptureHost` over `CaptureCoordinator`, `CapturePublisher`, `UserPermascrollCaptureSink`), `CaptureCoordinator::spansFor`, providers, bytecode loop, `capture`, `io_captured`, `io_tag` for receipts                                      | criteria 6-8, 12             |
 | C4    | Persistence: exposure set, `ScriptRunner::persistability()`, `vquery` consults it, captured cells through `resultRows`/`writeResultSlice` (quote path for cells with no `store`), `--capture-dir`                                                                                                    | criterion 9                  |
 | C5    | Recovery surface: lazy `recover()`/`resumePublications()`, `:captures`, `:reconcile`, timeout and destructor behaviour, crash tests, leak tests, UX journeys, docs (§4.13, plan notes, `vql-conformance.md`)                                                                                         | criteria 10, 11, 13          |
@@ -916,6 +916,71 @@ Deviations and findings, recorded because the code disagreed with the note:
 1. **A refused submission's `Rejected` outcome** is copied into a record like any other, and the
    service's own `Rejected` cell, which no request reaps, is freed with it; before C1b a refusal's
    outcome cell outlived its script.
+
+### 18.3 Stage C2 as built
+
+C2 is the VQL surface for writes and nothing of capture. What landed, with the places it differs
+from the text above:
+
+- **Grammar and lowering.** `IoEffectStatement` keeps `Kind::Read` as "the submit shape" and gains
+  `request` (`ReadBytes`, `WriteBytes`, `AppendBytes`, `Sync`), `source` (a literal or `$name`) and
+  `openMode`. The compiler builds `write_bytes(off, src[, N, unit])`, `append_bytes(src[, N, unit])`
+  and `sync([N, unit])` terms beside `read_bytes`; `src` is the text cell itself or the bound
+  variable's cell, so an outcome is passed as the cell it is. `write_bytes`, `append_bytes` and
+  `sync` are reserved call names (a `def` of one is `VQL_IO_QUERY_CONTEXT`). `io_open` now takes a
+  path and a mode (`IoOpenMode`, whose numbering is the contract between compiler and runner; the VM
+  requires one answer cell per argument, so the provider answers the handle twice).
+- **Runner.** `ScriptRunner::admit` decodes all four functors; for a write or append
+  `ScriptRunner::sourceBytes` freezes the bytes (text cell: its text; outcome: its payload through
+  the same gate and `PayloadResolver` lease as a read, an owned record included) before anything is
+  staged. `ScriptIoPorts` gains `stageWrite`, `stageAppend`, `stageSync` and `OpenFileFn` takes the
+  rights bits; a host that stages none fails the script with `VQL_IO_EFFECT_ARGUMENT`. Because every
+  non-detached submit already compiled the `io_own_outcome` call, a named write, append or sync
+  outcome is an owned record with no further change (C1b's "only reads are owned" meant only
+  non-detached submits are).
+- **Refusals as values.** The host's per-write bound is a `StageFailure{diagnostic, refusal}`: a
+  `refusal` makes the runner mint a `Rejected` outcome through the new `IoHost::refuse` and return
+  the refused arm, so an oversize write is `Rejected(BudgetExceeded, fileDetailWriteBound = 3)`, not
+  a failed script. The service's own budget refusals use details 0 and 1. A missing grant is
+  `Rejected(Unsupported, fileDetailNoWriteGrant)`, a wrong discipline
+  `Rejected(Unsupported, fileDetailWrongMode)`, create on an existing file
+  `Failed(BackendFailure, EEXIST)`.
+- **New names.** `VQL_IO_WRITE_SOURCE` (a source that is a capability or request, or an outcome with
+  no payload). An unbound `$name` as a source is `VQL_IO_EFFECT_ARGUMENT` before anything runs,
+  because the compiler would otherwise write the name itself. `io_uncertain($r)` answers the
+  outcome's `uncertain` field, which only `Cancelled` and `TimedOut` carry; for any other tag it
+  answers nothing, as `io_error` does.
+- **vquery.** `--io-write-root DIR` (repeatable; `writeRootGrant` over the roots, no roots means no
+  grant), `--io-write-bytes N` (positive; usage error otherwise), `:open [-w|-wc|-a|-ac] NAME PATH`
+  (the `c` forms add create; they ask, the grant decides). The capability is bound once at `:open`
+  time, so a denied `:open -w` prints `Open failed` and binds nothing.
+
+Deviations and findings, recorded because the code disagreed with the note:
+
+1. **A final-component symlink is judged by its target, not refused `ELOOP`.** The host
+   canonicalises the path before the grant sees it and the worker opens the canonical path, so an
+   alias inside a root opens its target and one pointing out of the root is `Rejected` by the grant.
+   `ELOOP` from `O_NOFOLLOW` remains only for a swap after canonicalisation (the race C1 already
+   named). The tests pin the observable behaviour.
+1. **Opens leak ten arena cells per run.** Measured while testing C2 and present with reads alone
+   (`open` plus `read_bytes` leaves 11 cells a run, `open` alone 10): the endpoint and capability
+   graph of a closed file is not reclaimed. C2 adds nothing to it (a write, append and sync run
+   leaves no more than a read run, a test pins that), but criterion 11's "arena bounded after 10^4
+   write runs" cannot hold until opens are fixed; this belongs to C5's leak work.
+1. **Persistence is unchanged.** A script that only writes has no exposed payload range, so §4.7
+   would let it persist, but the exposure set is C4; until then any script that held an action still
+   refuses `-o`, `--in-place` and `:save`, and a test pins it so C4 changes it knowingly.
+1. **`io_uncertain` is empty, not `false`, for a `Complete` write.** §4.2 reads as if every outcome
+   answers; the field exists only where the backend sets it, and inventing `false` would be a
+   default. A script tests `io_tag` first.
+1. **Opens and their closes stay in the service until the next admission**, so a script that names
+   100 writes holds the service at the open and its close, not zero requests; the criterion is that
+   the 100 are not counted, which the test asserts.
+
+Notes for C3: `sourceBytes` is the one place that turns an outcome (service or owned record) into
+retained bytes and is the model for `capture($r)`'s lease; a capture of a record still needs the
+`ReadObservation` C1b did not copy. A write's source outcome is read as bytes, never as text, so the
+C4 exposure set must not count it as an exposure.
 
 ## 19. Deferrals
 

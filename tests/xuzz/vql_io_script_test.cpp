@@ -1556,7 +1556,7 @@ struct OwnedRunnerWorld {
                           -> std::expected<CellRef, FrontendDiagnostic> {
                         return w.specification();
                       },
-                      [this](std::string_view)
+                      [this](std::string_view, std::uint64_t)
                           -> std::expected<SubmissionCell, FrontendDiagnostic> {
                         return w.bridge.submit(w.capability, w.specification());
                       },
@@ -1616,20 +1616,27 @@ TEST(VqlIoScriptTest, DestroyingARunnerStopsAReadThatNeverEnds) {
 /// real parser, runner and bridge on the harness World.
 class VqlScriptDriver final : public ConformanceDriver {
 public:
-  explicit VqlScriptDriver(World &w) : engine_(w.core) {}
+  /// @p script is the one action the driver runs; a write script is staged by
+  /// `stageWrite`, which hands back the same specification cell a read gets.
+  explicit VqlScriptDriver(World &w, std::string script = readOnCap)
+      : engine_(w.core), script_(std::move(script)) {}
 
   auto begin(World &w, const CapabilityCell capability,
              const CellRef specification) -> RunResult override {
     engine_.setVariable("cap", capability.cell);
-    runner_ = std::make_unique<ScriptRunner>(
-        engine_, w.vm,
-        ScriptIoPorts{
-            w.bridge, w.host, w.payloads, w.diagnostics,
-            [specification](CapabilityCell, std::uint64_t, std::uint64_t)
-                -> std::expected<CellRef, FrontendDiagnostic> {
-              return specification;
-            }});
-    return translate(w, runner_->run(Parser(readOnCap).parseQuery()));
+    ScriptIoPorts ports{
+        w.bridge, w.host, w.payloads, w.diagnostics,
+        [specification](CapabilityCell, std::uint64_t, std::uint64_t)
+            -> std::expected<CellRef, FrontendDiagnostic> {
+          return specification;
+        }};
+    ports.stageWrite = [specification](CapabilityCell, std::uint64_t,
+                                       std::vector<std::byte>)
+        -> std::expected<CellRef, xanadu::vql::StageFailure> {
+      return specification;
+    };
+    runner_ = std::make_unique<ScriptRunner>(engine_, w.vm, std::move(ports));
+    return translate(w, runner_->run(Parser(script_).parseQuery()));
   }
   auto resume(World &w, FrontendToken token) -> RunResult override {
     return translate(w, runner_->resume(ScriptWake{std::move(token),
@@ -1669,6 +1676,7 @@ private:
   }
 
   VQLEngine engine_;
+  std::string script_;
   std::unique_ptr<ScriptRunner> runner_;
   std::vector<CellRef> outcomes_;
 };
@@ -1678,6 +1686,17 @@ const DriverFactory vqlDriver = [](World &w) {
 };
 
 XUZZ_FRONTEND_CONFORMANCE(VqlScriptConformance, vqlDriver)
+
+// M7-VQL-c C2, criterion 12: the same harness over a write action. A write is
+// one submit like a read, so every contract the harness pins (multiplicity,
+// pending, refusal as a value, terminals, rollback) holds for it unchanged.
+const DriverFactory vqlWriteDriver = [](World &w) {
+  return std::make_unique<VqlScriptDriver>(
+      w, "effect { let $s := submit($cap, write_bytes(0, \"ok\")); "
+         "match $s { admitted($q) => await($q), refused($e) => $e } }");
+};
+
+XUZZ_FRONTEND_CONFORMANCE(VqlWriteScriptConformance, vqlWriteDriver)
 
 // ---- Real file reads through the M4/M5 file endpoint adapter --------------
 

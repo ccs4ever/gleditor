@@ -119,6 +119,8 @@ private:
   IoOperand parseIoOperand();
   IoDuration parseIoDuration();
   void parseIoReadAction(IoEffectStatement &effect);
+  IoByteSource parseIoByteSource();
+  IoOpenMode parseIoOpenMode();
   /// Refuse a script I/O name in a row or query expression.
   void refuseIoCall(const Token &name) const;
 

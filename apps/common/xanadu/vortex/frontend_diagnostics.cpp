@@ -45,6 +45,9 @@ constexpr std::array builtins{
             "I/O effect inside a row or query expression"},
     Builtin{FrontendId::Vql, frontend_codes::vqlEffectArgument,
             "script I/O action given an unusable capability, offset or bound"},
+    Builtin{FrontendId::Vql, frontend_codes::vqlWriteSource,
+            "a write's byte source is neither a text cell nor an outcome that "
+            "exposes a payload"},
     Builtin{FrontendId::Vql, frontend_codes::vqlEffectNeedsRunner,
             "script I/O action can park and runs only through a runner"},
     Builtin{FrontendId::Vql, frontend_codes::vqlPersistNeedsCapture,

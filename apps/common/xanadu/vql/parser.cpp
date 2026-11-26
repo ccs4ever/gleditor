@@ -2272,7 +2272,8 @@ IoOperand Parser::parseIoOperand() {
 
 void Parser::refuseIoCall(const Token &name) const {
   if (name.text == "submit" || name.text == "await" ||
-      name.text == "read_bytes") {
+      name.text == "read_bytes" || name.text == "write_bytes" ||
+      name.text == "append_bytes" || name.text == "sync") {
     throw ParseError(
         std::format("{}: '{}' is an I/O script action name and cannot be "
                     "called in a query, row, filter or projection expression",
@@ -2311,6 +2312,7 @@ IoEffectStatement Parser::parseIoEffectStatement() {
                        current_.loc);
     }
     consume(TokenKind::CloseParen, "Expected ')' after the path");
+    effect.openMode = parseIoOpenMode();
   } else {
     parseIoReadAction(effect);
   }
@@ -2320,6 +2322,34 @@ IoEffectStatement Parser::parseIoEffectStatement() {
     effect.resultVar = consumeVariable("an outcome variable").stringValue;
   }
   return effect;
+}
+
+IoOpenMode Parser::parseIoOpenMode() {
+  if (!check(TokenKind::KwFor)) return IoOpenMode::Read;
+  advance();
+  const bool append = checkWord("append");
+  if (!append && !checkWord("write")) {
+    throw ParseError("An open action's mode is 'for write' or 'for append', "
+                     "optionally followed by 'create'",
+                     current_.loc);
+  }
+  advance();
+  const bool create = checkWord("create");
+  if (create) advance();
+  if (append) return create ? IoOpenMode::AppendCreate : IoOpenMode::Append;
+  return create ? IoOpenMode::WriteCreate : IoOpenMode::Write;
+}
+
+IoByteSource Parser::parseIoByteSource() {
+  if (check(TokenKind::StringLiteral)) {
+    return {.text = advance().stringValue, .isVariable = false};
+  }
+  if (check(TokenKind::Variable)) {
+    return {.text = advance().stringValue, .isVariable = true};
+  }
+  throw ParseError("A write's bytes are a string literal or a $variable bound "
+                   "to a text cell or an outcome",
+                   current_.loc);
 }
 
 IoDuration Parser::parseIoDuration() {
@@ -2345,12 +2375,33 @@ void Parser::parseIoReadAction(IoEffectStatement &effect) {
   consume(TokenKind::OpenParen, "Expected '(' after 'submit'");
   effect.capabilityVar = consumeVariable("a capability variable").stringValue;
   consume(TokenKind::Comma, "Expected ',' after the capability");
-  consumeWord("read_bytes");
-  consume(TokenKind::OpenParen, "Expected '(' after 'read_bytes'");
-  effect.offset = parseIoOperand();
-  consume(TokenKind::Comma, "Expected ',' between the offset and the bound");
-  effect.maxBytes = parseIoOperand();
-  consume(TokenKind::CloseParen, "Expected ')' after read_bytes arguments");
+  if (checkWord("write_bytes")) {
+    advance();
+    effect.request = IoRequestKind::WriteBytes;
+    consume(TokenKind::OpenParen, "Expected '(' after 'write_bytes'");
+    effect.offset = parseIoOperand();
+    consume(TokenKind::Comma, "Expected ',' between the offset and the bytes");
+    effect.source = parseIoByteSource();
+    consume(TokenKind::CloseParen, "Expected ')' after write_bytes arguments");
+  } else if (checkWord("append_bytes")) {
+    advance();
+    effect.request = IoRequestKind::AppendBytes;
+    consume(TokenKind::OpenParen, "Expected '(' after 'append_bytes'");
+    effect.source = parseIoByteSource();
+    consume(TokenKind::CloseParen, "Expected ')' after append_bytes argument");
+  } else if (checkWord("sync")) {
+    advance();
+    effect.request = IoRequestKind::Sync;
+    consume(TokenKind::OpenParen, "Expected '(' after 'sync'");
+    consume(TokenKind::CloseParen, "sync() takes no arguments");
+  } else {
+    consumeWord("read_bytes");
+    consume(TokenKind::OpenParen, "Expected '(' after 'read_bytes'");
+    effect.offset = parseIoOperand();
+    consume(TokenKind::Comma, "Expected ',' between the offset and the bound");
+    effect.maxBytes = parseIoOperand();
+    consume(TokenKind::CloseParen, "Expected ')' after read_bytes arguments");
+  }
   consume(TokenKind::CloseParen, "Expected ')' after submit arguments");
   if (checkWord("within")) {
     advance();

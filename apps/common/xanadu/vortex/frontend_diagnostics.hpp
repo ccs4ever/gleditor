@@ -64,6 +64,9 @@ inline constexpr std::string_view vqlQueryContext = "VQL_IO_QUERY_CONTEXT";
 /// A script action's capability, offset or bound is not a usable value; the
 /// script stops before anything is submitted.
 inline constexpr std::string_view vqlEffectArgument = "VQL_IO_EFFECT_ARGUMENT";
+/// A write or append names a byte source that is not readable as bytes: not a
+/// text cell, or an outcome that retained no payload.
+inline constexpr std::string_view vqlWriteSource = "VQL_IO_WRITE_SOURCE";
 /// A synchronous executor was asked to run a script holding an I/O action. The
 /// action compiles to bytecode but can park, and there is no blocking
 /// fallback, so such a script runs only through begin/resume (the runner).

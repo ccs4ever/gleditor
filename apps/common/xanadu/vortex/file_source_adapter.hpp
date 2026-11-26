@@ -161,6 +161,9 @@ inline constexpr std::uint64_t fileRightsMutating =
 /// script can tell them apart without parsing text (design note §7).
 inline constexpr std::uint32_t fileDetailNoWriteGrant = 1;
 inline constexpr std::uint32_t fileDetailWrongMode    = 2;
+/// `BudgetExceeded` detail of a write or append larger than the host's
+/// per-action bound; the service's own budget refusals use 0 and 1.
+inline constexpr std::uint32_t fileDetailWriteBound = 3;
 
 /// A bounded file operation for `stageAt`: the same frozen arguments
 /// `stageRead`/`stageWrite`/`stageStableRead` take, under a caller-chosen

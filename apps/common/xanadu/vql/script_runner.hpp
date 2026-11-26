@@ -76,11 +76,31 @@ using StageReadFn =
     std::function<std::expected<zigzag::CellRef, vortex::FrontendDiagnostic>(
         vortex::CapabilityCell, std::uint64_t offset, std::uint64_t length)>;
 
-/// Admit an open of a path as a managed submission (`effect { open(...) }`).
-/// Optional: a host that cannot open files leaves it empty and the action is
-/// refused as `VQL_IO_EFFECT_ARGUMENT`.
-using OpenFileFn = std::function<std::expected<
-    vortex::SubmissionCell, vortex::FrontendDiagnostic>(std::string_view path)>;
+/// Why a write, append or sync could not be staged: always a diagnostic, and
+/// additionally a typed refusal when the host's own bound stopped it, which
+/// the script sees as a `Rejected` outcome value instead of a failure.
+struct StageFailure {
+  vortex::FrontendDiagnostic diagnostic;
+  std::optional<vortex::IoErrorInfo> refusal;
+};
+/// Stage a positional write of frozen bytes; the bytes are the caller's copy,
+/// complete before this returns.
+using StageWriteFn = std::function<std::expected<zigzag::CellRef, StageFailure>(
+    vortex::CapabilityCell, std::uint64_t offset, std::vector<std::byte>)>;
+using StageAppendFn =
+    std::function<std::expected<zigzag::CellRef, StageFailure>(
+        vortex::CapabilityCell, std::vector<std::byte>)>;
+using StageSyncFn = std::function<std::expected<zigzag::CellRef, StageFailure>(
+    vortex::CapabilityCell)>;
+
+/// Admit an open of a path as a managed submission (`effect { open(...) }`),
+/// asking for @p rights (the file rights bits). Optional: a host that cannot
+/// open files leaves it empty and the action is refused as
+/// `VQL_IO_EFFECT_ARGUMENT`. The host, not the script, decides whether a
+/// mutating right is granted.
+using OpenFileFn = std::function<
+    std::expected<vortex::SubmissionCell, vortex::FrontendDiagnostic>(
+        std::string_view path, std::uint64_t rights)>;
 /// Admit the close of the endpoint behind a capability the script opened.
 using CloseCapabilityFn = std::function<
     std::expected<vortex::SubmissionCell, vortex::FrontendDiagnostic>(
@@ -106,6 +126,11 @@ struct ScriptIoPorts {
   /// record existed.
   std::size_t retainedPayloadBytes{
       vortex::FileReadHostOptions::defaultBudgetBytes};
+  /// The mutating requests. A host that stages none leaves them empty and a
+  /// script that submits one stops with `VQL_IO_EFFECT_ARGUMENT`.
+  StageWriteFn stageWrite;
+  StageAppendFn stageAppend;
+  StageSyncFn stageSync;
 };
 
 /// The ports over a `FileReadHost`: reads are staged on the file endpoint
@@ -211,6 +236,11 @@ private:
       -> zigzag::vortex::RelationResult;
   [[nodiscard]] auto openCapability(const zigzag::vortex::RelationQuery &query)
       -> zigzag::vortex::RelationResult;
+  /// The bytes a write or append sends, frozen now: a text cell's text, or the
+  /// payload of an outcome (binary-safe). Anything else, or an outcome that
+  /// retained no payload, is `VQL_IO_WRITE_SOURCE`.
+  [[nodiscard]] auto sourceBytes(zigzag::CellRef source) const
+      -> std::expected<std::vector<std::byte>, vortex::FrontendDiagnostic>;
   /// The payload of a terminal outcome as text, only where the shared status
   /// gate exposes one; nullopt for an outcome that retained none.
   [[nodiscard]] auto payloadText(vortex::OutcomeCell outcome) const

@@ -80,6 +80,11 @@ auto IoHost::isTerminal(const RequestCell request) -> bool {
   return service_.poll(request).outcome.has_value();
 }
 
+auto IoHost::refuse(const IoErrorInfo reason) -> SubmitResult {
+  requireOwner();
+  return {Refused{service_.refuse(reason)}};
+}
+
 auto IoHost::admitOpen(OpenSpec spec) -> SubmitResult {
   requireOwner();
   if (!policyFor(profile_).allowDirectSubmit) {

@@ -610,6 +610,152 @@ TEST_F(VQueryE2ETest, ScriptReadsAnOutcomesFieldsAsValues) {
   EXPECT_EQ(result.output, "world\n");
 }
 
+// M7-VQL-c C2: write effects through the real CLI. Authority to write is the
+// invoking human's flag; a script cannot grant itself any.
+namespace {
+
+std::string writeAction(const std::string &cap, const std::string &description,
+                        const std::string &name) {
+  return "effect { let $s := submit($" + cap + ", " + description +
+         "); match $s { admitted($q) => await($q), refused($e) => $e } } as $" +
+         name + "; ";
+}
+
+std::string readAll(const fs::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+} // namespace
+
+TEST_F(VQueryE2ETest, WithNoWriteRootEveryWriteOpenIsARejectedValue) {
+  const auto target = testDir / "denied.txt";
+  const auto result = runVQuery(
+      "-e 'effect { open(\"" + target.string() +
+      "\") for write create } as $o; return io_tag($o), io_error($o), "
+      "io_detail($o)'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "Rejected\nUnsupported\n1\n");
+  EXPECT_FALSE(fs::exists(target)) << "no file was created";
+}
+
+TEST_F(VQueryE2ETest, AWriteRootAllowsCreateWriteAppendAndSync) {
+  const auto target = testDir / "report.txt";
+  const auto script = "effect { open(\"" + target.string() +
+                      "\") for write create } as $o; " +
+                      writeAction("o", "write_bytes(0, \"hello\")", "w") +
+                      writeAction("o", "sync()", "d") +
+                      "return io_tag($o), io_tag($w), io_bytes($w), io_tag($d)";
+  const auto result = runVQuery("--io-write-root '" + testDir.string() +
+                                "' -e '" + script + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "Capability\nComplete\n5\nComplete\n");
+  EXPECT_EQ(readAll(target), "hello");
+
+  const auto more = runVQuery(
+      "--io-write-root '" + testDir.string() + "' -e 'effect { open(\"" +
+      target.string() + "\") for append } as $a; " +
+      writeAction("a", "append_bytes(\" world\")", "w") + "return io_tag($w)'");
+  ASSERT_EQ(more.exitCode, 0) << more.output;
+  EXPECT_EQ(readAll(target), "hello world");
+}
+
+TEST_F(VQueryE2ETest, AWriteRootDoesNotAdmitAPathOutsideIt) {
+  const auto root = testDir / "granted";
+  fs::create_directories(root);
+  const auto outside = testDir / "elsewhere.txt";
+  const auto result  = runVQuery(
+      "--io-write-root '" + root.string() + "' -e 'effect { open(\"" +
+      (root / ".." / "elsewhere.txt").string() +
+      "\") for write create } as $o; return io_tag($o), io_detail($o)'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "Rejected\n1\n");
+  EXPECT_FALSE(fs::exists(outside));
+}
+
+TEST_F(VQueryE2ETest, TheWriteBoundFlagRefusesAnOversizedWriteAsAValue) {
+  const auto target = testDir / "bounded.txt";
+  const auto script = "effect { open(\"" + target.string() +
+                      "\") for write create } as $o; " +
+                      writeAction("o", "write_bytes(0, \"12345\")", "w") +
+                      "return io_tag($w), io_error($w)";
+  const auto result = runVQuery("--io-write-root '" + testDir.string() +
+                                "' --io-write-bytes 4 -e '" + script + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "Rejected\nBudgetExceeded\n");
+  EXPECT_EQ(readAll(target), "");
+  for (const auto *bad : {"0", "-1", "lots", "1.5"}) {
+    SCOPED_TRACE(bad);
+    const auto usage =
+        runVQuery(std::string{"--io-write-bytes "} + bad + " -e 'return 1'");
+    EXPECT_EQ(usage.exitCode, 1) << usage.output;
+    EXPECT_NE(usage.output.find("--io-write-bytes"), std::string::npos)
+        << usage.output;
+  }
+}
+
+TEST_F(VQueryE2ETest, AScriptCopiesABinaryFileByteForByte) {
+  std::string bytes;
+  for (int i = 0; i < 512; ++i) bytes.push_back(static_cast<char>(i % 256));
+  const auto from = testDir / "in.bin";
+  const auto to   = testDir / "out.bin";
+  std::ofstream(from, std::ios::binary) << bytes;
+  const auto script = "effect { open(\"" + from.string() +
+                      "\") } as $src; effect { open(\"" + to.string() +
+                      "\") for write create } as $dst; " +
+                      writeAction("src", "read_bytes(0, 512)", "r") +
+                      writeAction("dst", "write_bytes(0, $r)", "w") +
+                      "return io_tag($w), io_bytes($w)";
+  const auto result = runVQuery("--io-write-root '" + testDir.string() +
+                                "' -e '" + script + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "Complete\n512\n");
+  EXPECT_EQ(readAll(to), bytes);
+}
+
+TEST_F(VQueryE2ETest, ReplOpensForWriteOnlyUnderTheGrant) {
+  const auto target = testDir / "repl.txt";
+  const auto input  = testDir / "write.vql";
+  {
+    std::ofstream script(input);
+    script << ":open -wc out " << target.string() << "\n"
+           << writeAction("out", "write_bytes(0, \"ab\")", "w")
+           << "return io_tag($w)\n"
+           << ":quit\n";
+  }
+  const auto denied = runVQuery("< '" + input.string() + "'");
+  EXPECT_NE(denied.output.find("Open failed"), std::string::npos)
+      << denied.output;
+  EXPECT_FALSE(fs::exists(target));
+
+  const auto allowed = runVQuery("--io-write-root '" + testDir.string() +
+                                 "' < '" + input.string() + "'");
+  ASSERT_EQ(allowed.exitCode, 0) << allowed.output;
+  EXPECT_NE(
+      allowed.output.find("Opened " + target.string() + " for change as $out"),
+      std::string::npos)
+      << allowed.output;
+  EXPECT_EQ(readAll(target), "ab");
+}
+
+// C4 changes this: until a capture route exists, a script that wrote is still
+// "a script that ran an I/O action", and its rows are never made durable.
+TEST_F(VQueryE2ETest, AWritingScriptsRowsAreStillNotPersisted) {
+  const auto target = testDir / "persist.txt";
+  const auto out    = testDir / "write.store";
+  const auto script =
+      "effect { open(\"" + target.string() + "\") for write create } as $o; " +
+      writeAction("o", "write_bytes(0, \"x\")", "w") + "return io_tag($w)";
+  const auto result =
+      runVQuery("--io-write-root '" + testDir.string() + "' -o '" +
+                out.string() + "' -e '" + script + "'");
+  EXPECT_EQ(result.exitCode, 1) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << result.output;
+  EXPECT_FALSE(fs::exists(out));
+}
+
 TEST_F(VQueryE2ETest, ScriptTimeoutFlagTakesMillisecondsOrOff) {
   const auto source = writeSource(testDir, "hello world");
   for (const auto *value : {"5000", "off"}) {

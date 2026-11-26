@@ -154,9 +154,10 @@ void printHelpREPL() {
       << "  :ascii                Toggle ASCII art output mode\n"
       << "  :engine vortex        Select the Vortex VM execution engine\n"
       << "  :store <label> <path> Load additional xanadoc/slice store\n"
-      << "  :open <name> <path>   Open a file read-only; bind its capability "
-         "to "
-         "$name for `effect { ... }` script I/O\n"
+      << "  :open [-w|-wc|-a|-ac] <name> <path>  Open a file read-only (or "
+         "for write -w / append -a, c to create); bind its capability to "
+         "$name for `effect { ... }` script I/O; writing needs "
+         "--io-write-root\n"
       << "  :timeout [MS|off]     Show or set how long a parked script may "
          "wait before it is abandoned\n"
       << "  :stores               List currently loaded stores\n"
@@ -222,6 +223,8 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
                                                  "--format",
                                                  "--permascroll",
                                                  "--io-file",
+                                                 "--io-write-root",
+                                                 "--io-write-bytes",
                                                  "-d",
                                                  "--dims",
                                                  "--view-dims",
@@ -352,6 +355,18 @@ int main(int argc, char *argv[]) {
             "asynchronously; read it with an `effect { ... }` script action")
       .append()
       .default_value(std::vector<std::string>{});
+
+  program.add_argument("--io-write-root")
+      .help("Allow script I/O actions to open files for write or append "
+            "beneath DIR (symlinks and '..' are resolved first); may be "
+            "repeated. With none given no script can change any file")
+      .append()
+      .default_value(std::vector<std::string>{});
+
+  program.add_argument("--io-write-bytes")
+      .help("The most bytes one script write or append may carry (default "
+            "1048576)")
+      .default_value(std::string{});
 
   program.add_argument("--script-timeout")
       .help("How long a script waiting on I/O may stay parked before it is "
@@ -546,18 +561,42 @@ int main(int argc, char *argv[]) {
   // Declared after `io`, so the runner dies first and cancels its waiters on a
   // live host.
   std::unique_ptr<xanadu::vql::ScriptRunner> ioRunner;
+  xanadu::vortex::FileReadHostOptions ioOptions;
+  {
+    // Authority to write is the invoking human's: it comes from these flags
+    // and from nowhere a script can reach.
+    std::vector<std::filesystem::path> writeRoots;
+    for (const auto &root :
+         program.get<std::vector<std::string>>("--io-write-root"))
+      writeRoots.emplace_back(root);
+    if (!writeRoots.empty())
+      ioOptions.writeGrant = xanadu::vortex::writeRootGrant(writeRoots);
+    if (const auto bound = program.get<std::string>("--io-write-bytes");
+        !bound.empty()) {
+      std::size_t count{};
+      const auto *const end = bound.data() + bound.size();
+      const auto parsed     = std::from_chars(bound.data(), end, count);
+      if (parsed.ec != std::errc{} || parsed.ptr != end || count == 0) {
+        std::cerr << "Error: --io-write-bytes expects a positive number of "
+                     "bytes\n";
+        return 1;
+      }
+      ioOptions.writeBytes = count;
+    }
+  }
   const auto ioHost = [&]() -> xanadu::vortex::FileReadHost & {
     if (!io)
-      io = std::make_unique<xanadu::vortex::FileReadHost>(vm,
-                                                          coordinator.arena());
+      io = std::make_unique<xanadu::vortex::FileReadHost>(
+          vm, coordinator.arena(), ioOptions);
     return *io;
   };
   // Open @p path through the host and bind its capability to $name. The open
   // is admitted and then polled through the pump; nothing here reads a file.
-  const auto bindFile = [&](const std::string &name,
-                            const std::string &path) -> bool {
+  const auto bindFile = [&](const std::string &name, const std::string &path,
+                            const std::uint64_t rights =
+                                xanadu::vortex::fileRightRead) -> bool {
     auto &host      = ioHost();
-    const auto open = host.beginOpen(path);
+    const auto open = host.beginOpen(path, rights);
     if (!open) {
       std::cerr << "Open failed: " << open.error().code << ": "
                 << open.error().message << "\n";
@@ -888,14 +927,28 @@ int main(int argc, char *argv[]) {
       }
     } else if (line.starts_with(":open ")) {
       std::istringstream iss(line);
-      std::string cmd, name, path;
+      std::string cmd, name;
       iss >> cmd >> name;
+      // An optional mode flag leads: -w (write), -a (append), each with a
+      // trailing c to create the file (and fail if it exists). The host's
+      // write grant still decides; a flag asks, it does not authorise.
+      std::uint64_t rights = xanadu::vortex::fileRightRead;
+      bool flagged         = false;
+      if (name == "-w" || name == "-wc" || name == "-a" || name == "-ac") {
+        flagged = true;
+        rights  = name[1] == 'w' ? xanadu::vortex::fileRightWrite
+                                 : xanadu::vortex::fileRightAppend;
+        if (name.size() == 3) rights |= xanadu::vortex::fileRightCreate;
+        iss >> name;
+      }
+      std::string path;
       // The path is the rest of the line, so one with spaces is not cut.
       std::getline(iss >> std::ws, path);
       if (name.empty() || path.empty()) {
-        std::cout << "Usage: :open <name> <path>\n";
-      } else if (bindFile(name, path)) {
-        std::cout << "Opened " << path << " as $" << name << "\n";
+        std::cout << "Usage: :open [-w|-wc|-a|-ac] <name> <path>\n";
+      } else if (bindFile(name, path, rights)) {
+        std::cout << "Opened " << path << (flagged ? " for change" : "")
+                  << " as $" << name << "\n";
       }
     } else if (line == ":stores") {
       std::cout << "Registered stores on ##/d.stores rank:\n";

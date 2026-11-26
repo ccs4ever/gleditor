@@ -12,6 +12,11 @@ namespace {
 /// builds. The host that stages a read decodes this term; the VM only carries
 /// it as a cell.
 constexpr const char *readBytesFunctor = "read_bytes";
+/// The functors of the mutating descriptions: terms the host decodes, never
+/// the VM.
+constexpr const char *writeBytesFunctor  = "write_bytes";
+constexpr const char *appendBytesFunctor = "append_bytes";
+constexpr const char *syncFunctor        = "sync";
 
 } // namespace
 
@@ -22,6 +27,9 @@ constexpr const char *readBytesFunctor = "read_bytes";
 //                  match $s { admitted($q) => await($q), refused($e) => $e } }
 //
 //   MakeTerm read_bytes(off, max[, N, unit]) -> spec
+//   (write_bytes(off, src[, N, unit]), append_bytes(src[, N, unit]) and
+//   sync([N, unit]) build their own term the same way; `src` is a text cell
+//   or an outcome cell, which the host reads when it stages the request)
 //   Submit   $cap, spec             -> sum, arm, payload
 //   BranchFalseCell arm, ADMITTED   ; arm 0 is Admitted
 //   CopyCellRefs payload            -> result        ; refused($e) => $e
@@ -42,12 +50,13 @@ constexpr const char *readBytesFunctor = "read_bytes";
 //
 // Open -- effect { open("path") } [as $cap]
 //
-//   RelationNext io_open (path)     -> handle        ; the request or Rejected
+//   RelationNext io_open (path, mode) -> handle      ; the request or Rejected
 //   (then the Await / Copy of $h above, over the handle)
 //   RelationNext io_open_capability (outcome) -> found, capability
 //   $cap := the capability when the open minted one, the outcome otherwise
 //
-// Read ... as $r -- the outcome a name holds must outlive its request
+// Read ... as $r (any submit, writes included) -- the outcome a name holds
+// must outlive its request
 //
 //   RelationNext io_own_outcome (outcome) -> found, record
 //   $r := the record when the host copied the outcome and retired the
@@ -132,14 +141,32 @@ VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
   switch (effect.kind) {
   case Kind::Read: {
     const auto capability = bound(effect.capabilityVar);
-    const auto offset     = operand(effect.offset);
-    const auto length     = operand(effect.maxBytes);
 
     const auto spec     = fresh();
     const auto makeTerm = emitOp(OpcodeKind::MakeTerm, "#IO_SPEC");
-    emitInputConstant(makeTerm, std::string{readBytesFunctor});
-    emitInput(makeTerm, offset);
-    emitInput(makeTerm, length);
+    const auto source   = [&] {
+      return effect.source.isVariable ? bound(effect.source.text)
+                                        : emitConstant(effect.source.text);
+    };
+    switch (effect.request) {
+    case IoRequestKind::ReadBytes:
+      emitInputConstant(makeTerm, std::string{readBytesFunctor});
+      emitInput(makeTerm, operand(effect.offset));
+      emitInput(makeTerm, operand(effect.maxBytes));
+      break;
+    case IoRequestKind::WriteBytes:
+      emitInputConstant(makeTerm, std::string{writeBytesFunctor});
+      emitInput(makeTerm, operand(effect.offset));
+      emitInput(makeTerm, source());
+      break;
+    case IoRequestKind::AppendBytes:
+      emitInputConstant(makeTerm, std::string{appendBytesFunctor});
+      emitInput(makeTerm, source());
+      break;
+    case IoRequestKind::Sync:
+      emitInputConstant(makeTerm, std::string{syncFunctor});
+      break;
+    }
     if (effect.within) {
       emitInput(makeTerm, operand(effect.within->amount));
       emitInputConstant(makeTerm, effect.within->unitMillis);
@@ -179,10 +206,11 @@ VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
     break;
   }
   case Kind::Open: {
-    const auto path   = effect.openPath.isVariable
-                            ? bound(effect.openPath.text)
-                            : emitConstant(effect.openPath.text);
-    const auto opened = relate(openRelation, {path});
+    const auto path = effect.openPath.isVariable
+                          ? bound(effect.openPath.text)
+                          : emitConstant(effect.openPath.text);
+    const auto mode = emitConstant(static_cast<std::int64_t>(effect.openMode));
+    const auto opened = relate(openRelation, {path, mode});
     const auto handle = opened.answers.front();
     firstOpcode       = opened.opcode;
     const auto arm    = relate(handleArmRelation, {handle});

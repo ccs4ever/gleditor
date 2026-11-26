@@ -70,6 +70,10 @@ public:
              std::optional<std::chrono::milliseconds> within = std::nullopt)
       -> SubmitResult;
   [[nodiscard]] auto admitOpen(OpenSpec spec) -> SubmitResult;
+  /// A refusal a front end decided before any request existed (a write over
+  /// the host's bound): the same `Rejected` value an admission refusal is,
+  /// minted through the owner-only cell store.
+  [[nodiscard]] auto refuse(IoErrorInfo reason) -> SubmitResult;
   /// Ask a request's backend to stop. The request's outcome is `Cancelled`
   /// (or whatever the backend had already finished); a terminal request is
   /// `AlreadyTerminal`, a value and not an error. It never retires the

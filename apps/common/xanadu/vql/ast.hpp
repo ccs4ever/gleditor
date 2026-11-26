@@ -543,6 +543,34 @@ struct IoOpenPath {
   bool isVariable{false};
 };
 
+/// What an `open` action asks the host for. The host's write grant, never the
+/// script, decides whether a mutating mode is allowed; the numbering is the
+/// value the compiled `io_open` call carries, so it is part of the contract
+/// between the compiler and the runner.
+enum class IoOpenMode : std::int64_t {
+  Read,
+  Write,
+  WriteCreate,
+  Append,
+  AppendCreate,
+};
+
+/// The request a `submit` action describes.
+enum class IoRequestKind : std::uint8_t {
+  ReadBytes,
+  WriteBytes,
+  AppendBytes,
+  Sync,
+};
+
+/// What a write or append sends: a string literal, or the name of a session
+/// or earlier-action variable bound to a text cell or an outcome (whose
+/// payload is copied byte for byte).
+struct IoByteSource {
+  std::string text;
+  bool isVariable{false};
+};
+
 /// A script action (plan §10, M7-VQL): it exists only as a top-level script
 /// statement, so it is reached once per script run, never per row. Four
 /// shapes, all written `effect { ... } [as $name]`:
@@ -557,9 +585,20 @@ struct IoOpenPath {
 ///           yields its outcome (Cancelled, or the terminal it had reached).
 ///   Open:   `open("path")` or `open($path)` opens a file read-only and yields
 ///           the open outcome; `as $name` binds the capability it minted.
+///           `for write|append [create]` asks for a mutating open, which the
+///           host's write grant may refuse (a Rejected outcome).
+///
+/// A submit may also describe `write_bytes(off, src)`, `append_bytes(src)` or
+/// `sync()`; all take the same `within`, match arms and `as`.
 struct IoEffectStatement {
+  /// `Read` is the submit shape; which request it submits is `request`.
   enum class Kind : std::uint8_t { Read, Await, Cancel, Open };
   Kind kind{Kind::Read};
+  IoRequestKind request{IoRequestKind::ReadBytes};
+  /// WriteBytes and AppendBytes: the bytes to send.
+  IoByteSource source;
+  /// Open: the mode (`for write [create]`, `for append [create]`).
+  IoOpenMode openMode{IoOpenMode::Read};
 
   std::string submissionVar;
   std::string capabilityVar;

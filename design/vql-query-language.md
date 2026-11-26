@@ -2335,9 +2335,9 @@ an outcome's tag and fields are read with path functions (M7-VQL-b, below), not 
 **Where it may stand.** Only as a top-level statement of the query's own script body. It is refused
 with `VQL_IO_QUERY_CONTEXT`, at parse time and before anything runs, as the action of a
 `for`/`let`/`where`/`if` block, inside a `def`, lambda, `watch` or `with perspective` body, and the
-names `submit`, `await` and `read_bytes` cannot be called in any expression (a row, filter,
-projection or `return` value). Queries, rows, filters and projections stay pure: a script action
-cannot be reached once per row.
+names `submit`, `await`, `read_bytes`, `write_bytes`, `append_bytes` and `sync` cannot be called in
+any expression (a row, filter, projection or `return` value). Queries, rows, filters and projections
+stay pure: a script action cannot be reached once per row.
 
 **Multiplicity.** An action submits once each time execution reaches it. The whole script is one
 program (see "Bytecode form"); every stretch of ordinary statements runs through the Vortex VM
@@ -2458,6 +2458,51 @@ on it fails the script at that statement. The capability's lifetime is the scrip
 ends, fails, is abandoned or its runner is destroyed, each file it opened is closed through the file
 close path, as its own request, never on the evaluation thread. Capabilities bound by the host
 (`--io-file`, `:open`) live for the session and are not closed by a script.
+
+**Writing a file (M7-VQL-c C2).** A write is a request on a capability exactly as a read is, so it
+is a `submit` and takes `within`, `as`, the detached `admitted($q) => $q` form, `await($h)` and
+`cancel($h)` unchanged. `open` takes a mode, and three request descriptions join `read_bytes`:
+
+```vql
+effect { open("out/report.txt") for write create } as $o;
+effect {
+  let $s := submit($o, write_bytes(0, $text)) within 2 s;
+  match $s { admitted($q) => await($q), refused($e) => $e }
+} as $w;
+effect {
+  let $s := submit($o, sync());
+  match $s { admitted($q) => await($q), refused($e) => $e }
+} as $d;
+return io_tag($w), io_bytes($w), io_tag($d)
+```
+
+- `open(p) for write [create]` and `for append [create]`: write opens `O_RDWR`, append
+  `O_RDWR|O_APPEND` (a capability has one discipline, so `write_bytes` on an append capability and
+  `append_bytes` on a positional one are refused), `create` adds `O_CREAT|O_EXCL` (a file that
+  exists is `Failed`, with `io_error` `BackendFailure` and `io_detail` the `EEXIST` number; nothing
+  is truncated or clobbered).
+- `write_bytes(offset, source)`, `append_bytes(source)`, `sync()` (`fdatasync`, ordered after every
+  earlier write admitted on that capability). `source` is a string literal or a `$variable` bound to
+  one text cell or to an outcome. An outcome's retained payload is written byte for byte, so a
+  binary read can be copied to a file (`write_bytes(0, $r)` after `read_bytes(...) as $r`), which
+  the text route cannot do. An empty text is a valid zero-byte write. The bytes are frozen when the
+  request is submitted. A name no earlier action bound and no session variable holds is
+  `VQL_IO_EFFECT_ARGUMENT` before anything runs (it would otherwise be written as its own name); a
+  capability, request, or an outcome with no payload is `VQL_IO_WRITE_SOURCE`.
+- **Authority is the host's.** `vquery` opens nothing for writing unless the person who ran it
+  passed `--io-write-root DIR` (repeatable): the path, with `..` and symlinks resolved first, must
+  lie strictly beneath a root. With none, every write or append open is a `Rejected` outcome (a
+  value the script reads: `io_error` `Unsupported`, `io_detail` `1`) and no file is touched.
+  `--io-write-bytes N` bounds one write (default 1 MiB); a larger one is `Rejected` with `io_error`
+  `BudgetExceeded` and `io_detail` `3`, nothing staged. A write on a read-only or wrong-discipline
+  capability is `Rejected` with `io_detail` `2`. The REPL's `:open -w|-wc|-a|-ac NAME PATH` binds
+  such a capability for the session under the same grant.
+- **Outcomes** are values: `Complete` (`io_bytes` is the bytes written), `Failed`, `Cancelled` or
+  `TimedOut` (a prefix may have landed: `io_uncertain($r)` is `true` or `false`), `Unknown`,
+  `Rejected`. No outcome of a write has a payload. `io_uncertain` answers nothing for a tag that has
+  no such field. A named write outcome is an owned record like a named read's.
+- Rows of a script that wrote are still not persisted by `-o`, `--in-place` or `:save`
+  (`VQL_IO_PERSIST_NEEDS_CAPTURE`); only capture (M7-VQL-c C3-C4) changes that.
 
 ## 5. Memory Management & Topological Garbage Collection
 
@@ -2728,6 +2773,7 @@ table.
 | 16.7    | `current` | 2026-11-25 | **M7-VQL-b gate round 1** (4.13): a script that ran any action cannot be persisted by `-o`, `--in-place` or `:save` whatever its last statement returns (`VQL_IO_PERSIST_NEEDS_CAPTURE`); an `open` nobody bound is closed at script end; a read through a name whose open minted no capability names the open and its tag (`VQL_IO_EFFECT_ARGUMENT`); a `within` longer than the script timeout extends the script deadline to the request deadline plus the timeout; `--script-timeout` rejects sizes no deadline can hold.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 16.8    | `current` | 2026-11-25 | **M7-VQL-b gate polish** (4.13): the deadline a `within` request earns holds only while the request runs; a runner destroyed with a read running asks the backend to stop it; a refused close is retried only after another close finishes, at most four times.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 16.9    | `current` | 2026-11-26 | **M7-VQL-c design (4.13), nothing built**: script write effects (`write_bytes`, `append_bytes`, `sync`, `open(...) for write\|append` behind a host write grant) and explicit `capture($r)`, whose receipt and `io_captured($c)` cells quote the author's permascroll; `VQL_IO_PERSIST_NEEDS_CAPTURE` is lifted only for a run whose exposed payload ranges are all covered. Specified in [vortex-io-m7-vql-c.md](vortex-io-m7-vql-c.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 16.10   | `current` | 2026-11-26 | **M7-VQL-c C2: write effects** (4.13): `open(p) for write\|append [create]`, and `write_bytes(off, src)`, `append_bytes(src)` and `sync()` as `submit` descriptions (so `within`, `as`, handles and `cancel` apply); `src` is a text cell or an outcome (byte for byte); `io_uncertain($r)` joins the outcome functions; `write_bytes`, `append_bytes` and `sync` become reserved call names; `vquery --io-write-root DIR` (repeatable, default deny), `--io-write-bytes N` and `:open -w\|-wc\|-a\|-ac`; new diagnostic `VQL_IO_WRITE_SOURCE`. No existing program changes meaning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix

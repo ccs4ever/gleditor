@@ -26,8 +26,29 @@ using zigzag::CellRef;
 
 constexpr const char *logCategory = "vql.script.io";
 
-/// The functor the compiler gives a bounded read's request description.
-constexpr const char *readBytesFunctor = "read_bytes";
+/// The functors the compiler gives each request description.
+constexpr const char *readBytesFunctor   = "read_bytes";
+constexpr const char *writeBytesFunctor  = "write_bytes";
+constexpr const char *appendBytesFunctor = "append_bytes";
+constexpr const char *syncFunctor        = "sync";
+
+/// The file rights an `open` mode asks for; the host's grant may refuse any
+/// mutating one.
+auto rightsOf(const IoOpenMode mode) -> std::uint64_t {
+  switch (mode) {
+  case IoOpenMode::Read:
+    return vortex::fileRightRead;
+  case IoOpenMode::Write:
+    return vortex::fileRightWrite;
+  case IoOpenMode::WriteCreate:
+    return vortex::fileRightWrite | vortex::fileRightCreate;
+  case IoOpenMode::Append:
+    return vortex::fileRightAppend;
+  case IoOpenMode::AppendCreate:
+    return vortex::fileRightAppend | vortex::fileRightCreate;
+  }
+  return vortex::fileRightRead;
+}
 
 /// Whether @p text is well-formed UTF-8 (no overlongs, surrogates or values
 /// past U+10FFFF).
@@ -470,9 +491,10 @@ struct FieldRelation {
   const char *function;
   const char *field;
 };
-constexpr std::array<FieldRelation, 2> fieldRelations{{
+constexpr std::array<FieldRelation, 3> fieldRelations{{
     {outcomeErrorRelation, "io_error", "errorCode"},
     {outcomeDetailRelation, "io_detail", "stableDetail"},
+    {outcomeUncertainRelation, "io_uncertain", "uncertain"},
 }};
 
 } // namespace
@@ -599,19 +621,25 @@ auto ScriptRunner::openPath(const RelationQuery &query) -> RelationResult {
         diagnose(vortex::frontend_codes::vqlEffectArgument, std::move(message));
     return std::unexpected(stageFailure_->message);
   };
-  if (query.arguments.size() != 1) return refuse("open expects one path");
+  if (query.arguments.size() != 2)
+    return refuse("open expects a path and a mode");
   if (!ports_.openFile) return refuse("this program cannot open files");
   if (current_ == nullptr)
     return refuse("an open ran outside any script activation");
   const auto path = query.arena.textOf(query.arguments[0]);
   if (path.empty()) return refuse("open names an empty path");
+  const auto mode = number(query.arguments[1], "the open mode", std::nullopt);
+  if (!mode) return refuse(mode.error().message);
+  if (*mode > static_cast<std::uint64_t>(IoOpenMode::AppendCreate))
+    return refuse("open names a mode this program does not know");
   // The request graph and submission sum are the I/O service's, as in admit().
   const HostCells hostCells{current_->executor.get(), query.arena};
   // Earlier scripts' rows are done with before this one admits anything, so a
   // budget they filled is free for this open.
   retireAll(finished_);
   freeFinishedRecords();
-  const auto submission = ports_.openFile(path);
+  const auto submission =
+      ports_.openFile(path, rightsOf(static_cast<IoOpenMode>(*mode)));
   if (!submission) return refuse(submission.error().message);
   const auto matched = ports_.bridge.match(*submission);
   if (!matched) {
@@ -627,7 +655,9 @@ auto ScriptRunner::openPath(const RelationQuery &query) -> RelationResult {
     handle = std::get<vortex::Refused>(*matched).outcome.cell;
   }
   current_->admitted.push_back(entry);
-  return answerOnce(query, handle);
+  // One answer per argument, as the VM requires; only the first is the handle.
+  return std::optional<RelationAnswer>{RelationAnswer{
+      .nextPosition = 1, .limit = 1, .answers = {handle, handle}}};
 }
 
 auto ScriptRunner::openCapability(const RelationQuery &query)
@@ -663,26 +693,58 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
   // A capability an earlier `open ... as $name` of this script will mint is
   // not yet a value to check: it is checked when its read submits.
   std::set<std::string> opensLater;
+  // Every name an earlier action of this script binds: such a name is a value
+  // the run makes, not one to check beforehand.
+  std::set<std::string> named;
   for (std::size_t index = 0; index < statements.size(); ++index) {
     const auto *action = std::get_if<IoEffectStatement>(&statements[index]);
     if (action == nullptr) continue;
+    const auto remember = [&] {
+      if (action->resultVar) named.insert(*action->resultVar);
+    };
     if (action->kind == IoEffectStatement::Kind::Open) {
       if (action->resultVar) opensLater.insert(*action->resultVar);
+      remember();
       continue;
     }
-    if (action->kind != IoEffectStatement::Kind::Read) continue;
+    if (action->kind != IoEffectStatement::Kind::Read) {
+      remember();
+      continue;
+    }
     if (!opensLater.contains(action->capabilityVar)) {
       if (const auto cap = capability(action->capabilityVar, index); !cap)
         return ScriptRunResult::failed(cap.error());
     }
-    if (const auto offset = operand(action->offset, index); !offset)
-      return ScriptRunResult::failed(offset.error());
-    if (const auto length = operand(action->maxBytes, index); !length)
-      return ScriptRunResult::failed(length.error());
+    const bool positional = action->request == IoRequestKind::ReadBytes ||
+                            action->request == IoRequestKind::WriteBytes;
+    if (positional) {
+      if (const auto offset = operand(action->offset, index); !offset)
+        return ScriptRunResult::failed(offset.error());
+    }
+    if (action->request == IoRequestKind::ReadBytes) {
+      if (const auto length = operand(action->maxBytes, index); !length)
+        return ScriptRunResult::failed(length.error());
+    }
+    const bool sends = action->request == IoRequestKind::WriteBytes ||
+                       action->request == IoRequestKind::AppendBytes;
+    if (sends && action->source.isVariable &&
+        !named.contains(action->source.text)) {
+      // An unbound name would compile to a text cell holding its own name,
+      // and a write would put that in the file.
+      const auto &bound = session_.variables();
+      const auto found  = bound.find(action->source.text);
+      if (found == bound.end() || found->second.size() != 1)
+        return ScriptRunResult::failed(
+            diagnose(vortex::frontend_codes::vqlEffectArgument,
+                     "$" + action->source.text +
+                         " is not bound to exactly one cell to write",
+                     index));
+    }
     if (action->within) {
       if (const auto bound = operand(action->within->amount, index); !bound)
         return ScriptRunResult::failed(bound.error());
     }
+    remember();
   }
   auto activation   = std::make_shared<Activation>();
   activation->query = std::move(query);
@@ -900,24 +962,49 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
     stageFailure_ = diagnostic;
     throw std::runtime_error(diagnostic.message);
   };
-  const auto arguments                   = vlog.argumentsOf(description);
-  constexpr std::size_t plainArguments   = 2;
-  constexpr std::size_t boundedArguments = 4; // offset, max, amount, unit
-  if (arena.textOf(description) != readBytesFunctor ||
-      (arguments.size() != plainArguments &&
-       arguments.size() != boundedArguments))
+  const auto arguments               = vlog.argumentsOf(description);
+  constexpr std::size_t boundedExtra = 2; // amount, unit of a `within`
+  const auto functor                 = arena.textOf(description);
+  std::optional<IoRequestKind> kind;
+  std::size_t plainArguments = 0;
+  if (functor == readBytesFunctor) {
+    kind           = IoRequestKind::ReadBytes;
+    plainArguments = 2; // offset, max
+  } else if (functor == writeBytesFunctor) {
+    kind           = IoRequestKind::WriteBytes;
+    plainArguments = 2; // offset, source
+  } else if (functor == appendBytesFunctor) {
+    kind           = IoRequestKind::AppendBytes;
+    plainArguments = 1; // source
+  } else if (functor == syncFunctor) {
+    kind           = IoRequestKind::Sync;
+    plainArguments = 0;
+  }
+  if (!kind || (arguments.size() != plainArguments &&
+                arguments.size() != plainArguments + boundedExtra))
     fail(diagnose(vortex::frontend_codes::vqlEffectArgument,
-                  "the request description is not read_bytes(offset, max)"));
-  const auto offset = number(arguments[0], "the offset", std::nullopt);
-  if (!offset) fail(offset.error());
-  const auto length = number(arguments[1], "the bound", std::nullopt);
-  if (!length) fail(length.error());
+                  "the request description is not read_bytes(offset, max), "
+                  "write_bytes(offset, source), append_bytes(source) or "
+                  "sync()"));
+  std::uint64_t offset = 0;
+  std::uint64_t length = 0;
+  if (*kind == IoRequestKind::ReadBytes || *kind == IoRequestKind::WriteBytes) {
+    const auto parsed = number(arguments[0], "the offset", std::nullopt);
+    if (!parsed) fail(parsed.error());
+    offset = *parsed;
+  }
+  if (*kind == IoRequestKind::ReadBytes) {
+    const auto parsed = number(arguments[1], "the bound", std::nullopt);
+    if (!parsed) fail(parsed.error());
+    length = *parsed;
+  }
   std::optional<std::chrono::milliseconds> within;
-  if (arguments.size() == boundedArguments) {
+  if (arguments.size() == plainArguments + boundedExtra) {
     const auto amount =
-        number(arguments[2], "the 'within' bound", std::nullopt);
+        number(arguments[plainArguments], "the 'within' bound", std::nullopt);
     if (!amount) fail(amount.error());
-    const auto unit = number(arguments[3], "the 'within' unit", std::nullopt);
+    const auto unit = number(arguments[plainArguments + 1], "the 'within' unit",
+                             std::nullopt);
     if (!unit) fail(unit.error());
     if (*unit == 0 || *amount > maxDeadline.count() / *unit)
       fail(diagnose(vortex::frontend_codes::vqlEffectArgument,
@@ -932,9 +1019,56 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
   // can hold. They join finished_ when the script ends.
   retireAll(finished_);
   freeFinishedRecords();
-  const auto spec = ports_.stageRead(capability, *offset, *length);
-  if (!spec) fail(spec.error());
-  const auto submission = ports_.bridge.submit(capability, *spec, within);
+  // The bytes of a write are frozen here, before anything is staged: no
+  // worker can observe a half-built buffer.
+  std::vector<std::byte> frozen;
+  if (*kind == IoRequestKind::WriteBytes ||
+      *kind == IoRequestKind::AppendBytes) {
+    const auto &source = arguments[*kind == IoRequestKind::WriteBytes ? 1 : 0];
+    auto bytes         = sourceBytes(vlog.deref(source));
+    if (!bytes) fail(bytes.error());
+    frozen = *std::move(bytes);
+  }
+  const auto unstaged = [&] {
+    return diagnose(vortex::frontend_codes::vqlEffectArgument,
+                    "this program cannot stage that request");
+  };
+  std::expected<CellRef, StageFailure> spec{std::unexpected{
+      StageFailure{.diagnostic = unstaged(), .refusal = std::nullopt}}};
+  switch (*kind) {
+  case IoRequestKind::ReadBytes: {
+    auto read = ports_.stageRead(capability, offset, length);
+    if (read) {
+      spec = *read;
+    } else {
+      spec = std::unexpected{
+          StageFailure{.diagnostic = read.error(), .refusal = std::nullopt}};
+    }
+    break;
+  }
+  case IoRequestKind::WriteBytes:
+    if (ports_.stageWrite)
+      spec = ports_.stageWrite(capability, offset, std::move(frozen));
+    break;
+  case IoRequestKind::AppendBytes:
+    if (ports_.stageAppend)
+      spec = ports_.stageAppend(capability, std::move(frozen));
+    break;
+  case IoRequestKind::Sync:
+    if (ports_.stageSync) spec = ports_.stageSync(capability);
+    break;
+  }
+  std::expected<vortex::SubmissionCell, FrontendDiagnostic> submission =
+      std::unexpected{unstaged()};
+  if (spec) {
+    submission = ports_.bridge.submit(capability, *spec, within);
+  } else if (spec.error().refusal) {
+    // The host's own bound said no: a value the script reads, like any
+    // admission refusal, never a failed script.
+    submission = ports_.bridge.wrap(ports_.host.refuse(*spec.error().refusal));
+  } else {
+    fail(spec.error().diagnostic);
+  }
   if (!submission) fail(submission.error());
   const auto matched = ports_.bridge.match(*submission);
   if (!matched) {
@@ -1071,6 +1205,43 @@ void ScriptRunner::endActivation(Activation &activation) noexcept {
   activation.admitted.clear();
 }
 
+auto ScriptRunner::sourceBytes(const CellRef source) const
+    -> std::expected<std::vector<std::byte>, FrontendDiagnostic> {
+  const auto refuse = [&](std::string message) {
+    return std::unexpected{
+        diagnose(vortex::frontend_codes::vqlWriteSource, std::move(message))};
+  };
+  const auto &arena      = session_.coordinator().arena();
+  const auto incarnation = arena.incarnationOf(source);
+  if (!incarnation) return refuse("the bytes to write are not a live cell");
+  const auto tag = vortex::ioCellTag(arena, source, *incarnation);
+  if (!tag) {
+    // A text cell: its text is the bytes, whatever they are.
+    const auto text = arena.textOf(source);
+    std::vector<std::byte> bytes(text.size());
+    std::ranges::transform(text, bytes.begin(), [](const char c) {
+      return static_cast<std::byte>(c);
+    });
+    return bytes;
+  }
+  if (*tag != vortex::IoCellTag::Outcome)
+    return refuse("the bytes to write are a capability or request, not a text "
+                  "cell or an outcome");
+  const auto gate = gated(vortex::OutcomeCell{source, *incarnation});
+  if (!gate) return refuse(gate.error().message);
+  if (!gate->payload)
+    return refuse(std::string{"the outcome ("} +
+                  std::string{vortex::toString(gate->tag)} +
+                  ") retained no payload to write");
+  auto lease = ports_.payloads.retain(*gate->payload);
+  if (!lease) return refuse("the outcome's payload was not retained");
+  auto bytes = ports_.payloads.read(
+      *lease, 0, static_cast<std::size_t>(lease->range.length));
+  ports_.payloads.release(lease->lease);
+  if (!bytes) return refuse("the outcome's payload could not be read");
+  return std::vector<std::byte>{bytes->begin(), bytes->end()};
+}
+
 auto ScriptRunner::payloadText(const vortex::OutcomeCell outcome) const
     -> std::expected<std::optional<std::string>, FrontendDiagnostic> {
   const auto gate = gated(outcome);
@@ -1198,6 +1369,30 @@ auto ScriptRunner::resume(ScriptWake wake) -> ScriptRunResult {
   return settle(activation, activation->executor->resume(parked));
 }
 
+namespace {
+
+/// A staged write, append or sync as the runner takes it. A write over the
+/// host's bound is a refusal value; every other stage error is a diagnostic.
+auto staged(const std::expected<CellRef, vortex::StageReadError> &result,
+            const std::string_view what)
+    -> std::expected<CellRef, StageFailure> {
+  if (result) return *result;
+  StageFailure failure{
+      .diagnostic =
+          FrontendDiagnostic{
+              std::string{vortex::frontend_codes::vqlEffectArgument},
+              "the " + std::string{what} + " was not staged: " +
+                  std::string{vortex::toString(result.error())},
+              {}},
+      .refusal = std::nullopt};
+  if (result.error() == vortex::StageReadError::OutOfBounds)
+    failure.refusal = vortex::IoErrorInfo{vortex::IoErrorCode::BudgetExceeded,
+                                          vortex::fileDetailWriteBound};
+  return std::unexpected{std::move(failure)};
+}
+
+} // namespace
+
 auto fileScriptPorts(vortex::FileReadHost &host) -> ScriptIoPorts {
   return ScriptIoPorts{
       host.bridge(),
@@ -1215,9 +1410,9 @@ auto fileScriptPorts(vortex::FileReadHost &host) -> ScriptIoPorts {
                 std::string{vortex::toString(staged.error())},
             {}}};
       },
-      [&host](const std::string_view path)
+      [&host](const std::string_view path, const std::uint64_t rights)
           -> std::expected<vortex::SubmissionCell, FrontendDiagnostic> {
-        return host.bridge().admitOpen(host.openSpec(path));
+        return host.bridge().admitOpen(host.openSpec(path, rights));
       },
       [&host](const vortex::CapabilityCell capability) {
         return host.closeCapability(capability);
@@ -1225,7 +1420,19 @@ auto fileScriptPorts(vortex::FileReadHost &host) -> ScriptIoPorts {
       [&host](const vortex::OutcomeCell open) {
         return host.capabilityOf(open);
       },
-      host.retainedPayloadBytes()};
+      host.retainedPayloadBytes(),
+      [&host](const vortex::CapabilityCell capability,
+              const std::uint64_t offset, std::vector<std::byte> bytes) {
+        return staged(host.stageWrite(capability, offset, std::move(bytes)),
+                      "write");
+      },
+      [&host](const vortex::CapabilityCell capability,
+              std::vector<std::byte> bytes) {
+        return staged(host.stageAppend(capability, std::move(bytes)), "append");
+      },
+      [&host](const vortex::CapabilityCell capability) {
+        return staged(host.stageSync(capability), "sync");
+      }};
 }
 
 auto driveToCompletion(ScriptRunner &runner, ScriptRunResult first,
