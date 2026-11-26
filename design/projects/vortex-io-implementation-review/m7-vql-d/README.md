@@ -4,4 +4,4 @@ Brief: [`brief.md`](brief.md). Critics: VQL, Vortex and zigzag (per the roadmap)
 
 | round | target     | VQL | Vortex | zigzag | outcome     |
 | ----- | ---------- | --- | ------ | ------ | ----------- |
-| r1    | `301b9a8d` |     |        |        | in progress |
+| r1    | `301b9a8d` | 0/2/4 | 0/2/3 | 0/2/3 | NOT CONVERGED; fixed per [`r1-disposition.md`](r1-disposition.md) |
