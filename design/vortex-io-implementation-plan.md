@@ -1371,26 +1371,40 @@ M7-VQL-b implementation notes and deliberate deferrals:
   rule. A runner torn down does not wait for a close to finish. `admitOpen` keeps its profile gate
   (an actor profile refuses it as a value). The off-owner rule is unchanged: it runs on the owner
   thread, and the file is opened on a worker.
-- Script deadline. `ScriptRunner::setScriptTimeout` (and `setClock`) give each script started
-  afterwards a deadline; `expireIfDue(token)` abandons a parked script past it: waiter and route
-  dropped, the awaited request asked to stop (`retireRequest`), its requests released, files closed,
-  diagnostic `VQL_SCRIPT_TIMEOUT` with the action's index. `driveToCompletion` calls it on every
-  idle turn. `vquery --script-timeout MS|off` defaults to a named 30 s (`defaultScriptTimeout`, with
-  its rationale at the constant) pending `system://settings` in M8; `:timeout` shows and sets it.
+- Script deadline. `ScriptRunner::setScriptTimeout` give each script started afterwards a deadline;
+  `expireIfDue(token)` abandons a parked script past it: waiter and route dropped, the awaited
+  request asked to stop (`cancelRequest`, before the program is dropped, so a rollback cannot orphan
+  it first), its requests released, files closed, diagnostic `VQL_SCRIPT_TIMEOUT` with the action's
+  index. `driveToCompletion` calls it on every idle turn. `vquery --script-timeout MS|off` defaults
+  to a named 30 s (`defaultScriptTimeout`, with its rationale at the constant) pending
+  `system://settings` in M8; `:timeout` shows and sets it.
 - `lastResults`. A script that holds an action clears the saved results before it runs, because its
   first admission retires the rows before it; `:save`, `-o` and `--in-place` then find none rather
   than cells that no longer exist.
 - Running detached reads. A request a script started and nothing awaited is kept in the runner's
-  finished list and retired when a later admission finds it terminal; a runner destroyed first
-  leaves it as it always left a running request.
+  finished list and retired (before the next script's first admission) once it is terminal. A runner
+  destroyed first retires everything with `force`: a running request or a close just admitted is
+  orphaned, never cancelled, so it runs to its own end and its terminal is dropped and its slot
+  freed; nothing is left in the service's accounting. (The first cut said the request was
+  "forgotten"; it was not, and held a slot for good.)
+- A close is not budget-refusable. `IoService::admit` skips the `maxRequests` count for a close
+  operation: a close is the request that returns a descriptor, so refusing it at a full budget
+  strands what it would free. It stays bounded by one close per open endpoint (`Conflict`). A close
+  refused for any other reason is kept and retried at the next reap.
+- One clock. The runner reads `IoHost::now()` (the service's clock); `ScriptRunner::setClock` is
+  gone. A `within` longer than the script timeout extends the script's deadline to the request's
+  deadline plus the timeout, so the request's `TimedOut` value, not `VQL_SCRIPT_TIMEOUT`, is what
+  the script sees. A backend that ignores a stop request never reports `TimedOut`; the script
+  timeout is then the bound. `expireDue` walks an ordered deadline index (`O(due)` per pump, not
+  `O(maxRequests)`).
 
 Deferred in M7-VQL-b:
 
 - Matching outcome fields in script syntax (`outcome(complete($payload, ..), ..)` of the examples
   document): fields are read with path functions instead.
 - A deterministic end-to-end timeout test with a real file: a regular file never blocks, so expiry
-  is proved on injected clocks (service, runner and driver) and the CLI is tested for the flag, the
-  REPL command and a script that finishes inside its deadline.
+  is proved on one injected service clock and the CLI is tested for the flag, the REPL command and a
+  script that finishes inside its deadline.
 - Closing a capability the script did not open, and closing one early from the script.
 - A read bound's `within` in a unit finer than milliseconds; `within` on `open`, whose deadline is
   the host's open deadline (`FileReadHostOptions::openDeadline`).
