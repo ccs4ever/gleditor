@@ -307,7 +307,22 @@ Argued:
   Still a coverage rule, not taint: derived text is allowed once covered. Handle rows (capability,
   request, receipt) are refused on any line. Price: an exposure whose outcome was retired before it
   was captured cannot be covered afterwards, so it refuses persistence for the rest of the session;
-  the author captures inside the script that reads, or restarts the session.
+  the author captures inside the script that reads, runs `:forget` (below), or restarts the session.
+- **Size of the exposure set (gate round 2).** The runner stores one `PayloadRange` per distinct
+  exposed range (a few words, never the text), so the set grows with the number of distinct payloads
+  the session turns into text, and `expose` and each persistence check are linear in it. A session
+  that reads a large file in many small pieces and prints each piece pays that; ranges are not
+  coalesced, because coverage is asked per range and a coalesced interval would hide which exposure
+  an uncovered byte belongs to. `:forget` drops the uncovered part of the set.
+- **`:forget` (owner decision 2026-11-26, gate round 2).** The REPL command that gets a session out
+  of a poisoned persist rule. Since the rule is coverage and not taint, the runner cannot tell which
+  variable carries uncaptured text, so `ScriptRunner::forget()` unbinds every session variable that
+  is not a runtime I/O handle (capabilities, outcomes, receipts hold no text of their own and stay;
+  reading a payload through one exposes it afresh and the rule counts it again) and removes the
+  uncovered exposures, keeping the covered ones. It prints what it unbound, clears the last result
+  rows (they may be built from the dropped text), and does nothing when every exposure is covered.
+  Price: a covered text variable the author still wanted is unbound too, and is rebuilt by a `let`;
+  chosen over guessing, since a wrong guess lets uncaptured bytes reach a store.
 - **Evaluated at script end, not at persist time.** Translations may be evicted later (the
   coordinator evicts committed translations least recently hit first,
   `capture_coordinator.cpp:769-792`); a decision made at the end of the script is a fact about that
@@ -1298,6 +1313,20 @@ whose worker never finishes (a sink that never returns) keeps its graph: the cel
   record); the same check makes its stale name typed, which is what the finding needed.
 - **`:reconcile`** parses its decision as a whole.
 
+### 18.8 Gate round 2 fixes
+
+- **The stale marker is a tagged cell** (`IoCellTag::StaleBinding`, `makeStaleBindingCell`), not a
+  text cell, so no reader that takes an untagged cell for text can mistake it for a value. A write
+  source, a submit capability, a capture's outcome, an offset or length, and a persisted row each
+  refuse it by tag with `VQL_IO_STALE_BINDING` (the row through the handle refusal). It is minted
+  after the constructor's Submit-hook check and, at destruction, any variable still naming it (or a
+  freed handle) is unbound before the cell is freed.
+- **Names are recorded before anything is freed.** `noteBindings()` runs before every retirement and
+  at `run`, `resume`, in each relation provider and after every plain line (the driver calls it), so
+  a name a plain `let` made is tracked. The provider wrapper also refuses an argument whose recorded
+  incarnation no longer matches, so a slot reused during a pump inside one script cannot alias.
+- **`:forget`**, see §4.7.
+
 ## 19. Deferrals
 
 - `message` and frame modes; per-row, per-loop and `for`-body effects (until an explicit gate).
@@ -1334,3 +1363,6 @@ The open questions of the first draft are answered; each ruling is applied above
 - **Q6, timeout or `~ScriptRunner` mid-capture.** Abandon and pin (§11).
 - **Q7, `sync()`.** In scope (§4.4).
 - **Q8, append mode.** `O_APPEND` in scope (§4.3).
+- **Q9, escaping a poisoned session (2026-11-26, gate round 2).** Add the REPL command `:forget`,
+  which drops the uncovered exposures and unbinds every session variable that is not a runtime
+  handle (§4.7).
