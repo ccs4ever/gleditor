@@ -677,17 +677,19 @@ TEST(VqlIoCaptureTest, TheCaptureHostHoldsNoRunOnceTheNextScriptAdmits) {
 // ---- What the result slice can carry (design §18 check (a))
 // ------------------------
 
-TEST(VqlIoCaptureTest, ACapturedCellNamesNoStoreSoOnlyAQuotedSpanCarriesIt) {
+// The arena alone cannot say where a captured cell's bytes live: it has no
+// store behind a bare makeCell(PrimediaSpan) cell, so `quotedContent` answers
+// nothing. vquery's resultRows supplies the capture store for such a cell
+// (vquery_e2e_test pins that through the CLI); this pins both halves of what
+// it relies on: the arena stays silent, and a Store over the author's
+// permascroll can carry the span without a copy.
+TEST(VqlIoCaptureTest, AnArenaCannotQuoteACapturedCellButTheCaptureStoreCan) {
   CaptureWorld w;
   const auto path  = w.put("in.txt", "quoted into a result");
   const auto cells = w.captured(open(path, "f") + read("f", "0, 64", "r") +
                                 captureOf("r", "c"));
   ASSERT_EQ(cells.size(), 1U);
-  // The arena has no store behind this cell, so resultRows' quotedContent()
-  // finds nothing and the row would be typed in again.
   EXPECT_FALSE(w.arena.quotedContent(cells.front()).has_value());
-  // But the span is in the author's permascroll, and a Store over that
-  // permascroll can quote it: writeResultSlice carries it without a copy.
   const auto span = w.arena.contentOf(cells.front()).front();
   xanadu::Store output(w.perma);
   const xanadu::ResultRow row{
@@ -704,6 +706,194 @@ TEST(VqlIoCaptureTest, ACapturedCellNamesNoStoreSoOnlyAQuotedSpanCarriesIt) {
   ASSERT_EQ(back.front().quote->spans.size(), 1U);
   EXPECT_EQ(back.front().quote->spans.front(), span);
   EXPECT_EQ(w.appendedBytes(), appended);
+}
+
+// ---- Persistability (design §4.7, criterion 9) -----------------------------
+
+/// `read("f", ...)` then a row that exposes the payload as text.
+const auto exposePayload = std::string{"return io_payload($r)"};
+
+TEST(VqlIoPersistabilityTest, NothingIsKnownBeforeAScriptHasFinished) {
+  CaptureWorld w;
+  EXPECT_FALSE(w.runner->persistability().has_value());
+}
+
+TEST(VqlIoPersistabilityTest, AnUncapturedExposureNeedsCapture) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "transient bytes");
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + exposePayload)
+                  .has_value());
+  const auto verdict = w.runner->persistability();
+  ASSERT_TRUE(verdict.has_value());
+  EXPECT_FALSE(verdict->persistable());
+  EXPECT_EQ(verdict->exposed, 1U);
+  EXPECT_EQ(verdict->uncovered, 1U);
+}
+
+TEST(VqlIoPersistabilityTest, ACapturedPayloadMayBeExposedAndPersisted) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "captured then shown");
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
+                    captureOf("r", "c") + exposePayload)
+                  .has_value());
+  const auto verdict = w.runner->persistability();
+  ASSERT_TRUE(verdict.has_value());
+  EXPECT_TRUE(verdict->persistable());
+  EXPECT_EQ(verdict->exposed, 1U);
+}
+
+TEST(VqlIoPersistabilityTest, TheCaptureMustHappenBeforeTheScriptEnds) {
+  // The verdict is the run's, taken when it ends: a later script's capture
+  // does not make an earlier script's rows persistable.
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "late capture");
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + exposePayload)
+                  .has_value());
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
+                    captureOf("r", "c") + "return 1")
+                  .has_value());
+  EXPECT_TRUE(w.runner->persistability()->persistable());
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + exposePayload)
+                  .has_value());
+  EXPECT_FALSE(w.runner->persistability()->persistable())
+      << "a second read is a new observation, uncaptured";
+}
+
+TEST(VqlIoPersistabilityTest, PartialCoverageStillNeedsCapture) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "0123456789abcdef");
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
+                    captureOf("r", "c", "0, 4") + exposePayload)
+                  .has_value());
+  const auto verdict = w.runner->persistability();
+  ASSERT_TRUE(verdict.has_value());
+  EXPECT_FALSE(verdict->persistable())
+      << "the other twelve bytes were never captured";
+  EXPECT_EQ(verdict->uncovered, 1U);
+}
+
+TEST(VqlIoPersistabilityTest, TwoCapturesThatTogetherCoverThePayloadCover) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "0123456789");
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
+                    captureOf("r", "a", "0, 4") + captureOf("r", "b", "4, 6") +
+                    exposePayload)
+                  .has_value());
+  EXPECT_TRUE(w.runner->persistability()->persistable());
+}
+
+TEST(VqlIoPersistabilityTest, DerivedTextFollowsTheCoverageOfWhatItCameFrom) {
+  CaptureWorld w;
+  const auto path    = w.put("in.txt", "derive me");
+  const auto derived = std::string{"return string(io_payload($r))"};
+  ASSERT_TRUE(
+      w.run(open(path, "f") + read("f", "0, 64", "r") + derived).has_value());
+  EXPECT_FALSE(w.runner->persistability()->persistable())
+      << "a value computed from uncaptured text was still exposed as text";
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
+                    captureOf("r", "c") + derived)
+                  .has_value());
+  EXPECT_TRUE(w.runner->persistability()->persistable());
+}
+
+TEST(VqlIoPersistabilityTest, ReturningAnOutcomeNamesItsPayloadToo) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "named by handle");
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + "return $r")
+                  .has_value());
+  EXPECT_FALSE(w.runner->persistability()->persistable());
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
+                    captureOf("r", "c") + "return $r")
+                  .has_value());
+  EXPECT_TRUE(w.runner->persistability()->persistable());
+}
+
+TEST(VqlIoPersistabilityTest,
+     ReadingWithoutTurningTheBytesIntoTextIsNoExposure) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "read, never shown");
+  ASSERT_TRUE(
+      w.run(open(path, "f") + read("f", "0, 64", "r") + "return io_tag($r)")
+          .has_value());
+  const auto verdict = w.runner->persistability();
+  ASSERT_TRUE(verdict.has_value());
+  EXPECT_EQ(verdict->exposed, 0U);
+  EXPECT_TRUE(verdict->persistable())
+      << "no payload became text, so there is nothing to capture";
+}
+
+TEST(VqlIoPersistabilityTest, ACaptureOfARecordAndAServiceOutcomeCoverAlike) {
+  for (const std::size_t retained :
+       {xanadu::vortex::FileReadHostOptions::defaultBudgetBytes,
+        std::size_t{1}}) {
+    SCOPED_TRACE(retained);
+    CaptureWorld w{retained};
+    const auto path = w.put("in.txt", "either kind of outcome");
+    ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + exposePayload)
+                    .has_value());
+    EXPECT_FALSE(w.runner->persistability()->persistable());
+    ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
+                      captureOf("r", "c") + exposePayload)
+                    .has_value());
+    EXPECT_TRUE(w.runner->persistability()->persistable());
+  }
+}
+
+TEST(VqlIoPersistabilityTest, WithoutACaptureStackAnyExposureIsUncovered) {
+  // A host that never attached one: the script cannot capture and nothing it
+  // exposed is covered.
+  CaptureWorld w{xanadu::vortex::FileReadHostOptions::defaultBudgetBytes,
+                 false};
+  const auto path = w.put("in.txt", "no stack");
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + exposePayload)
+                  .has_value());
+  EXPECT_FALSE(w.runner->persistability()->persistable());
+  ASSERT_TRUE(w.run(open(path, "f") + "return io_tag($f)").has_value());
+  EXPECT_TRUE(w.runner->persistability()->persistable());
+}
+
+TEST(VqlIoPersistabilityTest, TheCaptureStackIsBuiltOnlyWhenAScriptCaptures) {
+  CaptureWorld w{xanadu::vortex::FileReadHostOptions::defaultBudgetBytes,
+                 false};
+  int built  = 0;
+  auto ports = xanadu::vql::fileScriptPorts(*w.host);
+  ports.ensureCaptureHost =
+      [&]() -> std::expected<xanadu::vortex::CaptureHost *, std::string> {
+    ++built;
+    return &w.host->attachCapture(
+        *w.sink, w.publisher.get(),
+        CaptureHostOptions{.journalPath = w.base / "capture.journal"});
+  };
+  w.runner.reset();
+  w.runner = std::make_unique<ScriptRunner>(w.engine, w.vm, std::move(ports));
+  const auto path = w.put("in.txt", "lazy");
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + exposePayload)
+                  .has_value());
+  EXPECT_EQ(built, 0) << "a plain read builds no journal";
+  EXPECT_FALSE(w.runner->persistability()->persistable());
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
+                    captureOf("r", "c") + exposePayload)
+                  .has_value());
+  EXPECT_EQ(built, 1);
+  EXPECT_TRUE(w.runner->persistability()->persistable());
+}
+
+TEST(VqlIoPersistabilityTest, AStackThatCannotBeBuiltIsTheTypedRefusal) {
+  CaptureWorld w{xanadu::vortex::FileReadHostOptions::defaultBudgetBytes,
+                 false};
+  auto ports = xanadu::vql::fileScriptPorts(*w.host);
+  ports.ensureCaptureHost =
+      []() -> std::expected<xanadu::vortex::CaptureHost *, std::string> {
+    return std::unexpected("the capture store is unreadable");
+  };
+  w.runner.reset();
+  w.runner = std::make_unique<ScriptRunner>(w.engine, w.vm, std::move(ports));
+  const auto path = w.put("in.txt", "x");
+  const auto result =
+      w.run(open(path, "f") + read("f", "0, 64", "r") + captureOf("r", "c"));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code, "VQL_IO_CAPTURE_UNAVAILABLE");
+  EXPECT_NE(result.error().message.find("unreadable"), std::string::npos);
 }
 
 } // namespace

@@ -2380,11 +2380,12 @@ there fails the script before an earlier statement runs. The bounds of a staged 
 ceiling, whether the capability is a file) are checked when that action stages its read, so a later
 action that exceeds them fails the script after the earlier actions have run (reads are idempotent).
 
-**Persistence.** The rows of a script that ends in an action hold bytes the author never captured.
-`vquery` refuses `-o`, `--in-place` and `:save` for them with `VQL_IO_PERSIST_NEEDS_CAPTURE` and
-writes nothing; a later query that does not end in an action is saved as before. A capture command
-that routes the bytes through `CaptureCoordinator` is deferred. `def` of `submit`, `await` or
-`read_bytes` is refused with `VQL_IO_QUERY_CONTEXT`, the code a call of them gets.
+**Persistence.** The rows of a script that turned a payload into text hold bytes the author may
+never have captured. `vquery` refuses `-o`, `--in-place` and `:save` for such a script with
+`VQL_IO_PERSIST_NEEDS_CAPTURE` and writes nothing unless a committed capture covers every payload
+the script exposed (the rule is under "Capturing a read" below); a later query that does not end in
+an action is saved as before. `def` of `submit`, `await` or `read_bytes` is refused with
+`VQL_IO_QUERY_CONTEXT`, the code a call of them gets.
 
 **Concurrent scripts.** One runner may hold several parked scripts. Each keeps its own actions (the
 submission sum and request), so resuming them in any order binds each token to its own request. The
@@ -2501,8 +2502,8 @@ return io_tag($w), io_bytes($w), io_tag($d)
   `TimedOut` (a prefix may have landed: `io_uncertain($r)` is `true` or `false`), `Unknown`,
   `Rejected`. No outcome of a write has a payload. `io_uncertain` answers nothing for a tag that has
   no such field. A named write outcome is an owned record like a named read's.
-- Rows of a script that wrote are still not persisted by `-o`, `--in-place` or `:save`
-  (`VQL_IO_PERSIST_NEEDS_CAPTURE`); only capture (M7-VQL-c C3-C4) changes that.
+- A script that only wrote exposes no payload as text, so its rows persist like any other (M7-VQL-c
+  C4; see the persistence rule below).
 
 **Capturing a read (M7-VQL-c C3).** Input is transient unless a script explicitly makes it durable.
 `capture` is its own statement, not a `submit`, because a capture is three requests (an append to
@@ -2543,8 +2544,29 @@ return io_tag($c), io_captured($c)
   never cancelled and never finished in the background, and the coordinator pins the capture's
   intervals by phase for `reconcile`. The capture journal is recovered on the first capture of a
   session, not at start.
-- Rows of a script that captured are still not persisted by `-o`, `--in-place` or `:save`
-  (`VQL_IO_PERSIST_NEEDS_CAPTURE`); lifting that is C4.
+
+**Persisting what was captured (M7-VQL-c C4).** Each script run keeps an **exposure set**: the range
+of every payload it turned into text, whether through `io_payload`, as an action's final row, or by
+returning an outcome that retained a payload. When the script ends, the runner asks the capture
+coordinator whether committed captures hold every byte of every range; `-o`, `--in-place` and
+`:save` accept the run's rows only if so (`ScriptRunner::persistability()`).
+
+- **Coverage, not flow tracking.** A row derived from covered input (`string(io_payload($r))`) may
+  be persisted; the same row over an uncaptured payload, or over only part of one, is
+  `VQL_IO_PERSIST_NEEDS_CAPTURE` naming how many exposures are uncovered. Derived or duplicated text
+  persists as typed text (a second copy of the bytes); the cells of `io_captured($c)` persist as
+  quotes of the permanent span.
+- A script that exposed nothing (a write-only script, a read read only for its `io_tag`) is
+  vacuously covered and persists.
+- The decision is a fact about the run, taken when it ends. A capture made by a later script does
+  not change it.
+- `vquery` builds the capture stack on the first script that holds a `capture`: a dedicated store
+  and journal in `--capture-dir`, by default `$XDG_DATA_HOME/xuzz/capture/<key>/` beside the
+  permascroll's `$XDG_DATA_HOME/xuzz/permascroll/<key>/` (for a `--permascroll DIR` outside that
+  layout, `DIR.capture`). A plain read starts none. A store that cannot be opened is
+  `VQL_IO_CAPTURE_UNAVAILABLE` naming the directory.
+- A saved captured row quotes the permanent span through the capture store; `--in-place` writes a
+  cell holding that span, not a retyped copy.
 
 ## 5. Memory Management & Topological Garbage Collection
 
@@ -2817,6 +2839,7 @@ table.
 | 16.9    | `current` | 2026-11-26 | **M7-VQL-c design (4.13), nothing built**: script write effects (`write_bytes`, `append_bytes`, `sync`, `open(...) for write\|append` behind a host write grant) and explicit `capture($r)`, whose receipt and `io_captured($c)` cells quote the author's permascroll; `VQL_IO_PERSIST_NEEDS_CAPTURE` is lifted only for a run whose exposed payload ranges are all covered. Specified in [vortex-io-m7-vql-c.md](vortex-io-m7-vql-c.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 16.10   | `current` | 2026-11-26 | **M7-VQL-c C2: write effects** (4.13): `open(p) for write\|append [create]`, and `write_bytes(off, src)`, `append_bytes(src)` and `sync()` as `submit` descriptions (so `within`, `as`, handles and `cancel` apply); `src` is a text cell or an outcome (byte for byte); `io_uncertain($r)` joins the outcome functions; `write_bytes`, `append_bytes` and `sync` become reserved call names; `vquery --io-write-root DIR` (repeatable, default deny), `--io-write-bytes N` and `:open -w\|-wc\|-a\|-ac`; new diagnostic `VQL_IO_WRITE_SOURCE`. No existing program changes meaning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | 16.11   | `current` | 2026-11-26 | **M7-VQL-c C3: capture effects** (4.13): `effect { capture($r[, off, len]) } as $c` over an outcome (a service outcome or an owned record) lowers to a relation loop of begin, arm and step around one `Await`; the value is the receipt (`io_tag` `CaptureReceipt`) or the refusing or failed outcome, and `io_captured($c)` answers the cells whose content is the permanent permascroll span. New diagnostics `VQL_IO_CAPTURE_UNAVAILABLE` and `VQL_IO_CAPTURE_SOURCE`; `capture` is contextual (not reserved). Persist refusal unchanged.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 16.12   | `current` | 2026-11-26 | **M7-VQL-c C4: capture-covered persistence** (4.13): `-o`, `--in-place` and `:save` accept a script's rows when every payload range the script exposed as text is covered by a committed capture (`ScriptRunner::persistability()`); partial or missing coverage keeps `VQL_IO_PERSIST_NEEDS_CAPTURE`; derived text persists once covered; a script that exposed nothing (write-only) persists. `vquery --capture-dir DIR` (default beside the permascroll) builds the capture stack on the first `capture`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix

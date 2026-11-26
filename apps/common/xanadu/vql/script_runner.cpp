@@ -154,6 +154,9 @@ struct ScriptRunner::Activation final : vortex::FrontendActivation {
   /// that ended one before any request), so each ending can abandon or free
   /// them through the capture host.
   std::vector<CellRef> captures;
+  /// Every payload range this script turned into text (design §4.7), the
+  /// range and not the text: coverage is a question about bytes.
+  std::vector<vortex::PayloadRange> exposures;
   /// Each open outcome the script's `open` actions produced, with whether it
   /// minted a capability, so a later read through a failed open can say which
   /// open failed and how.
@@ -596,6 +599,10 @@ void ScriptRunner::installProviders() {
               return std::optional<RelationAnswer>{std::nullopt};
             const auto text = payloadText(*outcome);
             if (!text) return std::unexpected(text.error().message);
+            if (*text) {
+              if (const auto gate = gated(*outcome); gate && gate->payload)
+                expose(*gate->payload);
+            }
             return answerOnce(
                 query, *text ? std::optional{query.arena.makeCell(**text)}
                              : std::nullopt);
@@ -943,6 +950,12 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
       continue;
     }
     if (action->kind == IoEffectStatement::Kind::Capture) {
+      if (ports_.ensureCaptureHost) {
+        if (const auto built = ports_.ensureCaptureHost(); !built)
+          return ScriptRunResult::failed(
+              diagnose(vortex::frontend_codes::vqlCaptureUnavailable,
+                       built.error(), index));
+      }
       if (captureHost() == nullptr)
         return ScriptRunResult::failed(
             diagnose(vortex::frontend_codes::vqlCaptureUnavailable,
@@ -1542,6 +1555,26 @@ auto ScriptRunner::payloadText(const vortex::OutcomeCell outcome) const
   return std::optional<std::string>{std::move(text)};
 }
 
+void ScriptRunner::expose(const vortex::PayloadRange &range) {
+  if (current_ == nullptr) return;
+  auto &seen = current_->exposures;
+  if (std::ranges::find(seen, range) == seen.end()) seen.push_back(range);
+}
+
+auto ScriptRunner::assess(const Activation &activation) const
+    -> Persistability {
+  // The lookup, never the builder: a script that captured nothing must not
+  // start a journal just to learn that nothing is covered.
+  auto *const host = captureHost();
+  Persistability verdict{.exposed = activation.exposures.size()};
+  for (const auto &range : activation.exposures) {
+    const bool covered =
+        host != nullptr && host->coordinator().spansFor(range).has_value();
+    if (!covered) ++verdict.uncovered;
+  }
+  return verdict;
+}
+
 auto ScriptRunner::finish(const std::shared_ptr<Activation> &activation,
                           const ProgramResult &done) -> ScriptRunResult {
   // However it ends, the script's actions move to the finished list: their
@@ -1579,6 +1612,24 @@ auto ScriptRunner::finish(const std::shared_ptr<Activation> &activation,
     if (!text) return ScriptRunResult::failed(text.error());
     if (*text) rows.push_back(session_.coordinator().arena().makeCell(**text));
   }
+  // An outcome returned as a row names its payload to whoever reads the row,
+  // and an action's final row is followed by the payload text itself: both
+  // expose it. A write's outcome, which retained none, exposes nothing.
+  {
+    const auto &arena = session_.coordinator().core().arena();
+    for (const auto row : done.rows) {
+      const auto incarnation = arena.incarnationOf(row);
+      if (!incarnation) continue;
+      const vortex::OutcomeCell named{row, *incarnation};
+      if (!vortex::ioOutcomeTag(arena, named)) continue;
+      if (const auto gate = gated(named); gate && gate->payload) {
+        auto &seen = activation->exposures;
+        if (std::ranges::find(seen, *gate->payload) == seen.end())
+          seen.push_back(*gate->payload);
+      }
+    }
+  }
+  persistability_ = assess(*activation);
   return ScriptRunResult::completed(std::move(rows));
 }
 

@@ -137,11 +137,31 @@ struct ScriptIoPorts {
   /// can capture nothing and the script stops with
   /// `VQL_IO_CAPTURE_UNAVAILABLE` before anything runs.
   std::function<vortex::CaptureHost *()> captureHost;
+  /// Builds the capture stack the first time a script holding a `capture`
+  /// is about to run, so a host pays for a journal, a store and a recovery
+  /// only when one is asked for. `captureHost` stays a plain lookup (it runs
+  /// on every admission and must not build anything); the string is why the
+  /// stack could not be built, which the script sees as
+  /// `VQL_IO_CAPTURE_UNAVAILABLE`. Empty: nothing to build.
+  std::function<std::expected<vortex::CaptureHost *, std::string>()>
+      ensureCaptureHost;
 };
 
 /// The ports over a `FileReadHost`: reads are staged on the file endpoint
 /// adapter, and a stage the adapter refuses is `VQL_IO_EFFECT_ARGUMENT`.
 [[nodiscard]] auto fileScriptPorts(vortex::FileReadHost &host) -> ScriptIoPorts;
+
+/// Whether the rows the most recent finished script ended with may be made
+/// durable (design §4.7). Every payload the script turned into text is an
+/// exposure; one is covered when a committed capture holds all of its bytes.
+/// A script that exposed nothing is vacuously covered.
+struct Persistability {
+  std::size_t exposed{};
+  std::size_t uncovered{};
+  [[nodiscard]] constexpr bool persistable() const noexcept {
+    return 0 == uncovered;
+  }
+};
 
 /// A woken token and why it came back.
 struct ScriptWake {
@@ -217,6 +237,14 @@ public:
 
   void wake(vortex::FrontendToken token, vortex::FrontendWake why) override;
 
+  /// What the most recent script to finish exposed and what a capture covers,
+  /// decided when it ended (a fact about that run, not about whatever the
+  /// coordinator holds later). Nullopt before any script has finished.
+  [[nodiscard]] auto persistability() const noexcept
+      -> std::optional<Persistability> {
+    return persistability_;
+  }
+
   /// Script-owned outcome records alive now (named outcomes whose request was
   /// retired at once), and the physical payload bytes their leases pin.
   [[nodiscard]] auto ownedRecordCount() const noexcept -> std::size_t {
@@ -270,6 +298,11 @@ private:
   /// through the bridge.
   [[nodiscard]] auto gated(vortex::OutcomeCell outcome) const
       -> std::expected<vortex::GatedOutcome, vortex::FrontendDiagnostic>;
+  /// Note that the running script turned @p range into text, once.
+  void expose(const vortex::PayloadRange &range);
+  /// Count @p activation's exposures against what the capture host covers.
+  [[nodiscard]] auto assess(const Activation &activation) const
+      -> Persistability;
   /// `io_own_outcome`: copy the finished outcome a named read yielded into a
   /// script-owned record and retire its request (§12.1).
   [[nodiscard]] auto ownOutcome(const zigzag::vortex::RelationQuery &query)
@@ -410,6 +443,7 @@ private:
   /// reason as finishedRecords_: a caller's rows may be the receipt.
   std::vector<zigzag::CellRef> finishedCaptures_;
   std::size_t retainedBytes_{};
+  std::optional<Persistability> persistability_;
   std::vector<std::string> providers_;
   /// The whole token, so a waiter dropped with its request's cells can still
   /// tell its caller (an Abandoned wake) that the script is dead.

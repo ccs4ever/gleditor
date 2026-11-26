@@ -1,9 +1,9 @@
 # M7-VQL-c: VQL write and capture
 
-Status: design note; stages C1 (adapter and host), C1b (owned records), C2 (VQL writes) and C3
-(capture wiring) of §18 are built, the rest is not. It specifies the third M7-VQL slice of the
-[Vortex I/O implementation plan](vortex-io-implementation-plan.md): script **write effects** to a
-file endpoint, and **capture**, the explicit act that makes a script's input durable so results
+Status: design note; stages C1 (adapter and host), C1b (owned records), C2 (VQL writes), C3 (capture
+wiring) and C4 (persistence) of §18 are built, the rest is not. It specifies the third M7-VQL slice
+of the [Vortex I/O implementation plan](vortex-io-implementation-plan.md): script **write effects**
+to a file endpoint, and **capture**, the explicit act that makes a script's input durable so results
 built from it may be persisted. It extends [`vql-query-language.md`](vql-query-language.md) §4.13
 and changes no on-disk format and no core file (§14 lists the proposals considered and refused).
 
@@ -800,7 +800,7 @@ expert, reports under `design/projects/vortex-io-implementation-review/m7-vql-c/
 | C1b   | Owned records (§12.1): `OwnedOutcome::copy`, the runner's owned-record table with leases and `retainedPayloadBytes`, early `retire` of a named request, `io_payload` and the gate reading records, `auditLanguageValue` knowing the `Owned` field; independent of writes and testable on reads alone | criteria 14, 15              |
 | C2    | VQL writes (built, §18.3): grammar, reserved names, compile, `ScriptRunner::admit` decodes `write_bytes`/`append_bytes`/`sync`, `open ... for`, `io_uncertain`, `vquery --io-write-root`/`--io-write-bytes`/`:open -w -a`                                                                            | criteria 1, 5, 12 for writes |
 | C3    | Capture core wiring: `FileReadHost`-sibling capture host (`CaptureHost` over `CaptureCoordinator`, `CapturePublisher`, `UserPermascrollCaptureSink`), `CaptureCoordinator::spansFor`, providers, bytecode loop, `capture`, `io_captured`, `io_tag` for receipts                                      | criteria 6-8, 12             |
-| C4    | Persistence: exposure set, `ScriptRunner::persistability()`, `vquery` consults it, captured cells through `resultRows`/`writeResultSlice` (quote path for cells with no `store`), `--capture-dir`                                                                                                    | criterion 9                  |
+| C4    | Built (§18.5). Persistence: exposure set, `ScriptRunner::persistability()`, `vquery` consults it, captured cells through `resultRows`/`writeResultSlice` (quote path for cells with no `store`), `--capture-dir`                                                                                     | criterion 9                  |
 | C5    | Recovery surface: lazy `recover()`/`resumePublications()`, `:captures`, `:reconcile`, timeout and destructor behaviour, crash tests, leak tests, UX journeys, docs (§4.13, plan notes, `vql-conformance.md`)                                                                                         | criteria 10, 11, 13          |
 
 C1b needs only M7-VQL-b and may land before or alongside C1; C3's `capture($r)` and C4's exposure
@@ -1076,6 +1076,56 @@ are the capture's. They are not identified: the coordinator mints an endpoint, a
 spec cell per append and never frees them, the append and the two durable steps are service requests
 whose graphs the service reaps, and the relation answers a loop mints each pass are program cells.
 Criterion 11 for captures needs that accounting; C3 does not claim it.
+
+### 18.5 Stage C4 as built
+
+C4 is the persist rule and the `vquery` capture stack; `:captures`, `:reconcile`, the crash and leak
+suites and the UX journeys stay C5. What landed, with the places it differs from the text above:
+
+- **`ScriptRunner::persistability()`** answers `Persistability{exposed, uncovered}` (`persistable()`
+  is `uncovered == 0`) for the most recent script to finish, nullopt before any has. The runner
+  records one exposure per distinct `PayloadRange` in three places: `io_payload` returning text, the
+  final row of an action (the payload text row `finish` appends), and any result row that is an
+  outcome retaining a payload (so `return $r` is an exposure, which keeps the pre-C4 refusals of
+  `return $r` and `return io_payload($r)` true until a capture covers them). A write's source
+  outcome read as bytes is not an exposure, and `io_tag` or `io_bytes` of an outcome is not one. The
+  verdict is taken in `finish`, once per script.
+- **Coverage asks `spansFor`, not `translationFor`.** `translationFor` answers one contiguous span
+  and refuses a range captured over two non-adjacent appends; `spansFor` answers any union of
+  committed slots and is the question "is every byte captured". Pending, pinned and evicted
+  translations are uncovered either way.
+- **Write-only scripts persist.** An empty exposure set is vacuously covered (§4.7), so a script
+  that only wrote now passes `-o`, `--in-place` and `:save`; the C2 test that pinned the opposite
+  (`AWritingScriptsRowsAreStillNotPersisted`) became
+  `AWritingScriptsRowsPersistBecauseItExposedNoPayload`.
+- **The capture stack is built lazily by a new port, not by `captureHost`.** `captureHost` runs on
+  every admission and at every verdict, so it stays a plain lookup.
+  `ScriptIoPorts::ensureCaptureHost` runs in `run`'s pre-flight of a script holding a `capture` and
+  returns the host or a reason (`VQL_IO_CAPTURE_UNAVAILABLE` carries it). `vquery` builds there:
+  create the directory, open `loadStore` over the capture directory when it holds `ops.nodes` (else
+  a new `Store` over the author's permascroll), `UserPermascrollCaptureSink`, `CapturePublisher`,
+  then `FileReadHost::attachCapture` with the journal in the same directory. The sink, store and
+  publisher are declared before the `FileReadHost` in `main`, so they outlive its workers. The
+  coordinator's own `recover()` and `resumePublications()` stay lazy on the first capture
+  (`CaptureHost::begin`), as in C3.
+- **`--capture-dir DIR`** moves the store; the default is `$XDG_DATA_HOME/xuzz/capture/<key>/`
+  derived from the permascroll's own storage directory (`config().storageDir`) by replacing the
+  `permascroll` path component, and `DIR.capture` beside a `--permascroll` outside that layout. It
+  is also in `reorderArgs`'s value-taking list, which every new value flag must join.
+- **`resultRows` quotes a captured cell against the capture store** when `quotedContent` answers
+  nothing and the cell's content is non-scratch spans, as §18.4 finding 5 planned. With a primary
+  store loaded `quotedContent` falls back to that store, which carries the same local spans.
+- **`--in-place` needed a second vquery-local change.** C3's note said the `resultRows` change is
+  all `promote` needs. It is not: `--in-place` promotes the result cells directly, and a captured
+  cell is linked on the receipt's range rank, so promotion's reachable walk reaches the receipt and
+  the runtime I/O graph and refuses with `RuntimeOnlyState`, silently ("the query minted no cells").
+  `vquery` now promotes, for a result on the range rank holding one non-scratch span, a detached
+  cell over that span, which the store writes as a cell holding the captured span (no retyped copy);
+  and says why when promotion refuses (`promoteOrRefuse`, a message on stderr).
+- **The refusal text counts**: "turned N payload(s) it read into text without capturing all of it".
+  The exit code and the typed code are unchanged.
+- **Deferred to C5**: the capture store is built lazily but never read by a command; `:captures` and
+  `:reconcile`, the crash points through a script, and the leak accounting remain.
 
 ## 19. Deferrals
 

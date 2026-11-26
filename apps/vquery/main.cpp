@@ -7,9 +7,11 @@
  * Features in-place store modification, designated output store
  * creation/update, and ASCII art visualization for terminal debugging.
  */
+#include <algorithm>
 #include <argparse/argparse.hpp>
 #include <charconv>
 #include <chrono>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -30,8 +32,11 @@
 #include "common/xanadu/result_slice.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_loader.hpp"
 #include "common/xanadu/store_stream.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/capture_coordinator.hpp"
+#include "common/xanadu/vortex/capture_publication.hpp"
 #include "common/xanadu/vortex/file_read_host.hpp"
 #include "common/xanadu/vortex/mesh_cli.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
@@ -88,6 +93,7 @@ std::string extractStoreLabel(const std::string &path) {
 std::vector<xanadu::ResultRow>
 resultRows(const xanadu::MultiStoreCoordinator &coordinator,
            const std::vector<zigzag::CellRef> &results,
+           const xanadu::Store *captureStore,
            const std::string_view transientPath = {}) {
   std::vector<xanadu::ResultRow> rows;
   rows.reserve(results.size());
@@ -134,6 +140,24 @@ resultRows(const xanadu::MultiStoreCoordinator &coordinator,
       if (const auto quoted = coordinator.arena().quotedContent(*master)) {
         quote = xanadu::QuotedSpans{.store = quoted->store,
                                     .spans = std::move(quoted->spans)};
+      }
+    }
+    // A captured cell's content is already a span of the author's permascroll
+    // but it names no store, so the arena cannot say where it lives. The
+    // capture store is a Store over that permascroll, and quoting the span
+    // against it transcludes the bytes the author captured instead of typing
+    // them in again. Spans of the scratch scroll are bytes the query built
+    // and stay typed.
+    if (!quote && captureStore != nullptr) {
+      if (const auto master = coordinator.derefCloneMaster(cell)) {
+        const auto content = coordinator.arena().contentOf(*master);
+        if (!content.empty() &&
+            std::ranges::none_of(content, [](const xanadu::PrimediaSpan &span) {
+              return xanadu::scratchScroll == span.scroll;
+            })) {
+          quote = xanadu::QuotedSpans{
+              .store = captureStore, .spans = {content.begin(), content.end()}};
+        }
       }
     }
     rows.push_back({.text   = std::move(rendered),
@@ -225,6 +249,7 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
                                                  "--io-file",
                                                  "--io-write-root",
                                                  "--io-write-bytes",
+                                                 "--capture-dir",
                                                  "-d",
                                                  "--dims",
                                                  "--view-dims",
@@ -366,6 +391,12 @@ int main(int argc, char *argv[]) {
   program.add_argument("--io-write-bytes")
       .help("The most bytes one script write or append may carry (default "
             "1048576)")
+      .default_value(std::string{});
+
+  program.add_argument("--capture-dir")
+      .help("Where `capture` keeps its journal and its receipt store (default: "
+            "beside the permascroll, under 'capture' instead of "
+            "'permascroll'). Built when a script first captures")
       .default_value(std::string{});
 
   program.add_argument("--script-timeout")
@@ -556,6 +587,12 @@ int main(int argc, char *argv[]) {
   // One VM for the process: the core has a single write guard, and the I/O
   // host parks script actions on this VM's cursors.
   zigzag::vortex::VortexVM vm(coordinator.core());
+  // What a capture writes through, declared before the host that runs workers
+  // over them: the host's destructor joins those workers, and they must find
+  // the sink and the publisher alive. Built on the first `capture`.
+  std::unique_ptr<xanadu::vortex::UserPermascrollCaptureSink> captureSink;
+  std::unique_ptr<xanadu::Store> captureStore;
+  std::unique_ptr<xanadu::vortex::CapturePublisher> capturePublisher;
   // Script I/O is built on first use, so a plain query never starts workers.
   std::unique_ptr<xanadu::vortex::FileReadHost> io;
   // Declared after `io`, so the runner dies first and cancels its waiters on a
@@ -589,6 +626,44 @@ int main(int argc, char *argv[]) {
       io = std::make_unique<xanadu::vortex::FileReadHost>(
           vm, coordinator.arena(), ioOptions);
     return *io;
+  };
+  // The capture store lives in a dedicated directory beside the permascroll
+  // (design §5.6): the publisher lands on the store's latest and needs one
+  // writer, which a document store another program opens cannot promise.
+  const auto captureDirectory = [&]() -> std::filesystem::path {
+    if (const auto named = program.get<std::string>("--capture-dir");
+        !named.empty())
+      return named;
+    const auto scroll = permascroll->config().storageDir;
+    if (scroll.parent_path().filename() == "permascroll")
+      return scroll.parent_path().parent_path() / "capture" / scroll.filename();
+    return scroll.parent_path() / (scroll.filename().string() + ".capture");
+  };
+  const auto ensureCapture =
+      [&]() -> std::expected<xanadu::vortex::CaptureHost *, std::string> {
+    auto &host = ioHost();
+    if (auto *built = host.capture()) return built;
+    const auto directory = captureDirectory();
+    try {
+      std::filesystem::create_directories(directory);
+      if (std::filesystem::exists(directory / "ops.nodes")) {
+        captureStore = xanadu::loadStore(directory, permascroll);
+      } else {
+        captureStore = std::make_unique<xanadu::Store>(permascroll);
+      }
+      captureSink =
+          std::make_unique<xanadu::vortex::UserPermascrollCaptureSink>(
+              *permascroll);
+      capturePublisher = std::make_unique<xanadu::vortex::CapturePublisher>(
+          *captureStore, directory);
+      return &host.attachCapture(
+          *captureSink, capturePublisher.get(),
+          xanadu::vortex::CaptureHostOptions{.journalPath = directory /
+                                                            "capture.journal"});
+    } catch (const std::exception &error) {
+      return std::unexpected("the capture store at " + directory.string() +
+                             " could not be opened: " + error.what());
+    }
   };
   // Open @p path through the host and bind its capability to $name. The open
   // is admitted and then polled through the pump; nothing here reads a file.
@@ -634,8 +709,10 @@ int main(int argc, char *argv[]) {
     // next action replaces it, so the rows printed from this script stay
     // readable until then and a long session holds one request, not all.
     if (!ioRunner) {
-      ioRunner = std::make_unique<xanadu::vql::ScriptRunner>(
-          engine, vm, xanadu::vql::fileScriptPorts(host));
+      auto ports              = xanadu::vql::fileScriptPorts(host);
+      ports.ensureCaptureHost = ensureCapture;
+      ioRunner = std::make_unique<xanadu::vql::ScriptRunner>(engine, vm,
+                                                             std::move(ports));
     }
     auto &runner = *ioRunner;
     runner.setScriptTimeout(scriptTimeout);
@@ -647,16 +724,23 @@ int main(int argc, char *argv[]) {
   bool hasResults = false;
   // A script that ran an I/O action may return the bytes it read (through
   // io_payload, or as the action's own row) or handles to its requests, and
-  // which row came from where is not tracked: input is transient until a
-  // capture route exists, so none of the three ways to make rows durable
-  // (-o, --in-place, :save) accepts any result of such a script.
+  // which row came from where is not tracked. What is tracked is coverage:
+  // each payload the script turned into text is an exposure, and the runner
+  // says whether a committed capture holds every one. Input is transient
+  // unless the author captured it, so -o, --in-place and :save accept the
+  // result of such a script only when nothing it exposed is uncovered.
   bool resultsFromAction         = false;
   const auto refuseDurableAction = [&]() -> bool {
     if (!resultsFromAction) return false;
+    const auto verdict = ioRunner ? ioRunner->persistability() : std::nullopt;
+    if (verdict && verdict->persistable()) return false;
     std::cerr << xanadu::vortex::frontend_codes::vqlPersistNeedsCapture
-              << ": the result comes from a script that ran an I/O action, so "
-                 "its rows may hold bytes it read; input is transient unless "
-                 "explicitly captured, and there is no capture command yet\n";
+              << ": the result comes from a script that turned "
+              << (verdict ? verdict->uncovered : std::size_t{}) << " payload"
+              << (verdict && 1 == verdict->uncovered ? "" : "s")
+              << " it read into text without capturing "
+                 "all of it; input is transient unless explicitly captured "
+                 "(effect { capture($r) })\n";
     return true;
   };
   auto runQuery = [&](std::string_view qStr) -> bool {
@@ -778,16 +862,37 @@ int main(int argc, char *argv[]) {
         return 1;
       }
       auto &store         = *primStore->store;
-      const auto &arena   = coordinator.arena();
+      auto &arena         = coordinator.arena();
       std::size_t written = 0;
       for (const auto result : lastResults) {
         if (!zigzag::isEphemeral(result) || arena.isProxy(result) ||
             arena.resolveForeign(result)) {
           continue;
         }
-        if (const auto promoted =
-                zigzag::promote(store, store.latest(), arena, result)) {
+        // A captured cell is linked into its capture's receipt, and the
+        // receipt into the runtime I/O graph that promotion refuses. What the
+        // author wants written is the span, which already has an address in
+        // the permascroll, so a detached cell over that one span is promoted
+        // instead. Captured cells are the ones on the receipt's range rank.
+        auto promotable    = result;
+        const auto content = arena.contentOf(result);
+        if (io && 1 == content.size() &&
+            xanadu::scratchScroll != content[0].scroll &&
+            arena.linked(
+                result,
+                io->bridge().schema().dim(xanadu::vortex::IoDimension::Range),
+                zigzag::DimVector::NEG)) {
+          promotable = arena.makeCell(content[0]);
+        }
+        const auto promoted =
+            zigzag::promoteOrRefuse(store, store.latest(), arena, promotable);
+        if (promoted) {
           written += promoted->cells.size();
+        } else {
+          // Said, not swallowed: a result the store cannot name (runtime-only
+          // state, bytes it cannot address) is a refusal the author should see.
+          std::cerr << "Not written in place: "
+                    << zigzag::toString(promoted.error()) << "\n";
         }
       }
       if (0 == written) {
@@ -812,7 +917,7 @@ int main(int argc, char *argv[]) {
           streamOutput ? streamStore->path() : std::filesystem::path(outPath);
       xanadu::Store outStore(permascroll);
       xanadu::writeResultSlice(
-          outStore, resultRows(coordinator, lastResults,
+          outStore, resultRows(coordinator, lastResults, captureStore.get(),
                                stdinStore ? stdinStore->path().string() : ""));
       outStore.save(destination.string());
       if (streamOutput) {
@@ -976,7 +1081,7 @@ int main(int argc, char *argv[]) {
             throw std::invalid_argument("result path already exists: " + path);
           }
           const auto rows =
-              resultRows(coordinator, lastResults,
+              resultRows(coordinator, lastResults, captureStore.get(),
                          stdinStore ? stdinStore->path().string() : "");
           xanadu::Store output(permascroll);
           xanadu::writeResultSlice(output, rows);

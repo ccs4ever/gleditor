@@ -12,10 +12,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "common/xanadu/result_slice.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_loader.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 
 namespace {
@@ -27,7 +30,10 @@ struct ProcessResult {
   std::string output;
 };
 
-ProcessResult runVQuery(const std::string &args) {
+// @p dataHome redirects XDG_DATA_HOME (default: build/xdg/data), so a test can
+// own the permascroll and the capture store beside it.
+ProcessResult runVQuery(const std::string &args,
+                        const std::string &dataHome = {}) {
   std::string binary = "./build/vquery";
   if (!fs::exists(binary)) {
     return {-1, "vquery binary not found at " + binary};
@@ -36,8 +42,9 @@ ProcessResult runVQuery(const std::string &args) {
   std::string cmd =
       "SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy "
       "LIBGL_ALWAYS_SOFTWARE=1 XDG_DATA_HOME=" +
-      fs::current_path().string() +
-      "/build/xdg/data XDG_CONFIG_HOME=" + fs::current_path().string() +
+      (dataHome.empty() ? fs::current_path().string() + "/build/xdg/data"
+                        : dataHome) +
+      " XDG_CONFIG_HOME=" + fs::current_path().string() +
       "/build/xdg/config XDG_CACHE_HOME=" + fs::current_path().string() +
       "/build/xdg/cache " + binary + " " + args + " 2>&1";
 
@@ -738,9 +745,10 @@ TEST_F(VQueryE2ETest, ReplOpensForWriteOnlyUnderTheGrant) {
   EXPECT_EQ(readAll(target), "ab");
 }
 
-// C4 changes this: until a capture route exists, a script that wrote is still
-// "a script that ran an I/O action", and its rows are never made durable.
-TEST_F(VQueryE2ETest, AWritingScriptsRowsAreStillNotPersisted) {
+// A script that only wrote exposed no payload as text, so there is nothing a
+// capture could cover and its rows persist (design §4.7: an empty exposure set
+// is vacuously covered). C2 pinned the opposite while no capture route existed.
+TEST_F(VQueryE2ETest, AWritingScriptsRowsPersistBecauseItExposedNoPayload) {
   const auto target = testDir / "persist.txt";
   const auto out    = testDir / "write.store";
   const auto script =
@@ -749,11 +757,12 @@ TEST_F(VQueryE2ETest, AWritingScriptsRowsAreStillNotPersisted) {
   const auto result =
       runVQuery("--io-write-root '" + testDir.string() + "' -o '" +
                 out.string() + "' -e '" + script + "'");
-  EXPECT_EQ(result.exitCode, 1) << result.output;
-  EXPECT_NE(result.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+  EXPECT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
             std::string::npos)
       << result.output;
-  EXPECT_FALSE(fs::exists(out));
+  EXPECT_TRUE(fs::exists(out));
+  EXPECT_EQ(readAll(target), "x");
 }
 
 TEST_F(VQueryE2ETest, ScriptTimeoutFlagTakesMillisecondsOrOff) {
@@ -832,4 +841,205 @@ TEST_F(VQueryE2ETest, TheCompilerCliLowersTheNewActionsToHostOpcodes) {
   EXPECT_EQ(WEXITSTATUS(status), 0) << out;
   EXPECT_NE(out.find("AWAIT"), std::string::npos) << out;
   EXPECT_NE(out.find("RELATIONNEXT"), std::string::npos) << out;
+}
+
+// ---- M7-VQL-c C4: the persist rule over a real capture store ----------------
+//
+// Each test owns its XDG_DATA_HOME so the permascroll and the capture store
+// beside it are the test's, not the shared build/xdg one.
+namespace {
+
+const std::string readAll64 =
+    "effect { let $s := submit($src, read_bytes(0, 64)); "
+    "match $s { admitted($q) => await($q), refused($e) => $e } } as $r; ";
+
+struct CaptureSession {
+  fs::path dataHome;
+  fs::path source;
+  std::string bind;
+  [[nodiscard]] fs::path permascrollDir() const {
+    return dataHome / "xuzz" / "permascroll" / "default";
+  }
+  [[nodiscard]] fs::path captureDir() const {
+    return dataHome / "xuzz" / "capture" / "default";
+  }
+  [[nodiscard]] ProcessResult run(const std::string &args) const {
+    return runVQuery(bind + args, dataHome.string());
+  }
+  /// The permascroll those runs wrote, opened for reading the saved stores.
+  [[nodiscard]] std::shared_ptr<xanadu::UserPermascroll> permascroll() const {
+    xanadu::UserPermascroll::Config config;
+    config.storageDir = permascrollDir();
+    return std::make_shared<xanadu::UserPermascroll>(std::move(config));
+  }
+};
+
+CaptureSession captureSession(const fs::path &testDir,
+                              const std::string &content) {
+  CaptureSession session;
+  session.dataHome = testDir / "xdg";
+  fs::create_directories(session.dataHome);
+  session.source = testDir / "captured.txt";
+  std::ofstream(session.source, std::ios::binary) << content;
+  session.bind = "--io-file src=" + session.source.string() + " ";
+  return session;
+}
+
+} // namespace
+
+TEST_F(VQueryE2ETest, ACapturedScriptPersistsAsATranscludedQuoteOfTheCapture) {
+  const auto session = captureSession(testDir, "captured by the author");
+  const auto out     = testDir / "captured.store";
+  const auto result =
+      session.run("-o '" + out.string() + "' -e '" + readAll64 +
+                  "effect { capture($r) } as $c; return io_captured($c)'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << result.output;
+  ASSERT_TRUE(fs::exists(out)) << result.output;
+
+  // The capture store is a dedicated directory beside the permascroll.
+  EXPECT_TRUE(fs::exists(session.captureDir() / "capture.journal"));
+  EXPECT_TRUE(fs::exists(session.captureDir() / "ops.nodes"));
+  EXPECT_TRUE(fs::exists(session.permascrollDir()));
+
+  const auto perma = session.permascroll();
+  const auto saved = xanadu::loadStore(out, perma);
+  const auto rows  = xanadu::readResultSlice(*saved, saved->latest());
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(rows.front().text, "captured by the author");
+  // Transcluded, not retyped: the row's content is the captured span, which
+  // reads back from the permascroll as the file's bytes.
+  ASSERT_TRUE(rows.front().quote.has_value())
+      << "the row was typed in again instead of quoting the capture";
+  ASSERT_EQ(rows.front().quote->spans.size(), 1U);
+  EXPECT_EQ(perma->read(rows.front().quote->spans.front()),
+            "captured by the author");
+}
+
+TEST_F(VQueryE2ETest, ACapturedScriptMaySaveInPlaceAndFromTheRepl) {
+  const auto session       = captureSession(testDir, "in place bytes");
+  const fs::path sampleSrc = "tests/samples/xudu/core_hypertext/xanadoc_a";
+  if (!fs::exists(sampleSrc)) GTEST_SKIP() << "sample fixture not present";
+  const auto primary = testDir / "primary";
+  fs::copy(sampleSrc, primary, fs::copy_options::recursive);
+  const auto query =
+      readAll64 + "effect { capture($r) } as $c; " + "return io_captured($c)";
+
+  const auto inPlace =
+      session.run("'" + primary.string() + "' --in-place -e '" + query + "'");
+  EXPECT_EQ(inPlace.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << inPlace.output;
+  EXPECT_NE(inPlace.output.find("Wrote 1 cell"), std::string::npos)
+      << inPlace.output;
+  {
+    // The primary store's new cell holds the captured span itself: the bytes
+    // the capture appended, not a second typed copy after them.
+    const auto reloaded = xanadu::loadStore(primary, session.permascroll());
+    // The cell the write made holds the capture's own span; a typed copy
+    // would be a second span of the same bytes after the capture and receipt.
+    const auto perma  = session.permascroll();
+    std::size_t holds = 0;
+    // Operation indices start at 1.
+    for (std::uint32_t at = 1; at <= reloaded->opCount(); ++at) {
+      const auto *node = reloaded->getCompactOp(at);
+      if (node != nullptr && node->spanLength > 0 &&
+          xanadu::localScroll == node->scrollId &&
+          perma->read(node->span()) == "in place bytes") {
+        ++holds;
+        EXPECT_EQ(node->spanStart, 0U) << "retyped after the capture";
+      }
+    }
+    EXPECT_EQ(holds, 1U);
+  }
+
+  const auto repl  = testDir / "repl.store";
+  const auto input = testDir / "captured.vql";
+  {
+    std::ofstream script(input);
+    script << ":open src " << session.source.string() << "\n"
+           << query << "\n:save " << repl.string() << "\n:quit\n";
+  }
+  const auto saved =
+      runVQuery("< '" + input.string() + "'", session.dataHome.string());
+  EXPECT_EQ(saved.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << saved.output;
+  EXPECT_TRUE(fs::exists(repl)) << saved.output;
+  const auto reloaded = xanadu::loadStore(repl, session.permascroll());
+  const auto back     = xanadu::readResultSlice(*reloaded, reloaded->latest());
+  ASSERT_EQ(back.size(), 1U);
+  EXPECT_EQ(back.front().text, "in place bytes");
+  EXPECT_TRUE(back.front().quote.has_value());
+}
+
+TEST_F(VQueryE2ETest, PartialCoverageIsRefusedAndWritesNothing) {
+  const auto session = captureSession(testDir, "0123456789abcdef");
+  const auto out     = testDir / "partial.store";
+  const auto result =
+      session.run("-o '" + out.string() + "' -e '" + readAll64 +
+                  "effect { capture($r, 0, 4) } as $c; return io_payload($r)'");
+  EXPECT_EQ(result.exitCode, 1) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << result.output;
+  EXPECT_FALSE(fs::exists(out));
+}
+
+TEST_F(VQueryE2ETest, DerivedTextPersistsOnlyOnceTheSourceIsCovered) {
+  const auto session = captureSession(testDir, "derive me");
+  const auto derived = std::string{"return string(io_payload($r))"};
+  const auto plain   = testDir / "plain.store";
+  const auto refused = session.run("-o '" + plain.string() + "' -e '" +
+                                   readAll64 + derived + "'");
+  EXPECT_EQ(refused.exitCode, 1) << refused.output;
+  EXPECT_NE(refused.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << refused.output;
+  EXPECT_FALSE(fs::exists(plain));
+
+  const auto covered = testDir / "covered.store";
+  const auto allowed =
+      session.run("-o '" + covered.string() + "' -e '" + readAll64 +
+                  "effect { capture($r) } as $c; " + derived + "'");
+  EXPECT_EQ(allowed.exitCode, 0) << allowed.output;
+  const auto saved = xanadu::loadStore(covered, session.permascroll());
+  const auto rows  = xanadu::readResultSlice(*saved, saved->latest());
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(rows.front().text, "derive me");
+}
+
+TEST_F(VQueryE2ETest, ACaptureDirFlagMovesTheCaptureStore) {
+  const auto session = captureSession(testDir, "elsewhere");
+  const auto where   = testDir / "my-capture";
+  const auto result =
+      session.run("--capture-dir '" + where.string() + "' -e '" + readAll64 +
+                  "effect { capture($r) } as $c; return io_tag($c)'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "CaptureReceipt\n");
+  EXPECT_TRUE(fs::exists(where / "capture.journal"));
+  EXPECT_FALSE(fs::exists(session.captureDir()));
+}
+
+TEST_F(VQueryE2ETest, APlainReadStartsNoCaptureStore) {
+  const auto session = captureSession(testDir, "no capture asked");
+  const auto result =
+      session.run("-e '" + readAll64 + "return io_payload($r)'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_FALSE(fs::exists(session.captureDir()))
+      << "reading builds no journal or store";
+}
+
+TEST_F(VQueryE2ETest, AnUnopenableCaptureStoreIsTheTypedRefusal) {
+  const auto session = captureSession(testDir, "blocked");
+  const auto blocker = testDir / "not-a-directory";
+  std::ofstream(blocker) << "file";
+  const auto result =
+      session.run("--capture-dir '" + blocker.string() + "' -e '" + readAll64 +
+                  "effect { capture($r) } as $c; return 1'");
+  EXPECT_EQ(result.exitCode, 1) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_CAPTURE_UNAVAILABLE"), std::string::npos)
+      << result.output;
 }
