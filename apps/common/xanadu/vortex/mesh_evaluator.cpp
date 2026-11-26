@@ -1025,7 +1025,8 @@ evaluate(Frontend frontend, std::string_view source, EvaluationBudget budget,
       vql::VQLEngine engine(context->core);
       vql::QueryExecutor executor(engine, context->vm,
                                   {.mode      = vql::QueryExecutionMode::Vortex,
-                                   .maxCycles = budget.maxCycles});
+                                   .maxCycles = budget.maxCycles,
+                                   .keepProgram = true});
       const auto execution = executor.execute(source);
       if (!execution) throw std::runtime_error(execution.error().message);
       for (auto value : *execution) builder.append(tail, value);

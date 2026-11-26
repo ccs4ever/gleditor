@@ -539,15 +539,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
         .ioActions        = ioActions_,
         .finalIsIoEffect  = finalIsIoEffect_,
     };
-    {
-      std::unordered_set<std::string> captured;
-      for (const auto *table :
-           {&frameFreeCaptureNames_, &frameRequiredDefaultCaptureBindings_,
-            &frameConditionalRequiredDefaultCaptureBindings_})
-        for (const auto &[frame, names] : *table)
-          captured.insert(names.begin(), names.end());
-      result.capturedNames.assign(captured.begin(), captured.end());
-    }
+    result.makesClosures = nextClosureLambdaId_ != 0;
     for (const auto &[name, slots] : streamBindings_) {
       if (name == ".") continue;
       if (const auto initial = options.initialBindings.find(name);

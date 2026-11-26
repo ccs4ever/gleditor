@@ -1143,6 +1143,27 @@ TEST_F(JoinWorld, ALoneQuotingRowIsReturnedItselfNotRetyped) {
   EXPECT_EQ(spans[0].start, quotedHome.start);
 }
 
+TEST(VqlJoinForeignTest, ALoneRowOfALoadedStoreIsReturnedItself) {
+  xanadu::Store store;
+  auto at          = store.sliceGenesis(xanadu::MicroversionId{});
+  at               = store.makeCell(at, "loaded row");
+  const auto first = store.cellRefOf(at).value();
+  const auto base  = store.rebuildManifold(at);
+  zigzag::ArenaManifold arena{&base, &store};
+  zigzag::vortex::VortexCore core{arena};
+  zigzag::vortex::VortexVM vm{core};
+  VQLEngine engine{core};
+  engine.setVariable("rows", std::vector{first});
+  QueryExecutor executor(engine, vm, {.maxCycles = 100'000});
+  const auto result = executor.execute("join($rows, \",\")");
+  ASSERT_TRUE(result.has_value()) << result.error().message;
+  ASSERT_EQ(result->size(), 1U);
+  EXPECT_EQ(result->front(), first)
+      << "the store's own row, so a write of it carries its origin";
+  EXPECT_EQ(arena.contentOf(first).size(), base.contentOf(first).size())
+      << "the row's content is untouched";
+}
+
 TEST_F(JoinWorld, QuotingRowsAreJoinedAsTheRunOfTheirOwnSpans) {
   const auto home = arena.makeCell(quotedHome);
   const auto away = arena.makeCell(quotedAway);
@@ -1306,6 +1327,69 @@ TEST(VqlIoLetFreeTest, AClosureKeepsAJoinedTextItCaptured) {
   EXPECT_EQ(f.rows("return $g(1)"), (Texts{"r0-r1-r2!"}));
 }
 
+TEST(VqlIoLetFreeTest, AClosureKeepsACellItHoldsThroughALambdaParameter) {
+  FileWorld f;
+  EXPECT_EQ(f.rows("let $t := \"abc\"; return $t"), (Texts{"abc"}));
+  ASSERT_TRUE(f.run("let $mk := \\($s) \\($y) $s + $y; return $t"));
+  EXPECT_EQ(f.rows("let $k := $mk($t); return $k(\"!\")"), (Texts{"abc!"}));
+  EXPECT_EQ(f.rows("let $t := \"N\"; return $t"), (Texts{"N"}));
+  EXPECT_EQ(f.rows("return $k(\"!\")"), (Texts{"abc!"}))
+      << "$s is no session name, yet the closure holds the cell $t had";
+  EXPECT_EQ(f.rows("let $t := \"M\"; return $t"), (Texts{"M"}));
+  EXPECT_EQ(f.rows("return $k(\"?\")"), (Texts{"abc?"}));
+}
+
+TEST(VqlIoLetFreeTest, AClosureKeepsAJoinedTextItHoldsThroughAParameter) {
+  FileWorld f;
+  f.bindRows(3);
+  EXPECT_EQ(f.rows("let $t := join($rows, \"-\"); return $t"),
+            (Texts{"r0-r1-r2"}));
+  ASSERT_TRUE(f.run("let $mk := \\($s) \\($y) $s + $y; return $t"));
+  EXPECT_EQ(f.rows("let $k := $mk($t); return $k(\"!\")"),
+            (Texts{"r0-r1-r2!"}));
+  EXPECT_EQ(f.rows("let $t := \"N\"; return $t"), (Texts{"N"}));
+  EXPECT_EQ(f.rows("return $k(\"!\")"), (Texts{"r0-r1-r2!"}));
+}
+
+TEST(VqlIoLetFreeTest, AClosurePassedThroughAClosureKeepsWhatTheInnerHolds) {
+  FileWorld f;
+  EXPECT_EQ(f.rows("let $t := \"abc\"; return $t"), (Texts{"abc"}));
+  ASSERT_TRUE(f.run("let $mk := \\($s) \\($y) $s + $y; return $t"));
+  ASSERT_TRUE(f.run("let $k := $mk($t); return $t"));
+  ASSERT_TRUE(f.run("let $h := \\($c) $c(\"?\"); return $t"));
+  EXPECT_EQ(f.rows("let $t := \"N\"; return $t"), (Texts{"N"}));
+  EXPECT_EQ(f.rows("return $h($k)"), (Texts{"abc?"}));
+}
+
+TEST(VqlIoLetFreeTest, ForgettingTheClosureLetsTheCellGoOnTheNextRebind) {
+  FileWorld f;
+  EXPECT_EQ(f.rows("let $t := \"abc\"; return $t"), (Texts{"abc"}));
+  const auto held = f.engine.variables().find("t");
+  ASSERT_NE(held, f.engine.variables().end());
+  const auto cell        = held->second.front();
+  const auto incarnation = f.arena.incarnationOf(cell);
+  ASSERT_TRUE(incarnation.has_value());
+  ASSERT_TRUE(f.run("let $mk := \\($s) \\($y) $s + $y; return $t"));
+  ASSERT_TRUE(f.run("let $k := $mk($t); return $t"));
+  ASSERT_TRUE(f.run("let $t := \"N\"; return $t"));
+  EXPECT_TRUE(f.arena.matches(cell, *incarnation)) << "$k still holds it";
+  f.engine.eraseVariable("k");
+  ASSERT_TRUE(f.run("let $t := \"M\"; return $t"));
+  EXPECT_TRUE(f.arena.matches(cell, *incarnation))
+      << "the cell was freed with the rebind of $t that followed the closure";
+}
+
+TEST(VqlIoLetFreeTest, ClearingTheVariablesFreesWhatTheyMinted) {
+  FileWorld f;
+  EXPECT_EQ(f.rows("let $t := \"abc\"; return $t"), (Texts{"abc"}));
+  const auto held        = f.engine.variables().find("t");
+  const auto cell        = held->second.front();
+  const auto incarnation = *f.arena.incarnationOf(cell);
+  f.engine.clearVariables();
+  EXPECT_FALSE(f.arena.matches(cell, incarnation));
+  EXPECT_TRUE(f.engine.variables().empty());
+}
+
 TEST(VqlIoLetFreeTest, StructureAPercentMintedIsTheUsersNotTheNames) {
   FileWorld f;
   EXPECT_EQ(f.rows("let $r := #/d.1%%%; return join(#/d.1/count(), \"\")"),
@@ -1338,6 +1422,70 @@ TEST(VqlIoLetFreeTest, ANameThatAliasesAReplacedCellKeepsItsText) {
   EXPECT_EQ(f.rows("let $m := join($rows, \"-\"); return $m"),
             (Texts{"r0-r1"}));
   EXPECT_EQ(f.rows("let $m := $m; return $m"), (Texts{"r0-r1"}));
+}
+
+// ---- A plain query's program is reclaimed like a script's
+// --------------------
+
+namespace {
+/// Live cells after @p runs repeats of @p source, once warm: a second figure
+/// that matches the first is a bounded arena.
+void expectBoundedPlainRuns(FileWorld &f, const std::string &source,
+                            const std::size_t runs = 10'000) {
+  // The rows are the caller's: a REPL prints them and drops them.
+  const auto once = [&] {
+    const auto result = f.run(source);
+    ASSERT_TRUE(result.has_value()) << source;
+    for (const auto cell : *result) {
+      if (const auto incarnation = f.arena.incarnationOf(cell))
+        static_cast<void>(f.arena.freeCell(cell, *incarnation));
+    }
+  };
+  constexpr std::size_t warmRuns = 8;
+  for (std::size_t i = 0; i < warmRuns; ++i) once();
+  const auto warmLive = f.arena.liveCells();
+  const auto warmSlot = f.arena.cellCount();
+  for (std::size_t i = 0; i < runs; ++i) once();
+  EXPECT_EQ(f.arena.liveCells(), warmLive) << source;
+  EXPECT_EQ(f.arena.cellCount(), warmSlot) << source;
+}
+} // namespace
+
+TEST(VqlIoPlainReclaimTest, ReturningAJoinLeavesTheArenaBounded) {
+  FileWorld f;
+  f.bindRows(4);
+  expectBoundedPlainRuns(f, "return join($rows, \",\")");
+}
+
+TEST(VqlIoPlainReclaimTest, BindingAJoinLeavesTheArenaBounded) {
+  FileWorld f;
+  f.bindRows(4);
+  expectBoundedPlainRuns(f, "let $t := join($rows, \",\"); return $t");
+}
+
+TEST(VqlIoPlainReclaimTest, ReturningACountLeavesTheArenaBounded) {
+  FileWorld f;
+  f.bindRows(4);
+  expectBoundedPlainRuns(f, "return $rows/count()");
+}
+
+TEST(VqlIoPlainReclaimTest, TheRowsAndABoundTextSurviveTheReclaim) {
+  FileWorld f;
+  f.bindRows(3);
+  EXPECT_EQ(f.rows("let $t := join($rows, \"+\"); return $t, $t"),
+            (Texts{"r0+r1+r2", "r0+r1+r2"}));
+  EXPECT_EQ(f.rows("return $t"), (Texts{"r0+r1+r2"}));
+  EXPECT_EQ(f.rows("return join($rows, \"*\")"), (Texts{"r0*r1*r2"}));
+}
+
+TEST(VqlIoPlainReclaimTest, AClosureAmongTheResultsKeepsItsProgram) {
+  FileWorld f;
+  f.bindRows(2);
+  ASSERT_TRUE(f.run("let $t := \"abc\"; return $t"));
+  ASSERT_TRUE(f.run("let $g := \\($x) $x + \"!\"; return $t"));
+  for (int i = 0; i < 50; ++i)
+    ASSERT_TRUE(f.run("let $u := join($rows, \"\"); return $t"));
+  EXPECT_EQ(f.rows("return $g(\"a\")"), (Texts{"a!"}));
 }
 
 // ---- The payload-less outcome constructor ----------------------------------

@@ -185,6 +185,40 @@ QueryExecutor::prepare(const QueryExpression &query) {
   return effectiveQuery;
 }
 
+namespace {
+
+/// The closure values among @p roots, and those they capture in turn, each
+/// with the cells its environment holds. The VM is the one that can read a
+/// closure's environment; the engine keeps what it reports so a cell a closure
+/// holds is never freed under it.
+std::vector<VQLEngine::ClosureEnvironment>
+closureEnvironments(const zigzag::vortex::VortexVM &vm,
+                    const zigzag::ArenaManifold &arena,
+                    std::vector<zigzag::CellRef> pending) {
+  std::vector<VQLEngine::ClosureEnvironment> found;
+  std::unordered_set<zigzag::CellRef> seen;
+  while (!pending.empty()) {
+    const auto cell = pending.back();
+    pending.pop_back();
+    if (!seen.insert(cell).second) continue;
+    const auto incarnation = arena.incarnationOf(cell);
+    if (!incarnation) continue;
+    const auto closure = vm.closureValue(cell);
+    if (!closure) continue;
+    VQLEngine::ClosureEnvironment environment{
+        .root = cell, .incarnation = *incarnation, .captured = {}};
+    for (const auto &stream : closure->captures) {
+      environment.captured.insert(environment.captured.end(), stream.begin(),
+                                  stream.end());
+      pending.insert(pending.end(), stream.begin(), stream.end());
+    }
+    found.push_back(std::move(environment));
+  }
+  return found;
+}
+
+} // namespace
+
 /// One compiled program between its first step and its end: what a parked
 /// script keeps so the same cursor resumes at the same Await. Everything the
 /// run changed on the VM (the contract coordinator, the prose_hits provider,
@@ -244,6 +278,12 @@ public:
     keep_        = std::move(keep);
   }
   void keepCompiledProgram() noexcept { reclaimable_ = false; }
+  /// Also keep every cell of the region that is linked, on a dimension that is
+  /// not one of the VM's own, to a cell outside it,
+  /// and what it reaches: a program's cells hang off the VM's own ranks
+  /// (`d.spin`, `d.cursors`), so a link on any other is the program's own
+  /// mutation of the space, which is the user's and not the program's.
+  void keepAttachedCells() noexcept { keepAttached_ = true; }
   /// The reclaim is skipped when this reports that the session's dynamic-view
   /// registry names cells of the program: a shape handle, lens or view cell
   /// registered with no `let` still outlives the script (a lens a script makes
@@ -275,6 +315,16 @@ private:
     });
   }
 
+  [[nodiscard]] bool systemDimension(const zigzag::DimRef dim) const {
+    const auto &d = vm_.core().dims();
+    return dim == d.grab || dim == d.step || dim == d.spin || dim == d.stack ||
+           dim == d.contract || dim == d.clone || dim == d.cursors ||
+           dim == d.cache || dim == d.vars || dim == d.values ||
+           dim == d.pinningCursors || dim == d.name || dim == d.role ||
+           dim == d.stdlib || dim == d.clause || dim == d.scan ||
+           dim == d.stores;
+  }
+
   /// Detach every cell this run allocated and free it (P7, Repair: a rank the
   /// program shares with cells outside it stays walkable). Never a cell the
   /// I/O service owns, a row, or anything a row reaches within the region.
@@ -298,6 +348,21 @@ private:
       for (const auto root : keep_) {
         if (region.contains(root) && kept.insert(root).second)
           reach.push_back(root);
+      }
+      if (keepAttached_) {
+        for (const auto cell : owned) {
+          const bool attached = std::ranges::any_of(
+              arena.dimensionsOf(cell), [&](const zigzag::DimLink &link) {
+                const auto outside =
+                    [&](const std::optional<zigzag::CellRef> next) {
+                      return next && !region.contains(*next);
+                    };
+                return !systemDimension(link.dim) &&
+                       (outside(link.neighbor(zigzag::DimVector::POS)) ||
+                        outside(link.neighbor(zigzag::DimVector::NEG)));
+              });
+          if (attached && kept.insert(cell).second) reach.push_back(cell);
+        }
       }
       while (!reach.empty()) {
         const auto cell = reach.back();
@@ -336,6 +401,7 @@ private:
   std::vector<zigzag::CellRef> keep_;
   bool windowOpen_{false};
   bool reclaimable_{false};
+  bool keepAttached_{false};
   std::function<bool()> named_;
   bool closed_{false};
 };
@@ -656,16 +722,15 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
     // The cells the script published as session variables: the program's own
     // region must not be freed under them.
     std::vector<zigzag::CellRef> publishedCells;
+    ContractBindings published;
+    VQLEngine::OwnedBindings owned;
+    std::unordered_map<std::string, std::vector<PathStep>> functors;
     if (session_) {
-      ContractBindings published;
-      VQLEngine::OwnedBindings owned;
-      std::unordered_map<std::string, std::vector<PathStep>> functors;
-      publishMounts(session_, run->compiled_.sessionBindings);
       for (const auto &binding : run->compiled_.sessionBindings) {
         using Kind = CompilationResult::SessionBinding::Kind;
         if (binding.kind == Kind::Mount || binding.kind == Kind::Unmount)
           continue;
-        if (binding.kind == CompilationResult::SessionBinding::Kind::Functor) {
+        if (binding.kind == Kind::Functor) {
           functors.emplace(binding.name, binding.functor);
           continue;
         }
@@ -689,15 +754,34 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
           }
         }
       }
+    }
+    // A closure value holds cells by reference the arena does not record: the
+    // cells it captured, and the descriptor and frames of the program that
+    // compiled its lambda. Whatever closure the bindings or rows reach is
+    // reported to the session, and a program whose result holds one is kept.
+    // Looked for only when this program compiled a lambda or the session
+    // already holds a closure, since a closure can come from no other place.
+    std::vector<VQLEngine::ClosureEnvironment> closures;
+    if (run->compiled_.makesClosures ||
+        (session_ && session_->holdsClosures())) {
+      auto roots = cells;
+      roots.insert(roots.end(), publishedCells.begin(), publishedCells.end());
+      closures = closureEnvironments(vm_, arena, std::move(roots));
+    }
+    if (session_) {
+      publishMounts(session_, run->compiled_.sessionBindings);
       session_->publishCompilerBindings(std::move(published),
                                         std::move(functors), std::move(owned),
-                                        cells, run->compiled_.capturedNames);
+                                        cells, closures);
       session_->publishUserDefs(run->query_.defs);
     }
     vm_.abortScopedChoices(cursor);
     vm_.setCursorOpcode(cursor, std::nullopt);
     vm_.clearChoicePoints();
 
+    // Whether the program's cells are still in the arena to be reclaimed: a
+    // mark that is released has already truncated them away.
+    bool regionRemains = !run->markHeld;
     if (run->markHeld) {
       const bool noDynamicViewsChanged =
           !session_ || (session_->dynamicViews().viewCells.size() ==
@@ -718,29 +802,35 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
             const auto dense = arena.denseOf(c);
             return !dense.has_value() || *dense < run->preCompileMark.cellCount;
           });
-      settleMark(!(noMutations && noNewResultCells));
+      regionRemains = !(noMutations && noNewResultCells);
+      settleMark(regionRemains);
     }
-    // A script of plain queries keeps its compiled program when it published
-    // any binding, since a binding may name cells of the program. A script
-    // with an I/O action publishes only streams (`as $r`, `let`) in the usual
-    // case, and those are roots like the rows: the program's region is freed
-    // around the cells they reach, so a long session of named outcomes does
-    // not grow the arena by a program per run. A functor or mount binding is
-    // not a cell root, so such a script still keeps its program. A registry
-    // entry the run made is checked when the run closes (keepIfNamed), since a
-    // parked script that is abandoned has registered cells too.
+    // The program's region is freed around the cells the rows and the
+    // published bindings reach (they are the roots), for a plain query as for
+    // an I/O script, so a long session of `return join(...)` or `let $t :=
+    // join(...)` grows the arena by nothing. It is kept when something names
+    // it that is not a cell root: a functor or mount binding, a closure value
+    // among the results, or (checked when the run closes, keepIfNamed) a
+    // registry entry the run made. A run that changed a cell outside its own
+    // region (the trail grew: a `%` linked it to a cell that was already
+    // there) is kept too, because the structure it built is the user's.
     const bool onlyStreams = std::ranges::all_of(
         run->compiled_.sessionBindings, [](const auto &binding) {
           return binding.kind ==
                  CompilationResult::SessionBinding::Kind::Stream;
         });
-    const bool published = session_ && !run->compiled_.sessionBindings.empty();
-    if (run->compiled_.ioActions.empty() || (published && !onlyStreams)) {
+    const bool namesProgram =
+        session_ && !run->compiled_.sessionBindings.empty();
+    if (!regionRemains || options_.keepProgram ||
+        (namesProgram && !onlyStreams) || !closures.empty()) {
       run->keepCompiledProgram();
     } else {
       auto roots = cells;
       roots.insert(roots.end(), publishedCells.begin(), publishedCells.end());
       run->reclaimOnClose(std::move(roots));
+      // A plain query may have built structure the user keeps (a `%` links
+      // new cells into the space), which no row need name.
+      if (run->compiled_.ioActions.empty()) run->keepAttachedCells();
     }
     ProgramResult done{.rows            = std::move(cells),
                        .finalIsIoEffect = run->compiled_.finalIsIoEffect};

@@ -39,6 +39,10 @@ struct QueryExecutionOptions {
   /// The longest text a `join` builds, forwarded to the compiler; a host
   /// whose writes may be larger than the default raises it with them.
   std::size_t maxJoinedTextBytes{defaultJoinedTextBytes};
+  /// Leave the compiled program in the arena when the run ends, for a host that
+  /// exports or inspects it (the mesh evaluator snapshots the arena). By
+  /// default the program's cells are freed around the rows and bindings.
+  bool keepProgram{false};
 };
 
 class ProgramRun;

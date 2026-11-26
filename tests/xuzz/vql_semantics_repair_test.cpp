@@ -638,13 +638,13 @@ TEST_F(VQLSemanticsRepairTest, EmptyWalkOnlyRunsArgumentFreeBuiltinCount) {
   const auto counted    = engine.execute("##/d.missing/count()");
   ASSERT_EQ(counted.size(), 1U);
   EXPECT_EQ(arena.asInt64(counted.front()), 0);
-  const auto before = arena.cellCount();
+  const auto before = arena.liveCells();
   EXPECT_TRUE(engine.execute("##/d.missing/count(##/+d.unexpected%)").empty());
-  EXPECT_EQ(arena.cellCount(), before);
+  EXPECT_EQ(arena.liveCells(), before);
   EXPECT_FALSE(arena.linked(core.home(), unexpected, DimVector::POS));
   engine.execute("def count() := ##/+d.unexpected%;");
   EXPECT_TRUE(engine.execute("##/d.missing/count()").empty());
-  EXPECT_EQ(arena.cellCount(), before);
+  EXPECT_EQ(arena.liveCells(), before);
   EXPECT_FALSE(arena.linked(core.home(), unexpected, DimVector::POS));
 }
 
