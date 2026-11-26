@@ -1149,6 +1149,26 @@ TEST_F(VQueryE2ETest, ACrashedSessionsPinIsListedReleasedAndStaysReleased) {
       << again.output;
 }
 
+// A promote with a start and no length, or any trailing token, is a typo in a
+// durable decision: usage, and nothing is decided.
+TEST_F(VQueryE2ETest, ReconcileRefusesAHalfTypedOrOverlongDecision) {
+  const auto session = captureSession(testDir, "unused");
+  const auto result =
+      repl(session, testDir,
+           {":reconcile 3 promote 100", ":reconcile 3 promote 1 2 3",
+            ":reconcile 3 release now", ":reconcile 3 promote 1 x"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  std::size_t usages = 0;
+  for (auto at = result.output.find("Usage: :reconcile");
+       at != std::string::npos;
+       at = result.output.find("Usage: :reconcile", at + 1))
+    ++usages;
+  EXPECT_EQ(usages, 4U) << result.output;
+  EXPECT_EQ(result.output.find("Promoted"), std::string::npos) << result.output;
+  EXPECT_EQ(result.output.find("Reconcile refused"), std::string::npos)
+      << result.output;
+}
+
 TEST_F(VQueryE2ETest, ReconcileNamesItsFormWhenGivenOnlyHalfOfIt) {
   const auto session = captureSession(testDir, "unused");
   const auto result =

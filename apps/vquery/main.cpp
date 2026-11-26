@@ -170,6 +170,48 @@ resultRows(const xanadu::MultiStoreCoordinator &coordinator,
 
 /// What the owner reads beside a pinned capture, in words; a diagnostic, not a
 /// control value.
+/// `:reconcile ID release` or `:reconcile ID promote [START LEN]`, parsed as a
+/// whole: the decision is durable and journaled, so a half-typed pair or a
+/// trailing token is a usage error rather than a guess at what was meant.
+auto parseReconcile(const std::string &line)
+    -> std::optional<std::pair<xanadu::vortex::CaptureId,
+                               xanadu::vortex::CaptureReconcileDecision>> {
+  std::istringstream words(line);
+  std::vector<std::string> tokens;
+  for (std::string word; words >> word;) tokens.push_back(std::move(word));
+  const auto number =
+      [](const std::string &text) -> std::optional<std::uint64_t> {
+    std::uint64_t value{};
+    const auto *end          = text.data() + text.size();
+    const auto [stop, error] = std::from_chars(text.data(), end, value);
+    if (error != std::errc{} || stop != end) return std::nullopt;
+    return value;
+  };
+  constexpr std::size_t idAt        = 1;
+  constexpr std::size_t verbAt      = 2;
+  constexpr std::size_t spanAt      = 3;
+  constexpr std::size_t verbOnly    = 3;
+  constexpr std::size_t verbAndSpan = 5;
+  if (tokens.size() <= verbAt) return std::nullopt;
+  const auto id = number(tokens[idAt]);
+  if (!id) return std::nullopt;
+  if (tokens[verbAt] == "release" && tokens.size() == verbOnly)
+    return std::pair{*id, xanadu::vortex::CaptureReconcileDecision{
+                              xanadu::vortex::ReconcileRelease{}}};
+  if (tokens[verbAt] != "promote") return std::nullopt;
+  xanadu::vortex::ReconcilePromote promote;
+  if (tokens.size() == verbAndSpan) {
+    const auto start  = number(tokens[spanAt]);
+    const auto length = number(tokens[spanAt + 1]);
+    if (!start || !length) return std::nullopt;
+    promote.span = xanadu::PrimediaSpan{
+        .scroll = xanadu::localScroll, .start = *start, .length = *length};
+  } else if (tokens.size() != verbOnly) {
+    return std::nullopt;
+  }
+  return std::pair{*id, xanadu::vortex::CaptureReconcileDecision{promote}};
+}
+
 auto captureReasonName(const xanadu::vortex::CaptureRecoveryReason reason)
     -> std::string_view {
   using Reason = xanadu::vortex::CaptureRecoveryReason;
@@ -1169,25 +1211,10 @@ int main(int argc, char *argv[]) {
         std::cout << "\n";
       }
     } else if (line == ":reconcile" || line.starts_with(":reconcile ")) {
-      std::istringstream iss(line);
-      std::string cmd, verb;
-      xanadu::vortex::CaptureId id{};
-      iss >> cmd >> id >> verb;
+      const auto parsed = parseReconcile(line);
+      const auto id     = parsed ? parsed->first : xanadu::vortex::CaptureId{};
       std::optional<xanadu::vortex::CaptureReconcileDecision> decision;
-      if (!iss.fail() && verb == "release") {
-        decision = xanadu::vortex::ReconcileRelease{};
-      } else if (!iss.fail() && verb == "promote") {
-        xanadu::vortex::ReconcilePromote promote;
-        std::uint64_t start{};
-        std::uint64_t length{};
-        if (iss >> start >> length) {
-          promote.span = xanadu::PrimediaSpan{
-              .scroll = xanadu::localScroll, .start = start, .length = length};
-          decision = promote;
-        } else if (iss.eof()) {
-          decision = promote;
-        }
-      }
+      if (parsed) decision = parsed->second;
       const auto journal = captureDirectory() / "capture.journal";
       std::error_code missing;
       if (!decision) {
