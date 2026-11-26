@@ -71,6 +71,7 @@
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/spool.hpp"
+#include "common/xanadu/zigzag/cell_deletion.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace xanadu {
@@ -777,6 +778,48 @@ public:
    * exportPrefix() refuses an arena that holds a freed slot.
    */
   ArenaResult freeCell(CellRef ref, AllocationIncarnation incarnation);
+
+  /// What deleteCell() did: the neighbourhood it broke, and whether the cell's
+  /// slot was released (an arena cell) or only detached (a cell the arena reads
+  /// through from its base, whose shadow is the detachment).
+  struct Deletion {
+    Neighbourhood broken;
+    bool freed{false};
+  };
+
+  /**
+   * @brief Delete @p ref: break all its connections, remove it, and either
+   *        leave them broken or repair them (P7, the one deletion algorithm).
+   *
+   * The plan is zigzag::planDeletion(), shared with xuzz's persistent delete
+   * and the I/O reapers; this is its arena expression. Repair joins each
+   * dimension's negward and posward neighbours (one write per dimension);
+   * LeaveBroken only clears the cell's links. "Remove" is freeCell() for an
+   * arena cell. A cell read through from the base manifold is detached and
+   * kept: the writes shadow it, the base is untouched, and releasing the
+   * enclosing mark undoes the lot. Under a mark the whole deletion is
+   * journalled like any other write, so release(mark) restores it.
+   *
+   * Refused before anything is written, so a refusal changes nothing:
+   * UnknownCell when @p ref is not live under @p incarnation, NotReleasable
+   * for the home cell and for cells other arena state names (dimensions,
+   * proxies, quote and provenance cells). May throw what link() throws (a
+   * shadow allocation, the link-run limit), possibly after some writes; under
+   * a mark release() restores.
+   */
+  std::expected<Deletion, ArenaRefusal>
+  deleteCell(CellRef ref, AllocationIncarnation incarnation, DeletionMode mode);
+
+  /// deleteCell() without the removal: break @p ref's connections (every
+  /// dimension) and leave the cell in the arena, for a caller that frees it
+  /// later or keeps it. Returns the neighbourhood it broke.
+  std::expected<Neighbourhood, ArenaRefusal> detachCell(CellRef ref,
+                                                        DeletionMode mode);
+
+  /// detachCell() along one dimension, leaving the cell's other connections.
+  /// The reapers' rank detach: Repair keeps the rest of the rank walkable.
+  std::expected<RankNeighbours, ArenaRefusal>
+  detachFromRank(CellRef ref, DimRef dim, DeletionMode mode);
 
   /// How many cells a walk through this arena could visit: its own and every
   /// base cell it reads through. cellCount() alone would cut a walk over base

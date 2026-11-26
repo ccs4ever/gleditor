@@ -6,6 +6,7 @@
 #include "common/xanadu/format_resolver.hpp"
 #include "common/xanadu/overlay.hpp"
 #include "common/xanadu/published_vocabulary.hpp"
+#include "common/xanadu/zigzag/cell_deletion.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
@@ -601,92 +602,42 @@ bool ZigzagVisualizer::deleteFocusCell() {
   if (isProtected(focus)) {
     return false; // Protected from deletion!
   }
-  const auto linkSpan = engine_->manifold().dimensionsOf(focus);
-  const std::vector<DimLink> links(linkSpan.begin(), linkSpan.end());
+  // The shared deletion plan (P7). A persistent cell is never un-minted: it is
+  // detached, so Repair joins each dimension's neighbours in one operation per
+  // dimension and leaves the cell with no links.
+  const auto broken =
+      zigzag::Neighbourhood::of(focus, engine_->manifold().dimensionsOf(focus));
 
-  std::optional<CellRef> nextFocus;
-
-  // 1) Prioritize adjacent cells along active view dimensions (X, Y, Z)
-  const std::array<DimID, 3> viewDims = {current_view_.x_dimension,
-                                         current_view_.y_dimension,
-                                         current_view_.z_dimension};
-  for (const auto &dimId : viewDims) {
-    const auto named = dimensionRef(dimId);
-    if (!named) {
-      continue;
-    }
-    const auto *storedDim = std::get_if<DimRef>(&*named);
-    if (!storedDim) {
-      continue;
-    }
-    const DimRef dimRef = *storedDim;
-    const auto posNeighbor =
-        engine_->manifold().linked(focus, dimRef, DimVector::POS);
-    if (posNeighbor && *posNeighbor != focus && !isProtected(*posNeighbor) &&
-        !isEphemeral(*posNeighbor)) {
-      nextFocus = posNeighbor;
-      break;
-    }
-    const auto negNeighbor =
-        engine_->manifold().linked(focus, dimRef, DimVector::NEG);
-    if (negNeighbor && *negNeighbor != focus && !isProtected(*negNeighbor) &&
-        !isEphemeral(*negNeighbor)) {
-      nextFocus = negNeighbor;
-      break;
-    }
-  }
-
-  // 2) Fallback to any connected cell on non-metadata dimensions
-  if (!nextFocus) {
-    for (const auto &link : links) {
-      const auto dimName =
-          engine_->manifold().textOf(link.dim, engine_->store());
-      if (dimName == "d.role" || dimName == "d.mime" || dimName == "d.media" ||
-          dimName == "d.dims") {
-        continue;
-      }
-      if (link.pos != zigzag::noCell && link.pos != focus &&
-          !isProtected(link.pos) && !isEphemeral(link.pos)) {
-        nextFocus = link.pos;
-        break;
-      }
-      if (link.neg != zigzag::noCell && link.neg != focus &&
-          !isProtected(link.neg) && !isEphemeral(link.neg)) {
-        nextFocus = link.neg;
-        break;
+  // The cursor leaves along the first bound view dimension (x, y, z),
+  // posward before negward, and is never put on a protected or derived cell
+  // or across the metadata dimensions.
+  std::vector<DimRef> bound;
+  for (const auto &dimId :
+       {current_view_.x_dimension, current_view_.y_dimension,
+        current_view_.z_dimension}) {
+    if (const auto named = dimensionRef(dimId)) {
+      if (const auto *stored = std::get_if<DimRef>(&*named)) {
+        bound.push_back(*stored);
       }
     }
   }
+  const auto isMetadata = [this](const DimRef dim) {
+    const auto name = engine_->manifold().textOf(dim, engine_->store());
+    return name == "d.role" || name == "d.mime" || name == "d.media" ||
+           name == "d.dims";
+  };
+  const auto nextFocus = zigzag::cursorMoveOff(
+      broken, bound, engine_->manifold().home(),
+      [&](const DimRef dim, const CellRef cell) {
+        return !isProtected(cell) && !isEphemeral(cell) &&
+               (std::ranges::contains(bound, dim) || !isMetadata(dim));
+      });
 
-  // 3) Ultimate fallback: home cell
-  if (!nextFocus) {
-    nextFocus = engine_->manifold().home();
-  }
-
-  // Splice around focus and unlink it, in as few operations as the fold allows.
-  //
-  // One operation per dimension, not three. Joining the two neighbours already
-  // unlinks the cell between them: a link is one edge, so setting neg's posward
-  // to pos displaces this cell from *both* its sides -- the fold clears the
-  // negward side of what neg used to point at and the posward side of what pos
-  // used to point back to, and both of those are this cell. Following that with
-  // an explicit clear restates a link that is already clear, and linkCells()
-  // has no idempotence guard, so each of those was a dead operation in an
-  // append-only spool. Deleting a cell on two dimensions recorded four
-  // operations where two carried the change.
-  for (const auto &link : links) {
-    if (link.neg != zigzag::noCell && link.pos != zigzag::noCell) {
-      // A rank of exactly two loses one and becomes a cell linked to itself,
-      // which is a degenerate rank rather than a broken one.
-      engine_->linkCells(link.neg, link.pos, link.dim, DimVector::POS);
-      continue;
-    }
-    if (link.pos != zigzag::noCell) {
-      engine_->linkCells(focus, std::nullopt, link.dim, DimVector::POS);
-    } else if (link.neg != zigzag::noCell) {
-      engine_->linkCells(focus, std::nullopt, link.dim, DimVector::NEG);
-    }
-  }
+  zigzag::planDeletion(focus, broken, zigzag::DeletionMode::Repair,
+                       [&](const zigzag::LinkEdit &edit) {
+                         engine_->linkCells(edit.from, edit.to, edit.dim,
+                                            edit.dir);
+                       });
   accursed_cell_focus_ = nextFocus;
   rebuildActiveViewTopology();
   invalidateAccessibility();

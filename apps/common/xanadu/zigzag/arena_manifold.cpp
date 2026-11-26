@@ -2991,6 +2991,61 @@ ArenaResult ArenaManifold::freeCell(const CellRef ref,
   return this;
 }
 
+std::expected<Neighbourhood, ArenaRefusal>
+ArenaManifold::detachCell(const CellRef ref, const DeletionMode mode) {
+  if (!contains(ref)) return std::unexpected{ArenaRefusal::UnknownCell};
+  // The run is a span into storage the writes below move, so read it whole
+  // first.
+  auto broken = Neighbourhood::of(ref, dimensionsOf(ref));
+  std::optional<ArenaRefusal> refused;
+  planDeletion(ref, broken, mode, [&](const LinkEdit &edit) {
+    if (refused) return;
+    if (const auto done = link(edit.from, edit.dim, edit.dir, edit.to); !done)
+      refused = done.error();
+  });
+  if (refused) return std::unexpected{*refused};
+  return broken;
+}
+
+std::expected<RankNeighbours, ArenaRefusal>
+ArenaManifold::detachFromRank(const CellRef ref, const DimRef dim,
+                              const DeletionMode mode) {
+  if (!contains(ref)) return std::unexpected{ArenaRefusal::UnknownCell};
+  const RankNeighbours ward{.dim     = dim,
+                            .negward = linked(ref, dim, DimVector::NEG),
+                            .posward = linked(ref, dim, DimVector::POS)};
+  std::optional<ArenaRefusal> refused;
+  planRankDeletion(ref, ward, mode, [&](const LinkEdit &edit) {
+    if (refused) return;
+    if (const auto done = link(edit.from, edit.dim, edit.dir, edit.to); !done)
+      refused = done.error();
+  });
+  if (refused) return std::unexpected{*refused};
+  return ward;
+}
+
+std::expected<ArenaManifold::Deletion, ArenaRefusal>
+ArenaManifold::deleteCell(const CellRef ref,
+                          const AllocationIncarnation incarnation,
+                          const DeletionMode mode) {
+  if (!matches(ref, incarnation)) {
+    return std::unexpected{ArenaRefusal::UnknownCell};
+  }
+  if (home() == ref || namedByArenaState(ref)) {
+    return std::unexpected{ArenaRefusal::NotReleasable};
+  }
+  auto broken = detachCell(ref, mode);
+  if (!broken) return std::unexpected{broken.error()};
+  Deletion result{.broken = *std::move(broken)};
+  if (isEphemeral(ref)) {
+    // Detached above, so the only refusal left would be a shadow or arena
+    // state, both excluded; a refusal here is a broken invariant.
+    expectWritten(freeCell(ref, incarnation));
+    result.freed = true;
+  }
+  return result;
+}
+
 ArenaResult ArenaManifold::compact() {
   if (outstandingMarks_ > 0) {
     return std::unexpected{ArenaRefusal::MarksOutstanding};

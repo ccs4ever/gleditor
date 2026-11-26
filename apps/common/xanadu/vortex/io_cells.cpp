@@ -197,20 +197,16 @@ std::expected<CellRef, IoCellError> canonicalOfField(const ArenaManifold &arena,
 
 void detachFromRank(ArenaManifold &arena, const CellRef member,
                     const DimRef dim) noexcept {
-  // link() and unlink() can throw (a copy-on-write shadow allocation, the
-  // link-run limit), and a throw out of a noexcept function would terminate
-  // the owner thread. Catching leaves the rank cut at this member rather than
-  // relinked: a retired member the walks can no longer reach is the lesser
-  // failure, and it is logged so a bound that bites is visible.
+  // The shared deletion plan (P7) along one rank, Repair: the member's
+  // neighbours are joined so the rank stays walkable. link() can throw (a
+  // copy-on-write shadow allocation, the link-run limit), and a throw out of a
+  // noexcept function would terminate the owner thread. Catching leaves the
+  // rank cut at this member rather than relinked: a retired member the walks
+  // can no longer reach is the lesser failure, and it is logged so a bound
+  // that bites is visible.
   try {
-    const auto previous = arena.linked(member, dim, DimVector::NEG);
-    const auto next     = arena.linked(member, dim, DimVector::POS);
-    if (!previous && !next) return;
-    if (previous) static_cast<void>(arena.unlink(member, dim, DimVector::NEG));
-    if (next) static_cast<void>(arena.unlink(member, dim, DimVector::POS));
-    if (previous && next) {
-      static_cast<void>(arena.link(*previous, dim, DimVector::POS, *next));
-    }
+    static_cast<void>(
+        arena.detachFromRank(member, dim, zigzag::DeletionMode::Repair));
   } catch (const std::exception &error) {
     GLEDITOR_LOG_WARN("vortex.io.cells", "rank detach left a cut rank: {}",
                       error.what());
