@@ -1356,6 +1356,10 @@ P6: the Submit opcode (applied with owner approval, `vortex_vm.{hpp,cpp}` only):
   trail (the arena has no such region and the rank links of the endpoint queue are
   trail-journalled); cancelling on rollback (a recall, wrong for any future write). The VM also
   refuses an arm ordinal above 1.
+- **Gate passed.** The M7-VQL gate converged in three rounds: round 3 (`183129f5`) approved with
+  zero BLOCKING and zero MAJOR from both reviewers. The round table, reports and dispositions are in
+  [`m7-vql/README.md`](projects/vortex-io-implementation-review/m7-vql/README.md); the polish of
+  round 3's minors is in `m7-vql/r3-disposition.md`.
 - Pattern matching reuses existing opcodes: `BranchFalseCell` on the arm ordinal selects the arm,
   `Await` takes the payload. No second opcode was needed.
 
