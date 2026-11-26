@@ -482,6 +482,51 @@ TEST(VqlIoCaptureAbandonTest, DestroyingTheHostWithALiveCaptureIsSafe) {
   SUCCEED();
 }
 
+// ---- Names that outlive their handle ---------------------------------------
+
+// M7-VQL-c r1 D: a session variable naming a record or receipt that the next
+// admission freed must refuse by name, never answer for the cell that reused
+// the slot.
+TEST(VqlIoStaleBindingTest,
+     AFreedReceiptsNameIsRefusedNotAnotherCapturesReceipt) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "stale receipt");
+  const auto capture =
+      open(path, "f") + read("f", "0, 64", "r") + captureOf("r", "c");
+  ASSERT_TRUE(w.run(capture + "return 1").has_value());
+  ASSERT_TRUE(w.run(open(path, "g") + read("g", "0, 64", "s") +
+                    captureOf("s", "d") + "return 2")
+                  .has_value());
+  EXPECT_EQ(w.failure("return io_tag($c)"), "VQL_IO_STALE_BINDING");
+  EXPECT_EQ(w.rows("return io_tag($d)"),
+            std::vector<std::string>{"CaptureReceipt"});
+}
+
+TEST(VqlIoStaleBindingTest, AFreedRecordsNameIsRefusedNotAStrangersOutcome) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "AAAA");
+  ASSERT_EQ(
+      w.rows(open(path, "f") + read("f", "0, 64", "a") + "return io_tag($a)"),
+      std::vector<std::string>{"Complete"});
+  ASSERT_EQ(
+      w.rows(open(path, "g") + read("g", "100, 4", "b") + "return io_tag($b)"),
+      std::vector<std::string>{"EndOfStream"});
+  EXPECT_EQ(w.failure("return io_tag($a)"), "VQL_IO_STALE_BINDING");
+  EXPECT_EQ(w.failure("return io_bytes($a)"), "VQL_IO_STALE_BINDING");
+}
+
+TEST(VqlIoStaleBindingTest, ACarriedRecordsBytesAreRefusedNotReadAsZero) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "eleven bytes");
+  ASSERT_EQ(
+      w.rows(open(path, "f") + read("f", "0, 64", "r") + "return io_bytes($r)"),
+      std::vector<std::string>{"12"});
+  // No admission since: the record's cells are alive, its lease is not.
+  EXPECT_EQ(w.failure("return io_bytes($r)"), "VQL_IO_STALE_BINDING");
+  EXPECT_EQ(w.failure("return io_payload($r)"), "VQL_IO_STALE_BINDING");
+  EXPECT_EQ(w.rows("return io_tag($r)"), std::vector<std::string>{"Complete"});
+}
+
 // ---- Recovery
 // -----------------------------------------------------------------
 
@@ -618,8 +663,9 @@ TEST(VqlIoPersistabilityTest, ACapturedPayloadMayBeExposedAndPersisted) {
 }
 
 TEST(VqlIoPersistabilityTest, TheCaptureMustHappenBeforeTheScriptEnds) {
-  // The verdict is the run's, taken when it ends: a later script's capture
-  // does not make an earlier script's rows persistable.
+  // The rule is the session's (gate round 1): a later script's capture of a
+  // new read does not cover bytes an earlier script exposed, and once that
+  // read is retired nothing can, so the exposure refuses for the session.
   CaptureWorld w;
   const auto path = w.put("in.txt", "late capture");
   ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + exposePayload)
@@ -627,11 +673,24 @@ TEST(VqlIoPersistabilityTest, TheCaptureMustHappenBeforeTheScriptEnds) {
   ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
                     captureOf("r", "c") + "return 1")
                   .has_value());
-  EXPECT_TRUE(w.runner->persistability()->persistable());
+  EXPECT_FALSE(w.runner->persistability()->persistable());
+  EXPECT_EQ(w.runner->persistability()->uncovered, 1U);
   ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + exposePayload)
                   .has_value());
-  EXPECT_FALSE(w.runner->persistability()->persistable())
+  EXPECT_EQ(w.runner->persistability()->uncovered, 2U)
       << "a second read is a new observation, uncaptured";
+}
+
+TEST(VqlIoPersistabilityTest, TextCarriedInAVariableStaysExposedAcrossScripts) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "carried");
+  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
+                    "let $t := io_payload($r); return 1")
+                  .has_value());
+  // A plain script with no action at all: the session still holds the text.
+  ASSERT_TRUE(w.run("return $t").has_value());
+  EXPECT_FALSE(w.runner->persistability()->persistable());
+  EXPECT_EQ(w.runner->persistability()->exposed, 1U);
 }
 
 TEST(VqlIoPersistabilityTest, PartialCoverageStillNeedsCapture) {
@@ -665,10 +724,13 @@ TEST(VqlIoPersistabilityTest, DerivedTextFollowsTheCoverageOfWhatItCameFrom) {
       w.run(open(path, "f") + read("f", "0, 64", "r") + derived).has_value());
   EXPECT_FALSE(w.runner->persistability()->persistable())
       << "a value computed from uncaptured text was still exposed as text";
-  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
-                    captureOf("r", "c") + derived)
+  CaptureWorld covered;
+  const auto again = covered.put("in.txt", "derive me");
+  ASSERT_TRUE(covered
+                  .run(open(again, "f") + read("f", "0, 64", "r") +
+                       captureOf("r", "c") + derived)
                   .has_value());
-  EXPECT_TRUE(w.runner->persistability()->persistable());
+  EXPECT_TRUE(covered.runner->persistability()->persistable());
 }
 
 TEST(VqlIoPersistabilityTest, ReturningAnOutcomeNamesItsPayloadToo) {
@@ -677,10 +739,13 @@ TEST(VqlIoPersistabilityTest, ReturningAnOutcomeNamesItsPayloadToo) {
   ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + "return $r")
                   .has_value());
   EXPECT_FALSE(w.runner->persistability()->persistable());
-  ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
-                    captureOf("r", "c") + "return $r")
+  CaptureWorld covered;
+  const auto again = covered.put("in.txt", "named by handle");
+  ASSERT_TRUE(covered
+                  .run(open(again, "f") + read("f", "0, 64", "r") +
+                       captureOf("r", "c") + "return $r")
                   .has_value());
-  EXPECT_TRUE(w.runner->persistability()->persistable());
+  EXPECT_TRUE(covered.runner->persistability()->persistable());
 }
 
 TEST(VqlIoPersistabilityTest,
@@ -707,10 +772,13 @@ TEST(VqlIoPersistabilityTest, ACaptureOfARecordAndAServiceOutcomeCoverAlike) {
     ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") + exposePayload)
                     .has_value());
     EXPECT_FALSE(w.runner->persistability()->persistable());
-    ASSERT_TRUE(w.run(open(path, "f") + read("f", "0, 64", "r") +
-                      captureOf("r", "c") + exposePayload)
+    CaptureWorld covered{retained};
+    const auto again = covered.put("in.txt", "either kind of outcome");
+    ASSERT_TRUE(covered
+                    .run(open(again, "f") + read("f", "0, 64", "r") +
+                         captureOf("r", "c") + exposePayload)
                     .has_value());
-    EXPECT_TRUE(w.runner->persistability()->persistable());
+    EXPECT_TRUE(covered.runner->persistability()->persistable());
   }
 }
 
@@ -724,7 +792,8 @@ TEST(VqlIoPersistabilityTest, WithoutACaptureStackAnyExposureIsUncovered) {
                   .has_value());
   EXPECT_FALSE(w.runner->persistability()->persistable());
   ASSERT_TRUE(w.run(open(path, "f") + "return io_tag($f)").has_value());
-  EXPECT_TRUE(w.runner->persistability()->persistable());
+  EXPECT_FALSE(w.runner->persistability()->persistable())
+      << "the session's exposure is still uncovered";
 }
 
 TEST(VqlIoPersistabilityTest, TheCaptureStackIsBuiltOnlyWhenAScriptCaptures) {
@@ -750,7 +819,8 @@ TEST(VqlIoPersistabilityTest, TheCaptureStackIsBuiltOnlyWhenAScriptCaptures) {
                     captureOf("r", "c") + exposePayload)
                   .has_value());
   EXPECT_EQ(built, 1);
-  EXPECT_TRUE(w.runner->persistability()->persistable());
+  EXPECT_EQ(w.runner->persistability()->uncovered, 1U)
+      << "only the first, uncaptured exposure is left";
 }
 
 TEST(VqlIoPersistabilityTest, AStackThatCannotBeBuiltIsTheTypedRefusal) {

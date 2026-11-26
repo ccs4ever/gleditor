@@ -279,10 +279,11 @@ range, **`CaptureCoordinator::translationFor(range)` covers all of it**, and rec
 nothing it exposed is as persistable as a script with no action, which it already was by being
 refused only when it held an action; here it becomes accurate instead of blunt).
 
-`ScriptRunner::persistability()` answers `Persistable` or `NeedsCapture{uncovered}` for the most
-recent finished script; `vquery` consults it where it consults `resultsFromAction` now. A
-`NeedsCapture` run keeps the exact current refusal (`VQL_IO_PERSIST_NEEDS_CAPTURE`) with its message
-extended by the count of uncovered exposures.
+`ScriptRunner::persistability()` answers `Persistable` or `NeedsCapture{uncovered}` for the session
+(gate round 1: the exposure set spans every script the runner has run, see "Session scope" below);
+`vquery` consults it where it consults `resultsFromAction` now. A `NeedsCapture` run keeps the exact
+current refusal (`VQL_IO_PERSIST_NEEDS_CAPTURE`) with its message extended by the count of uncovered
+exposures.
 
 Argued:
 
@@ -298,6 +299,15 @@ Argued:
   printed" into an error after the author already paid for the capture.
 - **Partial coverage refuses.** Capturing bytes `[0,10)` and exposing `[0,4096)` is `NeedsCapture`:
   the uncovered 4086 bytes were never captured.
+- **Session scope (gate round 1, owner decision Q2).** The first cut took the verdict for the script
+  that ran the action. The text a script exposes outlives it as a session variable, so a later plain
+  line could return it and reach `-o`, `--in-place` or `:save`. The exposure set is now the
+  runner's, accumulated across every script (and every plain query through the same VM) since it
+  began, and `vquery` checks coverage of the whole set whenever results are persisted, on any line.
+  Still a coverage rule, not taint: derived text is allowed once covered. Handle rows (capability,
+  request, receipt) are refused on any line. Price: an exposure whose outcome was retired before it
+  was captured cannot be covered afterwards, so it refuses persistence for the rest of the session;
+  the author captures inside the script that reads, or restarts the session.
 - **Evaluated at script end, not at persist time.** Translations may be evicted later (the
   coordinator evicts committed translations least recently hit first,
   `capture_coordinator.cpp:769-792`); a decision made at the end of the script is a fact about that
@@ -1273,6 +1283,21 @@ whose worker never finishes (a sink that never returns) keeps its graph: the cel
 | 14  | Owned records                          | Met (C1b)                                                                                                                                                                |
 | 15  | Retention bounded                      | Met (C1b); 10^4 named-outcome runs stay bounded and their opens' graphs are now freed too                                                                                |
 
+### 18.7 Gate round 1 fixes
+
+- **Teardown.** `~ScriptRunner` holds every live activation strongly before it clears `parked_`, so
+  an activation only `parked_` owned (its caller dropped the token) still has its files closed,
+  requests retired and captures released and pinned. `~FileReadHost` abandons the capture host's
+  runs while the service is alive, and `~CaptureHost` no longer reaps through the service.
+- **Session variables naming freed handles.** `ScriptRunner` records the incarnation of every
+  runtime handle a session variable names when a script ends, and before each run, resume and
+  admission rebinds a variable whose handle died to a stale marker cell. Every relation provider
+  refuses the marker with `VQL_IO_STALE_BINDING`. Chosen over keeping records alive while named:
+  that is unbounded (a name can be kept for ever) and would hold payload leases and request slots
+  the budget exists to free. `await($h) as $r` still names the service's outcome (not an owned
+  record); the same check makes its stale name typed, which is what the finding needed.
+- **`:reconcile`** parses its decision as a whole.
+
 ## 19. Deferrals
 
 - `message` and frame modes; per-row, per-loop and `for`-body effects (until an explicit gate).
@@ -1288,6 +1313,11 @@ whose worker never finishes (a sink that never returns) keeps its graph: the cel
 - Linking a result row to the capture receipt as an xanalink rather than by shared permascroll
   address.
 - Remote (swarm) publication of a capture receipt; local capture invents no remote signature.
+
+Gate round 1 additions: `await($h) as $r` is not copied to an owned record (it would retire `$h`'s
+request); a `let` of the same script is not visible to a write's `$source` or an offset; a refused
+close at runner destruction is not retried. All three are recorded in
+`projects/vortex-io-implementation-review/m7-vql-c/r1-disposition.md`.
 
 ## 20. Owner decisions (2026-11-26)
 

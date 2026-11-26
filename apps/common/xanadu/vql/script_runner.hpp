@@ -241,12 +241,14 @@ public:
 
   void wake(vortex::FrontendToken token, vortex::FrontendWake why) override;
 
-  /// What the most recent script to finish exposed and what a capture covers,
-  /// decided when it ended (a fact about that run, not about whatever the
-  /// coordinator holds later). Nullopt before any script has finished.
-  [[nodiscard]] auto persistability() const noexcept
-      -> std::optional<Persistability> {
-    return persistability_;
+  /// What every script of this runner has exposed as text since it began,
+  /// against what committed captures cover now (design §4.7, owner decision
+  /// Q2: a coverage rule over the session, not taint tracking: exposed text
+  /// outlives its script as a session variable, so no single line can vouch
+  /// for the rows it persists). Nullopt before any script has finished.
+  [[nodiscard]] auto persistability() const -> std::optional<Persistability> {
+    if (!finishedAny_) return std::nullopt;
+    return assess();
   }
 
   /// Script-owned outcome records alive now (named outcomes whose request was
@@ -304,9 +306,22 @@ private:
       -> std::expected<vortex::GatedOutcome, vortex::FrontendDiagnostic>;
   /// Note that the running script turned @p range into text, once.
   void expose(const vortex::PayloadRange &range);
-  /// Count @p activation's exposures against what the capture host covers.
-  [[nodiscard]] auto assess(const Activation &activation) const
-      -> Persistability;
+  /// Count the session's exposures against what the capture host covers.
+  [[nodiscard]] auto assess() const -> Persistability;
+  /// Remember which runtime handles the session variables name, with the
+  /// incarnation each had when it was bound.
+  void noteBindings();
+  /// Rebind every session variable whose handle was freed to the stale marker,
+  /// so a reused arena slot is never read under the old name.
+  void reconcileBindings() noexcept;
+  /// A `VQL_IO_STALE_BINDING` refusal carrying @p message.
+  [[nodiscard]] auto staleRefusal(std::string message)
+      -> zigzag::vortex::RelationResult;
+  /// Whether @p cell is a finished script's record whose payload lease went
+  /// back with its script.
+  [[nodiscard]] auto payloadReleased(zigzag::CellRef cell) const -> bool;
+  /// The marker cell session variables of freed handles are rebound to.
+  [[nodiscard]] auto staleMarker() const -> zigzag::CellRef;
   /// `io_own_outcome`: copy the finished outcome a named read yielded into a
   /// script-owned record and retire its request (§12.1).
   [[nodiscard]] auto ownOutcome(const zigzag::vortex::RelationQuery &query)
@@ -452,7 +467,22 @@ private:
   /// reason as finishedRecords_: a caller's rows may be the receipt.
   std::vector<zigzag::CellRef> finishedCaptures_;
   std::size_t retainedBytes_{};
-  std::optional<Persistability> persistability_;
+  /// Every payload range any script turned into text (design §4.7): the range
+  /// and not the text, since coverage is a question about bytes. It spans the
+  /// session because the text outlives its script as a session variable.
+  std::vector<vortex::PayloadRange> exposures_;
+  bool finishedAny_{false};
+  /// A runtime handle a session variable named when its script ended: the
+  /// cell's incarnation then, so a freed-and-reused slot is told from it.
+  struct BoundHandle {
+    zigzag::CellRef cell;
+    zigzag::ArenaManifold::AllocationIncarnation incarnation;
+  };
+  std::map<std::string, std::vector<BoundHandle>> bound_;
+  /// What a freed handle's variable now names. Minted with the runner, outside
+  /// any script, and freed with it: made on first need it would be a cell no
+  /// program's reclamation may own, and would appear mid-session.
+  zigzag::CellRef staleMarker_;
   std::vector<std::string> providers_;
   /// The whole token, so a waiter dropped with its request's cells can still
   /// tell its caller (an Abandoned wake) that the script is dead.

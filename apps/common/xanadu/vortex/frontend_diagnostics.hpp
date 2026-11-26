@@ -89,6 +89,11 @@ inline constexpr std::string_view vqlPersistNeedsCapture =
 /// names live native state that no store can hold; what a capture made
 /// durable is the cells `io_captured` answers, so that is what to return.
 inline constexpr std::string_view vqlPersistHandle = "VQL_IO_PERSIST_HANDLE";
+/// A session variable names a runtime handle (a record, receipt, request or
+/// outcome) that was freed when its script's rows were retired. The name is
+/// refused rather than read, because the arena reuses the freed slot and the
+/// bare reference would answer for an unrelated cell.
+inline constexpr std::string_view vqlStaleBinding = "VQL_IO_STALE_BINDING";
 /// A query segment of a script failed (the QueryError category and message
 /// ride in the diagnostic's message).
 inline constexpr std::string_view vqlScriptFailed = "VQL_SCRIPT_FAILED";

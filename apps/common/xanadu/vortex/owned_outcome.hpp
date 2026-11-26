@@ -35,6 +35,9 @@ struct OwnedOutcome {
   /// What the lease pins: the whole physical chunk (plan §8.1), which is what
   /// a retention budget charges.
   std::size_t chunkBytes{};
+  /// The lease was given back (a finished script's record): the bytes it named
+  /// are gone, which is not the same as a read that retained none.
+  bool payloadReleased{};
   /// What the read observed (locator, generation, extent), copied by value
   /// from the service outcome's d.io.source cell: a capture of the record keys
   /// its overlap on the observation, which the record would otherwise have

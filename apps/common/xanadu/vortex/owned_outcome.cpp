@@ -118,7 +118,8 @@ void OwnedOutcome::releasePayload(PayloadResolver &resolver) noexcept {
   if (!payload) return;
   resolver.release(payload->lease);
   payload.reset();
-  chunkBytes = 0;
+  chunkBytes      = 0;
+  payloadReleased = true;
 }
 
 void OwnedOutcome::freeCells(ArenaManifold &arena,

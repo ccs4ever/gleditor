@@ -520,7 +520,10 @@ TEST_F(VQueryE2ETest,
   }
 }
 
-TEST_F(VQueryE2ETest, AQueryAfterAnActionIsSavableAgain) {
+// The rule is coverage over the session (owner decision Q2): once a script has
+// turned bytes into text, a later line cannot persist anything until a capture
+// holds them, whatever that later line returns.
+TEST_F(VQueryE2ETest, AQueryAfterAnActionIsRefusedWhileItsExposureIsUncovered) {
   const auto source = writeSource(testDir, "hello world");
   const auto input  = testDir / "later.vql";
   const auto repl   = testDir / "later.store";
@@ -531,10 +534,10 @@ TEST_F(VQueryE2ETest, AQueryAfterAnActionIsSavableAgain) {
            << "\n:quit\n";
   }
   const auto session = runVQuery("< '" + input.string() + "'");
-  EXPECT_EQ(session.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+  EXPECT_NE(session.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
             std::string::npos)
       << session.output;
-  EXPECT_TRUE(fs::exists(repl)) << session.output;
+  EXPECT_FALSE(fs::exists(repl)) << "nothing was saved";
 }
 
 TEST_F(VQueryE2ETest, ReplOpensAPathWithSpaces) {
@@ -1180,6 +1183,93 @@ TEST_F(VQueryE2ETest, ReconcileNamesItsFormWhenGivenOnlyHalfOfIt) {
        at = result.output.find("Usage: :reconcile", at + 1))
     ++usages;
   EXPECT_EQ(usages, 3U) << result.output;
+}
+
+// M7-VQL-c r1 C: text a script exposed outlives it as a session variable, so a
+// later plain line returning it must not reach durable output, and neither
+// may a capability row on any line.
+TEST_F(VQueryE2ETest, ExposedTextCarriedInASessionVariableIsNotPersistedLater) {
+  const auto session = captureSession(testDir, "carried bytes");
+  const auto saved   = testDir / "carried.store";
+  const auto result  = repl(session, testDir,
+                            {":open src " + session.source.string(),
+                             readAll64 + "let $t := io_payload($r); return 1",
+                             "return $t", ":save " + saved.string()});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << result.output;
+  EXPECT_FALSE(fs::exists(saved)) << "transient bytes were persisted";
+}
+
+TEST_F(VQueryE2ETest, ExposedTextBecomesPersistableOnceACaptureCoversIt) {
+  const auto session = captureSession(testDir, "covered later");
+  const auto after   = testDir / "after.store";
+  const auto result  = repl(session, testDir,
+                            {":open src " + session.source.string(),
+                             readAll64 + "effect { capture($r) } as $c; " +
+                                 "let $t := io_payload($r); return 1",
+                             "return $t", ":save " + after.string()});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << result.output;
+  EXPECT_TRUE(fs::exists(after)) << result.output;
+}
+
+TEST_F(VQueryE2ETest, ACapabilityRowIsRefusedOnAPlainLineAndInBatch) {
+  const auto session = captureSession(testDir, "handle bytes");
+  const auto saved   = testDir / "cap.store";
+  const auto result  = repl(session, testDir,
+                            {":open src " + session.source.string(),
+                             "return $src", ":save " + saved.string()});
+  EXPECT_NE(result.output.find("VQL_IO_PERSIST_HANDLE"), std::string::npos)
+      << result.output;
+  EXPECT_FALSE(fs::exists(saved));
+
+  const auto out   = testDir / "cap_batch.store";
+  const auto batch = session.run("-o '" + out.string() + "' -e 'return $src'");
+  EXPECT_EQ(batch.exitCode, 1) << batch.output;
+  EXPECT_NE(batch.output.find("VQL_IO_PERSIST_HANDLE"), std::string::npos)
+      << batch.output;
+  EXPECT_FALSE(fs::exists(out));
+}
+
+// M7-VQL-c r1 D: a name bound by an earlier script outlives its record, and
+// the arena reuses the freed slot; the name must say so, not answer for a
+// stranger's record.
+TEST_F(VQueryE2ETest, AStaleOutcomeNameIsATypedRefusalNotAStrangersRecord) {
+  const auto session = captureSession(testDir, "stale test bytes");
+  const auto first   = "effect { let $s := submit($src, read_bytes(0, 5)); "
+                       "match $s { admitted($q) => await($q), refused($e) => "
+                       "$e } } as $a; return io_tag($a)";
+  const auto second  = "effect { let $s := submit($src, read_bytes(100, 5)); "
+                       "match $s { admitted($q) => await($q), refused($e) => "
+                       "$e } } as $b; return io_tag($b)";
+  const auto result  = repl(session, testDir,
+                            {":open src " + session.source.string(), first,
+                             second, "return io_tag($a)", "return io_tag($b)"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_STALE_BINDING"), std::string::npos)
+      << result.output;
+  EXPECT_EQ(result.output.find("RelationNext expects"), std::string::npos)
+      << result.output;
+  // $b is the live one and still reads its own outcome.
+  EXPECT_NE(result.output.find("EndOfStream"), std::string::npos)
+      << result.output;
+}
+
+TEST_F(VQueryE2ETest, AStaleReceiptNameIsATypedRefusal) {
+  const auto session = captureSession(testDir, "receipt bytes");
+  const auto capture = readAll64 + "effect { capture($r) } as $c; return 1";
+  const auto result  = repl(session, testDir,
+                            {":open src " + session.source.string(), capture,
+                             capture, "return io_captured($c)"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  // The second capture rebinds $c, so the live receipt answers; the first
+  // script's receipt is gone and nothing names it.
+  EXPECT_EQ(result.output.find("RelationNext expects"), std::string::npos)
+      << result.output;
 }
 
 // The receipt `$c` is a runtime handle; persisting it was refused deep inside

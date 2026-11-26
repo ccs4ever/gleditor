@@ -154,9 +154,6 @@ struct ScriptRunner::Activation final : vortex::FrontendActivation {
   /// that ended one before any request), so each ending can abandon or free
   /// them through the capture host.
   std::vector<CellRef> captures;
-  /// Every payload range this script turned into text (design §4.7), the
-  /// range and not the text: coverage is a question about bytes.
-  std::vector<vortex::PayloadRange> exposures;
   /// Each open outcome the script's `open` actions produced, with whether it
   /// minted a capability, so a later read through a failed open can say which
   /// open failed and how.
@@ -181,7 +178,9 @@ struct ScriptRunner::Activation final : vortex::FrontendActivation {
 
 ScriptRunner::ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
                            ScriptIoPorts ports, QueryExecutionOptions options)
-    : session_(session), vm_(vm), ports_(std::move(ports)), options_(options) {
+    : session_(session), vm_(vm), ports_(std::move(ports)), options_(options),
+      staleMarker_(
+          session.coordinator().arena().makeCell(std::string{"stale handle"})) {
   if (vm_.hasSubmitHandler()) {
     throw std::logic_error(
         "a VortexVM has one Submit hook and another runner holds it");
@@ -245,6 +244,9 @@ ScriptRunner::~ScriptRunner() {
   owned_.clear();
   retainedBytes_ = 0;
   freeFinishedRecords();
+  auto &arena = session_.coordinator().arena();
+  if (const auto incarnation = arena.incarnationOf(staleMarker_))
+    static_cast<void>(arena.freeCell(staleMarker_, *incarnation));
 }
 
 auto ScriptRunner::diagnose(const std::string_view code, std::string message,
@@ -571,7 +573,20 @@ constexpr std::array<FieldRelation, 3> fieldRelations{{
 void ScriptRunner::installProviders() {
   const auto install = [&](const char *name,
                            zigzag::vortex::RelationProvider provider) {
-    vm_.setRelationProvider(name, std::move(provider));
+    // A name whose handle was freed answers a typed refusal at every reader,
+    // never the value of whichever cell reused the slot.
+    vm_.setRelationProvider(
+        name,
+        [this, provider = std::move(provider)](
+            const RelationQuery &query) -> RelationResult {
+          if (std::ranges::find(query.arguments, staleMarker_) !=
+              query.arguments.end()) {
+            return staleRefusal(
+                "a variable names an I/O handle that was freed when its "
+                "script's rows were retired; bind it again with 'as'");
+          }
+          return provider(query);
+        });
     providers_.emplace_back(name);
   };
   // Outcome fields. Each answers one cell or nothing; the VM and the compiler
@@ -617,6 +632,10 @@ void ScriptRunner::installProviders() {
             if (isCaptureReceipt(query)) return answerOnce(query, {});
             const auto outcome = liveOutcome(query, "io_bytes");
             if (!outcome) return std::unexpected(outcome.error());
+            if (payloadReleased(outcome->cell))
+              return staleRefusal(
+                  "io_bytes: the bytes belonged to the script that read "
+                  "them and went back with it; read them again");
             const auto gate = gated(*outcome);
             if (!gate) return std::unexpected(gate.error().message);
             const auto counted =
@@ -634,6 +653,10 @@ void ScriptRunner::installProviders() {
             if (isCaptureReceipt(query)) return answerOnce(query, {});
             const auto outcome = liveOutcome(query, "io_payload");
             if (!outcome) return std::unexpected(outcome.error());
+            if (payloadReleased(outcome->cell))
+              return staleRefusal(
+                  "io_payload: the bytes belonged to the script that read "
+                  "them and went back with it; read them again");
             if (query.position != 0)
               return std::optional<RelationAnswer>{std::nullopt};
             const auto text = payloadText(*outcome);
@@ -737,6 +760,7 @@ auto ScriptRunner::openPath(const RelationQuery &query) -> RelationResult {
   // budget they filled is free for this open.
   retireAll(finished_);
   freeFinishedRecords();
+  reconcileBindings();
   const auto submission =
       ports_.openFile(path, rightsOf(static_cast<IoOpenMode>(*mode)));
   if (!submission) return refuse(submission.error().message);
@@ -834,6 +858,7 @@ auto ScriptRunner::captureBegin(const RelationQuery &query, const bool ranged)
   const HostCells hostCells{current_->executor.get(), arena};
   retireAll(finished_);
   freeFinishedRecords();
+  reconcileBindings();
 
   const auto rejected = [&](const vortex::IoErrorCode code,
                             const std::uint32_t detail) -> RelationResult {
@@ -968,6 +993,7 @@ void ScriptRunner::releaseCaptures(Activation &activation,
 
 auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
   reapClosing();
+  reconcileBindings();
   // Everything that can be wrong with an action's own values is wrong before
   // anything is compiled, staged or submitted.
   const auto &statements = query.body.statements;
@@ -1050,7 +1076,10 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
         return ScriptRunResult::failed(
             diagnose(vortex::frontend_codes::vqlEffectArgument,
                      "$" + action->source.text +
-                         " is not bound to exactly one cell to write",
+                         " is not bound to exactly one cell to write (a "
+                         "name bound by a 'let' of this script is not "
+                         "visible to its actions; bind it in an earlier "
+                         "script or name an outcome with 'as')",
                      index));
     }
     if (action->within) {
@@ -1218,7 +1247,16 @@ auto ScriptRunner::ownOutcome(const RelationQuery &query) -> RelationResult {
   }
   const auto cell = record->cell.cell;
   retainedBytes_ += record->chunkBytes + record->observationBytes();
-  owned_.insert_or_assign(cell, *std::move(record));
+  // A rolled-back record's slot can be reused within this activation: the
+  // entry it leaves must give its lease and budget back, not be overwritten.
+  if (const auto stale = owned_.find(cell); stale != owned_.end()) {
+    retainedBytes_ -=
+        std::min(retainedBytes_,
+                 stale->second.chunkBytes + stale->second.observationBytes());
+    stale->second.releasePayload(ports_.payloads);
+    owned_.erase(stale);
+  }
+  owned_.emplace(cell, *std::move(record));
   current_->ownedCells.push_back(cell);
   // Nothing reads the service's outcome again: the record has every field it
   // had, so the request leaves the budget now rather than at the script's end.
@@ -1342,6 +1380,7 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
   // can hold. They join finished_ when the script ends.
   retireAll(finished_);
   freeFinishedRecords();
+  reconcileBindings();
   // The bytes of a write are frozen here, before anything is staged: no
   // worker can observe a half-built buffer.
   std::vector<std::byte> frozen;
@@ -1602,23 +1641,95 @@ auto ScriptRunner::payloadText(const vortex::OutcomeCell outcome) const
 }
 
 void ScriptRunner::expose(const vortex::PayloadRange &range) {
-  if (current_ == nullptr) return;
-  auto &seen = current_->exposures;
-  if (std::ranges::find(seen, range) == seen.end()) seen.push_back(range);
+  // Recorded whoever asks, a plain query that reads a variable included: the
+  // text a script exposed outlives it, so the set belongs to the session.
+  if (std::ranges::find(exposures_, range) == exposures_.end())
+    exposures_.push_back(range);
 }
 
-auto ScriptRunner::assess(const Activation &activation) const
-    -> Persistability {
+auto ScriptRunner::assess() const -> Persistability {
   // The lookup, never the builder: a script that captured nothing must not
   // start a journal just to learn that nothing is covered.
   auto *const host = captureHost();
-  Persistability verdict{.exposed = activation.exposures.size()};
-  for (const auto &range : activation.exposures) {
+  Persistability verdict{.exposed = exposures_.size()};
+  for (const auto &range : exposures_) {
     const bool covered =
         host != nullptr && host->coordinator().spansFor(range).has_value();
     if (!covered) ++verdict.uncovered;
   }
   return verdict;
+}
+
+auto ScriptRunner::staleRefusal(std::string message)
+    -> zigzag::vortex::RelationResult {
+  auto refusal =
+      diagnose(vortex::frontend_codes::vqlStaleBinding, std::move(message));
+  // Only a running script consumes stageFailure_; a plain query would leave it
+  // set for whatever fails next.
+  if (current_ != nullptr) stageFailure_ = refusal;
+  // A plain query has no diagnostic channel, only this text, so it names the
+  // code itself.
+  return std::unexpected(refusal.code + ": " + refusal.message);
+}
+
+auto ScriptRunner::payloadReleased(const zigzag::CellRef cell) const -> bool {
+  return std::ranges::any_of(
+      finishedRecords_, [&](const vortex::OwnedOutcome &record) {
+        return record.cell.cell == cell && record.payloadReleased;
+      });
+}
+
+auto ScriptRunner::staleMarker() const -> zigzag::CellRef {
+  return staleMarker_;
+}
+
+void ScriptRunner::noteBindings() {
+  const auto &arena = session_.coordinator().arena();
+  std::map<std::string, std::vector<BoundHandle>> next;
+  for (const auto &[name, cells] : session_.variables()) {
+    std::vector<BoundHandle> handles;
+    for (const auto cell : cells) {
+      const auto incarnation = arena.incarnationOf(cell);
+      if (!incarnation) continue;
+      if (!vortex::ioCellTag(arena, cell, *incarnation)) continue;
+      // A handle already seen under this name keeps the incarnation it had
+      // then; only a newly bound one takes today's.
+      const auto known = bound_.find(name);
+      std::optional<BoundHandle> before;
+      if (known != bound_.end()) {
+        const auto found =
+            std::ranges::find(known->second, cell, &BoundHandle::cell);
+        if (found != known->second.end()) before = *found;
+      }
+      handles.push_back(before.value_or(BoundHandle{cell, *incarnation}));
+    }
+    if (!handles.empty()) next.emplace(name, std::move(handles));
+  }
+  bound_ = std::move(next);
+}
+
+void ScriptRunner::reconcileBindings() noexcept {
+  try {
+    const auto &arena = session_.coordinator().arena();
+    for (auto it = bound_.begin(); it != bound_.end();) {
+      auto bound   = session_.getVariable(it->first);
+      bool changed = false;
+      std::erase_if(it->second, [&](const BoundHandle &handle) {
+        if (arena.matches(handle.cell, handle.incarnation)) return false;
+        for (auto &cell : bound) {
+          if (cell != handle.cell) continue;
+          cell    = staleMarker();
+          changed = true;
+        }
+        return true;
+      });
+      if (changed) session_.setVariable(it->first, std::move(bound));
+      it = it->second.empty() ? bound_.erase(it) : std::next(it);
+    }
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN(logCategory, "stale session handles were not marked: {}",
+                      error.what());
+  }
 }
 
 auto ScriptRunner::finish(const std::shared_ptr<Activation> &activation,
@@ -1668,14 +1779,12 @@ auto ScriptRunner::finish(const std::shared_ptr<Activation> &activation,
       if (!incarnation) continue;
       const vortex::OutcomeCell named{row, *incarnation};
       if (!vortex::ioOutcomeTag(arena, named)) continue;
-      if (const auto gate = gated(named); gate && gate->payload) {
-        auto &seen = activation->exposures;
-        if (std::ranges::find(seen, *gate->payload) == seen.end())
-          seen.push_back(*gate->payload);
-      }
+      if (const auto gate = gated(named); gate && gate->payload)
+        expose(*gate->payload);
     }
   }
-  persistability_ = assess(*activation);
+  finishedAny_ = true;
+  noteBindings();
   return ScriptRunResult::completed(std::move(rows));
 }
 
@@ -1722,6 +1831,7 @@ auto ScriptRunner::expireIfDue(const FrontendToken &token)
 
 auto ScriptRunner::resume(ScriptWake wake) -> ScriptRunResult {
   reapClosing();
+  reconcileBindings();
   auto activation =
       std::dynamic_pointer_cast<Activation>(wake.token.activation);
   if (!activation || !activation->parked) {

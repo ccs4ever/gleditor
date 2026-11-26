@@ -14,6 +14,7 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <gleditor/logging.hpp>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -38,6 +39,7 @@
 #include "common/xanadu/vortex/capture_coordinator.hpp"
 #include "common/xanadu/vortex/capture_publication.hpp"
 #include "common/xanadu/vortex/file_read_host.hpp"
+#include "common/xanadu/vortex/framed_log.hpp"
 #include "common/xanadu/vortex/io_cells.hpp"
 #include "common/xanadu/vortex/mesh_cli.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
@@ -719,7 +721,20 @@ int main(int argc, char *argv[]) {
     if (auto *built = host.capture()) return built;
     const auto directory = captureDirectory();
     try {
+      // Each directory this creates is an entry in its parent that must be
+      // durable before the journal's first intent: a power loss after the
+      // append would otherwise leave bytes with no intent to find them.
+      std::vector<std::filesystem::path> created;
+      for (auto at = directory; !at.empty() && !std::filesystem::exists(at);
+           at      = at.parent_path())
+        created.push_back(at);
       std::filesystem::create_directories(directory);
+      for (const auto &made : created) {
+        if (!xanadu::vortex::syncParentDirectory(made))
+          GLEDITOR_LOG_WARN("vquery.capture",
+                            "the entry of {} could not be made durable",
+                            made.string());
+      }
       if (std::filesystem::exists(directory / "ops.nodes")) {
         captureStore = xanadu::loadStore(directory, permascroll);
       } else {
@@ -796,42 +811,36 @@ int main(int argc, char *argv[]) {
   };
   // Query Execution Helper
   bool hasResults = false;
-  // A script that ran an I/O action may return the bytes it read (through
-  // io_payload, or as the action's own row) or handles to its requests, and
-  // which row came from where is not tracked. What is tracked is coverage:
-  // each payload the script turned into text is an exposure, and the runner
-  // says whether a committed capture holds every one. Input is transient
-  // unless the author captured it, so -o, --in-place and :save accept the
-  // result of such a script only when nothing it exposed is uncovered.
-  bool resultsFromAction         = false;
+  // Input is transient unless the author captured it (design §4.7, owner
+  // decision Q2). The rule is coverage over the session, not taint: every
+  // payload any script turned into text since the session began is an
+  // exposure, the text outlives its script as a session variable, and so the
+  // runner says whether committed captures hold every one whatever line made
+  // the rows. A row that is itself a runtime handle names native state no
+  // store can hold and is refused on every line, including a bare `return
+  // $src` over a capability that `--io-file` or `:open` bound.
   const auto refuseDurableAction = [&]() -> bool {
-    if (!resultsFromAction) return false;
-    const auto verdict = ioRunner ? ioRunner->persistability() : std::nullopt;
-    if (verdict && verdict->persistable()) {
-      // Covered input may be persisted, but a row that is itself a runtime
-      // handle (the receipt `$c`, a capability, a request) names native state
-      // no store can hold: promotion would refuse it deep inside, so it is
-      // refused here by name, with the road to what the author meant.
-      const auto &arena = coordinator.arena();
-      for (const auto cell : lastResults) {
-        const auto incarnation = arena.incarnationOf(cell);
-        if (!incarnation) continue;
-        const auto tag = xanadu::vortex::ioCellTag(arena, cell, *incarnation);
-        if (!tag || *tag == xanadu::vortex::IoCellTag::Outcome) continue;
-        std::cerr << xanadu::vortex::frontend_codes::vqlPersistHandle
-                  << ": a result row is a runtime I/O handle ("
-                  << xanadu::vortex::toString(*tag)
-                  << "), which no store can hold; return "
-                     "io_captured($c) to persist what a capture made "
-                     "durable\n";
-        return true;
-      }
-      return false;
+    // Handles first: promotion would refuse them deep inside, so they are
+    // refused here by name, with the road to what the author meant.
+    const auto &arena = coordinator.arena();
+    for (const auto cell : lastResults) {
+      const auto incarnation = arena.incarnationOf(cell);
+      if (!incarnation) continue;
+      const auto tag = xanadu::vortex::ioCellTag(arena, cell, *incarnation);
+      if (!tag || *tag == xanadu::vortex::IoCellTag::Outcome) continue;
+      std::cerr << xanadu::vortex::frontend_codes::vqlPersistHandle
+                << ": a result row is a runtime I/O handle ("
+                << xanadu::vortex::toString(*tag)
+                << "), which no store can hold; return "
+                   "io_captured($c) to persist what a capture made "
+                   "durable\n";
+      return true;
     }
+    const auto verdict = ioRunner ? ioRunner->persistability() : std::nullopt;
+    if (!verdict || verdict->persistable()) return false;
     std::cerr << xanadu::vortex::frontend_codes::vqlPersistNeedsCapture
-              << ": the result comes from a script that turned "
-              << (verdict ? verdict->uncovered : std::size_t{}) << " payload"
-              << (verdict && 1 == verdict->uncovered ? "" : "s")
+              << ": this session turned " << verdict->uncovered << " payload"
+              << (1 == verdict->uncovered ? "" : "s")
               << " it read into text without capturing "
                  "all of it; input is transient unless explicitly captured "
                  "(effect { capture($r) })\n";
@@ -861,9 +870,8 @@ int main(int argc, char *argv[]) {
       // the script ends or fails: -o, --in-place and :save of a failed
       // script find no results rather than cells that no longer exist.
       lastResults.clear();
-      hasResults        = false;
-      resultsFromAction = false;
-      auto rows         = runIoScript(std::move(ast));
+      hasResults = false;
+      auto rows  = runIoScript(std::move(ast));
       if (!rows) {
         std::cerr << "Query failed: " << rows.error().code << ": "
                   << rows.error().message << "\n";
@@ -885,9 +893,8 @@ int main(int argc, char *argv[]) {
       results = *execution;
     }
 
-    lastResults       = results;
-    hasResults        = true;
-    resultsFromAction = ranAction;
+    lastResults = results;
+    hasResults  = true;
 
     // Format results
     if (format == "ascii") {
