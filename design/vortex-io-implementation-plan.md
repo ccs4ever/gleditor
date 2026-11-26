@@ -1444,6 +1444,12 @@ M7-VQL-c implementation notes (built in stages C1-C5; **gate passed** in round 3
   fixed in the gate polish commit. See
   [`m7-vql-c/README.md`](projects/vortex-io-implementation-review/m7-vql-c/README.md).
 
+M7-VQL remaining slices: the deferrals of M7-VQL, -b and -c are collected, classified (in scope,
+owned by another milestone, refused) and ordered into slices M7-VQL-d to M7-VQL-m, with the exit
+criterion "M7-VQL complete", in [`vortex-io-m7-vql-roadmap.md`](vortex-io-m7-vql-roadmap.md). It is
+a roadmap only: each slice still gets its own design note, owner approval of any core proposal (P10
+is the one candidate, conditional on a spike) and a gate.
+
 M7-VQL-c design (the first draft): write effects (`write_bytes`, `append_bytes`, `sync`,
 `open ... for write|append`, behind a host write grant) and explicit capture
 (`effect { capture($r) }`, which routes a read outcome through `CaptureCoordinator` into the
