@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <string>
 #include <thread>
@@ -190,9 +191,9 @@ TEST(VqlIoMatchGrammarTest, ANameThatIsNotAnOutcomeIsRefusedWhereItIsKnown) {
       parseFailure("effect { open(\"x\") } as $f; match $f { _ => (1) }");
   EXPECT_NE(open.find(matchCode), std::string::npos) << open;
   EXPECT_NE(open.find("io_tag"), std::string::npos) << open;
-  const auto capture = parseFailure(readAs("r") +
-                                    "effect { capture($r) } as $c; match $c { "
-                                    "_ => (1) }");
+  const auto capture =
+      parseFailure(readAs("r") + "effect { capture($r) } as $c; match $c { "
+                                 "_ => (1) }");
   EXPECT_NE(capture.find(matchCode), std::string::npos) << capture;
 }
 
@@ -312,8 +313,8 @@ struct ValueWorld {
                           return specs.emplace_back(w.specification());
                         }};
     ports.retainedPayloadBytes = retained;
-    runner = std::make_unique<ScriptRunner>(engine, w.vm, std::move(ports),
-                                            options);
+    runner =
+        std::make_unique<ScriptRunner>(engine, w.vm, std::move(ports), options);
     engine.setVariable("cap", w.capability.cell);
   }
 
@@ -392,14 +393,16 @@ TEST(VqlIoMatchRunTest, EveryTerminalTagSelectsItsOwnArmAndBindsItsFields) {
   };
   ValueWorld probe;
   const std::vector<Case> cases{
-      {"Complete", Complete{probe.w.payloadRange(), {}, terminalProgress},
+      {"Complete",
+       Complete{probe.w.payloadRange(), {}, terminalProgress},
        {"ok"}},
       {"EndOfStream", EndOfStream{terminalProgress}, {"eof"}},
       {"Partial",
        Partial{probe.w.payloadRange(), PartialCause::BackendFailure,
                terminalProgress},
        {"BackendFailure"}},
-      {"Failed", Failed{{IoErrorCode::BackendFailure, 3}, {}, terminalProgress},
+      {"Failed",
+       Failed{{IoErrorCode::BackendFailure, 3}, {}, terminalProgress},
        {"BackendFailure"}},
       {"Cancelled", Cancelled{{}, terminalProgress, true}, {"true"}},
       {"TimedOut", TimedOut{{}, terminalProgress, false}, {"false"}},
@@ -415,8 +418,7 @@ TEST(VqlIoMatchRunTest, EveryTerminalTagSelectsItsOwnArmAndBindsItsFields) {
       complete->payload = s.w.payloadRange();
     if (auto *partial = std::get_if<Partial>(&outcome))
       partial->payload = s.w.payloadRange();
-    const auto rows =
-        s.drive(readAs("r") + describeAll, {std::move(outcome)});
+    const auto rows = s.drive(readAs("r") + describeAll, {std::move(outcome)});
     EXPECT_EQ(s.texts(rows), test.expected);
     EXPECT_EQ(s.w.submissions(), 1U) << "a match submits nothing";
   }
@@ -425,10 +427,9 @@ TEST(VqlIoMatchRunTest, EveryTerminalTagSelectsItsOwnArmAndBindsItsFields) {
 TEST(VqlIoMatchRunTest, RejectedBindsTheTypedErrorAndItsDetail) {
   ValueWorld s;
   s.w.refuseAdmission = true;
-  const auto rows =
-      s.drive(readAs("r") +
-                  "match $r { rejected($c, $d) => $c, _ => (\"other\") }",
-              {});
+  const auto rows     = s.drive(
+      readAs("r") + "match $r { rejected($c, $d) => $c, _ => (\"other\") }",
+      {});
   EXPECT_EQ(s.texts(rows), (Texts{"InvalidRequest"}));
   const auto detail = s.drive(
       readAs("r") + "match $r { rejected(_, $d) => $d, _ => (\"other\") }", {});
@@ -437,10 +438,9 @@ TEST(VqlIoMatchRunTest, RejectedBindsTheTypedErrorAndItsDetail) {
 
 TEST(VqlIoMatchRunTest, TheWildcardTakesWhateverNoArmNamed) {
   ValueWorld s;
-  const auto rows =
-      s.drive(readAs("r") +
-                  "match $r { complete($p) => $p, _ => (io_tag($r)) }",
-              {EndOfStream{terminalProgress}});
+  const auto rows = s.drive(
+      readAs("r") + "match $r { complete($p) => $p, _ => (io_tag($r)) }",
+      {EndOfStream{terminalProgress}});
   EXPECT_EQ(s.texts(rows), (Texts{"EndOfStream"}));
 }
 
@@ -456,19 +456,19 @@ TEST(VqlIoMatchRunTest, ABinderForAFieldTheOutcomeLacksIsEmptyNotAnError) {
 
 TEST(VqlIoMatchRunTest, AnArmMayUseTheBinderInAValueExpression) {
   ValueWorld s;
-  const auto rows = s.drive(
-      readAs("r") + "match $r { complete($p) => (string($p) + \"!\"), "
-                    "_ => (\"no\") }",
-      {s.completeWithPayload()});
+  const auto rows =
+      s.drive(readAs("r") + "match $r { complete($p) => (string($p) + \"!\"), "
+                            "_ => (\"no\") }",
+              {s.completeWithPayload()});
   EXPECT_EQ(s.texts(rows), (Texts{"ok!"}));
 }
 
 TEST(VqlIoMatchRunTest, TheStatementAfterAMatchStillRuns) {
   ValueWorld s;
-  const auto rows = s.drive(
-      readAs("r") + "match $r { complete($p) => $p, _ => (\"x\") }; "
-                    "return io_tag($r)",
-      {s.completeWithPayload()});
+  const auto rows =
+      s.drive(readAs("r") + "match $r { complete($p) => $p, _ => (\"x\") }; "
+                            "return io_tag($r)",
+              {s.completeWithPayload()});
   EXPECT_EQ(s.texts(rows), (Texts{"Complete"}));
 }
 
@@ -477,9 +477,9 @@ TEST(VqlIoMatchRunTest, ABinderIsScopedToItsArm) {
   // arm reading `$p` reads whatever $p was before (nothing here): the compile
   // does not leak the binding.
   ValueWorld s;
-  const auto rows = s.drive(
-      readAs("r") + "match $r { complete($p) => $p, _ => ($p) }",
-      {EndOfStream{terminalProgress}});
+  const auto rows =
+      s.drive(readAs("r") + "match $r { complete($p) => $p, _ => ($p) }",
+              {EndOfStream{terminalProgress}});
   EXPECT_TRUE(rows.empty());
   const auto after = s.drive(readAs("r") + "match $r { complete($p) => $p, "
                                            "_ => (\"y\") }; return $p",
@@ -493,9 +493,9 @@ TEST(VqlIoMatchRunTest, MatchBindersExposeThePayloadLikeIoPayloadDoes) {
   ValueWorld s;
   const auto before = s.runner->persistability();
   EXPECT_FALSE(before.has_value());
-  const auto rows = s.drive(
-      readAs("r") + "match $r { complete($p) => $p, _ => (\"x\") }",
-      {s.completeWithPayload()});
+  const auto rows =
+      s.drive(readAs("r") + "match $r { complete($p) => $p, _ => (\"x\") }",
+              {s.completeWithPayload()});
   ASSERT_EQ(rows.size(), 1U);
   const auto after = s.runner->persistability();
   ASSERT_TRUE(after.has_value());
@@ -519,8 +519,8 @@ TEST(VqlIoMatchRunTest, AStaleNameIsTheTypedStaleRefusalNotAnArm) {
       1U);
   // The next script's admission retires the finished one's records, so `$old`
   // names a freed slot from then on, as every other reader of it is told.
-  ASSERT_EQ(s.drive(readAs("g") + "return $g", {s.completeWithPayload()}).size(),
-            1U);
+  ASSERT_EQ(
+      s.drive(readAs("g") + "return $g", {s.completeWithPayload()}).size(), 1U);
   const auto next = s.run("match $old { _ => (\"arm\") }");
   EXPECT_EQ(ValueWorld::code(next), "VQL_IO_STALE_BINDING")
       << ValueWorld::failure(next);
@@ -568,14 +568,15 @@ TEST(VqlIoMatchRunTest, EveryOneOfTwelveTagsDispatchesFromAnOutcomeCell) {
 
 // ---- await($h) as $r: an owned record that leaves $h awaitable -------------
 
-TEST(VqlIoAwaitRecordTest, ANamedAwaitIsAnOwnedRecordAndTheHandleStaysAwaitable) {
+TEST(VqlIoAwaitRecordTest,
+     ANamedAwaitIsAnOwnedRecordAndTheHandleStaysAwaitable) {
   ValueWorld s;
   auto result = s.run(detachedAs("h") + "effect { await($h) } as $r; "
                                         "effect { await($h) } as $again; "
                                         "return io_tag($r), io_tag($again), "
                                         "io_payload($r)");
   ASSERT_TRUE(ValueWorld::parked(result)) << ValueWorld::failure(result);
-  result = s.finish(s.completeWithPayload());
+  result           = s.finish(s.completeWithPayload());
   const auto *done = std::get_if<ScriptRunResult::Completed>(&result.value);
   ASSERT_NE(done, nullptr) << ValueWorld::failure(result);
   EXPECT_EQ(s.texts(done->value), (Texts{"Complete", "Complete", "ok"}));
@@ -584,7 +585,8 @@ TEST(VqlIoAwaitRecordTest, ANamedAwaitIsAnOwnedRecordAndTheHandleStaysAwaitable)
       << "each named await is its own record";
 }
 
-TEST(VqlIoAwaitRecordTest, TheRequestIsKeptWhileTheScriptRunsAndRetiredAtItsEnd) {
+TEST(VqlIoAwaitRecordTest,
+     TheRequestIsKeptWhileTheScriptRunsAndRetiredAtItsEnd) {
   ValueWorld s;
   auto result = s.run(detachedAs("h") + "effect { await($h) } as $r; "
                                         "return io_tag($r)");
@@ -602,27 +604,27 @@ TEST(VqlIoAwaitRecordTest, TheRequestIsKeptWhileTheScriptRunsAndRetiredAtItsEnd)
 
 TEST(VqlIoAwaitRecordTest, TheRecordHasTheFieldsOfTheOutcomeItCopied) {
   ValueWorld s;
-  const auto rows = s.drive(detachedAs("h") + "effect { await($h) } as $r; "
-                                              "return $r",
-                            {Failed{{IoErrorCode::BackendFailure, 3}, {},
-                                    terminalProgress}});
+  const auto rows =
+      s.drive(detachedAs("h") + "effect { await($h) } as $r; "
+                                "return $r",
+              {Failed{{IoErrorCode::BackendFailure, 3}, {}, terminalProgress}});
   ASSERT_EQ(rows.size(), 1U);
-  EXPECT_TRUE(xanadu::vortex::isOwnedOutcome(s.w.arena, s.w.bridge.schema(),
-                                             rows[0]));
+  EXPECT_TRUE(
+      xanadu::vortex::isOwnedOutcome(s.w.arena, s.w.bridge.schema(), rows[0]));
   const auto record = OutcomeCell{rows[0], *s.w.arena.incarnationOf(rows[0])};
   EXPECT_EQ(s.w.bridge.outcomeField(record, "errorCode"), "BackendFailure");
 }
 
 TEST(VqlIoAwaitRecordTest, ANamedCancelIsARecordToo) {
   ValueWorld s;
-  auto result = s.run(detachedAs("h") + "effect { cancel($h) } as $c; "
-                                        "effect { await($h) } as $r; "
-                                        "return io_tag($c), io_tag($r)");
+  auto result      = s.run(detachedAs("h") + "effect { cancel($h) } as $c; "
+                                                  "effect { await($h) } as $r; "
+                                                  "return io_tag($c), io_tag($r)");
   const auto *done = std::get_if<ScriptRunResult::Completed>(&result.value);
   if (done == nullptr) {
     ASSERT_TRUE(ValueWorld::parked(result)) << ValueWorld::failure(result);
     result = s.finish(Cancelled{{}, terminalProgress, false});
-    done = std::get_if<ScriptRunResult::Completed>(&result.value);
+    done   = std::get_if<ScriptRunResult::Completed>(&result.value);
   }
   ASSERT_NE(done, nullptr) << ValueWorld::failure(result);
   ASSERT_EQ(done->value.size(), 2U);
@@ -633,15 +635,16 @@ TEST(VqlIoAwaitRecordTest, ANamedCancelIsARecordToo) {
 TEST(VqlIoAwaitRecordTest, AnAwaitOfARefusedHandleIsACopyOfTheRefusal) {
   ValueWorld s;
   s.w.refuseAdmission = true;
-  const auto rows = s.drive(detachedAs("h") + "effect { await($h) } as $r; "
-                                              "effect { await($h) } as $r2; "
-                                              "return io_tag($r), io_tag($r2), "
-                                              "io_error($r)",
-                            {});
+  const auto rows     = s.drive(detachedAs("h") + "effect { await($h) } as $r; "
+                                                      "effect { await($h) } as $r2; "
+                                                      "return io_tag($r), io_tag($r2), "
+                                                      "io_error($r)",
+                                {});
   EXPECT_EQ(s.texts(rows), (Texts{"Rejected", "Rejected", "InvalidRequest"}));
 }
 
-TEST(VqlIoAwaitRecordTest, PastTheRetentionBudgetTheNameStaysTheServicesOutcome) {
+TEST(VqlIoAwaitRecordTest,
+     PastTheRetentionBudgetTheNameStaysTheServicesOutcome) {
   // The two payload bytes pin a whole chunk; a budget below it declines the
   // copy, and the name then reads the service's own outcome, as a named read
   // does. The handle is unharmed either way.
@@ -655,7 +658,8 @@ TEST(VqlIoAwaitRecordTest, PastTheRetentionBudgetTheNameStaysTheServicesOutcome)
   EXPECT_EQ(s.runner->ownedRecordCount(), 0U);
 }
 
-TEST(VqlIoAwaitRecordTest, ManyNamedAwaitRunsLeaveTheArenaAndTheServiceBounded) {
+TEST(VqlIoAwaitRecordTest,
+     ManyNamedAwaitRunsLeaveTheArenaAndTheServiceBounded) {
   ValueWorld s;
   const auto once = [&] {
     auto result = s.run(detachedAs("h") + "effect { await($h) } as $r; "
@@ -668,9 +672,9 @@ TEST(VqlIoAwaitRecordTest, ManyNamedAwaitRunsLeaveTheArenaAndTheServiceBounded) 
     s.freeOldSpecs();
   };
   for (std::size_t i = 0; i < 8; ++i) once();
-  const auto warmSlots  = s.w.arena.cellCount();
-  const auto warmLive   = s.w.arena.liveCells();
-  const auto warmLeases = s.w.payloads.liveLeases();
+  const auto warmSlots       = s.w.arena.cellCount();
+  const auto warmLive        = s.w.arena.liveCells();
+  const auto warmLeases      = s.w.payloads.liveLeases();
   constexpr std::size_t runs = 10'000;
   for (std::size_t i = 0; i < runs; ++i) once();
   EXPECT_EQ(s.w.arena.cellCount(), warmSlots);
@@ -686,7 +690,7 @@ TEST(VqlIoMatchRunTest, ManyMatchRunsLeaveTheArenaAndTheServiceBounded) {
                                       "end_of_stream => (\"eof\"), "
                                       "_ => (io_tag($r)) }");
     ASSERT_TRUE(ValueWorld::parked(result));
-    result = s.finish(s.completeWithPayload());
+    result           = s.finish(s.completeWithPayload());
     const auto *done = std::get_if<ScriptRunResult::Completed>(&result.value);
     ASSERT_NE(done, nullptr) << ValueWorld::failure(result);
     // The payload text is a row the caller owns; a test that frees nothing
@@ -698,9 +702,9 @@ TEST(VqlIoMatchRunTest, ManyMatchRunsLeaveTheArenaAndTheServiceBounded) {
     s.freeOldSpecs();
   };
   for (std::size_t i = 0; i < 8; ++i) once();
-  const auto warmSlots  = s.w.arena.cellCount();
-  const auto warmLive   = s.w.arena.liveCells();
-  const auto warmLeases = s.w.payloads.liveLeases();
+  const auto warmSlots       = s.w.arena.cellCount();
+  const auto warmLive        = s.w.arena.liveCells();
+  const auto warmLeases      = s.w.payloads.liveLeases();
   constexpr std::size_t runs = 10'000;
   for (std::size_t i = 0; i < runs; ++i) once();
   EXPECT_EQ(s.w.arena.cellCount(), warmSlots);
@@ -743,7 +747,7 @@ struct FileWorld {
   std::unique_ptr<xanadu::vortex::FileReadHost> host;
   std::unique_ptr<ScriptRunner> runner;
 
-  explicit FileWorld(xanadu::vql::QueryExecutionOptions options = {},
+  explicit FileWorld(xanadu::vql::QueryExecutionOptions options      = {},
                      xanadu::vortex::FileReadHostOptions hostOptions = {}) {
     static std::uint32_t counter = 0;
     base = fs::weakly_canonical(fs::temp_directory_path()) /
@@ -752,8 +756,8 @@ struct FileWorld {
     root = base / "root";
     fs::create_directories(root);
     hostOptions.writeGrant = xanadu::vortex::writeRootGrant({root});
-    host   = std::make_unique<xanadu::vortex::FileReadHost>(vm, arena,
-                                                            hostOptions);
+    host =
+        std::make_unique<xanadu::vortex::FileReadHost>(vm, arena, hostOptions);
     runner = std::make_unique<ScriptRunner>(
         engine, vm, xanadu::vql::fileScriptPorts(*host), options);
   }
@@ -820,10 +824,9 @@ TEST(VqlIoLetSourceTest, ALetIsAnAppendSourceAndAnOffsetAndALength) {
   EXPECT_EQ(rows, (Texts{"Complete", "XYaa"}));
   EXPECT_EQ(slurp(path), "aaaXYaaaaa");
   const auto appended = f.put(f.root / "log.txt", "a;").string();
-  static_cast<void>(f.rows("let $line := \"b;\"; " +
-                           open(appended, "for append", "o") +
-                           act("o", "append_bytes($line)", "w") +
-                           "return io_tag($w)"));
+  static_cast<void>(
+      f.rows("let $line := \"b;\"; " + open(appended, "for append", "o") +
+             act("o", "append_bytes($line)", "w") + "return io_tag($w)"));
   EXPECT_EQ(slurp(appended), "a;b;");
 }
 
@@ -858,9 +861,9 @@ TEST(VqlIoLetSourceTest, ALetOfSeveralValuesIsATypedRefusalNotTheFirstOfThem) {
   FileWorld f;
   f.bindRows(3);
   const auto path = (f.root / "many.txt").string();
-  const auto code = f.failure("let $t := $rows; " +
-                              open(path, "for write create", "o") +
-                              act("o", "write_bytes(0, $t)", "w") + "return 1");
+  const auto code =
+      f.failure("let $t := $rows; " + open(path, "for write create", "o") +
+                act("o", "write_bytes(0, $t)", "w") + "return 1");
   EXPECT_EQ(code, "VQL_IO_EFFECT_ARGUMENT");
   EXPECT_EQ(slurp(path), "");
 }
@@ -868,10 +871,9 @@ TEST(VqlIoLetSourceTest, ALetOfSeveralValuesIsATypedRefusalNotTheFirstOfThem) {
 TEST(VqlIoLetSourceTest, ALetOfANonNumberIsATypedOffsetRefusal) {
   FileWorld f;
   const auto path = f.put(f.root / "n.txt", "abcdef").string();
-  const auto code = f.failure("let $at := \"far\"; " +
-                              open(path, "for write", "o") +
-                              act("o", "write_bytes($at, \"x\")", "w") +
-                              "return 1");
+  const auto code =
+      f.failure("let $at := \"far\"; " + open(path, "for write", "o") +
+                act("o", "write_bytes($at, \"x\")", "w") + "return 1");
   EXPECT_EQ(code, "VQL_IO_EFFECT_ARGUMENT");
   EXPECT_EQ(slurp(path), "abcdef");
 }
@@ -922,8 +924,7 @@ struct JoinWorld : ::testing::Test {
   auto one(const std::string &source, std::size_t cycles = 100'000)
       -> std::string {
     const auto result = exec(source, cycles);
-    EXPECT_TRUE(result.has_value())
-        << (result ? "" : result.error().message);
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     if (!result || result->size() != 1U) return "<no single row>";
     return arena.textOf(result->front());
   }
@@ -1045,10 +1046,20 @@ TEST(VqlIoJoinTest, ManyJoinAndWriteRunsLeaveTheArenaAndTheServiceBounded) {
   static_cast<void>(
       f.rows(open(path, "for write create", "seed") + "return io_tag($seed)"));
   const auto once = [&] {
-    auto result = f.run("let $text := join($rows, \";\"); " +
-                        open(path, "for write", "o") +
-                        act("o", "write_bytes(0, $text)", "w") +
-                        "return io_tag($w)");
+    // A script's `let` publishes a session variable whose cell lives until
+    // the session drops it (an engine-wide lifetime this slice does not
+    // change); the test plays the owner, so what remains is the slice's own.
+    if (const auto held = f.engine.variables().find("text");
+        held != f.engine.variables().end()) {
+      for (const auto cell : held->second) {
+        if (const auto incarnation = f.arena.incarnationOf(cell))
+          static_cast<void>(f.arena.freeCell(cell, *incarnation));
+      }
+      f.engine.setVariable("text", std::vector<zigzag::CellRef>{});
+    }
+    auto result = f.run(
+        "let $text := join($rows, \";\"); " + open(path, "for write", "o") +
+        act("o", "write_bytes(0, $text)", "w") + "return io_tag($w)");
     ASSERT_TRUE(result.has_value());
     for (const auto cell : *result) {
       if (const auto incarnation = f.arena.incarnationOf(cell))
@@ -1066,6 +1077,72 @@ TEST(VqlIoJoinTest, ManyJoinAndWriteRunsLeaveTheArenaAndTheServiceBounded) {
   EXPECT_EQ(f.arena.liveCells(), warmLive);
   EXPECT_EQ(f.host->service().requestCount(), warmRequests);
   EXPECT_EQ(slurp(path), "r0;r1;r2;r3");
+}
+
+// ---- The payload-less outcome constructor ----------------------------------
+
+TEST(VqlIoSummaryTest, ASummaryKeepsTheTagTheErrorAndTheUncertainFlag) {
+  ValueWorld s;
+  const auto rows = s.drive(readAs("r") + "return $r",
+                            {TimedOut{{}, terminalProgress, true}});
+  ASSERT_EQ(rows.size(), 1U);
+  const auto source = OutcomeCell{rows[0], *s.w.arena.incarnationOf(rows[0])};
+  auto summary      = xanadu::vortex::OwnedOutcome::summary(
+      s.w.arena, s.w.bridge.schema(), source);
+  ASSERT_TRUE(summary);
+  const auto tag = xanadu::vortex::ioOutcomeTag(s.w.arena, summary->cell);
+  ASSERT_TRUE(tag);
+  EXPECT_EQ(*tag, IoOutcomeTag::TimedOut);
+  EXPECT_EQ(s.w.bridge.outcomeField(summary->cell, "uncertain"), "true");
+  EXPECT_EQ(s.w.bridge.outcomeField(summary->cell, "owned"), "true");
+  EXPECT_FALSE(s.w.bridge.outcomeField(summary->cell, "phase"))
+      << "no Progress rank";
+  EXPECT_FALSE(summary->payload.has_value());
+  EXPECT_FALSE(summary->observation.has_value());
+  summary->freeCells(s.w.arena, s.w.bridge.schema());
+}
+
+TEST(VqlIoSummaryTest, ASummaryFitsWhereTheFullCopyIsRefused) {
+  ValueWorld s;
+  const auto rows = s.drive(readAs("r") + "return $r",
+                            {TimedOut{{}, terminalProgress, true}});
+  ASSERT_EQ(rows.size(), 1U);
+  const auto source  = OutcomeCell{rows[0], *s.w.arena.incarnationOf(rows[0])};
+  const auto &schema = s.w.bridge.schema();
+  const auto live    = s.w.arena.liveCells();
+  auto small = xanadu::vortex::OwnedOutcome::summary(s.w.arena, schema, source);
+  ASSERT_TRUE(small);
+  const auto smallCells = s.w.arena.liveCells() - live;
+  small->freeCells(s.w.arena, schema);
+  auto full = xanadu::vortex::OwnedOutcome::copy(s.w.arena, schema,
+                                                 s.w.payloads, source, {});
+  ASSERT_TRUE(full);
+  const auto fullCells = s.w.arena.liveCells() - live;
+  full->freeCells(s.w.arena, schema);
+  EXPECT_LT(smallCells, fullCells) << "the summary mints fewer cells";
+
+  // Leave room for the summary and not for the copy: fill the free slots
+  // until only the summary's worth remain, then forbid new ones.
+  std::vector<zigzag::CellRef> filler;
+  while (s.w.arena.cellCount() - s.w.arena.liveCells() > smallCells)
+    filler.push_back(s.w.arena.makeCell("filler"));
+  s.w.arena.setAllocationLimitForTesting(
+      static_cast<std::uint32_t>(s.w.arena.cellCount()));
+  bool copyRefused = false;
+  try {
+    auto refused = xanadu::vortex::OwnedOutcome::copy(s.w.arena, schema,
+                                                      s.w.payloads, source, {});
+    copyRefused  = !refused;
+    if (refused) refused->freeCells(s.w.arena, schema);
+  } catch (const std::exception &) {
+    copyRefused = true;
+  }
+  EXPECT_TRUE(copyRefused) << "the full copy does not fit";
+  auto fits = xanadu::vortex::OwnedOutcome::summary(s.w.arena, schema, source);
+  EXPECT_TRUE(fits) << "the summary does";
+  if (fits) fits->freeCells(s.w.arena, schema);
+  s.w.arena.setAllocationLimitForTesting(
+      std::numeric_limits<std::uint32_t>::max());
 }
 
 } // namespace

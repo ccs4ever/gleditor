@@ -59,6 +59,19 @@ struct OwnedOutcome {
                                  std::optional<PayloadLease> payload)
       -> std::expected<OwnedOutcome, IoCellError>;
 
+  /// A smaller record of @p source: its tag and the three fields a script
+  /// reads to decide what to do (the error code, its stable detail, the
+  /// uncertain flag), and the `owned` mark. No payload, no observation and no
+  /// Progress rank, so it mints the fewest cells a record can. It is the copy
+  /// to fall back on when the full one is refused under arena pressure: a
+  /// failed capture step must still say what it was (`TimedOut`, uncertain)
+  /// and not be replaced by a generic refusal. Nothing here depends on the
+  /// payload budget.
+  [[nodiscard]] static auto summary(zigzag::ArenaManifold &arena,
+                                    const IoCellSchema &schema,
+                                    OutcomeCell source)
+      -> std::expected<OwnedOutcome, IoCellError>;
+
   /// Give the payload lease back; idempotent.
   void releasePayload(PayloadResolver &resolver) noexcept;
   /// Delete the record's cells with the shared deletion algorithm (P7),

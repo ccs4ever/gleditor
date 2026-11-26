@@ -138,9 +138,28 @@ void CaptureHost::advance(const CellRef handle, const OutcomeCell outcome) {
   const auto tag = ioOutcomeTag(arena_, outcome);
   std::optional<OwnedOutcome> ownedStep;
   if (tag && *tag != IoOutcomeTag::Complete) {
-    if (auto copy =
-            OwnedOutcome::copy(arena_, schema_, payloads_, outcome, {})) {
-      ownedStep = *std::move(copy);
+    // Under arena pressure the full copy is refused or throws; the tag and the
+    // error and uncertainty fields are what a script needs to tell a certain
+    // stop from an ambiguous one, and they need fewer cells.
+    try {
+      if (auto copy =
+              OwnedOutcome::copy(arena_, schema_, payloads_, outcome, {})) {
+        ownedStep = *std::move(copy);
+      }
+    } catch (const std::exception &error) {
+      GLEDITOR_LOG_DEBUG("vortex.io.capture",
+                         "a failed step's full copy was refused: {}",
+                         error.what());
+    }
+    if (!ownedStep) {
+      try {
+        if (auto small = OwnedOutcome::summary(arena_, schema_, outcome))
+          ownedStep = *std::move(small);
+      } catch (const std::exception &error) {
+        GLEDITOR_LOG_DEBUG("vortex.io.capture",
+                           "a failed step's summary was refused: {}",
+                           error.what());
+      }
     }
   }
 

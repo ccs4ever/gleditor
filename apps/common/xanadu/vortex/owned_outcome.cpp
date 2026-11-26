@@ -114,6 +114,44 @@ auto OwnedOutcome::copy(ArenaManifold &arena, const IoCellSchema &schema,
   }
 }
 
+auto OwnedOutcome::summary(ArenaManifold &arena, const IoCellSchema &schema,
+                           const OutcomeCell source)
+    -> std::expected<OwnedOutcome, IoCellError> {
+  const auto tag = ioOutcomeTag(arena, source);
+  if (!tag) return std::unexpected{tag.error()};
+  // The fields a script branches on, by the names the cell store wrote.
+  constexpr std::array kept{"errorCode", "stableDetail", "uncertain"};
+  const auto fields = fieldsOf(arena, schema, source.cell);
+  const auto mark   = arena.mark();
+  try {
+    const auto record = makeDetachedOutcomeCell(arena, schema, *tag);
+    if (!record) {
+      static_cast<void>(arena.release(mark));
+      return std::unexpected{record.error()};
+    }
+    bool written = true;
+    for (const auto &[label, value] : fields) {
+      if (std::ranges::find(kept, label) == kept.end()) continue;
+      written = written &&
+                appendIoField(arena, record->cell,
+                              schema.dim(IoDimension::Occurrence),
+                              schema.dim(IoDimension::State), label, value);
+    }
+    written =
+        written &&
+        appendIoField(arena, record->cell, schema.dim(IoDimension::Occurrence),
+                      schema.dim(IoDimension::State), ownedFieldLabel, "true");
+    if (!written || !arena.discard(mark)) {
+      static_cast<void>(arena.release(mark));
+      return std::unexpected{IoCellError::ArenaRefused};
+    }
+    return OwnedOutcome{.cell = *record};
+  } catch (...) {
+    static_cast<void>(arena.release(mark));
+    throw;
+  }
+}
+
 void OwnedOutcome::releasePayload(PayloadResolver &resolver) noexcept {
   if (!payload) return;
   resolver.release(payload->lease);

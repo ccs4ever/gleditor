@@ -93,7 +93,8 @@ ioTagSet(const std::initializer_list<IoMatchTag> tags) noexcept {
 }
 
 /// Every tag the operation can end a script's view of it with.
-[[nodiscard]] constexpr IoTagSet ioTagsOf(const IoOperation operation) noexcept {
+[[nodiscard]] constexpr IoTagSet
+ioTagsOf(const IoOperation operation) noexcept {
   using T = IoMatchTag;
   switch (operation) {
   case IoOperation::Read:
@@ -121,10 +122,10 @@ enum class IoMatchField : std::uint8_t {
 
 /// The fields @p tag's pattern binds, in binder order (at most two). The
 /// fields are the ones the shared outcome carries for that tag: bytes on
-/// `complete`, the terminal cause beside the bytes on `partial` (`io_cause`), the typed
-/// error on `failed` and `rejected`, and the uncertainty flag where a stop may
-/// have left a prefix. Every other tag has no field to bind; the outcome
-/// itself is still readable through `$r`.
+/// `complete`, the terminal cause beside the bytes on `partial` (`io_cause`),
+/// the typed error on `failed` and `rejected`, and the uncertainty flag where a
+/// stop may have left a prefix. Every other tag has no field to bind; the
+/// outcome itself is still readable through `$r`.
 [[nodiscard]] constexpr std::array<std::optional<IoMatchField>, 2>
 ioMatchFieldsOf(const IoMatchTag tag) noexcept {
   using F = IoMatchField;

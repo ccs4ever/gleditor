@@ -117,8 +117,8 @@ struct HostCells {
 /// The name of a Partial's cause from the number the cell store wrote; a
 /// number this build does not know is answered as it is, never invented.
 auto partialCauseName(const std::string &number) -> std::string {
-  unsigned value = 0;
-  const auto *end = number.data() + number.size();
+  unsigned value    = 0;
+  const auto *end   = number.data() + number.size();
   const auto parsed = std::from_chars(number.data(), end, value);
   if (parsed.ec != std::errc{} || parsed.ptr != end) return number;
   using C = vortex::PartialCause;
@@ -1463,23 +1463,22 @@ auto ScriptRunner::ownOutcome(const RelationQuery &query,
 auto ScriptRunner::matchTag(const RelationQuery &query) -> RelationResult {
   const auto cell = liveCell(query, "match");
   if (!cell) return std::unexpected(cell.error());
-  const auto outcome =
-      vortex::OutcomeCell{cell->first, cell->second};
-  const auto tag = vortex::ioOutcomeTag(query.arena, outcome);
+  const auto outcome = vortex::OutcomeCell{cell->first, cell->second};
+  const auto tag     = vortex::ioOutcomeTag(query.arena, outcome);
   if (!tag) {
     const auto kind = vortex::ioCellTag(query.arena, cell->first, cell->second);
-    stageFailure_   = diagnose(
-        vortex::frontend_codes::vqlMatch,
-        std::string{"a match is aimed at "} +
-            (kind && *kind == vortex::IoCellTag::Request
-                 ? "a request handle; await it first"
-                 : kind && *kind == vortex::IoCellTag::Capability
-                       ? "a capability, not an outcome"
-                       : "a value that is not an outcome"));
+    stageFailure_ =
+        diagnose(vortex::frontend_codes::vqlMatch,
+                 std::string{"a match is aimed at "} +
+                     (kind && *kind == vortex::IoCellTag::Request
+                          ? "a request handle; await it first"
+                      : kind && *kind == vortex::IoCellTag::Capability
+                          ? "a capability, not an outcome"
+                          : "a value that is not an outcome"));
     return std::unexpected(stageFailure_->message);
   }
-  return answerOnce(query, query.arena.makeScalarCell(static_cast<std::int64_t>(
-                               matchTagOf(*tag))));
+  return answerOnce(query, query.arena.makeScalarCell(
+                               static_cast<std::int64_t>(matchTagOf(*tag))));
 }
 
 void ScriptRunner::releaseRecords(Activation &activation,
@@ -1533,7 +1532,15 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
     stageFailure_ = diagnostic;
     throw std::runtime_error(diagnostic.message);
   };
-  const auto arguments               = vlog.argumentsOf(description);
+  // An argument a program computed (a `let` of this script) is a slot that
+  // holds a reference to its value cell; one the host bound, or a literal,
+  // is the cell itself.
+  const auto value = [&](const CellRef slot) {
+    const auto held = vm_.resultCells(slot);
+    return held.empty() ? slot : held.front();
+  };
+  auto arguments = vlog.argumentsOf(description);
+  for (auto &argument : arguments) argument = value(argument);
   constexpr std::size_t boundedExtra = 2; // amount, unit of a `within`
   const auto functor                 = arena.textOf(description);
   std::optional<IoRequestKind> kind;
@@ -1729,8 +1736,8 @@ auto ScriptRunner::failureOf(const std::string_view message,
       return diagnose(code, std::string{message.substr(colon + 2)}, position);
     }
   }
-  return diagnose(vortex::frontend_codes::vqlScriptFailed,
-                  std::string{message}, position);
+  return diagnose(vortex::frontend_codes::vqlScriptFailed, std::string{message},
+                  position);
 }
 
 auto ScriptRunner::settle(const std::shared_ptr<Activation> &activation,
@@ -1814,8 +1821,15 @@ auto ScriptRunner::sourceBytes(const CellRef source) const
     return std::unexpected{diagnose(vortex::frontend_codes::vqlStaleBinding,
                                     std::string{staleBindingAdvice})};
   if (!tag) {
-    // A text cell: its text is the bytes, whatever they are.
-    const auto text = arena.textOf(source);
+    // A text cell: its text is the bytes, whatever they are. A constant or a
+    // value a program computed (a `let` of this script) carries its text as a
+    // value, not as spooled cell text, so the rendered value comes first.
+    std::string text = arena.textOf(source);
+    if (text.empty()) {
+      if (const auto value = session_.coordinator().core().render(source)) {
+        if (const auto *held = std::get_if<std::string>(&*value)) text = *held;
+      }
+    }
     std::vector<std::byte> bytes(text.size());
     std::ranges::transform(text, bytes.begin(), [](const char c) {
       return static_cast<std::byte>(c);
