@@ -721,4 +721,83 @@ TEST(VortexSubmitOpcodeTest, BacktrackingOverASubmitSubmitsAgainOnReexecution) {
   EXPECT_NE(loopHost.submissions[0], loopHost.submissions[1]);
 }
 
+TEST(VortexSubmitOpcodeTest,
+     ARetryLoopOverASubmitLeavesTheServiceAndArenaBounded) {
+  // M7-VQL gate r1, vortex M1. Each pass admits a request and then Fails past
+  // it, so the arena rollback undoes the cells that named the request while
+  // the request is still running. The host is told before the cells go and
+  // forgets the request (it is not recalled), so N passes neither exhaust the
+  // request budget nor leave cells behind.
+  Harness h;
+  SubmitProbe host(h);
+  constexpr std::size_t passes = 6; // below the harness's 8-request budget
+  std::size_t notified         = 0;
+  h.vm.setSubmitRollbackHandler([&](const zigzag::vortex::VmSubmission &lost) {
+    ++notified;
+    ASSERT_EQ(lost.arm, 0);
+    h.host.orphanRequest(
+        RequestCell{lost.payload, *h.arena.incarnationOf(lost.payload)});
+  });
+  std::vector<CellRef> choices;
+  std::vector<SubmitOps> submits;
+  std::vector<CellRef> fails;
+  for (std::size_t i = 0; i < passes; ++i) {
+    choices.push_back(h.vm.mintOpcode(OpcodeKind::Choice));
+    submits.push_back(mintSubmit(h));
+    fails.push_back(h.vm.mintOpcode(OpcodeKind::Fail));
+  }
+  const auto halt = h.vm.mintOpcode(OpcodeKind::Halt);
+  for (std::size_t i = 0; i < passes; ++i) {
+    const auto alternative = i + 1 < passes ? choices[i + 1] : halt;
+    h.core.bindInput(choices[i], h.arena.makeScalarCell(
+                                     static_cast<std::int64_t>(alternative)));
+    spinTo(h, choices[i], submits[i].submit);
+    spinTo(h, submits[i].submit, fails[i]);
+  }
+  const auto cursor = h.vm.spawnCursor(choices[0]);
+  const auto cells  = h.arena.cellCount();
+
+  const auto r = h.vm.run(cursor, 1000);
+  ASSERT_TRUE(r.success) << r.errorMessage;
+  EXPECT_EQ(r.errorMessage, "Halted");
+  EXPECT_EQ(host.calls, passes) << "every pass is a new operation";
+  EXPECT_EQ(notified, passes) << "each rollback was announced before its cells";
+  EXPECT_EQ(h.arena.cellCount(), cells) << "the arena holds no leftover cells";
+
+  // The requests run to their end and are then dropped, not published.
+  // The endpoint runs one request at a time: each end starts the next.
+  for (std::size_t i = 0; i < passes; ++i) {
+    ASSERT_LT(i, h.scheduler->entries.size());
+    h.scheduler->complete(i, EndOfStream{{}});
+    static_cast<void>(h.service.pump(64));
+  }
+  const auto after = h.arena.cellCount();
+  EXPECT_EQ(after, cells) << "a dropped terminal mints no refusal cell";
+  for (std::size_t i = 0; i < 8; ++i) {
+    EXPECT_NE(h.submit().incarnation, 0U)
+        << "the budget is whole again: admission " << i;
+  }
+}
+
+TEST(VortexSubmitOpcodeTest, AnUnknownArmOrdinalIsATypedStepFailure) {
+  Harness h;
+  h.vm.setSubmitHandler([&](const CapabilityCell capability,
+                            const CellRef description,
+                            const CellRef) -> zigzag::vortex::VmSubmission {
+    auto result          = h.service.submit(capability, description);
+    const auto &admitted = std::get<Admitted>(result.value);
+    const auto sum =
+        makeAdmittedSubmissionCell(h.arena, h.schema, admitted.request);
+    return {*sum, 7, admitted.request.cell};
+  });
+  const auto ops  = mintSubmit(h);
+  const auto halt = h.vm.mintOpcode(OpcodeKind::Halt);
+  spinTo(h, ops.submit, halt);
+  const auto stepped = h.vm.step(h.vm.spawnCursor(ops.submit));
+  EXPECT_FALSE(stepped.success);
+  EXPECT_NE(stepped.errorMessage.find("unknown arm"), std::string::npos);
+  EXPECT_FALSE(h.vm.cellReferenceOf(ops.submission)) << "nothing published";
+  h.vm.setSubmitHandler({});
+}
+
 } // namespace

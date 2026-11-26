@@ -598,6 +598,32 @@ void IoService::retireRequest(const RequestCell request) {
   eraseRequestState(found->first);
 }
 
+void IoService::orphanRequest(const RequestCell request) {
+  const auto indexed =
+      requestByCell_.find(std::pair{request.cell, request.incarnation});
+  if (indexed == requestByCell_.end()) return;
+  const auto found = requests_.find(indexed->second);
+  if (found == requests_.end() || found->second.cell != request) return;
+  if (!found->second.waiters.empty()) return;
+  if (found->second.outcome || found->second.terminalRecord) {
+    forgetOrphan(found->first);
+    return;
+  }
+  found->second.orphaned = true;
+}
+
+void IoService::forgetOrphan(const std::uint64_t tokenKey) {
+  const auto found = requests_.find(tokenKey);
+  if (found == requests_.end()) return;
+  requestByCell_.erase(
+      std::pair{found->second.cell.cell, found->second.cell.incarnation});
+  {
+    std::scoped_lock lock(sinkState_->mutex);
+    sinkState_->limits.erase(tokenKey);
+  }
+  requests_.erase(found);
+}
+
 void IoService::reapRetiredRequest(const RequestCell request) {
   if (requestByCell_.contains(std::pair{request.cell, request.incarnation})) {
     return;
@@ -828,28 +854,30 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
       retainedPayload = PayloadLease{state.terminalPayload->range,
                                      state.terminalPayload->lease};
     }
-    try {
-      const auto materialized = cells_.publishTerminal(
-          state.cell, outcome, state.progress, retainedPayload);
-      if (!materialized) {
-        // Propagate publishTerminal's typed refusal (Stale on a dead
-        // request cell, InvalidRequest on a malformed outcome) exactly
-        // like ensureTerminalOutcome does -- minting BackendFailure here
-        // would type the same terminal differently depending on which
-        // path materialized it first.
-        state.outcome = cells_.mintRefusal(materialized.error());
-      } else {
-        state.outcome = *materialized;
+    // An orphan's cells are gone: publishing would mint a refusal for a
+    // request nothing can name.
+    if (!state.orphaned) try {
+        const auto materialized = cells_.publishTerminal(
+            state.cell, outcome, state.progress, retainedPayload);
+        if (!materialized) {
+          // Propagate publishTerminal's typed refusal (Stale on a dead
+          // request cell, InvalidRequest on a malformed outcome) exactly
+          // like ensureTerminalOutcome does -- minting BackendFailure here
+          // would type the same terminal differently depending on which
+          // path materialized it first.
+          state.outcome = cells_.mintRefusal(materialized.error());
+        } else {
+          state.outcome = *materialized;
+        }
+      } catch (...) {
+        // terminalQueued suppresses requeue: with state.outcome still unset
+        // a late sink event would otherwise pass queueTerminal's gate and
+        // run this whole materialization a second time.
+        state.terminalQueued = true;
+        GLEDITOR_LOG_DEBUG(
+            "vortex.io",
+            "terminal publication threw; outcome stays rematerializable");
       }
-    } catch (...) {
-      // terminalQueued suppresses requeue: with state.outcome still unset
-      // a late sink event would otherwise pass queueTerminal's gate and
-      // run this whole materialization a second time.
-      state.terminalQueued = true;
-      GLEDITOR_LOG_DEBUG(
-          "vortex.io",
-          "terminal publication threw; outcome stays rematerializable");
-    }
     // Terminal reached: if execute never ran -- cancel-before-start, a
     // scheduler-side removal, an enqueue-invariant failure -- the staged
     // entry this request's specification named is still sitting in the
@@ -906,7 +934,9 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
     }
     --remaining;
     ++delivered;
-    if (state.retireAfterTerminal) {
+    if (state.orphaned) {
+      forgetOrphan(key);
+    } else if (state.retireAfterTerminal) {
       eraseRequestState(key);
     }
   }

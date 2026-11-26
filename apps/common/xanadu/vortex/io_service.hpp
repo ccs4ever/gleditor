@@ -89,6 +89,12 @@ public:
   void retireWaiter(WaiterCell);
   [[nodiscard]] auto cancelRequest(RequestCell) -> RequestCancelResult;
   void retireRequest(RequestCell);
+  /// Forget a request whose cells the owner has rolled back (or is about to):
+  /// nothing can name its outcome any more. It is not cancelled, so the world
+  /// effect runs to its own end; its terminal is then dropped unpublished and
+  /// its budget freed. A request already terminal is forgotten at once, and a
+  /// stale or unknown handle is a no-op. Refused while a waiter is registered.
+  void orphanRequest(RequestCell);
   /// Free the graph of a request the service no longer indexes. A request
   /// retired while a submission view still named it was kept whole by the
   /// reaper and nothing re-reaps it once the view leaves; the owner calls this
@@ -138,6 +144,7 @@ private:
     bool closingEndpoint{};
     bool terminalQueued{};
     bool retireAfterTerminal{};
+    bool orphaned{};
     std::vector<std::pair<WaiterCell, OwnerWaiterRegistration>> waiters;
   };
   struct SinkState {
@@ -179,6 +186,8 @@ private:
   /// outcome the pass could not publish, and retireRequest(); refuses
   /// while waiters are still registered, mirroring retireRequest().
   void eraseRequestState(std::uint64_t tokenKey);
+  /// Drop an orphaned request's state without touching any cell.
+  void forgetOrphan(std::uint64_t tokenKey);
   [[nodiscard]] auto ensureTerminalOutcome(RequestState &)
       -> std::optional<OutcomeCell>;
 

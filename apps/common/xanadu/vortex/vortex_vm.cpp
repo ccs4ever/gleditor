@@ -491,7 +491,7 @@ void VortexVM::abortOwnedMutationGroups(
   }
   ChoicePoint saved = std::move(choiceStack_.back());
   choiceStack_.pop_back();
-  zigzag::expectMarkOrder(core_.arena().release(saved.mark));
+  releaseChoiceMark(saved);
   if (const auto pc = cursorPC_.find(cursor); pc != cursorPC_.end())
     pc->second = saved.altOp;
   cellReferences_.swap(saved.cellReferences);
@@ -1423,6 +1423,7 @@ void VortexVM::pushChoicePointImpl(const std::optional<CellRef> cursor,
       .mutationGroups     = mutationGroups_,
       .choiceId           = nextChoiceId_++,
       .scoped             = scoped,
+      .submissionMark     = submissions_.size(),
   });
   // Finish all allocating snapshots before taking a LIFO arena mark.
   try {
@@ -1462,7 +1463,7 @@ bool VortexVM::backtrack(const std::optional<CellRef> cursor) {
     ChoicePoint cp = choiceStack_.back();
     choiceStack_.pop_back();
     if (!cursor || cp.cursor == cursor || !cp.cursor) {
-      zigzag::expectMarkOrder(core_.arena().release(cp.mark));
+      releaseChoiceMark(cp);
       cellReferences_     = std::move(cp.cellReferences);
       streams_            = std::move(cp.streams);
       iterators_          = std::move(cp.iterators);
@@ -1546,6 +1547,24 @@ void VortexVM::cut(std::size_t cutBarrier) {
   }
 }
 
+void VortexVM::releaseChoiceMark(const ChoicePoint &choice) {
+  // The arena release below undoes the cells of every Submit admitted since
+  // the choice point, so each admitted request loses the cells that named it.
+  // The host is told first, while those cells still exist, so it can account
+  // for the request explicitly; the VM never recalls it (plan P6).
+  while (submissions_.size() > choice.submissionMark) {
+    const auto abandoned = submissions_.back();
+    submissions_.pop_back();
+    if (!submitRollbackHandler_) continue;
+    try {
+      submitRollbackHandler_(abandoned);
+    } catch (const std::exception &) {
+      // A host that cannot account for it must not stop the rollback.
+    }
+  }
+  zigzag::expectMarkOrder(core_.arena().release(choice.mark));
+}
+
 VortexVM *VortexVM::abortScopedChoices(const CellRef cursor) noexcept {
   const auto outer =
       std::ranges::find_if(choiceStack_, [cursor](const ChoicePoint &choice) {
@@ -1561,7 +1580,7 @@ VortexVM *VortexVM::abortScopedChoices(const CellRef cursor) noexcept {
     choiceStack_.pop_back();
   }
   choiceStack_.pop_back();
-  zigzag::expectMarkOrder(core_.arena().release(saved.mark));
+  releaseChoiceMark(saved);
 
   cellReferences_.swap(saved.cellReferences);
   streams_.swap(saved.streams);
@@ -2361,8 +2380,7 @@ ExecutionResult VortexVM::executeMutationScopeOpcode(const OpcodeKind kind,
     } catch (const std::exception &error) {
       if (checkpointCreated && choiceStack_.size() == checkpointIndex + 1 &&
           checkpointId && choiceStack_.back().choiceId == *checkpointId) {
-        zigzag::expectMarkOrder(
-            core_.arena().release(choiceStack_.back().mark));
+        releaseChoiceMark(choiceStack_.back());
         choiceStack_.pop_back();
       }
       return fail(error.what());
@@ -4093,6 +4111,8 @@ VmExecutionResult VortexVM::stepSubmit(const CellRef cursor,
   if (!sumTag || *sumTag != xanadu::vortex::IoCellTag::Submission ||
       !core_.arena().contains(admitted.payload))
     return fail("Submit host returned a stale or invalid submission");
+  if (admitted.arm > submissionArmLimit)
+    return fail("Submit host returned an unknown arm ordinal");
   try {
     writeCellReferences(outputs.span().subspan(0, 1),
                         {static_cast<std::int64_t>(admitted.submission.cell)});
@@ -4106,6 +4126,13 @@ VmExecutionResult VortexVM::stepSubmit(const CellRef cursor,
                                                  DimVector::POS));
   } catch (const std::exception &error) {
     return fail(error.what());
+  }
+  // Only a Submit under a live choice point can be rolled back; outside one
+  // nothing can ever notify, so nothing is kept.
+  if (choiceStack_.empty()) {
+    submissions_.clear();
+  } else {
+    submissions_.push_back(admitted);
   }
   ++totalCycles_;
   return VmExecutionResult{ExecutionResult{}, StepDisposition::Progress};

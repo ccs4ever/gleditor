@@ -206,6 +206,11 @@ void IoHost::retireRequest(const RequestCell request) {
   service_.retireRequest(request);
 }
 
+void IoHost::orphanRequest(const RequestCell request) {
+  requireOwner();
+  service_.orphanRequest(request);
+}
+
 auto IoHost::retireIfTerminal(const RequestCell request) -> bool {
   requireOwner();
   if (!service_.poll(request).outcome) return false;

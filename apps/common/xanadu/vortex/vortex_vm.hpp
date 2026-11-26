@@ -50,6 +50,9 @@ struct PendingAwait {
   xanadu::vortex::WaiterCell waiter;
 };
 
+/// The largest arm ordinal a Submit host may return (admitted 0, refused 1).
+inline constexpr std::uint8_t submissionArmLimit = 1;
+
 /// What a Submit host hands back: the managed sum cell, the ordinal of its
 /// arm and that arm's payload cell, already decoded so the VM never reads an
 /// I/O schema. A refusal is just another arm, never an exception. By the
@@ -587,6 +590,8 @@ struct ChoicePoint {
   std::optional<std::uint64_t> mutationCheckpointId;
   std::uint64_t choiceId{};
   bool scoped{false};
+  /// How many admitted Submits were on record when this point was taken.
+  std::size_t submissionMark{0};
 };
 
 enum class GuardDriveState : std::uint8_t { Complete, Suspended };
@@ -782,6 +787,17 @@ public:
     submitHandler_ = std::move(handler);
     return this;
   }
+  /// Installs the host's rollback notice for Submit: called once, newest
+  /// first, for each Submit admitted since a choice point whose rollback is
+  /// about to undo that Submit's cells (backtracking, a scoped abort). The
+  /// request is an effect in the world and is not recalled, so the host
+  /// decides what becomes of it; the VM only guarantees the cells still exist
+  /// during the call. An exception is contained. An empty function removes it.
+  VortexVM *
+  setSubmitRollbackHandler(std::function<void(const VmSubmission &)> handler) {
+    submitRollbackHandler_ = std::move(handler);
+    return this;
+  }
   [[nodiscard]] bool hasSubmitHandler() const noexcept {
     return static_cast<bool>(submitHandler_);
   }
@@ -859,6 +875,7 @@ private:
   ExecutionResult stepImpl(CellRef cursor);
   VmExecutionResult stepAwait(CellRef cursor, CellRef opcode);
   VmExecutionResult stepSubmit(CellRef cursor, CellRef opcode);
+  void releaseChoiceMark(const ChoicePoint &choice);
   ExecutionResult invokeFramePrepared(
       CellRef descriptorCell, std::span<const std::vector<CellRef>> arguments,
       std::span<const CellRef> resultSlots, CellRef cursor,
@@ -987,6 +1004,9 @@ private:
       awaitHandler_;
   std::function<VmSubmission(xanadu::vortex::CapabilityCell, CellRef, CellRef)>
       submitHandler_;
+  std::function<void(const VmSubmission &)> submitRollbackHandler_;
+  /// Admitted Submits a live choice point could still roll back, oldest first.
+  std::vector<VmSubmission> submissions_;
   std::unordered_map<CellRef, ActivationStack> activationFrames_;
   GuardStackMap guardStacks_;
   PendingGuardMap pendingGuardChecks_;

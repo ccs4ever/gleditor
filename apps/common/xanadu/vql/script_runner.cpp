@@ -26,11 +26,68 @@ constexpr const char *logCategory = "vql.script.io";
 /// The functor the compiler gives a bounded read's request description.
 constexpr const char *readBytesFunctor = "read_bytes";
 
+/// Whether @p text is well-formed UTF-8 (no overlongs, surrogates or values
+/// past U+10FFFF).
+auto validUtf8(const std::string_view text) -> bool {
+  std::size_t at = 0;
+  while (at < text.size()) {
+    const auto lead     = static_cast<unsigned char>(text[at]);
+    std::size_t extra   = 0;
+    std::uint32_t point = 0;
+    std::uint32_t floor = 0;
+    if (lead < 0x80) {
+      ++at;
+      continue;
+    }
+    if ((lead & 0xE0) == 0xC0) {
+      extra = 1;
+      point = lead & 0x1F;
+      floor = 0x80;
+    } else if ((lead & 0xF0) == 0xE0) {
+      extra = 2;
+      point = lead & 0x0F;
+      floor = 0x800;
+    } else if ((lead & 0xF8) == 0xF0) {
+      extra = 3;
+      point = lead & 0x07;
+      floor = 0x10000;
+    } else {
+      return false;
+    }
+    if (at + extra >= text.size()) return false;
+    for (std::size_t i = 1; i <= extra; ++i) {
+      const auto next = static_cast<unsigned char>(text[at + i]);
+      if ((next & 0xC0) != 0x80) return false;
+      point = (point << 6) | (next & 0x3F);
+    }
+    if (point < floor || point > 0x10FFFF ||
+        (point >= 0xD800 && point <= 0xDFFF))
+      return false;
+    at += extra + 1;
+  }
+  return true;
+}
+
 auto isAction(const Statement &statement) -> bool {
   return std::holds_alternative<IoEffectStatement>(statement);
 }
 
 } // namespace
+
+/// Marks the activation whose program the VM is stepping, for the hooks.
+struct ScriptRunner::Stepping {
+  Stepping(ScriptRunner &runner, Activation &activation)
+      : runner_(runner), previous_(runner.current_) {
+    runner.current_ = &activation;
+  }
+  ~Stepping() { runner_.current_ = previous_; }
+  Stepping(const Stepping &)            = delete;
+  Stepping &operator=(const Stepping &) = delete;
+
+private:
+  ScriptRunner &runner_;
+  Activation *previous_;
+};
 
 bool hasIoEffect(const QueryExpression &query) noexcept {
   return std::ranges::any_of(query.body.statements, isAction);
@@ -43,20 +100,31 @@ struct ScriptRunner::Activation final : vortex::FrontendActivation {
   QueryExpression query;
   std::unique_ptr<QueryExecutor> executor;
   std::optional<ParkedProgram> parked;
+  /// This script's admitted actions, oldest first.
+  std::vector<Admitted> admitted;
 };
 
 ScriptRunner::ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
                            ScriptIoPorts ports, QueryExecutionOptions options)
     : session_(session), vm_(vm), ports_(std::move(ports)), options_(options) {
+  if (vm_.hasSubmitHandler()) {
+    throw std::logic_error(
+        "a VortexVM has one Submit hook and another runner holds it");
+  }
   // The one admission hook of the VM this runner drives: a compiled action's
   // Submit lands here, once per executed instruction.
   vm_.setSubmitHandler(
       [this](const vortex::CapabilityCell capability, const CellRef description,
              const CellRef) { return admit(capability, description); });
+  vm_.setSubmitRollbackHandler(
+      [this](const zigzag::vortex::VmSubmission &abandoned) {
+        rolledBack(abandoned);
+      });
 }
 
 ScriptRunner::~ScriptRunner() {
   vm_.setSubmitHandler({});
+  vm_.setSubmitRollbackHandler({});
   for (const auto &[continuation, held] : parked_) {
     static_cast<void>(continuation);
     static_cast<void>(ports_.host.cancelWaiter(held.first));
@@ -65,9 +133,13 @@ ScriptRunner::~ScriptRunner() {
   // A waiter already completed (AlreadyComplete) keeps its route until its
   // wake; nothing may call this runner after it is gone.
   static_cast<void>(ports_.host.unrouteRunner(*this));
-  // Nothing reads the last action's outcome once the runner is gone, so its
-  // request leaves the service's index and the arena with it.
-  if (submission_) retireSubmission(*submission_);
+  // Nothing reads an outcome once the runner is gone, so each terminal
+  // request leaves the service's index and the arena with it; a running one
+  // is never cancelled.
+  retireAll(finished_);
+  for (const auto &weak : live_) {
+    if (const auto activation = weak.lock()) retireAll(activation->admitted);
+  }
 }
 
 auto ScriptRunner::diagnose(const std::string_view code, std::string message,
@@ -92,20 +164,37 @@ auto ScriptRunner::takeWake() -> std::optional<ScriptWake> {
   return next;
 }
 
-void ScriptRunner::retireSubmission(
-    const vortex::SubmissionCell submission) noexcept {
-  const auto matched = ports_.bridge.match(submission);
-  const auto *admitted =
-      matched ? std::get_if<vortex::Admitted>(&*matched) : nullptr;
-  const bool awaited = admitted != nullptr &&
-                       std::ranges::any_of(parked_, [&](const auto &entry) {
-                         return entry.second.second == admitted->request;
-                       });
-  if (awaited) {
-    ports_.bridge.release(submission);
+void ScriptRunner::retire(const Admitted &entry) noexcept {
+  const auto &arena = session_.coordinator().arena();
+  if (entry.request &&
+      !arena.matches(entry.request->cell, entry.request->incarnation)) {
+    // The cells were rolled back under a request that may still be running.
+    ports_.host.orphanRequest(*entry.request);
   } else {
-    ports_.bridge.retire(submission);
+    ports_.bridge.retire(entry.submission);
   }
+  if (latest_ && *latest_ == entry.submission) latest_.reset();
+}
+
+void ScriptRunner::retireAll(std::vector<Admitted> &entries) noexcept {
+  for (const auto &entry : entries) retire(entry);
+  entries.clear();
+}
+
+void ScriptRunner::rolledBack(
+    const zigzag::vortex::VmSubmission &abandoned) noexcept {
+  if (current_ == nullptr) return;
+  auto &entries = current_->admitted;
+  const auto at = std::ranges::find_if(entries, [&](const Admitted &entry) {
+    return entry.submission == abandoned.submission;
+  });
+  if (at == entries.end()) return;
+  // Backtracking recalls nothing: the read keeps running, but no cell can
+  // name it once the choice point's mark is released, so the service is told
+  // to forget it at its end instead of publishing an outcome nobody can read.
+  if (at->request) ports_.host.orphanRequest(*at->request);
+  if (latest_ && *latest_ == at->submission) latest_.reset();
+  entries.erase(at);
 }
 
 auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
@@ -126,6 +215,9 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
   activation->query = std::move(query);
   activation->executor =
       std::make_unique<QueryExecutor>(session_, vm_, options_);
+  std::erase_if(live_, [](const auto &weak) { return weak.expired(); });
+  live_.push_back(activation);
+  const Stepping stepping(*this, *activation);
   return settle(activation, activation->executor->begin(activation->query));
 }
 
@@ -226,12 +318,28 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
   const auto submission = ports_.bridge.submit(capability, *spec);
   if (!submission) fail(submission.error());
   const auto matched = ports_.bridge.match(*submission);
-  if (!matched) fail(matched.error());
-  // The previous action's outcome is no longer what a script can name, and its
-  // rows were returned by the run that finished it, so its request is retired
-  // here: a long session holds one action's request, not all of them.
-  if (submission_) retireSubmission(*submission_);
-  submission_ = *submission;
+  if (!matched) {
+    // Admitted but unreadable: nothing can name the request, so it is
+    // accounted for here and not left behind.
+    ports_.bridge.retire(*submission);
+    fail(matched.error());
+  }
+  if (current_ == nullptr) {
+    ports_.bridge.retire(*submission);
+    fail(diagnose(vortex::frontend_codes::vqlScriptFailed,
+                  "a Submit ran outside any script activation"));
+  }
+  // The previous actions' outcomes are no longer what this script can name,
+  // and finished scripts' rows were returned to their callers, so those
+  // requests are retired here: a long session holds the live and the latest
+  // finished action's requests, not every one.
+  retireAll(current_->admitted);
+  retireAll(finished_);
+  latest_ = *submission;
+  Admitted entry{.submission = *submission, .request = std::nullopt};
+  if (const auto *accepted = std::get_if<vortex::Admitted>(&*matched))
+    entry.request = accepted->request;
+  current_->admitted.push_back(entry);
   if (const auto *refused = std::get_if<vortex::Refused>(&*matched))
     return {*submission, 1, refused->outcome.cell};
   return {*submission, 0, std::get<vortex::Admitted>(*matched).request.cell};
@@ -246,15 +354,16 @@ auto ScriptRunner::settle(const std::shared_ptr<Activation> &activation,
                       : diagnose(vortex::frontend_codes::vqlScriptFailed,
                                  step.error().message, step.error().statement);
     if (!diagnostic.position) diagnostic.position = step.error().statement;
+    retireAll(activation->admitted);
     return ScriptRunResult::failed(std::move(diagnostic));
   }
   if (auto *done = std::get_if<ProgramResult>(&*step)) {
-    return finish(*done);
+    return finish(activation, *done);
   }
   auto &parked = std::get<ParkedProgram>(*step);
   const auto matched =
-      submission_
-          ? ports_.bridge.match(*submission_)
+      !activation->admitted.empty()
+          ? ports_.bridge.match(activation->admitted.back().submission)
           : std::expected<vortex::IoSubmissionValue, FrontendDiagnostic>{
                 std::unexpected{
                     diagnose(vortex::frontend_codes::tokenStale,
@@ -284,7 +393,13 @@ auto ScriptRunner::settle(const std::shared_ptr<Activation> &activation,
   return ScriptRunResult::parked(std::move(token));
 }
 
-auto ScriptRunner::finish(const ProgramResult &done) -> ScriptRunResult {
+auto ScriptRunner::finish(const std::shared_ptr<Activation> &activation,
+                          const ProgramResult &done) -> ScriptRunResult {
+  // However it ends, the script's actions move to the finished list: their
+  // rows stay readable until the next admission, then they are retired.
+  finished_.insert(finished_.end(), activation->admitted.begin(),
+                   activation->admitted.end());
+  activation->admitted.clear();
   ScriptRows rows = done.rows;
   if (done.finalIsIoEffect && !rows.empty()) {
     // The compiled action yields its outcome cell; the retained bytes, when
@@ -302,19 +417,28 @@ auto ScriptRunner::finish(const ProgramResult &done) -> ScriptRunResult {
     const auto gated = ports_.bridge.gate(handle);
     if (!gated) return ScriptRunResult::failed(gated.error());
     if (gated->payload) {
+      // The outcome row alone would read as "no payload"; a payload the tag
+      // exposed but the host cannot read is a typed failure instead.
+      const auto unreadable = [&](const std::string &why) {
+        return ScriptRunResult::failed(
+            diagnose(vortex::frontend_codes::vqlScriptFailed,
+                     "the action's payload could not be read: " + why));
+      };
       auto lease = ports_.payloads.retain(*gated->payload);
-      if (lease) {
-        const auto bytes = ports_.payloads.read(
-            *lease, 0, static_cast<std::size_t>(lease->range.length));
-        ports_.payloads.release(lease->lease);
-        if (bytes) {
-          std::string text(bytes->size(), '\0');
-          std::ranges::transform(*bytes, text.begin(), [](const std::byte b) {
-            return static_cast<char>(b);
-          });
-          rows.push_back(session_.coordinator().arena().makeCell(text));
-        }
-      }
+      if (!lease) return unreadable("it was not retained");
+      const auto bytes = ports_.payloads.read(
+          *lease, 0, static_cast<std::size_t>(lease->range.length));
+      ports_.payloads.release(lease->lease);
+      if (!bytes) return unreadable("the read was refused");
+      // A text cell holds text: bytes that are not valid UTF-8 are a typed
+      // refusal, never a cell that renders as something else.
+      std::string text(bytes->size(), '\0');
+      std::ranges::transform(*bytes, text.begin(), [](const std::byte b) {
+        return static_cast<char>(b);
+      });
+      if (!validUtf8(text))
+        return unreadable("the bytes are not valid UTF-8 text");
+      rows.push_back(session_.coordinator().arena().makeCell(text));
     }
   }
   return ScriptRunResult::completed(std::move(rows));
@@ -330,6 +454,7 @@ auto ScriptRunner::resume(ScriptWake wake) -> ScriptRunResult {
   }
   if (wake.why == FrontendWake::Abandoned) {
     activation->parked.reset();
+    retireAll(activation->admitted);
     return ScriptRunResult::failed(diagnose(
         vortex::frontend_codes::tokenStale,
         "the parked request or cursor went stale", wake.token.position));
@@ -338,6 +463,7 @@ auto ScriptRunner::resume(ScriptWake wake) -> ScriptRunResult {
   // runs the Submit before it a second time.
   auto parked = std::move(*activation->parked);
   activation->parked.reset();
+  const Stepping stepping(*this, *activation);
   return settle(activation, activation->executor->resume(parked));
 }
 

@@ -164,6 +164,15 @@ TEST(VqlIoGrammarTest, AMalformedActionIsAParseErrorWithoutTheContextCode) {
   }
 }
 
+TEST(VqlIoGrammarTest, AReservedNameCannotBeDefinedEither) {
+  for (const auto *name : {"submit", "await", "read_bytes"}) {
+    SCOPED_TRACE(name);
+    EXPECT_NE(parseFailure(std::string{"def "} + name + "() := 1; return ##")
+                  .find(contextCode),
+              std::string::npos);
+  }
+}
+
 TEST(VqlIoGrammarTest, AQueryWithoutAnActionParsesAsBefore) {
   const auto query = Parser("def submit_all() := 1; return ##").parseQuery();
   EXPECT_FALSE(hasIoEffect(query));
@@ -590,6 +599,113 @@ TEST(VqlIoScriptTest, ARunnerRetiresEachActionsRequestOnceTheNextReplacesIt) {
         << "the rows just returned stay readable until the next action";
     previous = request;
   }
+}
+
+TEST(VqlIoScriptTest, SeveralParkedScriptsKeepTheirOwnRequestsInEitherOrder) {
+  // M7-VQL gate r1, vortex M2: one runner, N scripts parked together. Each
+  // keeps its own submission; resuming in reverse order binds every token to
+  // its own request and nothing is retired while it is still awaited.
+  for (const bool reverse : {false, true}) {
+    SCOPED_TRACE(reverse);
+    ScriptWorld s;
+    constexpr std::size_t scripts = 5;
+    std::vector<RequestCell> requests;
+    for (std::size_t i = 0; i < scripts; ++i) {
+      const auto begun  = s.run(readOnCap);
+      const auto *token = parkedToken(begun);
+      ASSERT_NE(token, nullptr);
+      requests.push_back(token->request);
+    }
+    EXPECT_EQ(s.runner.parkedCount(), scripts);
+    for (const auto request : requests) {
+      EXPECT_TRUE(s.w.arena.matches(request.cell, request.incarnation))
+          << "a later script never retires an earlier one's request";
+    }
+    // The endpoint runs one request at a time: each completion starts the
+    // next queued one.
+    std::vector<ScriptWake> wakes;
+    for (std::size_t i = 0; i < scripts; ++i) {
+      s.w.complete(i, EndOfStream{{}});
+      static_cast<void>(s.w.pump());
+      while (auto woken = s.runner.takeWake())
+        wakes.push_back(*std::move(woken));
+    }
+    ASSERT_EQ(wakes.size(), scripts);
+    if (reverse) std::ranges::reverse(wakes);
+    for (auto &wake : wakes) {
+      const auto request = wake.token.request;
+      const auto resumed = s.runner.resume(std::move(wake));
+      const auto *done   = completedRows(resumed);
+      ASSERT_NE(done, nullptr);
+      const auto polled = s.w.service.poll(request).outcome;
+      ASSERT_TRUE(polled);
+      EXPECT_EQ(done->front(), polled->cell)
+          << "the script reads the outcome of its own request";
+    }
+    EXPECT_EQ(s.w.submissions(), scripts);
+    // The next admission retires every finished script's request.
+    const auto next = s.run(readOnCap);
+    ASSERT_NE(parkedToken(next), nullptr);
+    for (const auto request : requests) {
+      EXPECT_FALSE(s.w.arena.matches(request.cell, request.incarnation));
+    }
+  }
+}
+
+TEST(VqlIoScriptTest, ASecondRunnerOnTheSameVmIsRefused) {
+  ScriptWorld s;
+  VQLEngine other(s.w.core);
+  EXPECT_THROW(
+      ScriptRunner(
+          other, s.w.vm,
+          ScriptIoPorts{
+              s.w.bridge, s.w.host, s.w.payloads, s.w.diagnostics,
+              [](CapabilityCell, std::uint64_t,
+                 std::uint64_t) -> std::expected<CellRef, FrontendDiagnostic> {
+                return std::unexpected{FrontendDiagnostic{"TEST", "none", {}}};
+              }}),
+      std::logic_error);
+  EXPECT_TRUE(s.w.vm.hasSubmitHandler()) << "the first runner keeps its hook";
+}
+
+TEST(VqlIoScriptTest, AnAbandonedActivationRetiresItsRequest) {
+  ScriptWorld s;
+  const auto begun  = s.run(readOnCap);
+  const auto *token = parkedToken(begun);
+  ASSERT_NE(token, nullptr);
+  const auto request = token->request;
+  s.w.complete(0, EndOfStream{{}});
+  static_cast<void>(s.w.pump());
+  auto woken = s.runner.takeWake();
+  ASSERT_TRUE(woken);
+  woken->why         = FrontendWake::Abandoned;
+  const auto resumed = s.runner.resume(*std::move(woken));
+  EXPECT_NE(failedDiagnostic(resumed), nullptr);
+  EXPECT_FALSE(s.w.arena.matches(request.cell, request.incarnation))
+      << "the abandoned script's terminal request was retired";
+}
+
+TEST(VqlIoScriptTest, AnEffectScriptRunRetainsAPricedConstantNumberOfCells) {
+  // M7-VQL gate r1, vortex M3 (CONFIRMED, reclamation deferred as proposal
+  // P7). A parked script cuts its pre-compile mark, so its compiled program
+  // stays in the arena: measured 37-40 cells per run. Freeing it needs the
+  // arena to say which ranks a cell sits in, which is a core change. This
+  // pins the price so it cannot grow unnoticed; it is not a bound.
+  ScriptWorld s;
+  const auto measure = [&](const std::size_t runs) {
+    for (std::size_t i = 0; i < runs; ++i) {
+      const auto begun = s.run(readOnCap);
+      ASSERT_NE(parkedToken(begun), nullptr);
+      s.w.complete(s.w.submissions() - 1, EndOfStream{{}});
+      ASSERT_NE(completedRows(s.wakeAndResume()), nullptr);
+    }
+  };
+  measure(8);
+  const auto warm                         = s.w.arena.cellCount();
+  constexpr std::size_t n                 = 2000;
+  constexpr std::size_t pricedCellsPerRun = 40;
+  measure(n);
+  EXPECT_LE(s.w.arena.cellCount() - warm, n * pricedCellsPerRun);
 }
 
 TEST(VqlIoScriptTest, DestroyingARunnerRetiresItsTerminalRequestOnly) {

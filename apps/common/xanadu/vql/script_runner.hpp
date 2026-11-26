@@ -29,6 +29,7 @@
 #include <expected>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -95,13 +96,16 @@ struct ScriptWake {
 class ScriptRunner final : public vortex::FrontendRunner {
 public:
   /// @p vm must be the VM @p ports' IoHost parks on and the one @p session
-  /// runs its queries on, so the core has one write guard.
+  /// runs its queries on, so the core has one write guard. A VM has one
+  /// Submit hook, so a second runner on a VM that already has one is refused
+  /// with `std::logic_error` rather than silently replacing the first.
   ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
                ScriptIoPorts ports, QueryExecutionOptions options = {});
   /// Cancels every live activation's waiter (never its request) and drops
-  /// every route to this runner, so the host holds none to a dead one. The
-  /// last action's request is retired if it is terminal: rows a caller still
-  /// holds from it are valid until the next action or this destructor.
+  /// every route to this runner, so the host holds none to a dead one. Every
+  /// terminal request this runner admitted is retired: rows a caller still
+  /// holds from a finished action are valid until the next action admitted
+  /// by any activation, or this destructor.
   ~ScriptRunner() override;
 
   ScriptRunner(const ScriptRunner &)            = delete;
@@ -120,17 +124,18 @@ public:
     return parked_.size();
   }
 
-  /// The managed submission sum the most recent action bound to its
-  /// `$submission` variable; it lives until the next action or the runner.
+  /// The managed submission sum the most recently admitted action bound to
+  /// its `$submission` variable; it lives until that action is retired.
   [[nodiscard]] auto lastSubmission() const noexcept
       -> std::optional<vortex::SubmissionCell> {
-    return submission_;
+    return latest_;
   }
 
   void wake(vortex::FrontendToken token, vortex::FrontendWake why) override;
 
 private:
   struct Activation;
+  struct Stepping;
 
   /// The VM's Submit hook: decode the description, stage and admit the read.
   [[nodiscard]] auto admit(vortex::CapabilityCell capability,
@@ -140,7 +145,8 @@ private:
   settle(const std::shared_ptr<Activation> &activation,
          std::expected<ProgramStep, QueryExecutionError> step)
       -> ScriptRunResult;
-  [[nodiscard]] auto finish(const ProgramResult &done) -> ScriptRunResult;
+  [[nodiscard]] auto finish(const std::shared_ptr<Activation> &activation,
+                            const ProgramResult &done) -> ScriptRunResult;
   [[nodiscard]] auto number(zigzag::CellRef cell, const std::string &what,
                             std::optional<std::size_t> position) const
       -> std::expected<std::uint64_t, vortex::FrontendDiagnostic>;
@@ -152,16 +158,32 @@ private:
   [[nodiscard]] auto diagnose(std::string_view code, std::string message,
                               std::optional<std::size_t> position = {}) const
       -> vortex::FrontendDiagnostic;
-  /// Retire a finished action's submission and its terminal request, unless a
-  /// parked activation still awaits that request (then only the sum is
-  /// released).
-  void retireSubmission(vortex::SubmissionCell submission) noexcept;
+  /// What one admitted action holds: its sum and, on the admitted arm, the
+  /// request. An activation owns its own list, so several parked scripts
+  /// never share or overwrite one another's.
+  struct Admitted {
+    vortex::SubmissionCell submission;
+    std::optional<vortex::RequestCell> request;
+  };
+  /// Release an action's sum and retire its request when terminal. A request
+  /// whose cells the arena rolled back (a failed run, a backtracked Submit) is
+  /// orphaned in the service instead: never cancelled, forgotten at its end.
+  void retire(const Admitted &entry) noexcept;
+  void retireAll(std::vector<Admitted> &entries) noexcept;
+  /// The VM's rollback notice: a backtrack is about to undo this Submit.
+  void rolledBack(const zigzag::vortex::VmSubmission &abandoned) noexcept;
 
   VQLEngine &session_;
   zigzag::vortex::VortexVM &vm_;
   ScriptIoPorts ports_;
   QueryExecutionOptions options_;
-  std::optional<vortex::SubmissionCell> submission_;
+  std::optional<vortex::SubmissionCell> latest_;
+  /// The activation whose program is stepping now (owner thread, so one).
+  Activation *current_{nullptr};
+  /// Activations that have not ended; the destructor retires their requests.
+  std::vector<std::weak_ptr<Activation>> live_;
+  /// Finished activations' actions, kept readable until the next admission.
+  std::vector<Admitted> finished_;
   /// Why the Submit hook refused to admit, kept for the diagnostic the VM's
   /// own typed failure message cannot carry.
   std::optional<vortex::FrontendDiagnostic> stageFailure_;
