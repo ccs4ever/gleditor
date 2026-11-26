@@ -92,7 +92,10 @@ ioTagSet(const std::initializer_list<IoMatchTag> tags) noexcept {
   return set;
 }
 
-/// Every tag the operation can end a script's view of it with.
+/// Every tag the operation can end a script's view of it with. A read has
+/// `Conflict` too: the file adapter ends a read whose generation moved around
+/// the transfer in it, and a table that omitted it would make the one tag that
+/// signals a data race fall out of an "exhaustive" match unseen.
 [[nodiscard]] constexpr IoTagSet
 ioTagsOf(const IoOperation operation) noexcept {
   using T = IoMatchTag;
@@ -100,7 +103,7 @@ ioTagsOf(const IoOperation operation) noexcept {
   case IoOperation::Read:
     return ioTagSet({T::Rejected, T::Complete, T::EndOfStream, T::Partial,
                      T::Failed, T::Cancelled, T::TimedOut, T::Overflow,
-                     T::MessageTooLarge, T::Stale, T::Unknown});
+                     T::MessageTooLarge, T::Stale, T::Conflict, T::Unknown});
   case IoOperation::Write:
     return ioTagSet({T::Rejected, T::Complete, T::Partial, T::Failed,
                      T::Cancelled, T::TimedOut, T::Conflict, T::Unknown});

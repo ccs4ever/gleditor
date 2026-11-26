@@ -98,7 +98,7 @@ TEST(VqlIoMatchGrammarTest, ArmsPatternsAndBindersParse) {
 }
 
 TEST(VqlIoMatchGrammarTest, AMatchOnAReadMustNameEveryTagItCanEndWith) {
-  // A read can end with eleven tags; a match that stops at the obvious ones
+  // A read can end with twelve tags; a match that stops at the obvious ones
   // is the "forgot end_of_stream" bug this refusal exists to end.
   const auto message =
       parseFailure(readAs("r") + "match $r { complete($p) => $p, "
@@ -112,14 +112,16 @@ TEST(VqlIoMatchGrammarTest, AWildcardOrEveryTagIsExhaustive) {
   EXPECT_EQ(parseFailure(readAs("r") + "match $r { complete($p) => $p, "
                                        "_ => (\"other\") }"),
             "");
-  // A read's eleven tags, spelled out, with no wildcard.
+  // A read's twelve tags (conflict included: the file adapter ends a raced
+  // read with it), spelled out, with no wildcard.
   EXPECT_EQ(
       parseFailure(readAs("r") +
                    "match $r { rejected(_, _) => (1), complete(_) => (1), "
                    "end_of_stream => (1), partial(_, _) => (1), "
                    "failed(_, _) => (1), cancelled(_) => (1), "
                    "timed_out(_) => (1), overflow => (1), "
-                   "message_too_large => (1), stale => (1), unknown => (1) }"),
+                   "message_too_large => (1), stale => (1), conflict => (1), "
+                   "unknown => (1) }"),
       "");
 }
 
@@ -135,11 +137,19 @@ TEST(VqlIoMatchGrammarTest, ATagTheOperationCannotEndWithIsRefused) {
     EXPECT_NE(message.find(matchCode), std::string::npos) << message;
     EXPECT_NE(message.find("can end with"), std::string::npos) << message;
   }
-  // `conflict` is a write's tag and a read's impossibility.
+  // `conflict` ends a write (generation CAS) and a read (the generation moved
+  // around the transfer), so both accept an arm for it.
   EXPECT_EQ(parseFailure(write + "match $w { conflict => (1), _ => (2) }"), "");
-  EXPECT_NE(parseFailure(readAs("r") + "match $r { conflict => (1), _ => (2) }")
-                .find(matchCode),
-            std::string::npos);
+  EXPECT_EQ(parseFailure(readAs("r") + "match $r { conflict => (1), _ => (2) }"),
+            "");
+  // Without it a read's exhaustive match is refused by name.
+  const auto message = parseFailure(
+      readAs("r") + "match $r { rejected(_, _) => (1), complete(_) => (1), "
+                    "end_of_stream => (1), partial(_, _) => (1), "
+                    "failed(_, _) => (1), cancelled(_) => (1), "
+                    "timed_out(_) => (1), overflow => (1), "
+                    "message_too_large => (1), stale => (1), unknown => (1) }");
+  EXPECT_NE(message.find("conflict"), std::string::npos) << message;
 }
 
 TEST(VqlIoMatchGrammarTest, AWriteIsExhaustiveOverItsOwnEightTags) {
@@ -203,9 +213,10 @@ TEST(VqlIoMatchGrammarTest, AwaitOfAHandleKeepsTheOperationOfTheRead) {
   const auto source = detachedAs("h") + "effect { await($h) } as $r; ";
   EXPECT_EQ(parseFailure(source + "match $r { complete($p) => $p, _ => (1) }"),
             "");
-  EXPECT_NE(parseFailure(source + "match $r { conflict => (1), _ => (2) }")
-                .find(matchCode),
-            std::string::npos);
+  // `end_of_stream` is a read's alone, so refusing it on a write's tags and
+  // accepting it here shows the read's table was the one applied.
+  EXPECT_EQ(
+      parseFailure(source + "match $r { end_of_stream => (1), _ => (2) }"), "");
 }
 
 TEST(VqlIoMatchGrammarTest, AnUnknownSubjectNeedsEveryTagOrAWildcard) {
@@ -383,7 +394,8 @@ constexpr auto describeAll =
     "end_of_stream => (\"eof\"), partial($p, $why) => $why, "
     "failed($c, $d) => $c, cancelled($u) => $u, timed_out($u) => $u, "
     "overflow => (\"overflow\"), message_too_large => (\"big\"), "
-    "stale => (\"stale\"), unknown => (\"unknown\") }";
+    "stale => (\"stale\"), conflict => (\"conflict\"), "
+    "unknown => (\"unknown\") }";
 
 TEST(VqlIoMatchRunTest, EveryTerminalTagSelectsItsOwnArmAndBindsItsFields) {
   struct Case {
@@ -407,6 +419,9 @@ TEST(VqlIoMatchRunTest, EveryTerminalTagSelectsItsOwnArmAndBindsItsFields) {
       {"Cancelled", Cancelled{{}, terminalProgress, true}, {"true"}},
       {"TimedOut", TimedOut{{}, terminalProgress, false}, {"false"}},
       {"Unknown", Unknown{terminalProgress}, {"unknown"}},
+      {"Conflict",
+       Conflict{Generation{1}, Generation{2}, terminalProgress},
+       {"conflict"}},
   };
   for (const auto &test : cases) {
     SCOPED_TRACE(test.name);
@@ -422,6 +437,24 @@ TEST(VqlIoMatchRunTest, EveryTerminalTagSelectsItsOwnArmAndBindsItsFields) {
     EXPECT_EQ(s.texts(rows), test.expected);
     EXPECT_EQ(s.w.submissions(), 1U) << "a match submits nothing";
   }
+}
+
+TEST(VqlIoMatchRunTest, ATagNoArmNamedIsATypedRefusalNotAnEmptyResult) {
+  // The parser checks a match against a table that can lag an adapter (it did
+  // for a read's `conflict`), so the compiled match must itself end in a
+  // refusal when it has no `_`. The arm is removed after parsing to stand in
+  // for such a table.
+  ValueWorld s;
+  auto query = Parser(readAs("r") + "match $r { complete(_) => (\"c\"), "
+                                    "_ => (\"other\") }")
+                   .parseQuery();
+  auto &match = std::get<IoMatchStatement>(query.body.statements[1]);
+  ASSERT_EQ(match.arms.size(), 2U);
+  match.arms.pop_back();
+  auto result = s.runner->run(std::move(query));
+  ASSERT_TRUE(ValueWorld::parked(result));
+  result = s.finish(EndOfStream{terminalProgress});
+  EXPECT_EQ(ValueWorld::code(result), matchCode) << ValueWorld::failure(result);
 }
 
 TEST(VqlIoMatchRunTest, RejectedBindsTheTypedErrorAndItsDetail) {
@@ -840,6 +873,24 @@ TEST(VqlIoLetSourceTest, ALetBoundToAnOutcomeIsAnOutcomeSourceToo) {
              "let $copy := $r; " + open(to, "for write create", "o") +
              act("o", "write_bytes(0, $copy)", "w") + "return io_tag($w)"));
   EXPECT_EQ(slurp(to), "bytes\n");
+}
+
+TEST(VqlIoLetSourceTest, ANumericLetIsWrittenAsItsCanonicalText) {
+  // A computed number has no spooled text; it must be written as the digits
+  // `join` and `string()` give it, not as zero bytes reported Complete.
+  const std::vector<std::pair<std::string, std::string>> cases{
+      {"42", "42"}, {"1 + 2", "3"}, {"2.5", "2.5"}, {"join(1, \",\")", "1"}};
+  for (const auto &[expression, expected] : cases) {
+    SCOPED_TRACE(expression);
+    FileWorld f;
+    const auto path = (f.root / "num.txt").string();
+    const auto rows = f.rows("let $t := " + expression + "; " +
+                             open(path, "for write create", "o") +
+                             act("o", "write_bytes(0, $t)", "w") +
+                             "return io_tag($w), io_bytes($w)");
+    EXPECT_EQ(rows, (Texts{"Complete", std::to_string(expected.size())}));
+    EXPECT_EQ(slurp(path), expected);
+  }
 }
 
 TEST(VqlIoLetSourceTest, ALetThatHoldsNoValueIsATypedRefusalAndWritesNothing) {

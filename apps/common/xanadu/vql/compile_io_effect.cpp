@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <string>
 
@@ -501,6 +502,25 @@ VQLCompiler::compileIoMatch(const IoMatchStatement &match,
     emitInputConstant(leave, false);
     emitInput(leave, end);
     appendOpcode(next);
+  }
+  // The parser has checked the arms against the tags an operation can end
+  // with, but a table can lag an adapter (a read once lacked `Conflict`). A
+  // match with no `_` therefore ends in a refusal a tag nobody named reaches,
+  // never in an empty result that reads as "nothing to return".
+  const bool hasWildcard =
+      std::ranges::any_of(match.arms, [](const auto &arm) { return !arm.tag; });
+  if (!hasWildcard) {
+    const auto unmatched = emitOp(OpcodeKind::Assert, "#IO_MATCH_UNMATCHED");
+    emitInputConstant(unmatched, false);
+    emitInputConstant(
+        unmatched,
+        std::string{vortex::frontend_codes::vqlMatch} +
+            ": no arm of this match names the outcome's tag, and it has no "
+            "'_' arm");
+    ioActions_.push_back({.submitOpcode = unmatched,
+                          .awaitOpcode  = std::nullopt,
+                          .requestSlot  = std::nullopt,
+                          .statement    = statement});
   }
   appendOpcode(end);
   lastResultCells_ = {resultStream};

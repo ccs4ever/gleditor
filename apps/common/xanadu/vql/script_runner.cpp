@@ -4,6 +4,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <concepts>
 #include <cmath>
 #include <gleditor/logging.hpp>
 #include <limits>
@@ -13,6 +14,7 @@
 #include <string>
 #include <utility>
 
+#include "common/xanadu/scalar.hpp"
 #include "common/xanadu/vql/io_match.hpp"
 #include "common/xanadu/vql/limits.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
@@ -1827,7 +1829,19 @@ auto ScriptRunner::sourceBytes(const CellRef source) const
     std::string text = arena.textOf(source);
     if (text.empty()) {
       if (const auto value = session_.coordinator().core().render(source)) {
-        if (const auto *held = std::get_if<std::string>(&*value)) text = *held;
+        // A number's bytes are its canonical text (R6), the rendering
+        // `join` and `string()` give it, so a computed `let` is written as
+        // the digits a reader sees and never as nothing.
+        text = std::visit(
+            [](const auto &held) -> std::string {
+              if constexpr (std::same_as<std::remove_cvref_t<decltype(held)>,
+                                         std::string>) {
+                return held;
+              } else {
+                return xanadu::scalarValue(held).text;
+              }
+            },
+            *value);
       }
     }
     std::vector<std::byte> bytes(text.size());
