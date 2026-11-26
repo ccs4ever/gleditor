@@ -164,12 +164,35 @@ auto ScriptRunner::takeWake() -> std::optional<ScriptWake> {
   return next;
 }
 
+void ScriptRunner::orphan(const vortex::RequestCell request) noexcept {
+  auto result = ports_.host.orphanRequest(request);
+  if (result == vortex::IoService::OrphanResult::HasWaiters) {
+    // A parked script is waiting on the request whose cells are going; its
+    // waiter goes with them, so the route is dropped first and the orphaning
+    // retried.
+    for (auto it = parked_.begin(); it != parked_.end();) {
+      if (it->second.second == request) {
+        static_cast<void>(ports_.host.cancelWaiter(it->second.first));
+        it = parked_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    result = ports_.host.orphanRequest(request);
+  }
+  if (result == vortex::IoService::OrphanResult::HasWaiters) {
+    GLEDITOR_LOG_WARN(logCategory,
+                      "an abandoned request still has a waiter and stays in "
+                      "the service budget until the waiter drops");
+  }
+}
+
 void ScriptRunner::retire(const Admitted &entry) noexcept {
   const auto &arena = session_.coordinator().arena();
   if (entry.request &&
       !arena.matches(entry.request->cell, entry.request->incarnation)) {
     // The cells were rolled back under a request that may still be running.
-    ports_.host.orphanRequest(*entry.request);
+    orphan(*entry.request);
   } else {
     ports_.bridge.retire(entry.submission);
   }
@@ -183,18 +206,39 @@ void ScriptRunner::retireAll(std::vector<Admitted> &entries) noexcept {
 
 void ScriptRunner::rolledBack(
     const zigzag::vortex::VmSubmission &abandoned) noexcept {
-  if (current_ == nullptr) return;
-  auto &entries = current_->admitted;
-  const auto at = std::ranges::find_if(entries, [&](const Admitted &entry) {
+  // The choice point that is being undone may belong to a parked script other
+  // than the one stepping (interleaved scripts share one VM), and the notice
+  // can arrive with no stepping script at all (a close-time scoped abort), so
+  // every live activation is searched, the stepping one first.
+  const auto holds = [&](Activation &activation) -> std::vector<Admitted> * {
+    auto &entries = activation.admitted;
+    const auto at = std::ranges::find_if(entries, [&](const Admitted &entry) {
+      return entry.submission == abandoned.submission;
+    });
+    return at == entries.end() ? nullptr : &entries;
+  };
+  std::vector<Admitted> *owner = nullptr;
+  if (current_ != nullptr) owner = holds(*current_);
+  for (auto it = live_.begin(); owner == nullptr && it != live_.end(); ++it) {
+    if (const auto activation = it->lock()) owner = holds(*activation);
+  }
+  if (owner == nullptr) {
+    // Not an error: a failure path retires every admitted entry of its
+    // activation (retireAll orphans a rolled-back request) before or after
+    // this notice, whichever finds the entry first.
+    GLEDITOR_LOG_DEBUG(logCategory,
+                       "rollback notice names no live admitted submission");
+    return;
+  }
+  const auto at = std::ranges::find_if(*owner, [&](const Admitted &entry) {
     return entry.submission == abandoned.submission;
   });
-  if (at == entries.end()) return;
   // Backtracking recalls nothing: the read keeps running, but no cell can
   // name it once the choice point's mark is released, so the service is told
   // to forget it at its end instead of publishing an outcome nobody can read.
-  if (at->request) ports_.host.orphanRequest(*at->request);
+  if (at->request) orphan(*at->request);
   if (latest_ && *latest_ == at->submission) latest_.reset();
-  entries.erase(at);
+  owner->erase(at);
 }
 
 auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {

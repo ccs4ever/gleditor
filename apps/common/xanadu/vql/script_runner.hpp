@@ -170,6 +170,9 @@ private:
   /// orphaned in the service instead: never cancelled, forgotten at its end.
   void retire(const Admitted &entry) noexcept;
   void retireAll(std::vector<Admitted> &entries) noexcept;
+  /// Orphan @p request in the service, first dropping the route of any parked
+  /// script that still waits on it.
+  void orphan(vortex::RequestCell request) noexcept;
   /// The VM's rollback notice: a backtrack is about to undo this Submit.
   void rolledBack(const zigzag::vortex::VmSubmission &abandoned) noexcept;
 

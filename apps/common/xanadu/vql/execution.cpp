@@ -242,6 +242,12 @@ public:
     keep_        = std::move(keep);
   }
   void keepCompiledProgram() noexcept { reclaimable_ = false; }
+  /// The reclaim is skipped when this reports that the session's dynamic-view
+  /// registry names cells of the program: a shape handle, lens or view cell
+  /// registered with no `let` still outlives the script (a lens a script makes
+  /// stays usable by later queries), and freeing its cells would leave the
+  /// registry naming slots a later program reuses.
+  void keepIfNamed(std::function<bool()> named) { named_ = std::move(named); }
 
   [[nodiscard]] zigzag::CellRef cursor() const { return *compiled_.cursor; }
 
@@ -273,6 +279,7 @@ private:
   void reclaim() noexcept {
     if (!reclaimable_) return;
     reclaimable_ = false;
+    if (named_ && named_()) return;
     try {
       auto &arena = vm_.core().arena();
       std::vector<zigzag::CellRef> owned;
@@ -325,6 +332,7 @@ private:
   std::vector<zigzag::CellRef> keep_;
   bool windowOpen_{false};
   bool reclaimable_{false};
+  std::function<bool()> named_;
   bool closed_{false};
 };
 
@@ -380,6 +388,10 @@ QueryExecutor::beginVortex(const QueryExpression &query,
   const auto preCompileMark           = coordinator_.core().arena().mark();
   const std::size_t preCompileViewCount =
       session_ ? session_->dynamicViews().viewCells.size() : 0U;
+  const std::size_t preCompileShapeCount =
+      session_ ? session_->dynamicViews().shapeHandles.size() : 0U;
+  const std::size_t preCompileLensCount =
+      session_ ? session_->dynamicViews().cellLenses.size() : 0U;
   // Until the program has a run to own them, a refusal undoes these itself.
   std::vector<std::function<void()>> undo;
   const auto undoAll = [&undo] {
@@ -478,8 +490,17 @@ QueryExecutor::beginVortex(const QueryExpression &query,
     auto run = std::make_shared<ProgramRun>(vm_, std::move(result), query);
     run->preCompileMark      = preCompileMark;
     run->preCompileViewCount = preCompileViewCount;
-    run->preRunTrailSize     = coordinator_.core().arena().trailSize();
-    run->preRunCellCount     = coordinator_.core().arena().cellCount();
+    if (session_ != nullptr) {
+      run->keepIfNamed(
+          [registry = &session_->dynamicViews(), views = preCompileViewCount,
+           shapes = preCompileShapeCount, lenses = preCompileLensCount] {
+            return registry->viewCells.size() != views ||
+                   registry->shapeHandles.size() != shapes ||
+                   registry->cellLenses.size() != lenses;
+          });
+    }
+    run->preRunTrailSize = coordinator_.core().arena().trailSize();
+    run->preRunCellCount = coordinator_.core().arena().cellCount();
     // An I/O script's program is reclaimed when it ends, fails or is
     // abandoned (M7-VQL gate r1, vortex M3): the parked mark is cut, so
     // nothing else would ever free it.
@@ -531,6 +552,17 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
     zigzag::expectMarkOrder(keep ? arena.discard(run->preCompileMark)
                                  : arena.release(run->preCompileMark));
     if (!keep) vm_.pruneAssemblyState();
+  };
+  // The failure branch and the success path clear the cursor's VM state
+  // themselves; an exception unwinds past both, and P7 frees the cursor's slot
+  // for reuse, so state left under its CellRef would attach to a later program.
+  const auto clearCursorState = [&]() noexcept {
+    try {
+      if (arena.contains(cursor)) vm_.setCursorOpcode(cursor, std::nullopt);
+    } catch (const std::exception &error) {
+      GLEDITOR_LOG_WARN("vql.exec", "cursor state not cleared: {}",
+                        error.what());
+    }
   };
   try {
     const auto execution = vm_.run(cursor, options_.maxCycles);
@@ -628,9 +660,11 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
           });
       settleMark(!(noMutations && noNewResultCells));
     }
-    // Published bindings and dynamic views name cells of the program, so a
-    // script that published any keeps its compiled program; the rows and what
-    // they reach in the program's region survive either way.
+    // Published bindings name cells of the program, so a script that
+    // published any keeps its compiled program; the rows and what they reach
+    // in the program's region survive either way. A registry entry the run
+    // made is checked when the run closes (keepIfNamed), since a parked script
+    // that is abandoned has registered cells too.
     const bool published = session_ && !run->compiled_.sessionBindings.empty();
     if (run->compiled_.ioActions.empty() || published) {
       run->keepCompiledProgram();
@@ -643,6 +677,7 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
     run->close();
     return ProgramStep{std::move(done)};
   } catch (const TypeContractError &error) {
+    clearCursorState();
     vm_.clearChoicePoints();
     if (run->markHeld) {
       run->markHeld = false;
@@ -654,6 +689,7 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
         .message  = error.what(),
     });
   } catch (const std::exception &error) {
+    clearCursorState();
     vm_.clearChoicePoints();
     if (run->markHeld) {
       run->markHeld = false;

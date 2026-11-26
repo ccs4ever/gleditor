@@ -7,12 +7,14 @@
  * library store targets (home/d.stdlib with exported symbol names ending in
  * Return), as well as AST dumps and disassembled opcode listings.
  */
+#include <algorithm>
 #include <argparse/argparse.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <variant>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
@@ -135,6 +137,16 @@ int main(int argc, char *argv[]) {
   if (!result.success) {
     std::cerr << "Compilation failed: " << result.errorMessage << "\n";
     return 1;
+  }
+
+  if (std::ranges::any_of(ast.body.statements, [](const auto &statement) {
+        return std::holds_alternative<xanadu::vql::IoEffectStatement>(
+            statement);
+      })) {
+    // The compiler exports the Submit/Await bytecode; nothing here runs it, so
+    // no I/O host or capability is involved (M7-VQL gate r2, minor 1).
+    std::cerr << "Note: the script has I/O effects; only its bytecode is "
+                 "compiled, nothing is submitted.\n";
   }
 
   if (program.get<bool>("--dump-asm")) {

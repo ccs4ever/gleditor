@@ -665,6 +665,24 @@ TEST(VqlIoScriptTest, SeveralParkedScriptsKeepTheirOwnRequestsInEitherOrder) {
   }
 }
 
+TEST(VqlIoScriptTest, ARollbackNamesTheActivationThatOwnsTheSubmit) {
+  // M7-VQL gate r2, vortex minor 1: one choice point under two parked scripts
+  // is undone while neither is stepping, so the notice finds no current
+  // activation and the entries belong to others. Both requests are orphaned.
+  ScriptWorld s;
+  const auto outer = s.w.vm.spawnCursor(
+      s.w.vm.mintOpcode(zigzag::vortex::OpcodeKind::Nop), "outer choice");
+  s.w.vm.pushChoicePoint(outer,
+                         s.w.vm.mintOpcode(zigzag::vortex::OpcodeKind::Halt));
+  const auto first  = s.run(readOnCap);
+  const auto second = s.run(readOnCap);
+  ASSERT_NE(parkedToken(first), nullptr);
+  ASSERT_NE(parkedToken(second), nullptr);
+  ASSERT_EQ(s.w.service.orphanCount(), 0U);
+  ASSERT_TRUE(s.w.vm.backtrack(outer));
+  EXPECT_EQ(s.w.service.orphanCount(), 2U);
+}
+
 TEST(VqlIoScriptTest, ASecondRunnerOnTheSameVmIsRefused) {
   ScriptWorld s;
   VQLEngine other(s.w.core);
@@ -739,6 +757,103 @@ TEST(VqlIoScriptTest, AnAbandonedScriptFreesItsProgramToo) {
   const auto warmSlots = s.w.arena.cellCount();
   for (std::size_t i = 0; i < 500; ++i) abandonOnce();
   EXPECT_EQ(s.w.arena.cellCount(), warmSlots);
+}
+
+/// Every cell the session's dynamic-view registry names must still be live:
+/// the registry outlives the script, so a freed entry is a stale handle that a
+/// later program's reused slot would match (M7-VQL gate r2, N1).
+void expectRegistryLive(ScriptWorld &s) {
+  const auto &registry = s.engine.dynamicViews();
+  for (const auto &[cell, record] : registry.viewCells) {
+    static_cast<void>(record);
+    EXPECT_TRUE(s.w.arena.contains(cell)) << "a view cell was freed";
+  }
+  for (const auto &[cell, record] : registry.shapeHandles) {
+    static_cast<void>(record);
+    EXPECT_TRUE(s.w.arena.contains(cell)) << "a shape handle was freed";
+  }
+  for (const auto &[cell, record] : registry.cellLenses) {
+    static_cast<void>(record);
+    EXPECT_TRUE(s.w.arena.contains(cell)) << "a lens handle was freed";
+  }
+}
+
+auto finishRead(ScriptWorld &s, const std::string &source)
+    -> std::vector<CellRef> {
+  const auto begun = s.run(source);
+  EXPECT_NE(parkedToken(begun), nullptr);
+  s.w.complete(s.w.submissions() - 1, EndOfStream{{}});
+  const auto done  = s.wakeAndResume();
+  const auto *rows = completedRows(done);
+  EXPECT_NE(rows, nullptr);
+  return rows ? *rows : std::vector<CellRef>{};
+}
+
+TEST(VqlIoScriptTest, APivotAfterAnEffectKeepsItsViewUsableAfterwards) {
+  ScriptWorld s;
+  s.engine.setVariable("task", s.w.arena.makeCell("task"));
+  const auto rows = finishRead(s, std::string{readOnCap} +
+                                      "; return $task{ d.1 <=> d.priority }");
+  ASSERT_FALSE(rows.empty());
+  expectRegistryLive(s);
+  // The view's handle is still a live, registered cell, so a later query
+  // over it resolves instead of matching a recycled slot.
+  s.engine.setVariable("view", rows);
+  EXPECT_NO_THROW(s.engine.execute("$view/+d.1/value()"));
+  EXPECT_FALSE(s.engine.dynamicViews().viewCells.empty());
+}
+
+constexpr auto lensLet = ";\n let $editable := lens(get: \\(.) ./value(), "
+                         "put: \\(cell, val) $cell/value($val))";
+
+TEST(VqlIoScriptTest, ALensAfterAnEffectStaysUsableInALaterQuery) {
+  ScriptWorld s;
+  s.engine.setVariable("item", s.w.arena.makeCell("before"));
+  const auto rows = finishRead(s, std::string{readOnCap} + lensLet +
+                                      "\n return $item/$editable");
+  ASSERT_FALSE(rows.empty());
+  expectRegistryLive(s);
+  const auto read = s.engine.execute("$item/$editable");
+  ASSERT_EQ(read.size(), 1U);
+  EXPECT_EQ(s.w.arena.textOf(read.front()), "before");
+  s.engine.execute("weave { $item/$editable%\"after\" }");
+  const auto written = s.engine.execute("$item/value()");
+  ASSERT_EQ(written.size(), 1U);
+  EXPECT_EQ(s.w.arena.textOf(written.front()), "after");
+}
+
+TEST(VqlIoScriptTest, RegistryEntriesNeverGoStaleUnderSlotReuse) {
+  ScriptWorld s;
+  s.engine.setVariable("task", s.w.arena.makeCell("task"));
+  s.engine.setVariable("item", s.w.arena.makeCell("x"));
+  for (std::size_t i = 0; i < 40; ++i) {
+    const auto source =
+        std::string{readOnCap} +
+        (i % 2 == 0 ? "; return $task{ d.1 <=> d.priority }"
+                    : std::string{lensLet} + "\n return $item/$editable");
+    static_cast<void>(finishRead(s, source));
+    s.freeOldSpecs();
+    // Plain scripts that mint and free cells keep recycling slots between the
+    // registering ones.
+    static_cast<void>(finishRead(s, readOnCap));
+    s.freeOldSpecs();
+    expectRegistryLive(s);
+  }
+}
+
+TEST(VqlIoScriptTest, AnAbandonedScriptWithARegisteredViewKeepsItsCells) {
+  ScriptWorld s;
+  s.engine.setVariable("task", s.w.arena.makeCell("task"));
+  const auto begun =
+      s.run(std::string{readOnCap} + "; return $task{ d.1 <=> d.priority }");
+  ASSERT_NE(parkedToken(begun), nullptr);
+  s.w.complete(s.w.submissions() - 1, EndOfStream{{}});
+  static_cast<void>(s.w.pump());
+  auto woken = s.runner.takeWake();
+  ASSERT_TRUE(woken);
+  woken->why = FrontendWake::Abandoned;
+  static_cast<void>(s.runner.resume(*std::move(woken)));
+  expectRegistryLive(s);
 }
 
 TEST(VqlIoScriptTest, AFinishedScriptsRowsAndOutcomeSurviveItsProgram) {
