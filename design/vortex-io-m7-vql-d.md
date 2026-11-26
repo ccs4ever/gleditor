@@ -101,7 +101,8 @@ the change reverted): exhaustiveness check off (2 tests fail), `io_own_copy` ret
   `conflict` and `unknown` bind nothing, and read the outcome through `$r`.
 - **A script `let` is a session variable afterwards**, and the cells its program minted are freed
   when the name is rebound or erased (round 1, section 8); the join leak pin no longer frees by
-  hand.
+  hand. The claim that this bounds the arena holds for a plain query too since round 3 (section 8c):
+  before it, only a script with an I/O action reclaimed its program.
 - **The capture-host fallback is unit-tested at the constructor** (fits where the copy is refused),
   not end to end: forcing a failed capture step under an allocation limit needs a harness the
   capture tests do not have. Slice f touches that code and should add it.
@@ -180,10 +181,42 @@ Reports: [`r2-vql.md`](projects/vortex-io-implementation-review/m7-vql-d/r2-vql.
   its first step and no park falls inside one.
 - **An await of a handle another parked script admitted** is searched in that script's list too.
 
+## 8c. Gate round 3 fixes
+
+Reports: [`r3-vql.md`](projects/vortex-io-implementation-review/m7-vql-d/r3-vql.md),
+[`r2-zigzag.md`](projects/vortex-io-implementation-review/m7-vql-d/r2-zigzag.md); verdicts in
+[`r3-disposition.md`](projects/vortex-io-implementation-review/m7-vql-d/r3-disposition.md).
+
+- **A freed `let` cell is unreachable from every root, by construction.** Rounds 1 and 2 guessed
+  what a closure holds from the names its program mentioned (`capturedNames`, removed). A closure
+  value records the cells of its environment (`VortexVM::closureValue`), so the executor reports, at
+  each publish, every closure among the bindings and rows with the cells it captured (and the
+  closures those capture), and the engine keeps that table pruned to what a binding or row reaches.
+  A replaced cell is freed only when no binding, row, mount or registry entry names it, no reachable
+  closure captured it, and it has no link. A closure made through a lambda parameter
+  (`\($s) \($y) $s + $y`) is covered, which a name could not be.
+- **A plain query's program is reclaimed like an I/O script's**: the rows and the published bindings
+  are the roots, and everything else the run allocated is freed when it ends. The program is kept
+  when something names it that is not a cell root: a functor or mount binding, a closure value among
+  the results, a dynamic-view registry entry; and a region cell linked on a dimension that is not
+  the VM's own to a cell outside the region (what a `%` builds) is a root too, so structure a query
+  attaches to the space survives. Measured at 10^4 runs over four rows (live cells added per run):
+  `return join(...)` 266, `let $t := join(...)` 115, `return $rows/count()` 46, all now 0 (pinned by
+  `VqlIoPlainReclaimTest`; before the fix the three tests fail with those figures).
+- `clearVariables` frees what the bindings minted, as `:forget` does, and drops the closure table.
+- **Prices.** A cell a live closure captured is not reclaimed until the closure is dropped (the
+  table is exact, so it is freed at the next publish or `:forget` after that). A program whose
+  results or bindings include a closure value keeps its whole region. A session that holds a closure
+  walks its bindings on each publish that frees a cell, and each publish that makes a lambda or
+  follows a closure; a session without closures pays nothing (the table is empty). Cells of a parked
+  script's program that a second script rebinds are not tracked: the scripts' names are not visible
+  to each other until one ends (section 6), so the shape is unreachable through the script surface.
+
 ## 9. Change history
 
-| version | date       | change                                                    |
-| ------- | ---------- | --------------------------------------------------------- |
-| 0.1     | 2026-11-26 | Design and as-built for M7-VQL-d; gate pending            |
-| 0.2     | 2026-11-26 | Gate round 1 fixes (sections 7 and 8); join rewritten     |
-| 0.3     | 2026-11-26 | Gate round 2 fixes (section 8b); P11 approved as slice d2 |
+| version | date       | change                                                             |
+| ------- | ---------- | ------------------------------------------------------------------ |
+| 0.1     | 2026-11-26 | Design and as-built for M7-VQL-d; gate pending                     |
+| 0.2     | 2026-11-26 | Gate round 1 fixes (sections 7 and 8); join rewritten              |
+| 0.3     | 2026-11-26 | Gate round 2 fixes (section 8b); P11 approved as slice d2          |
+| 0.4     | 2026-11-26 | Gate round 3 fixes (section 8c): closure-sound free; plain reclaim |
