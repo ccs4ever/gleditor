@@ -47,6 +47,9 @@ constexpr std::array builtins{
             "script I/O action given an unusable capability, offset or bound"},
     Builtin{FrontendId::Vql, frontend_codes::vqlEffectNeedsRunner,
             "script I/O action can park and runs only through a runner"},
+    Builtin{FrontendId::Vql, frontend_codes::vqlPersistNeedsCapture,
+            "rows produced by an I/O action cannot be made durable without an "
+            "explicit capture"},
     Builtin{FrontendId::Vql, frontend_codes::vqlScriptFailed,
             "a query segment of a script failed"},
     Builtin{FrontendId::Vpl, frontend_codes::vplShapeMismatch,

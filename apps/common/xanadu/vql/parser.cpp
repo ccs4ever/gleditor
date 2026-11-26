@@ -393,6 +393,9 @@ DefDeclaration Parser::parseDefDeclaration() {
 
   Token nameTok =
       consume(TokenKind::Identifier, "Expected function name after 'def'");
+  // The three names are reserved, so a definition could never be called;
+  // refuse it where it is written, with the code every call gets.
+  refuseIoCall(nameTok);
   consume(TokenKind::OpenParen, "Expected '(' after function name");
   std::vector<LambdaParam> params = parseLambdaParams();
   consume(TokenKind::CloseParen, "Expected ')' after parameters in 'def'");

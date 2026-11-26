@@ -69,6 +69,12 @@ inline constexpr std::string_view vqlEffectArgument = "VQL_IO_EFFECT_ARGUMENT";
 /// fallback, so such a script runs only through begin/resume (the runner).
 inline constexpr std::string_view vqlEffectNeedsRunner =
     "VQL_IO_EFFECT_NEEDS_RUNNER";
+/// A front end was asked to make durable rows that an I/O action produced.
+/// Input is transient unless explicitly captured, and no capture route exists
+/// for those rows yet, so the persistence is refused rather than made without
+/// a capture decision or provenance.
+inline constexpr std::string_view vqlPersistNeedsCapture =
+    "VQL_IO_PERSIST_NEEDS_CAPTURE";
 /// A query segment of a script failed (the QueryError category and message
 /// ride in the diagnostic's message).
 inline constexpr std::string_view vqlScriptFailed  = "VQL_SCRIPT_FAILED";

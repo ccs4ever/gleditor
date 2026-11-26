@@ -434,6 +434,72 @@ TEST_F(VQueryE2ETest, AMissingIoFileIsATypedOpenFailure) {
       << result.output;
 }
 
+// M7-VQL gate r1, vql M1: bytes an action read are transient until explicitly
+// captured, so none of the three ways to make rows durable accepts them. A
+// typed code names the refusal and nothing is written.
+TEST_F(VQueryE2ETest, ActionRowsAreNotWrittenByOutputStoreInPlaceOrSave) {
+  const auto source = writeSource(testDir, "hello world");
+  const auto bind   = "--io-file src=" + source.string() + " ";
+  const auto out    = testDir / "result.store";
+  const auto saved =
+      runVQuery(bind + "-o '" + out.string() + "' -e '" + readAction + "'");
+  EXPECT_EQ(saved.exitCode, 1) << saved.output;
+  EXPECT_NE(saved.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << saved.output;
+  EXPECT_FALSE(fs::exists(out)) << "no result store was written";
+
+  const auto inPlace = runVQuery(bind + "--in-place -e '" + readAction + "'");
+  EXPECT_EQ(inPlace.exitCode, 1) << inPlace.output;
+  EXPECT_NE(inPlace.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << inPlace.output;
+
+  const auto input = testDir / "save.vql";
+  const auto repl  = testDir / "repl.store";
+  {
+    std::ofstream script(input);
+    script << ":open src " << source.string() << "\n"
+           << readAction << "\n:save " << repl.string() << "\n:quit\n";
+  }
+  const auto session = runVQuery("< '" + input.string() + "'");
+  EXPECT_NE(session.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << session.output;
+  EXPECT_FALSE(fs::exists(repl)) << "nothing was saved";
+}
+
+TEST_F(VQueryE2ETest, AQueryAfterAnActionIsSavableAgain) {
+  const auto source = writeSource(testDir, "hello world");
+  const auto input  = testDir / "later.vql";
+  const auto repl   = testDir / "later.store";
+  {
+    std::ofstream script(input);
+    script << ":open src " << source.string() << "\n"
+           << readAction << "\nreturn 5\n:save " << repl.string()
+           << "\n:quit\n";
+  }
+  const auto session = runVQuery("< '" + input.string() + "'");
+  EXPECT_EQ(session.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << session.output;
+  EXPECT_TRUE(fs::exists(repl)) << session.output;
+}
+
+TEST_F(VQueryE2ETest, ReplOpensAPathWithSpaces) {
+  const auto dir = testDir / "with space";
+  fs::create_directories(dir);
+  const auto source = writeSource(dir, "hello world");
+  const auto input  = testDir / "spaces.vql";
+  {
+    std::ofstream script(input);
+    script << ":open src " << source.string() << "\n"
+           << readAction << "\n:quit\n";
+  }
+  const auto result = runVQuery("< '" + input.string() + "'");
+  EXPECT_NE(result.output.find("world"), std::string::npos) << result.output;
+}
+
 TEST_F(VQueryE2ETest, TheCompilerCliLowersAScriptActionToSubmitAndAwait) {
   const auto script = testDir / "action.vql";
   std::ofstream(script) << readAction << "\n";

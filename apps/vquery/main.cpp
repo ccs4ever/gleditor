@@ -555,7 +555,19 @@ int main(int argc, char *argv[]) {
   };
   // Query Execution Helper
   bool hasResults = false;
-  auto runQuery   = [&](std::string_view qStr) -> bool {
+  // Rows an I/O action produced hold file bytes the author never captured:
+  // input is transient until a capture route exists, so none of the three
+  // ways to make rows durable (-o, --in-place, :save) accepts them.
+  bool resultsFromAction         = false;
+  const auto refuseDurableAction = [&]() -> bool {
+    if (!resultsFromAction) return false;
+    std::cerr << xanadu::vortex::frontend_codes::vqlPersistNeedsCapture
+              << ": the last result holds bytes read by an I/O action; input "
+                 "is transient unless explicitly captured, and there is no "
+                 "capture command yet\n";
+    return true;
+  };
+  auto runQuery = [&](std::string_view qStr) -> bool {
     // Parse AST
     xanadu::vql::QueryExpression ast;
     try {
@@ -571,6 +583,10 @@ int main(int argc, char *argv[]) {
     }
 
     if (const auto root = lensRepl.root()) engine.setVariable("lens", *root);
+    const bool endsInAction =
+        !ast.body.statements.empty() &&
+        std::holds_alternative<xanadu::vql::IoEffectStatement>(
+            ast.body.statements.back());
     std::vector<zigzag::CellRef> results;
     if (xanadu::vql::hasIoEffect(ast)) {
       auto rows = runIoScript(std::move(ast));
@@ -595,8 +611,9 @@ int main(int argc, char *argv[]) {
       results = *execution;
     }
 
-    lastResults = results;
-    hasResults  = true;
+    lastResults       = results;
+    hasResults        = true;
+    resultsFromAction = endsInAction;
 
     // Format results
     if (format == "ascii") {
@@ -648,6 +665,11 @@ int main(int argc, char *argv[]) {
     if (streamOutput) std::cout.rdbuf(std::cerr.rdbuf());
     bool ok = runQuery(queryText);
     if (!ok) return 1;
+    if ((program.get<bool>("--in-place") || !outPath.empty()) &&
+        refuseDurableAction()) {
+      std::cout.rdbuf(originalOutput);
+      return 1;
+    }
 
     // In place: what the query minted -- cells that exist only in the arena
     // -- is promoted into the primary store with everything reachable from
@@ -792,7 +814,9 @@ int main(int argc, char *argv[]) {
     } else if (line.starts_with(":open ")) {
       std::istringstream iss(line);
       std::string cmd, name, path;
-      iss >> cmd >> name >> path;
+      iss >> cmd >> name;
+      // The path is the rest of the line, so one with spaces is not cut.
+      std::getline(iss >> std::ws, path);
       if (name.empty() || path.empty()) {
         std::cout << "Usage: :open <name> <path>\n";
       } else if (bindFile(name, path)) {
@@ -815,6 +839,8 @@ int main(int argc, char *argv[]) {
         std::cout << "Usage: :save <new-store-path>\n";
       } else if (!hasResults) {
         std::cerr << "Run a query before saving results.\n";
+      } else if (refuseDurableAction()) {
+        // Nothing written; the typed code is on stderr.
       } else {
         const auto path = line.substr(pathStart);
         try {
