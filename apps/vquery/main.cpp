@@ -8,6 +8,7 @@
  * creation/update, and ASCII art visualization for terminal debugging.
  */
 #include <argparse/argparse.hpp>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +18,7 @@
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <tuple>
 #include <unistd.h>
@@ -64,8 +66,12 @@ parseScriptTimeout(const std::string &text) {
   if (text == "off") return std::optional<std::chrono::milliseconds>{};
   if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
     return std::nullopt;
-  const auto count = std::stoll(text);
-  if (count <= 0) return std::nullopt;
+  std::chrono::milliseconds::rep count{};
+  const auto *const end = text.data() + text.size();
+  const auto parsed     = std::from_chars(text.data(), end, count);
+  if (parsed.ec != std::errc{} || parsed.ptr != end || count <= 0 ||
+      count > xanadu::vql::ScriptRunner::maxDeadline.count())
+    return std::nullopt;
   return std::optional<std::chrono::milliseconds>{
       std::chrono::milliseconds{count}};
 }
@@ -600,16 +606,18 @@ int main(int argc, char *argv[]) {
   };
   // Query Execution Helper
   bool hasResults = false;
-  // Rows an I/O action produced hold file bytes the author never captured:
-  // input is transient until a capture route exists, so none of the three
-  // ways to make rows durable (-o, --in-place, :save) accepts them.
+  // A script that ran an I/O action may return the bytes it read (through
+  // io_payload, or as the action's own row) or handles to its requests, and
+  // which row came from where is not tracked: input is transient until a
+  // capture route exists, so none of the three ways to make rows durable
+  // (-o, --in-place, :save) accepts any result of such a script.
   bool resultsFromAction         = false;
   const auto refuseDurableAction = [&]() -> bool {
     if (!resultsFromAction) return false;
     std::cerr << xanadu::vortex::frontend_codes::vqlPersistNeedsCapture
-              << ": the last result holds bytes read by an I/O action; input "
-                 "is transient unless explicitly captured, and there is no "
-                 "capture command yet\n";
+              << ": the result comes from a script that ran an I/O action, so "
+                 "its rows may hold bytes it read; input is transient unless "
+                 "explicitly captured, and there is no capture command yet\n";
     return true;
   };
   auto runQuery = [&](std::string_view qStr) -> bool {
@@ -628,12 +636,9 @@ int main(int argc, char *argv[]) {
     }
 
     if (const auto root = lensRepl.root()) engine.setVariable("lens", *root);
-    const bool endsInAction =
-        !ast.body.statements.empty() &&
-        std::holds_alternative<xanadu::vql::IoEffectStatement>(
-            ast.body.statements.back());
+    const bool ranAction = xanadu::vql::hasIoEffect(ast);
     std::vector<zigzag::CellRef> results;
-    if (xanadu::vql::hasIoEffect(ast)) {
+    if (ranAction) {
       // The first action this script admits retires the rows the last one
       // returned, so nothing from before may be named afterwards, whether
       // the script ends or fails: -o, --in-place and :save of a failed
@@ -665,7 +670,7 @@ int main(int argc, char *argv[]) {
 
     lastResults       = results;
     hasResults        = true;
-    resultsFromAction = endsInAction;
+    resultsFromAction = ranAction;
 
     // Format results
     if (format == "ascii") {

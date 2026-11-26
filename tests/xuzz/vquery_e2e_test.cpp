@@ -469,6 +469,49 @@ TEST_F(VQueryE2ETest, ActionRowsAreNotWrittenByOutputStoreInPlaceOrSave) {
   EXPECT_FALSE(fs::exists(repl)) << "nothing was saved";
 }
 
+// vql gate r1 M1: the rule follows the script, not the last statement. A
+// later `return io_payload($r)` is the file's bytes as a row, and a
+// `return $r` is the action's own row; neither may be made durable.
+TEST_F(VQueryE2ETest,
+       ActionRowsReturnedByALaterStatementAreNotPersistedEither) {
+  const auto source = writeSource(testDir, "hello world");
+  const auto bind   = "--io-file src=" + source.string() + " ";
+  const std::string action =
+      "effect { let $s := submit($src, read_bytes(6, 5)); "
+      "match $s { admitted($q) => await($q), refused($e) => $e } } as $r; ";
+  for (const auto *tail : {"return io_payload($r)", "return $r"}) {
+    SCOPED_TRACE(tail);
+    const auto query = action + tail;
+    const auto out   = testDir / "later.store";
+    const auto saved =
+        runVQuery(bind + "-o '" + out.string() + "' -e '" + query + "'");
+    EXPECT_EQ(saved.exitCode, 1) << saved.output;
+    EXPECT_NE(saved.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+              std::string::npos)
+        << saved.output;
+    EXPECT_FALSE(fs::exists(out)) << "no result store was written";
+
+    const auto inPlace = runVQuery(bind + "--in-place -e '" + query + "'");
+    EXPECT_EQ(inPlace.exitCode, 1) << inPlace.output;
+    EXPECT_NE(inPlace.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+              std::string::npos)
+        << inPlace.output;
+
+    const auto input = testDir / "later_save.vql";
+    const auto repl  = testDir / "later_save.store";
+    {
+      std::ofstream script(input);
+      script << ":open src " << source.string() << "\n"
+             << query << "\n:save " << repl.string() << "\n:quit\n";
+    }
+    const auto session = runVQuery("< '" + input.string() + "'");
+    EXPECT_NE(session.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+              std::string::npos)
+        << session.output;
+    EXPECT_FALSE(fs::exists(repl)) << "nothing was saved";
+  }
+}
+
 TEST_F(VQueryE2ETest, AQueryAfterAnActionIsSavableAgain) {
   const auto source = writeSource(testDir, "hello world");
   const auto input  = testDir / "later.vql";
@@ -577,7 +620,10 @@ TEST_F(VQueryE2ETest, ScriptTimeoutFlagTakesMillisecondsOrOff) {
     ASSERT_EQ(result.exitCode, 0) << result.output;
     EXPECT_EQ(result.output, "Complete\nworld\n");
   }
-  for (const auto *bad : {"0", "-5", "soon", "1.5"}) {
+  // vql gate r1 MINOR 2: a size no deadline can hold is a usage error, not an
+  // uncaught exception or an overflowed deadline.
+  for (const auto *bad : {"0", "-5", "soon", "1.5", "99999999999999999999",
+                          "9223372036854775807"}) {
     SCOPED_TRACE(bad);
     const auto result =
         runVQuery(std::string{"--script-timeout "} + bad + " -e 'return 1'");
