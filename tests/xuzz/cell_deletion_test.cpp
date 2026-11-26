@@ -91,7 +91,8 @@ TEST(ArenaDeleteCellTest, leaveBrokenCutsEveryConnectionAndFreesTheCell) {
   const auto p = a.cell("p"), q = a.cell("q"), r = a.cell("r"), s = a.cell("s");
   a.chain(a.x, {p, q, r});
   a.chain(a.y, {s, q});
-  const auto done = a.m.deleteCell(q, a.inc(q), DeletionMode::LeaveBroken);
+  const auto done =
+      a.m.deleteCell(q, a.inc(q), DeletionMode::LeaveBroken, std::nullopt);
   ASSERT_TRUE(done);
   EXPECT_TRUE(done->freed);
   EXPECT_FALSE(a.m.contains(q));
@@ -108,14 +109,15 @@ TEST(ArenaDeleteCellTest, repairJoinsEachDimensionsNeighboursAndFreesTheCell) {
   const auto p = a.cell("p"), q = a.cell("q"), r = a.cell("r"), s = a.cell("s");
   a.chain(a.x, {p, q, r});
   a.chain(a.y, {s, q});
-  const auto done = a.m.deleteCell(q, a.inc(q), DeletionMode::Repair);
+  const auto done =
+      a.m.deleteCell(q, a.inc(q), DeletionMode::Repair, std::nullopt);
   ASSERT_TRUE(done);
   EXPECT_EQ(a.m.linked(p, a.x, DimVector::POS), r);
   EXPECT_EQ(a.m.linked(r, a.x, DimVector::NEG), p);
   EXPECT_EQ(a.m.linked(s, a.y, DimVector::POS), std::nullopt);
   EXPECT_TRUE(done->freed);
   // The freed slot is reusable and the stale handle is refused.
-  EXPECT_EQ(a.m.deleteCell(q, 1, DeletionMode::Repair).error(),
+  EXPECT_EQ(a.m.deleteCell(q, 1, DeletionMode::Repair, std::nullopt).error(),
             ArenaRefusal::UnknownCell);
 }
 
@@ -123,7 +125,8 @@ TEST(ArenaDeleteCellTest, aCellWithNoLinksIsJustFreed) {
   Arena a;
   const auto lone = a.cell("lone");
   const auto live = a.m.liveCells();
-  const auto done = a.m.deleteCell(lone, a.inc(lone), DeletionMode::Repair);
+  const auto done =
+      a.m.deleteCell(lone, a.inc(lone), DeletionMode::Repair, std::nullopt);
   ASSERT_TRUE(done);
   EXPECT_TRUE(done->broken.isolated());
   EXPECT_TRUE(done->freed);
@@ -134,7 +137,7 @@ TEST(ArenaDeleteCellTest, aRankOfTwoLeavesTheSurvivorUnlinked) {
   Arena a;
   const auto p = a.cell("p"), q = a.cell("q");
   a.chain(a.x, {p, q});
-  ASSERT_TRUE(a.m.deleteCell(q, a.inc(q), DeletionMode::Repair));
+  ASSERT_TRUE(a.m.deleteCell(q, a.inc(q), DeletionMode::Repair, std::nullopt));
   EXPECT_EQ(a.m.linked(p, a.x, DimVector::POS), std::nullopt);
   EXPECT_EQ(a.m.linked(p, a.x, DimVector::NEG), std::nullopt);
 }
@@ -144,7 +147,8 @@ TEST(ArenaDeleteCellTest, aCloneMasterAndAClone) {
   const auto master = a.cell("m"), v1 = a.cell("v1"), v2 = a.cell("v2");
   a.chain(a.clone, {master, v1, v2});
   // Deleting a view repairs the rank; the master still answers.
-  ASSERT_TRUE(a.m.deleteCell(v1, a.inc(v1), DeletionMode::Repair));
+  ASSERT_TRUE(
+      a.m.deleteCell(v1, a.inc(v1), DeletionMode::Repair, std::nullopt));
   EXPECT_EQ(a.m.cloneMaster(v2, a.clone), master);
   // Deleting the master with Repair promotes the first remaining view.
   ASSERT_TRUE(a.m.deleteCell(
@@ -181,7 +185,7 @@ TEST(ArenaDeleteCellTest, deletionUnderAMarkIsUndoneByRelease) {
   a.chain(a.x, {p, q, r});
   const auto live = a.m.liveCells();
   const auto mark = a.m.mark();
-  ASSERT_TRUE(a.m.deleteCell(q, a.inc(q), DeletionMode::Repair));
+  ASSERT_TRUE(a.m.deleteCell(q, a.inc(q), DeletionMode::Repair, std::nullopt));
   EXPECT_EQ(a.m.linked(p, a.x, DimVector::POS), r);
   ASSERT_TRUE(a.m.release(mark));
   EXPECT_TRUE(a.m.contains(q));
@@ -211,8 +215,9 @@ TEST(ArenaDeleteCellTest,
 
   // A base cell has no incarnation of its own until a write shadows it.
   ASSERT_TRUE(arena.link(second, minted.dim, DimVector::POS, third));
-  const auto done = arena.deleteCell(
-      second, arena.incarnationOf(second).value(), DeletionMode::Repair);
+  const auto done =
+      arena.deleteCell(second, arena.incarnationOf(second).value(),
+                       DeletionMode::Repair, std::nullopt);
   ASSERT_TRUE(done);
   EXPECT_FALSE(done->freed);
   EXPECT_EQ(arena.linked(first, minted.dim, DimVector::POS), third);
@@ -233,12 +238,13 @@ TEST(ArenaDeleteCellTest, theHomeAndNamedCellsAreRefusedBeforeAnyWrite) {
   ASSERT_TRUE(arena.link(home, dims, DimVector::POS, std::nullopt));
   EXPECT_EQ(arena
                 .deleteCell(home, arena.incarnationOf(home).value(),
-                            DeletionMode::Repair)
+                            DeletionMode::Repair, std::nullopt)
                 .error(),
             ArenaRefusal::NotReleasable);
   Arena a;
   const auto dim = a.m.ensureDimension("d.named");
-  EXPECT_EQ(a.m.deleteCell(dim, a.inc(dim), DeletionMode::Repair).error(),
+  EXPECT_EQ(a.m.deleteCell(dim, a.inc(dim), DeletionMode::Repair, std::nullopt)
+                .error(),
             ArenaRefusal::NotReleasable);
 }
 

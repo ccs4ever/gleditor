@@ -828,14 +828,13 @@ public:
    */
   std::expected<Deletion, ArenaRefusal>
   deleteCell(CellRef ref, AllocationIncarnation incarnation, DeletionMode mode,
-             std::optional<CloneGuard> clones = std::nullopt);
+             std::optional<CloneGuard> clones);
 
   /// deleteCell() without the removal: break @p ref's connections (every
   /// dimension) and leave the cell in the arena, for a caller that frees it
   /// later or keeps it. Returns the neighbourhood it broke.
   std::expected<Neighbourhood, ArenaRefusal>
-  detachCell(CellRef ref, DeletionMode mode,
-             std::optional<CloneGuard> clones = std::nullopt);
+  detachCell(CellRef ref, DeletionMode mode, std::optional<CloneGuard> clones);
 
   /// detachCell() along one dimension, leaving the cell's other connections.
   /// The reapers' rank detach: Repair keeps the rest of the rank walkable.

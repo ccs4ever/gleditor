@@ -681,6 +681,17 @@ TEST(VqlIoScriptTest, ARollbackNamesTheActivationThatOwnsTheSubmit) {
   ASSERT_EQ(s.w.service.orphanCount(), 0U);
   ASSERT_TRUE(s.w.vm.backtrack(outer));
   EXPECT_EQ(s.w.service.orphanCount(), 2U);
+  // Each parked script's waiter went with its request, and its caller is told.
+  for (int i = 0; i < 2; ++i) {
+    auto woken = s.runner.takeWake();
+    ASSERT_TRUE(woken) << "an orphaned parked script wakes its caller";
+    EXPECT_EQ(woken->why, FrontendWake::Abandoned);
+    const auto resumed = s.runner.resume(*std::move(woken));
+    const auto *failed = failedDiagnostic(resumed);
+    ASSERT_NE(failed, nullptr);
+    EXPECT_EQ(failed->code, frontend_codes::tokenStale);
+  }
+  EXPECT_FALSE(s.runner.takeWake());
 }
 
 TEST(VqlIoScriptTest, ASecondRunnerOnTheSameVmIsRefused) {
@@ -838,6 +849,60 @@ TEST(VqlIoScriptTest, RegistryEntriesNeverGoStaleUnderSlotReuse) {
     static_cast<void>(finishRead(s, readOnCap));
     s.freeOldSpecs();
     expectRegistryLive(s);
+  }
+}
+
+TEST(VqlIoScriptTest, RegistrationsNeverReachedByRowsKeepTheirCells) {
+  // M7-VQL gate r3, vql minor 2: a pivot, shape or lens whose result is not a
+  // row has nothing but the registry naming its cells, so only keepIfNamed
+  // stops the program reclaim from freeing them.
+  ScriptWorld s;
+  s.engine.setVariable("task", s.w.arena.makeCell("task"));
+  s.engine.setVariable("item", s.w.arena.makeCell("x"));
+  const auto before = s.engine.dynamicViews().viewCells.size();
+  const auto rows =
+      finishRead(s, std::string{readOnCap} +
+                        "; return count($task{ d.1 <=> d.priority })");
+  ASSERT_FALSE(rows.empty());
+  EXPECT_GT(s.engine.dynamicViews().viewCells.size() +
+                s.engine.dynamicViews().cellLenses.size() +
+                s.engine.dynamicViews().shapeHandles.size(),
+            before)
+      << "the script registered something";
+  expectRegistryLive(s);
+  s.freeOldSpecs();
+  // A following plain script must not take a slot the registry names.
+  const auto sizes = s.engine.dynamicViews().viewCells.size();
+  static_cast<void>(finishRead(s, readOnCap));
+  expectRegistryLive(s);
+  EXPECT_EQ(s.engine.dynamicViews().viewCells.size(), sizes);
+}
+
+TEST(VqlIoScriptTest, ARolledBackRunLeavesNoStaleRegistryKey) {
+  // M7-VQL gate r3, vql minor 1: a run that registers a view and then fails
+  // has its cells released; the keys must go with them, or a later mint into
+  // the freed slot replaces a key without changing the map's size.
+  zigzag::ArenaManifold arena;
+  VQLEngine engine(arena);
+  engine.setVariable("task", arena.makeCell("task"));
+  const auto failed =
+      engine.tryExecute("let $v := $task{ d.1 <=> d.priority }; $v/nonesuch()");
+  ASSERT_FALSE(failed) << "the script is meant to fail after registering";
+  const auto &registry = engine.dynamicViews();
+  EXPECT_TRUE(registry.viewCells.empty());
+  EXPECT_TRUE(registry.ownerViews.empty());
+  for (const auto &[cell, record] : registry.viewCells) {
+    static_cast<void>(record);
+    EXPECT_TRUE(arena.contains(cell));
+  }
+  // The freed slots are reused by a script that registers again; the map grows
+  // by exactly what it registered and every key is live.
+  const auto again = engine.execute("$task{ d.1 <=> d.other }");
+  ASSERT_EQ(again.size(), 1U);
+  EXPECT_EQ(registry.viewCells.size(), 1U);
+  for (const auto &[cell, record] : registry.viewCells) {
+    static_cast<void>(record);
+    EXPECT_TRUE(arena.contains(cell));
   }
 }
 

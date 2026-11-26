@@ -191,9 +191,9 @@ private:
   /// own typed failure message cannot carry.
   std::optional<vortex::FrontendDiagnostic> stageFailure_;
   std::deque<ScriptWake> woken_;
-  std::map<vortex::ContinuationId,
-           std::pair<vortex::WaiterCell, vortex::RequestCell>>
-      parked_;
+  /// The whole token, so a waiter dropped with its request's cells can still
+  /// tell its caller (an Abandoned wake) that the script is dead.
+  std::map<vortex::ContinuationId, vortex::FrontendToken> parked_;
 };
 
 /// Drive @p first to its end the way a CLI does, through the host and never

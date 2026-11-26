@@ -127,7 +127,7 @@ ScriptRunner::~ScriptRunner() {
   vm_.setSubmitRollbackHandler({});
   for (const auto &[continuation, held] : parked_) {
     static_cast<void>(continuation);
-    static_cast<void>(ports_.host.cancelWaiter(held.first));
+    static_cast<void>(ports_.host.cancelWaiter(held.waiter));
   }
   parked_.clear();
   // A waiter already completed (AlreadyComplete) keeps its route until its
@@ -171,8 +171,12 @@ void ScriptRunner::orphan(const vortex::RequestCell request) noexcept {
     // waiter goes with them, so the route is dropped first and the orphaning
     // retried.
     for (auto it = parked_.begin(); it != parked_.end();) {
-      if (it->second.second == request) {
-        static_cast<void>(ports_.host.cancelWaiter(it->second.first));
+      if (it->second.request == request) {
+        static_cast<void>(ports_.host.cancelWaiter(it->second.waiter));
+        // Its waiter will never fire; the caller waiting on takeWake() learns
+        // the script is dead from resume()'s stale-token diagnostic.
+        woken_.push_back(
+            ScriptWake{std::move(it->second), vortex::FrontendWake::Abandoned});
         it = parked_.erase(it);
       } else {
         ++it;
@@ -444,8 +448,7 @@ auto ScriptRunner::settle(const std::shared_ptr<Activation> &activation,
                  "the parked await could not be routed to the script runner",
                  parked.statement));
   }
-  parked_.insert_or_assign(token.continuation,
-                           std::pair{token.waiter, token.request});
+  parked_.insert_or_assign(token.continuation, token);
   activation->parked = std::move(parked);
   return ScriptRunResult::parked(std::move(token));
 }

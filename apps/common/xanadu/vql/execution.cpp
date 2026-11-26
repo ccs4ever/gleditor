@@ -312,8 +312,10 @@ private:
       for (const auto cell : owned) {
         if (kept.contains(cell)) continue;
         if (arena
+                // A program's own cells are never clone masters; there is
+                // no view rank to orphan, so no guard.
                 .deleteCell(cell, *arena.incarnationOf(cell),
-                            zigzag::DeletionMode::Repair)
+                            zigzag::DeletionMode::Repair, std::nullopt)
                 .has_value())
           ++freed;
       }
@@ -374,6 +376,17 @@ QueryExecutor::resume(ParkedProgram &parked) {
   run->beginWindow(coordinator_.core().arena().newestIncarnation());
   return advance(std::move(run));
 }
+
+namespace {
+/// release() the pre-compile mark and forget the session registrations whose
+/// cells that took with it.
+auto releaseAndForget(VQLEngine *session, zigzag::ArenaManifold &arena,
+                      const zigzag::Mark &mark) {
+  auto released = arena.release(mark);
+  if (session != nullptr) session->dynamicViews().dropFreed(arena);
+  return released;
+}
+} // namespace
 
 std::expected<ProgramStep, QueryExecutionError>
 QueryExecutor::beginVortex(const QueryExpression &query,
@@ -456,16 +469,16 @@ QueryExecutor::beginVortex(const QueryExpression &query,
       // them would mint cells in the arena for nothing.
       const auto events = compiler.declareMounts(query, compilation);
       publishMounts(session_, events);
-      zigzag::expectMarkOrder(
-          coordinator_.core().arena().release(preCompileMark));
+      zigzag::expectMarkOrder(releaseAndForget(
+          session_, coordinator_.core().arena(), preCompileMark));
       vm_.pruneAssemblyState();
       undoAll();
       return ProgramStep{ProgramResult{}};
     }
     auto result = compiler.compile(query, compilation);
     if (!result.success) {
-      zigzag::expectMarkOrder(
-          coordinator_.core().arena().release(preCompileMark));
+      zigzag::expectMarkOrder(releaseAndForget(
+          session_, coordinator_.core().arena(), preCompileMark));
       vm_.pruneAssemblyState();
       disassembly_ = result.disassembly;
       undoAll();
@@ -478,8 +491,8 @@ QueryExecutor::beginVortex(const QueryExpression &query,
     disassembly_ = result.disassembly;
 
     if (!result.cursor || !result.terminalOpcode) {
-      zigzag::expectMarkOrder(
-          coordinator_.core().arena().release(preCompileMark));
+      zigzag::expectMarkOrder(releaseAndForget(
+          session_, coordinator_.core().arena(), preCompileMark));
       vm_.pruneAssemblyState();
       undoAll();
       return std::unexpected(QueryExecutionError{
@@ -511,8 +524,8 @@ QueryExecutor::beginVortex(const QueryExpression &query,
     return advance(std::move(run));
   } catch (const TypeContractError &error) {
     vm_.clearChoicePoints();
-    zigzag::expectMarkOrder(
-        coordinator_.core().arena().release(preCompileMark));
+    zigzag::expectMarkOrder(releaseAndForget(
+        session_, coordinator_.core().arena(), preCompileMark));
     vm_.pruneAssemblyState();
     undoAll();
     return std::unexpected(QueryExecutionError{
@@ -521,8 +534,8 @@ QueryExecutor::beginVortex(const QueryExpression &query,
     });
   } catch (const std::exception &error) {
     vm_.clearChoicePoints();
-    zigzag::expectMarkOrder(
-        coordinator_.core().arena().release(preCompileMark));
+    zigzag::expectMarkOrder(releaseAndForget(
+        session_, coordinator_.core().arena(), preCompileMark));
     vm_.pruneAssemblyState();
     undoAll();
     return std::unexpected(runtimeError(error));
@@ -549,19 +562,24 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
   const auto settleMark = [&](const bool keep) {
     if (!run->markHeld) return;
     run->markHeld = false;
-    zigzag::expectMarkOrder(keep ? arena.discard(run->preCompileMark)
-                                 : arena.release(run->preCompileMark));
+    zigzag::expectMarkOrder(
+        keep ? arena.discard(run->preCompileMark)
+             : releaseAndForget(session_, arena, run->preCompileMark));
     if (!keep) vm_.pruneAssemblyState();
   };
   // The failure branch and the success path clear the cursor's VM state
   // themselves; an exception unwinds past both, and P7 frees the cursor's slot
   // for reuse, so state left under its CellRef would attach to a later program.
-  const auto clearCursorState = [&]() noexcept {
+  // The slot can be reused by another allocation, so liveness is the cursor's
+  // own incarnation, taken while it is certainly live.
+  const auto cursorIncarnation = arena.incarnationOf(cursor);
+  const auto clearCursorState  = [&]() noexcept {
     try {
-      if (arena.contains(cursor)) vm_.setCursorOpcode(cursor, std::nullopt);
+      if (cursorIncarnation && arena.matches(cursor, *cursorIncarnation))
+        vm_.setCursorOpcode(cursor, std::nullopt);
     } catch (const std::exception &error) {
       GLEDITOR_LOG_WARN("vql.exec", "cursor state not cleared: {}",
-                        error.what());
+                         error.what());
     }
   };
   try {
@@ -681,7 +699,8 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
     vm_.clearChoicePoints();
     if (run->markHeld) {
       run->markHeld = false;
-      zigzag::expectMarkOrder(arena.release(run->preCompileMark));
+      zigzag::expectMarkOrder(
+          releaseAndForget(session_, arena, run->preCompileMark));
       vm_.pruneAssemblyState();
     }
     return std::unexpected(QueryExecutionError{
@@ -693,7 +712,8 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
     vm_.clearChoicePoints();
     if (run->markHeld) {
       run->markHeld = false;
-      zigzag::expectMarkOrder(arena.release(run->preCompileMark));
+      zigzag::expectMarkOrder(
+          releaseAndForget(session_, arena, run->preCompileMark));
       vm_.pruneAssemblyState();
     }
     return std::unexpected(runtimeError(error));
