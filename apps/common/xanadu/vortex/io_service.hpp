@@ -116,6 +116,11 @@ public:
     Unknown,    ///< stale or unknown handle
   };
   auto orphanRequest(RequestCell) -> OrphanResult;
+  /// Requests the service still holds (running, or terminal and not yet
+  /// retired or forgotten): what the `maxRequests` budget counts.
+  [[nodiscard]] auto requestCount() const noexcept -> std::size_t {
+    return requests_.size();
+  }
   /// Requests ever orphaned or forgotten as orphans, for diagnosing a
   /// request that stays in the budget.
   [[nodiscard]] auto orphanCount() const noexcept -> std::uint64_t {
@@ -208,6 +213,8 @@ private:
       -> RequestCancelState;
   /// End every request whose deadline has passed.
   void expireDue();
+  /// Drop @p state's entry from `deadlines_` (it is leaving `requests_`).
+  void unindexDeadline(const RequestState &state, std::uint64_t key);
   void progress(PrivateRequestToken, IoProgress) noexcept override;
   void terminalCandidate(PrivateRequestToken, BackendResult,
                          std::optional<PayloadLease>) noexcept override;
@@ -237,6 +244,11 @@ private:
   IoCellStore &cells_;
   std::map<AdapterKey, IoAdapter *> adapters_;
   std::unordered_map<std::uint64_t, RequestState> requests_;
+  /// Requests with a deadline, ordered by it, so a pump looks only at the ones
+  /// that are due instead of every request in the budget. An entry leaves when
+  /// its request is examined at expiry or leaves `requests_`.
+  std::multimap<std::chrono::steady_clock::time_point, std::uint64_t>
+      deadlines_;
   // Both cell indexes key the full handle (dense index + allocation
   // incarnation): the arena can recycle a bare CellRef after a release,
   // and a stale entry must never shadow the new allocation's mapping.

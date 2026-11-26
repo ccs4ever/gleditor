@@ -71,6 +71,10 @@ auto IoHost::closeEndpoint(const EndpointCell endpoint, const CloseMode mode)
   return service_.closeEndpoint(endpoint, mode);
 }
 
+auto IoHost::now() const -> std::chrono::steady_clock::time_point {
+  return service_.now();
+}
+
 auto IoHost::isTerminal(const RequestCell request) -> bool {
   requireOwner();
   return service_.poll(request).outcome.has_value();

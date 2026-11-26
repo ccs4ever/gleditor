@@ -180,9 +180,12 @@ VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
     const auto arm    = relate(handleArmRelation, {handle});
     awaitOpcode       = awaitOrKeep(arm.answers.front(), handle, result);
     requestSlot       = handle;
-    if (effect.resultVar) {
-      // The variable is the capability the open minted, or the outcome itself
-      // when it minted none (a later submit on it is then refused by value).
+    {
+      // The capability relation runs for every open, bound or not: it is what
+      // records the capability for the script-end close, so an unbound open
+      // is closed too. `as $name` is then the capability the open minted, or
+      // the outcome itself when it minted none (a later read through it fails
+      // the script, naming the open and its tag: ScriptRunner::failedOpen).
       const auto capability = fresh();
       const auto keep       = emitOp(OpcodeKind::CopyCellRefs, "#IO_OPEN_KEEP");
       emitInput(keep, result);
@@ -197,7 +200,7 @@ VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
       emitInput(take, minted.answers.front());
       emitOutput(take, capability);
       appendOpcode(skip);
-      binding = capability;
+      if (effect.resultVar) binding = capability;
     }
     break;
   }

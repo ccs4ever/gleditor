@@ -29,15 +29,6 @@ constexpr const char *logCategory = "vql.script.io";
 /// The functor the compiler gives a bounded read's request description.
 constexpr const char *readBytesFunctor = "read_bytes";
 
-/// The longest `within` a script may ask for. The deadline is `now() + within`
-/// on a steady clock whose tick count is a signed 64-bit integer, so a quarter
-/// of that range leaves headroom for the sum; it is a representability limit,
-/// not a policy ceiling (a session's own timeout is `--script-timeout`, and
-/// the defaults move to system://settings with M8).
-constexpr std::chrono::milliseconds maxWithinMillis =
-    std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::duration::max() / 4);
-
 /// Whether @p text is well-formed UTF-8 (no overlongs, surrogates or values
 /// past U+10FFFF).
 auto validUtf8(const std::string_view text) -> bool {
@@ -116,6 +107,14 @@ struct ScriptRunner::Activation final : vortex::FrontendActivation {
   std::vector<Admitted> admitted;
   /// Capabilities this script opened; closed when it ends.
   std::vector<vortex::CapabilityCell> opened;
+  /// Each open outcome the script's `open` actions produced, with whether it
+  /// minted a capability, so a later read through a failed open can say which
+  /// open failed and how.
+  struct OpenOutcome {
+    vortex::OutcomeCell outcome;
+    bool minted{};
+  };
+  std::vector<OpenOutcome> openOutcomes;
   /// The overall deadline of the script, when it has one.
   std::optional<std::chrono::steady_clock::time_point> deadline;
 };
@@ -151,18 +150,21 @@ ScriptRunner::~ScriptRunner() {
   // A waiter already completed (AlreadyComplete) keeps its route until its
   // wake; nothing may call this runner after it is gone.
   static_cast<void>(ports_.host.unrouteRunner(*this));
-  // Nothing reads an outcome once the runner is gone, so each terminal
-  // request leaves the service's index and the arena with it; a running one
-  // is never cancelled, only forgotten at its own end. The files a script
+  // Nothing reads an outcome once the runner is gone, so every request it
+  // holds leaves the service's accounting: a terminal one is retired, and a
+  // running one (a detached read, a close just admitted) is forced out, which
+  // orphans it. An orphan is not cancelled; it runs to its own end and its
+  // terminal is dropped unpublished and its budget freed. The files a script
   // opened are closed first.
   for (const auto &weak : live_) {
     if (const auto activation = weak.lock()) closeOpened(*activation);
   }
-  retireAll(finished_);
+  retireAll(finished_, true);
   for (const auto &weak : live_) {
-    if (const auto activation = weak.lock()) retireAll(activation->admitted);
+    if (const auto activation = weak.lock())
+      retireAll(activation->admitted, true);
   }
-  reapClosing();
+  reapClosing(true);
 }
 
 auto ScriptRunner::diagnose(const std::string_view code, std::string message,
@@ -259,30 +261,54 @@ void ScriptRunner::abandonAll(std::vector<Admitted> &entries) noexcept {
   entries.clear();
 }
 
+bool ScriptRunner::closeOne(const vortex::CapabilityCell capability) noexcept {
+  try {
+    const auto closing = ports_.closeCapability(capability);
+    if (!closing) {
+      // Not an open file any more (already closed): nothing to retry.
+      GLEDITOR_LOG_WARN(logCategory, "closing an opened file failed: {}",
+                        closing.error().message);
+      return true;
+    }
+    const auto matched = ports_.bridge.match(*closing);
+    if (!matched) {
+      ports_.bridge.retire(*closing);
+      GLEDITOR_LOG_WARN(logCategory, "a close could not be read back: {}",
+                        matched.error().message);
+      return false;
+    }
+    if (const auto *accepted = std::get_if<vortex::Admitted>(&*matched)) {
+      closing_.push_back(
+          {.submission = *closing, .request = accepted->request});
+      return true;
+    }
+    ports_.bridge.retire(*closing);
+    GLEDITOR_LOG_WARN(logCategory,
+                      "the close of an opened file was refused; it is kept "
+                      "and tried again");
+    return false;
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN(logCategory, "closing an opened file threw: {}",
+                      error.what());
+    return true;
+  }
+}
+
 void ScriptRunner::closeOpened(Activation &activation) noexcept {
   const auto opened = std::exchange(activation.opened, {});
   if (!ports_.closeCapability) return;
   for (const auto capability : opened) {
-    try {
-      const auto closing = ports_.closeCapability(capability);
-      if (!closing) {
-        GLEDITOR_LOG_WARN(logCategory, "closing an opened file failed: {}",
-                          closing.error().message);
-        continue;
-      }
-      Admitted entry{.submission = *closing, .request = std::nullopt};
-      if (const auto matched = ports_.bridge.match(*closing))
-        if (const auto *accepted = std::get_if<vortex::Admitted>(&*matched))
-          entry.request = accepted->request;
-      closing_.push_back(entry);
-    } catch (const std::exception &error) {
-      GLEDITOR_LOG_WARN(logCategory, "closing an opened file threw: {}",
-                        error.what());
-    }
+    if (!closeOne(capability)) unclosed_.push_back(capability);
   }
 }
 
 void ScriptRunner::reapClosing(const bool force) noexcept {
+  if (!unclosed_.empty() && ports_.closeCapability) {
+    const auto retry = std::exchange(unclosed_, {});
+    for (const auto capability : retry) {
+      if (!closeOne(capability) && !force) unclosed_.push_back(capability);
+    }
+  }
   retireAll(closing_, force);
 }
 
@@ -509,6 +535,9 @@ auto ScriptRunner::openPath(const RelationQuery &query) -> RelationResult {
     }
   } hostCells{current_->executor.get(), query.arena,
               query.arena.newestIncarnation()};
+  // Earlier scripts' rows are done with before this one admits anything, so a
+  // budget they filled is free for this open.
+  retireAll(finished_);
   const auto submission = ports_.openFile(path);
   if (!submission) return refuse(submission.error().message);
   const auto matched = ports_.bridge.match(*submission);
@@ -516,7 +545,6 @@ auto ScriptRunner::openPath(const RelationQuery &query) -> RelationResult {
     ports_.bridge.retire(*submission);
     return refuse(matched.error().message);
   }
-  retireAll(finished_);
   Admitted entry{.submission = *submission, .request = std::nullopt};
   CellRef handle{};
   if (const auto *accepted = std::get_if<vortex::Admitted>(&*matched)) {
@@ -536,8 +564,21 @@ auto ScriptRunner::openCapability(const RelationQuery &query)
   if (query.position != 0 || !ports_.capabilityOf)
     return std::optional<RelationAnswer>{std::nullopt};
   const auto capability = ports_.capabilityOf(*outcome);
+  if (current_ != nullptr) {
+    current_->openOutcomes.push_back({*outcome, capability.has_value()});
+  }
   if (!capability) return std::optional<RelationAnswer>{std::nullopt};
-  if (current_ != nullptr) current_->opened.push_back(*capability);
+  if (current_ != nullptr) {
+    // The relation can be evaluated again (a retry, a backtrack): one open is
+    // one close.
+    if (std::ranges::find(current_->opened, *capability) ==
+        current_->opened.end())
+      current_->opened.push_back(*capability);
+  } else {
+    GLEDITOR_LOG_WARN(logCategory,
+                      "an open completed outside any script activation and "
+                      "will not be closed by the runner");
+  }
   return answerOnce(query, capability->cell);
 }
 
@@ -574,7 +615,8 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
   activation->query = std::move(query);
   activation->executor =
       std::make_unique<QueryExecutor>(session_, vm_, options_);
-  if (scriptTimeout_) activation->deadline = now() + *scriptTimeout_;
+  if (scriptTimeout_)
+    activation->deadline = now() + std::min(*scriptTimeout_, maxDeadline);
   std::erase_if(live_, [](const auto &weak) { return weak.expired(); });
   live_.push_back(activation);
   const Stepping stepping(*this, *activation);
@@ -697,12 +739,18 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
     if (!amount) fail(amount.error());
     const auto unit = number(arguments[3], "the 'within' unit", std::nullopt);
     if (!unit) fail(unit.error());
-    if (*unit == 0 || *amount > maxWithinMillis.count() / *unit)
+    if (*unit == 0 || *amount > maxDeadline.count() / *unit)
       fail(diagnose(vortex::frontend_codes::vqlEffectArgument,
                     "the 'within' bound is larger than a deadline can be"));
     within = std::chrono::milliseconds{
         static_cast<std::chrono::milliseconds::rep>(*amount * *unit)};
   }
+  // Finished scripts' rows were returned to their callers, so their requests
+  // are retired before this admission: a budget they filled is free for it.
+  // This script's own earlier actions stay: `as $r` names their outcomes for
+  // the statements after, and the admission budget bounds how many one script
+  // can hold. They join finished_ when the script ends.
+  retireAll(finished_);
   const auto spec = ports_.stageRead(capability, *offset, *length);
   if (!spec) fail(spec.error());
   const auto submission = ports_.bridge.submit(capability, *spec, within);
@@ -719,25 +767,67 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
     fail(diagnose(vortex::frontend_codes::vqlScriptFailed,
                   "a Submit ran outside any script activation"));
   }
-  // Finished scripts' rows were returned to their callers, so their requests
-  // are retired here. This script's own earlier actions stay: `as $r` names
-  // their outcomes for the statements after, and the admission budget bounds
-  // how many one script can hold. They join finished_ when the script ends.
-  retireAll(finished_);
   latest_ = *submission;
   Admitted entry{.submission = *submission, .request = std::nullopt};
   if (const auto *accepted = std::get_if<vortex::Admitted>(&*matched))
     entry.request = accepted->request;
   current_->admitted.push_back(entry);
+  if (within && current_->deadline && scriptTimeout_) {
+    // A request with its own deadline is not cut short by the script's: the
+    // script gets until the request's deadline plus its own timeout, so the
+    // request's TimedOut outcome (a value) is what the script reads.
+    current_->deadline =
+        std::max(*current_->deadline,
+                 now() + *within + std::min(*scriptTimeout_, maxDeadline));
+  }
   if (const auto *refused = std::get_if<vortex::Refused>(&*matched))
     return {*submission, 1, refused->outcome.cell};
   return {*submission, 0, std::get<vortex::Admitted>(*matched).request.cell};
+}
+
+auto ScriptRunner::failedOpen(const Activation &activation,
+                              const std::optional<std::size_t> statement) const
+    -> std::optional<FrontendDiagnostic> {
+  const auto &statements = activation.query.body.statements;
+  if (!statement || *statement >= statements.size()) return std::nullopt;
+  const auto *read = std::get_if<IoEffectStatement>(&statements[*statement]);
+  if (read == nullptr || read->kind != IoEffectStatement::Kind::Read)
+    return std::nullopt;
+  // The open that bound the name is the latest one before the read; opens
+  // evaluate once each, in statement order, so its ordinal indexes the
+  // outcomes the open relation recorded.
+  std::optional<std::size_t> binder;
+  std::size_t ordinal = 0;
+  for (std::size_t at = 0; at < *statement; ++at) {
+    const auto *open = std::get_if<IoEffectStatement>(&statements[at]);
+    if (open == nullptr || open->kind != IoEffectStatement::Kind::Open)
+      continue;
+    if (open->resultVar && *open->resultVar == read->capabilityVar)
+      binder = ordinal;
+    ++ordinal;
+  }
+  if (!binder || *binder >= activation.openOutcomes.size()) return std::nullopt;
+  const auto &opened = activation.openOutcomes[*binder];
+  if (opened.minted) return std::nullopt;
+  const auto tag =
+      vortex::ioOutcomeTag(session_.coordinator().arena(), opened.outcome);
+  return diagnose(vortex::frontend_codes::vqlEffectArgument,
+                  "$" + read->capabilityVar +
+                      " names an open that minted no capability (its outcome "
+                      "was " +
+                      (tag ? std::string{vortex::toString(*tag)}
+                           : std::string{"unreadable"}) +
+                      "), so nothing can be read through it",
+                  statement);
 }
 
 auto ScriptRunner::settle(const std::shared_ptr<Activation> &activation,
                           std::expected<ProgramStep, QueryExecutionError> step)
     -> ScriptRunResult {
   if (!step) {
+    if (!stageFailure_) {
+      stageFailure_ = failedOpen(*activation, step.error().statement);
+    }
     auto diagnostic =
         stageFailure_ ? std::exchange(stageFailure_, std::nullopt).value()
                       : diagnose(vortex::frontend_codes::vqlScriptFailed,
@@ -785,8 +875,9 @@ auto ScriptRunner::settle(const std::shared_ptr<Activation> &activation,
 }
 
 void ScriptRunner::endActivation(Activation &activation) noexcept {
-  closeOpened(activation);
+  // Terminal requests leave the budget before the closes are admitted.
   retireAll(activation.admitted);
+  closeOpened(activation);
   // A request still running (a detached read nobody awaited) is retired
   // later, when a next admission finds it terminal.
   finished_.insert(finished_.end(), activation.admitted.begin(),
@@ -862,12 +953,18 @@ auto ScriptRunner::expireIfDue(const FrontendToken &token)
   GLEDITOR_LOG_DEBUG(logCategory, "a parked script passed its deadline");
   // The script gave up: the request it waits on is asked to stop, its waiter
   // and route go, and its requests are released. Nothing resumes it.
+  //
+  // The awaited request is asked to stop before anything that can orphan it:
+  // dropping the parked program rolls its choice points back, and a rolled-
+  // back request is orphaned (never cancelled), so the stop must already be
+  // on its way.
+  static_cast<void>(ports_.host.cancelRequest(token.request));
   static_cast<void>(ports_.host.cancelWaiter(token.waiter));
   static_cast<void>(ports_.host.unrouteWake(token.continuation));
   parked_.erase(token.continuation);
   activation->parked.reset();
-  closeOpened(*activation);
   abandonAll(activation->admitted);
+  closeOpened(*activation);
   return diagnose(vortex::frontend_codes::vqlScriptTimeout,
                   "the script did not finish within its overall deadline; the "
                   "request it awaited was asked to stop",

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -579,10 +580,15 @@ TEST(VqlIoScriptTest, DestroyingARunnerCancelsItsWaiterNotItsRequest) {
     parked  = *token;
     request = token->request;
   }
+  EXPECT_EQ(w.scheduler->cancels, 0U) << "the request is never cancelled";
+  EXPECT_EQ(w.service.requestCount(), 1U)
+      << "it runs to its own end; the runner's destruction orphaned it";
   w.complete(0, EndOfStream{{}});
   static_cast<void>(w.pump());
-  EXPECT_TRUE(w.service.poll(request).outcome)
-      << "the request completes on its own; cancelling the waiter is not it";
+  EXPECT_EQ(w.service.requestCount(), 0U)
+      << "its terminal is dropped and its slot freed, not held for good";
+  EXPECT_FALSE(w.service.poll(request).outcome)
+      << "nothing names an orphan's outcome any more";
 }
 
 TEST(VqlIoScriptTest, ARunnerRetiresEachActionsRequestOnceTheNextReplacesIt) {
@@ -1402,8 +1408,8 @@ TEST(VqlIoDeadlineTest, ANegativeOrNonNumericWithinFailsBeforeAnythingRuns) {
 TEST(VqlIoDeadlineTest, AScriptPastItsOverallDeadlineIsAbandonedStably) {
   ScriptWorld s;
   auto now = std::chrono::steady_clock::time_point{};
-  s.runner.setClock([&now] { return now; })
-      ->setScriptTimeout(std::chrono::milliseconds{500});
+  s.w.service.setClock([&now] { return now; });
+  s.runner.setScriptTimeout(std::chrono::milliseconds{500});
   const auto begun  = s.run(readOnCap);
   const auto *token = parkedToken(begun);
   ASSERT_NE(token, nullptr);
@@ -1420,10 +1426,54 @@ TEST(VqlIoDeadlineTest, AScriptPastItsOverallDeadlineIsAbandonedStably) {
       << "an abandoned script is not abandoned twice";
 }
 
+// vortex gate r1 M1: the request a timed-out script awaited is asked to stop,
+// whatever the program's choice points do when it is dropped (a rolled-back
+// request is orphaned, and an orphan is never cancelled by itself). No script
+// shape available here holds a scoped choice point over the await, so this
+// pins the stop and the freed budget on the plain path.
+TEST(VqlIoDeadlineTest, ATimedOutScriptsAwaitedRequestIsAskedToStop) {
+  ScriptWorld s;
+  auto now = std::chrono::steady_clock::time_point{};
+  s.w.service.setClock([&now] { return now; });
+  s.runner.setScriptTimeout(std::chrono::milliseconds{500});
+  const auto begun = s.run(readOnCap);
+  ASSERT_NE(parkedToken(begun), nullptr);
+  ASSERT_EQ(s.w.scheduler->cancels, 0U);
+  now += std::chrono::milliseconds{500};
+  ASSERT_TRUE(s.runner.expireIfDue(*parkedToken(begun)));
+  EXPECT_EQ(s.w.scheduler->cancels, 1U)
+      << "the backend was told to stop, as the diagnostic says";
+  // The backend ends; its terminal is dropped unpublished and the slot freed.
+  s.w.complete(0, Cancelled{{}, {}, false});
+  static_cast<void>(s.w.pump());
+  EXPECT_EQ(s.w.service.requestCount(), 0U)
+      << "no request is left holding the budget";
+}
+
+// vql gate r1 MINOR 3: a request's own `within` is not cut short by the
+// script's overall timeout; the script waits until that deadline plus its own
+// timeout so the TimedOut outcome, a value, is what it reads.
+TEST(VqlIoDeadlineTest, AWithinLongerThanTheScriptTimeoutIsNotCutShort) {
+  ScriptWorld s;
+  auto now = std::chrono::steady_clock::time_point{};
+  s.w.service.setClock([&now] { return now; });
+  s.runner.setScriptTimeout(std::chrono::milliseconds{500});
+  const auto begun =
+      s.run("effect { let $s := submit($cap, read_bytes(0, 16)) within 2 s; "
+            "match $s { admitted($q) => await($q), refused($e) => $e } }");
+  ASSERT_NE(parkedToken(begun), nullptr);
+  const auto token = *parkedToken(begun);
+  now += std::chrono::milliseconds{2499};
+  EXPECT_FALSE(s.runner.expireIfDue(token))
+      << "inside the request's deadline plus the script timeout";
+  now += std::chrono::milliseconds{1};
+  EXPECT_TRUE(s.runner.expireIfDue(token));
+}
+
 TEST(VqlIoDeadlineTest, AScriptWithoutADeadlineWaitsAsLongAsItLikes) {
   ScriptWorld s;
   auto now = std::chrono::steady_clock::time_point{};
-  s.runner.setClock([&now] { return now; });
+  s.w.service.setClock([&now] { return now; });
   const auto begun = s.run(readOnCap);
   ASSERT_NE(parkedToken(begun), nullptr);
   now += std::chrono::hours{24};
@@ -1433,13 +1483,17 @@ TEST(VqlIoDeadlineTest, AScriptWithoutADeadlineWaitsAsLongAsItLikes) {
 TEST(VqlIoDeadlineTest, TheDriverReportsTheTimeoutAndLeavesNoBudgetBehind) {
   ScriptWorld s;
   auto now = std::chrono::steady_clock::time_point{};
-  s.runner.setClock([&now] { return now; })
-      ->setScriptTimeout(std::chrono::milliseconds{10});
+  s.w.service.setClock([&now] { return now; });
+  s.runner.setScriptTimeout(std::chrono::milliseconds{10});
   const auto rows = xanadu::vql::driveToCompletion(
       s.runner, s.run(readOnCap), [&] { static_cast<void>(s.w.pump()); },
       [&] { now += std::chrono::milliseconds{4}; });
   ASSERT_FALSE(rows);
   EXPECT_EQ(rows.error().code, "VQL_SCRIPT_TIMEOUT");
+  EXPECT_EQ(s.w.scheduler->cancels, 1U) << "the awaited request was stopped";
+  s.w.complete(0, Cancelled{{}, {}, false});
+  static_cast<void>(s.w.pump());
+  EXPECT_EQ(s.w.service.requestCount(), 0U) << "no budget left behind";
 }
 
 // ---- The shared conformance harness ---------------------------------------
@@ -1519,14 +1573,15 @@ struct FileScriptWorld {
   zigzag::vortex::VortexCore core{arena};
   zigzag::vortex::VortexVM vm{core};
   VQLEngine engine{core};
-  xanadu::vortex::FileReadHost host{vm, arena};
+  xanadu::vortex::FileReadHost host;
   // One runner for the session, as vquery has: it retires an action's request
   // when the next action or the runner replaces it, so the rows a test reads
   // after `run` returns are still live.
   ScriptRunner runner{engine, vm, xanadu::vql::fileScriptPorts(host)};
   std::filesystem::path dir;
 
-  FileScriptWorld() {
+  explicit FileScriptWorld(xanadu::vortex::FileReadHostOptions options = {})
+      : host(vm, arena, options) {
     dir = std::filesystem::temp_directory_path() /
           ("vql_io_script_" + std::to_string(::getpid()) + "_" +
            std::to_string(counter_++));
@@ -1712,6 +1767,115 @@ TEST(VqlIoOpenTest, ACapabilityDoesNotOutliveItsScript) {
   } else {
     EXPECT_FALSE(later.error().message.empty());
   }
+}
+
+// vql gate r1 M2: an open nobody bound is closed with the script as well.
+TEST(VqlIoOpenTest, AnUnboundOpenIsClosedAtTheEndOfTheScript) {
+  FileScriptWorld f;
+  const auto path = f.write("a.txt", "abc");
+  const auto rows = f.run("effect { open(\"" + path.string() + "\") }");
+  ASSERT_TRUE(rows) << rows.error().message;
+  EXPECT_TRUE(pumpUntil(f, [&] {
+    static_cast<void>(f.runner.takeWake());
+    return f.host.adapter().openedCount() == 0;
+  })) << "the file an unbound open minted was closed";
+}
+
+// vortex gate r1 M2: at the request budget the close of the script's own file
+// is still admitted (a close frees what it holds, so it is never refused for
+// budget), and the descriptor closes.
+TEST(VqlIoOpenTest, TheCloseIsAdmittedWhenTheScriptFilledTheBudget) {
+  xanadu::vortex::FileReadHostOptions options;
+  constexpr std::size_t openAndTwoReads = 3;
+  options.requests                      = openAndTwoReads;
+  FileScriptWorld f(options);
+  const auto path = f.write("a.txt", "hello world");
+  const auto rows = f.run(openAction(path, "f") + "; " + readFrom("f", 0, 5) +
+                          "; " + readFrom("f", 6, 5));
+  ASSERT_TRUE(rows) << rows.error().message;
+  EXPECT_EQ(f.host.service().requestCount(), openAndTwoReads + 1)
+      << "the script filled the budget and the close went beyond it";
+  EXPECT_TRUE(pumpUntil(f, [&] {
+    static_cast<void>(f.runner.takeWake());
+    return f.host.adapter().openedCount() == 0;
+  })) << "the descriptor closed although the budget was full";
+}
+
+// vortex gate r1 MINOR 3: the rows of a finished script are retired before the
+// next script's first admission, so the budget they filled is free for it.
+TEST(VqlIoOpenTest, AFinishedScriptsRowsDoNotRefuseTheNextScriptsFirstAction) {
+  xanadu::vortex::FileReadHostOptions options;
+  constexpr std::size_t openAndRead = 2;
+  options.requests                  = openAndRead;
+  FileScriptWorld f(options);
+  const auto a = f.write("a.txt", "hello world");
+  const auto b = f.write("b.txt", "second");
+  ASSERT_TRUE(f.run(openAction(a, "f") + "; " + readFrom("f", 0, 5)));
+  const auto rows = f.run(openAction(b, "g") + "; return io_tag($g)");
+  ASSERT_TRUE(rows) << rows.error().message;
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(f.text(rows->front()), "Capability")
+      << "the open was admitted, not refused for the first script's rows";
+}
+
+// vql gate r1 MINOR 1: a read through a name whose open minted no capability
+// says which open and how it ended.
+TEST(VqlIoOpenTest, AReadThroughAFailedOpenNamesTheOpenAndItsTag) {
+  FileScriptWorld f;
+  const auto rows = f.run(openAction(f.dir / "missing.txt", "f") + "; " +
+                          readFrom("f", 0, 5));
+  ASSERT_FALSE(rows);
+  EXPECT_EQ(rows.error().code, "VQL_IO_EFFECT_ARGUMENT");
+  EXPECT_NE(rows.error().message.find("$f"), std::string::npos)
+      << rows.error().message;
+  EXPECT_NE(rows.error().message.find("Failed"), std::string::npos)
+      << rows.error().message;
+  EXPECT_EQ(rows.error().position, 1U);
+}
+
+// vortex gate r1 M3: a runner destroyed with a read still running and a close
+// just admitted leaves no request in the service: nothing was left to retire
+// them, so each would hold a budget slot for good.
+TEST(VqlIoOpenTest, DestroyingARunnerLeavesNoServiceRequestBehind) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core{arena};
+  zigzag::vortex::VortexVM vm{core};
+  VQLEngine engine{core};
+  xanadu::vortex::FileReadHost host{vm, arena};
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("vql_io_dtor_" + std::to_string(::getpid()));
+  std::filesystem::create_directories(dir);
+  const auto path = dir / "a.txt";
+  std::ofstream(path, std::ios::binary | std::ios::trunc) << "hello world";
+  {
+    auto runner = std::make_unique<ScriptRunner>(
+        engine, vm, xanadu::vql::fileScriptPorts(host));
+    // The read is detached (its handle is the row) and the file opens first,
+    // so at the script's end the read runs and the close is just admitted.
+    const auto rows = xanadu::vql::driveToCompletion(
+        *runner,
+        runner->run(Parser(std::string{"effect { open(\""} + path.string() +
+                           "\") } as $f; effect { let $s := submit($f, "
+                           "read_bytes(0, 5)); match $s { admitted($q) => $q, "
+                           "refused($e) => $e } }")
+                        .parseQuery()),
+        [&] { host.pump(16); },
+        [] { std::this_thread::sleep_for(std::chrono::milliseconds{1}); });
+    ASSERT_TRUE(rows) << rows.error().message;
+    ASSERT_GE(host.service().requestCount(), 2U);
+    runner.reset();
+  }
+  const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+  while (host.service().requestCount() != 0 &&
+         std::chrono::steady_clock::now() < limit) {
+    host.pump(16);
+    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+  }
+  EXPECT_EQ(host.service().requestCount(), 0U)
+      << "every request the runner held was accounted for";
+  EXPECT_EQ(host.adapter().openedCount(), 0U);
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
 }
 
 TEST(VqlIoOpenTest, AMissingFileIsAnOutcomeValueNotAScriptFailure) {

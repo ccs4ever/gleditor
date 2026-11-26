@@ -68,6 +68,7 @@ public:
   }
   void releaseUnused(SchedulerReservation) noexcept override {}
   auto cancel(PrivateRequestToken) noexcept -> CancelQueuedResult override {
+    ++cancels;
     return CancelQueuedResult::AlreadyRunning;
   }
   auto pump(std::size_t) -> std::size_t override { return 0; }
@@ -89,6 +90,8 @@ public:
 
   std::uint64_t nextToken{privateTokenBase};
   std::vector<Entry> entries;
+  /// Stop requests that reached the backend.
+  std::size_t cancels{};
 };
 
 class DelayedAdapter final : public IoAdapter {

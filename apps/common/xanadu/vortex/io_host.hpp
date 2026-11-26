@@ -79,6 +79,9 @@ public:
   /// close is its own admitted request.
   [[nodiscard]] auto closeEndpoint(EndpointCell endpoint, CloseMode mode)
       -> SubmitResult;
+  /// The clock the service reads request deadlines on; a language that keeps
+  /// its own deadline reads this one so the two cannot disagree.
+  [[nodiscard]] auto now() const -> std::chrono::steady_clock::time_point;
   /// Whether @p request already has its terminal outcome.
   [[nodiscard]] auto isTerminal(RequestCell request) -> bool;
 

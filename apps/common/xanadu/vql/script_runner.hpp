@@ -145,13 +145,15 @@ public:
     scriptTimeout_ = timeout;
     return this;
   }
-  /// The clock the script deadline is read on; empty restores the steady
-  /// clock. A test injects one so a deadline passes on demand.
-  auto setClock(std::function<std::chrono::steady_clock::time_point()> clock)
-      -> ScriptRunner * {
-    clock_ = std::move(clock);
-    return this;
-  }
+  /// The longest deadline (a `within`, or a script timeout) that can be added
+  /// to a time point on the steady clock without overflowing: a quarter of
+  /// the tick range leaves headroom for the sum. A representability limit, not
+  /// a policy ceiling; a longer script timeout is clamped to it. The script
+  /// deadline is read on the I/O service's clock (`IoHost::now`), the one
+  /// request deadlines use, so a test injects one clock on the service.
+  static constexpr std::chrono::milliseconds maxDeadline =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::duration::max() / 4);
   /// If @p token's script is parked past its overall deadline, abandon it and
   /// say so: the awaited request is asked to stop, the waiter and route are
   /// dropped, the script's requests are released, and the diagnostic is
@@ -197,7 +199,7 @@ private:
   [[nodiscard]] auto payloadText(vortex::OutcomeCell outcome) const
       -> std::expected<std::optional<std::string>, vortex::FrontendDiagnostic>;
   [[nodiscard]] auto now() const -> std::chrono::steady_clock::time_point {
-    return clock_ ? clock_() : std::chrono::steady_clock::now();
+    return ports_.host.now();
   }
   [[nodiscard]] auto
   settle(const std::shared_ptr<Activation> &activation,
@@ -205,6 +207,12 @@ private:
       -> ScriptRunResult;
   [[nodiscard]] auto finish(const std::shared_ptr<Activation> &activation,
                             const ProgramResult &done) -> ScriptRunResult;
+  /// The diagnostic for a read through a name an open bound without minting a
+  /// capability: names the open and its outcome tag. Nullopt for any other
+  /// failure of statement @p statement.
+  [[nodiscard]] auto failedOpen(const Activation &activation,
+                                std::optional<std::size_t> statement) const
+      -> std::optional<vortex::FrontendDiagnostic>;
   [[nodiscard]] auto number(zigzag::CellRef cell, const std::string &what,
                             std::optional<std::size_t> position) const
       -> std::expected<std::uint64_t, vortex::FrontendDiagnostic>;
@@ -235,8 +243,11 @@ private:
   /// and retired once its terminal lands. For a script the host gave up on.
   void abandonAll(std::vector<Admitted> &entries) noexcept;
   /// Admit the close of every capability @p activation opened; the closes are
-  /// reaped as they finish (`reapClosing`).
+  /// reaped as they finish (`reapClosing`). A close the service refuses is
+  /// kept in `unclosed_` and retried.
   void closeOpened(Activation &activation) noexcept;
+  /// One close admission; false when it was refused and must be retried.
+  [[nodiscard]] bool closeOne(vortex::CapabilityCell capability) noexcept;
   /// An activation that failed or was abandoned: close what it opened and
   /// retire what it admitted.
   void endActivation(Activation &activation) noexcept;
@@ -263,9 +274,12 @@ private:
   std::optional<vortex::FrontendDiagnostic> stageFailure_;
   std::deque<ScriptWake> woken_;
   std::optional<std::chrono::milliseconds> scriptTimeout_;
-  std::function<std::chrono::steady_clock::time_point()> clock_;
   /// The closes of capabilities scripts opened, until each is terminal.
   std::vector<Admitted> closing_;
+  /// Capabilities whose close was refused (by value) and is tried again at the
+  /// next `reapClosing`: an opened file's lifetime is the script's, so a
+  /// refusal never ends it.
+  std::vector<vortex::CapabilityCell> unclosed_;
   std::vector<std::string> providers_;
   /// The whole token, so a waiter dropped with its request's cells can still
   /// tell its caller (an Abandoned wake) that the script is dead.

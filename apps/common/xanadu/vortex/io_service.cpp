@@ -216,7 +216,12 @@ auto IoService::admit(
     adapter->abandonStaged(request.specification);
     return SubmitResult{Refused{cells_.mintRefusal(error)}};
   };
-  if (requests_.size() >= budget_.maxRequests) {
+  // A close is the one request that returns resources (a descriptor, an
+  // endpoint slot), so a full request budget never refuses it: that would
+  // strand exactly the endpoint whose close would free room. It stays
+  // bounded without the count, since an endpoint closes at most once at a
+  // time (Conflict) and only an open endpoint can be closed.
+  if (!request.closeOperation && requests_.size() >= budget_.maxRequests) {
     return refuseAdmission({IoErrorCode::BudgetExceeded, 0});
   }
   // The decoder must declare at least one real byte channel. A zero bound
@@ -287,6 +292,7 @@ auto IoService::admit(
   } else {
     state.lane = LaneKey{0, token.value, CellRequest::Direction::Control};
   }
+  if (deadline) deadlines_.emplace(*deadline, tokenKey(token));
   requests_.emplace(tokenKey(token), std::move(state));
   requestByCell_.emplace(std::pair{requestCell->cell, requestCell->incarnation},
                          tokenKey(token));
@@ -398,6 +404,7 @@ void IoService::eraseRequestState(const std::uint64_t tokenKey) {
     std::scoped_lock lock(sinkState_->mutex);
     sinkState_->limits.erase(tokenKey);
   }
+  unindexDeadline(found->second, tokenKey);
   requests_.erase(found);
 }
 
@@ -596,17 +603,33 @@ auto IoService::stopRequest(RequestState &state, const std::uint64_t key,
   return RequestCancelState::Accepted;
 }
 
+void IoService::unindexDeadline(const RequestState &state,
+                                const std::uint64_t key) {
+  if (!state.deadline) return;
+  const auto [first, last] = deadlines_.equal_range(*state.deadline);
+  for (auto it = first; it != last; ++it) {
+    if (it->second == key) {
+      deadlines_.erase(it);
+      return;
+    }
+  }
+}
+
 void IoService::expireDue() {
-  std::optional<std::chrono::steady_clock::time_point> current;
-  for (auto &[key, state] : requests_) {
+  if (deadlines_.empty()) return;
+  const auto current = now();
+  while (!deadlines_.empty() && deadlines_.begin()->first <= current) {
+    const auto key = deadlines_.begin()->second;
+    deadlines_.erase(deadlines_.begin());
+    const auto found = requests_.find(key);
+    if (found == requests_.end()) continue;
+    auto &state = found->second;
     // A backend result already in hand wins the race: the request finished
     // before its deadline was noticed, and that is the outcome it keeps.
-    if (!state.deadline || state.outcome || state.terminalRecord ||
-        state.candidate || state.cancelRequested) {
+    if (state.outcome || state.terminalRecord || state.candidate ||
+        state.cancelRequested) {
       continue;
     }
-    if (!current) current = now();
-    if (*current < *state.deadline) continue;
     GLEDITOR_LOG_DEBUG("vortex.io", "request deadline expired");
     static_cast<void>(stopRequest(state, key, true));
   }
@@ -669,6 +692,7 @@ void IoService::forgetOrphan(const std::uint64_t tokenKey) {
     std::scoped_lock lock(sinkState_->mutex);
     sinkState_->limits.erase(tokenKey);
   }
+  unindexDeadline(found->second, tokenKey);
   requests_.erase(found);
 }
 
