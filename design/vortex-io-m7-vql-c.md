@@ -1,11 +1,13 @@
 # M7-VQL-c: VQL write and capture
 
-Status: design note; stages C1 (adapter and host), C1b (owned records), C2 (VQL writes), C3 (capture
-wiring) and C4 (persistence) of §18 are built, the rest is not. It specifies the third M7-VQL slice
-of the [Vortex I/O implementation plan](vortex-io-implementation-plan.md): script **write effects**
-to a file endpoint, and **capture**, the explicit act that makes a script's input durable so results
-built from it may be persisted. It extends [`vql-query-language.md`](vql-query-language.md) §4.13
-and changes no on-disk format and no core file (§14 lists the proposals considered and refused).
+Status: design note; **all stages of §18 are built** (C1 adapter and host, C1b owned records, C2 VQL
+writes, C3 capture wiring, C4 persistence, C5 recovery surface, leaks, crash tests and journeys);
+the milestone gate (a VQL expert and a Vortex expert) is pending. It specifies the third M7-VQL
+slice of the [Vortex I/O implementation plan](vortex-io-implementation-plan.md): script **write
+effects** to a file endpoint, and **capture**, the explicit act that makes a script's input durable
+so results built from it may be persisted. It extends
+[`vql-query-language.md`](vql-query-language.md) §4.13 and changes no on-disk format and no core
+file (§14 lists the proposals considered and refused).
 
 Where it lives. The plan's milestone table has rows for `M7-VQL` and no row for the `-b` or `-c`
 slices; slices are recorded as "implementation notes and deliberate deferrals" under the M7-VQL
@@ -801,7 +803,7 @@ expert, reports under `design/projects/vortex-io-implementation-review/m7-vql-c/
 | C2    | VQL writes (built, §18.3): grammar, reserved names, compile, `ScriptRunner::admit` decodes `write_bytes`/`append_bytes`/`sync`, `open ... for`, `io_uncertain`, `vquery --io-write-root`/`--io-write-bytes`/`:open -w -a`                                                                            | criteria 1, 5, 12 for writes |
 | C3    | Capture core wiring: `FileReadHost`-sibling capture host (`CaptureHost` over `CaptureCoordinator`, `CapturePublisher`, `UserPermascrollCaptureSink`), `CaptureCoordinator::spansFor`, providers, bytecode loop, `capture`, `io_captured`, `io_tag` for receipts                                      | criteria 6-8, 12             |
 | C4    | Built (§18.5). Persistence: exposure set, `ScriptRunner::persistability()`, `vquery` consults it, captured cells through `resultRows`/`writeResultSlice` (quote path for cells with no `store`), `--capture-dir`                                                                                     | criterion 9                  |
-| C5    | Recovery surface: lazy `recover()`/`resumePublications()`, `:captures`, `:reconcile`, timeout and destructor behaviour, crash tests, leak tests, UX journeys, docs (§4.13, plan notes, `vql-conformance.md`)                                                                                         | criteria 10, 11, 13          |
+| C5    | Built (§18.6). Recovery surface: lazy `recover()`/`resumePublications()`, `:captures`, `:reconcile`, timeout and destructor behaviour, crash tests, leak tests, UX journeys, docs (§4.13, plan notes, `vql-conformance.md`)                                                                          | criteria 10, 11, 13          |
 
 C1b needs only M7-VQL-b and may land before or alongside C1; C3's `capture($r)` and C4's exposure
 set read records, so both follow C1b. C2 and C3 are independent after C1 and may be built in either
@@ -1127,6 +1129,120 @@ suites and the UX journeys stay C5. What landed, with the places it differs from
 - **Deferred to C5**: the capture store is built lazily but never read by a command; `:captures` and
   `:reconcile`, the crash points through a script, and the leak accounting remain.
 
+### 18.6 Stage C5 as built
+
+C5 is the recovery surface, the leak accounting, the crash tests and the journeys. What landed, with
+the places it differs from the text above:
+
+- **`:captures` and `:reconcile`** in the `vquery` REPL, with no flag equivalent (the note asks for
+  none, and a REPL command is the surface a person reaches). Before any capture has built the stack:
+  `:captures` with no `capture.journal` in the capture directory prints "No captures: nothing has
+  been captured" and `:reconcile` prints "Nothing to reconcile", and **neither creates anything**.
+  With a journal on disk they build the stack as a first `capture` would and run
+  `CaptureHost::ready()`, the owner-thread recovery §8 names as the exception, so what a crashed
+  session left is what is printed. `:captures` lists the store directory, how many captures recovery
+  saw, `orphanBytes` from `recoveredReport()`, translation slots and evictions, and each pin with
+  its reason in words, the bytes its append may have written and the span its journal names (new
+  `CaptureCoordinator::pinnedDetails()`). `:reconcile ID release` or
+  `:reconcile ID promote [START LEN]` makes one `reconcile` call; a refusal prints the typed code
+  and detail, says the capture stays pinned and is **never retried**. A promote that leaves
+  `publicationPending` runs `resumePublications()` once and prints its result.
+- **A receipt row is a typed refusal.** Persisting a script that returns `$c` itself (or a
+  capability, a request) is `VQL_IO_PERSIST_HANDLE` naming the road (`io_captured($c)`), checked in
+  `vquery` beside `VQL_IO_PERSIST_NEEDS_CAPTURE`. Before it, `--in-place` refused deep inside
+  promotion with `RuntimeOnlyState` and `-o` typed the cell's words in. An outcome row (`return $w`)
+  is still a scalar and persists.
+- **The capture directory is created when a script that holds `capture` is about to run**, not on
+  success: the journal and store are built together and a refused capture (a range outside the
+  payload) has already needed them. The note asked for nothing finer (§13 builds on need), so this
+  is documented and pinned by a test, not changed. A plain read, `:captures` and `:reconcile` create
+  nothing.
+- **The REPL printed an empty line for a captured cell.** `core().render` cannot read a span of the
+  permascroll, so `return io_captured($c)` showed nothing though `-o` saved the right text. The text
+  output reads such a cell through the permascroll. Found by the journey test, not by an earlier
+  one.
+
+**Leak accounting.** Measured per run in a world whose caller frees its rows (rows are the caller's;
+`vquery` keeps the last query's, which is not a leak of the host).
+
+| Script                          | Live cells per run before | after |
+| ------------------------------- | ------------------------- | ----- |
+| `open`                          | 10 (11 with its row)      | 0     |
+| `open` + `read_bytes`           | 11 (12 with its row)      | 0     |
+| `open` + `read_bytes` + capture | 73 (with its row)         | 0     |
+
+Root causes, each freed through the shared deletion (`freeOwnedGraph` over
+`ArenaManifold::freeCell`, `deleteCell(LeaveBroken)` for records), no new unlink loop:
+
+1. **A closed file's graph.** Nothing reaped an endpoint or capability: the request reaper takes
+   requests, and a closed file's cells are not any request's. `reapIoEndpoint` frees the endpoint,
+   its queue and its capabilities (rights and consistency fields, the views on the endpoint's and an
+   authorising capability's clone ranks) and refuses while a request is queued or viewing any of
+   them. `ScriptRunner` calls it when its close request is terminal, `Complete` and retired, which
+   is at the next admission, as a caller's rows may still name `$f` until then. The service's
+   tombstones are keyed by incarnation, so a freed endpoint cannot be mistaken for a new one.
+1. **A request's spec cell.** `stageOp` mints one spec cell per read, write, append or sync and
+   nothing freed it. It is the host's decoding key, read inside `submit` and echoed to the adapter
+   only as a number the service forgets at the terminal; staging and consuming happen in one owner
+   call, so freeing right after `submit` cannot meet a reused slot.
+1. **A capture's scaffolding** (about sixty cells): the coordinator mints an endpoint, a capability
+   and a spec cell for the append and for each of the two durable steps and freed none of them
+   (`sweepStepGraphs` now frees a step's graph once its request is reaped and no pending capture
+   still reads the spec: the append's spec is read at the second durable step); the **append request
+   stayed whole** after the capture's view of it left, because nothing called `reapRetiredRequest`
+   (the capture host does, in `freeRun`); the **receipt's field cells** (id, sequence, digest,
+   pieces, scroll, span) and the **capture cell's own field cells** (id, append bytes, intervals)
+   were never walked. `stateCounts().stepGraphs` reports the scaffolding in flight.
+
+Tests: `ManyWriteRunsLeaveTheArenaAndTheServiceBounded` (10^4 write runs: slot high-water mark, live
+cells and service requests unchanged), `AnOpenedAndClosedFileLeavesNoCellsBehind`,
+`ManyCaptureRunsLeaveTheArenaAndTheStacksBounded` (10^3 capture runs: arena, service requests,
+capture runs, `stepGraphs`, pins, owned records), and
+`ADeathMidWriteLeavesAPrefixAndNothingResumes`. Fail-before, with the three fixes switched off: 11
+cells a run over 10^4 writes (110813 live against 813), 10 over 50 opens, and over 1000 captures
+54992 live against 983.
+
+**Crash tests** (`vql_io_capture_crash_test.cpp`): the journal's crash hook, made persistent so the
+process stays dead (a single throw only fails one step and the abort is then journaled), at each
+durable step of a script-driven capture and a second world over the same directory whose first
+capture runs the lazy recovery: after the Append intent (pinned, orphan bytes reported), after the
+bytes land and before `Appended` (pinned, orphans), after `Appended` (published exactly once by
+recovery, no re-append), after the snapshot fsync and before `Committed` (only the record is
+missing, the Store does not move), after `Committed` (nothing to recover), a store the filesystem
+refused (finished by the next session, never re-appended), and `reconcile` release followed by a
+capture. `vql_capture_world.hpp` is the world those and the capture suite share. A **write** has no
+journal: a death mid-write leaves a prefix and the restarted host has nothing to resume.
+
+**UX journeys** (`vquery_e2e_test.cpp`, through the REPL): read a CSV-shaped file, capture it,
+derive and `:save`, close, reopen and read the slice (the row quotes the capture and `:captures` in
+the next process lists it); write a report with `:open -wc`, `sync()`, read it back; the same write
+without `--io-write-root` is "Open failed". Findings recorded: the empty REPL line above (fixed); an
+**abandoned** capture (script timeout mid-append) still leaves about 27 arena cells a run, the
+opened file's graph (its open outcome keeps a view on the capability, so `reapIoEndpoint` refuses)
+and the capture's own; bounded by the abandoned scripts a session has, not freed, and listed under
+deferrals; a result row is the caller's, so a long `vquery` session grows by its printed rows as it
+always has.
+
+## Acceptance criteria, closed
+
+| #   | Criterion                              | Status                                                                                                                                                                       |
+| --- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Writes are values                      | Met (C2)                                                                                                                                                                     |
+| 2   | No authority from the script           | Met (C1, C2)                                                                                                                                                                 |
+| 3   | Frozen at submit, charged at admission | Met (C1)                                                                                                                                                                     |
+| 4   | Ordering                               | Met (C1)                                                                                                                                                                     |
+| 5   | Multiplicity and resume                | Met (C2)                                                                                                                                                                     |
+| 6   | Capture explicit and journal-ordered   | Met (C3)                                                                                                                                                                     |
+| 7   | Overlap reuses                         | Met (C3)                                                                                                                                                                     |
+| 8   | Capture failure is a value             | Met (C3)                                                                                                                                                                     |
+| 9   | Persistence gated by coverage          | Met (C4); a receipt row is `VQL_IO_PERSIST_HANDLE` (C5)                                                                                                                      |
+| 10  | Crash and abandon                      | Met: the five points through a script, timeout and destroyed-runner pins (C3), `:captures` lists a pin and `:reconcile` releases it (C5)                                     |
+| 11  | Leaks                                  | Met for 10^4 write runs and 10^3 capture runs (arena, service requests, `stepGraphs`, capture runs); **not** for an abandoned capture, which leaves about 27 cells (finding) |
+| 12  | No core change, no blocking            | Met: core files untouched; the only owner-thread I/O is the stated recovery and reconcile exception; the M7a conformance harness passes unchanged                            |
+| 13  | Format                                 | Met (`make format-check`, `make lint`)                                                                                                                                       |
+| 14  | Owned records                          | Met (C1b)                                                                                                                                                                    |
+| 15  | Retention bounded                      | Met (C1b); 10^4 named-outcome runs stay bounded and their opens' graphs are now freed too                                                                                    |
+
 ## 19. Deferrals
 
 - `message` and frame modes; per-row, per-loop and `for`-body effects (until an explicit gate).
@@ -1139,6 +1255,9 @@ suites and the UX journeys stay C5. What landed, with the places it differs from
 - A pure aggregate that joins many rows into one text cell so a script can write a query's rows.
 - Writes through `message`-mode endpoints, sockets, and any non-file endpoint.
 - `system://settings` entries for the write and capture bounds (M8); a UI for `:reconcile`.
+- Freeing the cells an **abandoned** capture leaves (about 27 a run: the opened file's graph, kept
+  by its open outcome's view on the capability, and the capture's own); the pin is the design, the
+  arena residue is not.
 - Linking a result row to the capture receipt as an xanalink rather than by shared permascroll
   address.
 - Remote (swarm) publication of a capture receipt; local capture invents no remote signature.

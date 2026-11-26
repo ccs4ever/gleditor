@@ -1418,7 +1418,28 @@ Deferred in M7-VQL-b:
   the host's open deadline (`FileReadHostOptions::openDeadline`).
 - Write, capture, `message` and frame modes, and per-row reads, remain refused.
 
-M7-VQL-c (design only, nothing built): write effects (`write_bytes`, `append_bytes`, `sync`,
+M7-VQL-c implementation notes (built in stages C1-C5; gate pending):
+
+- Stages: C1 adapter and host (write bytes in the prepared command and charged, `Append`/`Sync`
+  kinds, `writeGrant`), C1b owned outcome records, C2 VQL writes, C3 capture wiring (`CaptureHost`,
+  the relation loop around one `Await`), C4 persistence (`persistability()`, `--capture-dir`), C5
+  recovery surface, leaks, crash tests and journeys. The design, every deviation and the acceptance
+  table are in [`vortex-io-m7-vql-c.md`](vortex-io-m7-vql-c.md) §18.
+- No core file changed (`store.hpp`, `ops.hpp`, `compact_op.hpp`, `store_tables.hpp`,
+  `segmented_ops_spool`, `manifold`, `arena_manifold`, `vortex_core`, `vortex_vm`); P8 and P9 stay
+  refused.
+- C5: `vquery` `:captures` and `:reconcile` (recovery runs on the owner thread when a journal
+  exists; nothing is created otherwise); `VQL_IO_PERSIST_HANDLE` for a handle row; leaks closed by
+  `reapIoEndpoint` (a closed file's graph), freeing a request's spec cell after `submit`, and the
+  capture host and coordinator freeing receipt, capture and per-step scaffolding cells (open 10,
+  read 11 and capture 73 live cells a run, now 0); 10^4 write runs and 10^3 capture runs bounded;
+  the journal's crash hook at each durable step through a script.
+- Deferred: the arena residue of an abandoned capture (about 27 cells a run); the other deferrals of
+  the design note's §19.
+- Gate status: **pending** (a VQL expert and a Vortex expert; reports under
+  `projects/vortex-io-implementation-review/m7-vql-c/`).
+
+M7-VQL-c design (the first draft): write effects (`write_bytes`, `append_bytes`, `sync`,
 `open ... for write|append`, behind a host write grant) and explicit capture
 (`effect { capture($r) }`, which routes a read outcome through `CaptureCoordinator` into the
 author's one permascroll) that lifts `VQL_IO_PERSIST_NEEDS_CAPTURE` only for runs whose every
