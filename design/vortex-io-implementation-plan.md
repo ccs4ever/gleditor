@@ -1302,6 +1302,11 @@ Deferred, by design:
   ends, fails or is abandoned detaches and frees its own cells with the shared cell deletion (Repair
   mode), except the I/O service's cells and the rows; `ManyEffectScriptRunsLeaveTheArenaBounded`
   pins 10^4 runs (`m7-vql/p7-cell-deletion.md`).
+- Gate r2 (`m7-vql/r2-disposition.md`): a run whose dynamic-view registry grew (a pivot, a lens, a
+  shape value) keeps its compiled program, so the registry never names freed cells; a rollback
+  notice is routed to the activation that owns the Submit; `IoService::orphanRequest` is typed
+  (`OrphanResult`) and counted, and an orphaned open mints no endpoint; deleting a clone master with
+  views is refused unless the caller chooses promotion (`CloneGuard`, `ArenaRefusal::HoldsViews`).
 - Retiring the request: the outcome cell is the script's value, so a finished script's request is
   retired through `FrontendBridge::retire` only when the next action is admitted (or the runner
   ends), never earlier.

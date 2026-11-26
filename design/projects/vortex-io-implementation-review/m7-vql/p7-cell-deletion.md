@@ -60,8 +60,11 @@ proxies, quote and provenance cells).
 ### Clone ranks, marks, shadows
 
 - A clone master heads its rank (clones are posward), so deleting a master with `Repair` promotes
-  its first view; deleting a view repairs the rank and the master still answers. The algorithm does
-  not protect a master other cells view: that is policy (`io_cells heldByViews` keeps one).
+  its first view; deleting a view repairs the rank and the master still answers. The first view does
+  not carry the master's content, so (M7-VQL gate r2) a caller that passes a `CloneGuard` gets
+  `ArenaRefusal::HoldsViews` for a master with views, in either mode and before any write, unless it
+  sets `promoteFirstView`; `orphansViews()` is the shared check. xuzz's delete passes the guard and
+  refuses; the reapers keep their own `heldByViews` rule; reclaim passes none.
 - Under a mark every write, and the free, is journalled; `release(mark)` restores links and cell.
 - `link` may throw (shadow allocation, link-run limit) after some writes; under a mark `release`
   restores. `io_cells` catches and logs as before.
@@ -75,10 +78,14 @@ proxies, quote and provenance cells).
    order, again posward before negward (the xuzz delete's existing fallback).
 1. Otherwise `home`.
 
-The posward-then-negward order is the one the xuzz delete already used over x, y, z. A neighbour
-that is the deleted cell itself is never chosen. `eligible(dim, cell)` lets a UI refuse protected or
-derived cells and metadata dimensions. Step 2 goes beyond the owner's wording (which names only home
-for an unconnected cell) for a cell connected only on unbound dimensions; flagged in the report.
+The order is fixed: posward before negward, then bound dimensions before the cell's other
+connections, then home. Posward-before-negward is the one the xuzz delete already used over x, y, z;
+it is an inherited convention, not derived from anything (forward is the direction a reader keeps
+moving), and the keymap documentation should name it so. It is also written beside `cursorMoveOff`
+in `cell_deletion.hpp`. A neighbour that is the deleted cell itself is never chosen.
+`eligible(dim, cell)` lets a UI refuse protected or derived cells and metadata dimensions. Step 2
+goes beyond the owner's wording (which names only home for an unconnected cell) for a cell connected
+only on unbound dimensions; flagged in the report.
 
 ## Wiring
 
