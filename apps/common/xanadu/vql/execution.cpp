@@ -638,6 +638,9 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
       const auto values = vm_.resultCells(slot);
       cells.insert(cells.end(), values.begin(), values.end());
     }
+    // The cells the script published as session variables: the program's own
+    // region must not be freed under them.
+    std::vector<zigzag::CellRef> publishedCells;
     if (session_) {
       ContractBindings published;
       std::unordered_map<std::string, std::vector<PathStep>> functors;
@@ -654,6 +657,8 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
         for (const auto slot : binding.slots) {
           const auto slotValues = vm_.resultCells(slot);
           values.insert(values.end(), slotValues.begin(), slotValues.end());
+          publishedCells.insert(publishedCells.end(), slotValues.begin(),
+                                slotValues.end());
         }
       }
       session_->publishCompilerBindings(std::move(published),
@@ -686,16 +691,27 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
           });
       settleMark(!(noMutations && noNewResultCells));
     }
-    // Published bindings name cells of the program, so a script that
-    // published any keeps its compiled program; the rows and what they reach
-    // in the program's region survive either way. A registry entry the run
-    // made is checked when the run closes (keepIfNamed), since a parked script
-    // that is abandoned has registered cells too.
+    // A script of plain queries keeps its compiled program when it published
+    // any binding, since a binding may name cells of the program. A script
+    // with an I/O action publishes only streams (`as $r`, `let`) in the usual
+    // case, and those are roots like the rows: the program's region is freed
+    // around the cells they reach, so a long session of named outcomes does
+    // not grow the arena by a program per run. A functor or mount binding is
+    // not a cell root, so such a script still keeps its program. A registry
+    // entry the run made is checked when the run closes (keepIfNamed), since a
+    // parked script that is abandoned has registered cells too.
+    const bool onlyStreams = std::ranges::all_of(
+        run->compiled_.sessionBindings, [](const auto &binding) {
+          return binding.kind ==
+                 CompilationResult::SessionBinding::Kind::Stream;
+        });
     const bool published = session_ && !run->compiled_.sessionBindings.empty();
-    if (run->compiled_.ioActions.empty() || published) {
+    if (run->compiled_.ioActions.empty() || (published && !onlyStreams)) {
       run->keepCompiledProgram();
     } else {
-      run->reclaimOnClose(cells);
+      auto roots = cells;
+      roots.insert(roots.end(), publishedCells.begin(), publishedCells.end());
+      run->reclaimOnClose(std::move(roots));
     }
     ProgramResult done{.rows            = std::move(cells),
                        .finalIsIoEffect = run->compiled_.finalIsIoEffect};

@@ -1,0 +1,71 @@
+#ifndef XANADU_VORTEX_OWNED_OUTCOME_HPP
+#define XANADU_VORTEX_OWNED_OUTCOME_HPP
+
+/**
+ * @file owned_outcome.hpp
+ * @brief A script-owned copy of a terminal outcome
+ * (design/vortex-io-m7-vql-c.md §12.1), so a language can keep a named outcome
+ * after the service has retired the request that produced it.
+ *
+ * The record is an `IoCellTag::Outcome` cell carrying the same tag, field rank
+ * and Progress rank the service's outcome had, copied by value, plus one
+ * `owned` field that marks it. It has no Request, Queue, Waiter, Clone or
+ * Lease rank and so no road back to the service. A payload has no cell form,
+ * so the record's bytes are a resolver lease held beside it, never a cell.
+ * Language-neutral: nothing here knows VQL.
+ */
+
+#include <cstddef>
+#include <expected>
+#include <optional>
+
+#include "common/xanadu/vortex/io_cells.hpp"
+#include "common/xanadu/vortex/payload_resolver.hpp"
+
+namespace xanadu::vortex {
+
+/// The name of the field that marks a record as script-owned.
+inline constexpr const char *ownedFieldLabel = "owned";
+
+struct OwnedOutcome {
+  OutcomeCell cell;
+  /// The lease that keeps the retained bytes resolvable after the service
+  /// releases its own; absent when the outcome retained none.
+  std::optional<PayloadLease> payload;
+  /// What the lease pins: the whole physical chunk (plan §8.1), which is what
+  /// a retention budget charges.
+  std::size_t chunkBytes{};
+
+  /// Copy @p source's tag, scalar fields and progress into a new record. The
+  /// copy takes ownership of @p payload: on any failure the lease is released
+  /// and nothing is left behind. @p source is not touched.
+  [[nodiscard]] static auto copy(zigzag::ArenaManifold &arena,
+                                 const IoCellSchema &schema,
+                                 PayloadResolver &resolver, OutcomeCell source,
+                                 std::optional<PayloadLease> payload)
+      -> std::expected<OwnedOutcome, IoCellError>;
+
+  /// Give the payload lease back; idempotent.
+  void releasePayload(PayloadResolver &resolver) noexcept;
+  /// Delete the record's cells with the shared deletion algorithm (P7),
+  /// leaves first, so a holder of the handle sees a stale cell and never a
+  /// half-freed graph. Idempotent.
+  void freeCells(zigzag::ArenaManifold &arena,
+                 const IoCellSchema &schema) noexcept;
+  /// The same deletion for any request-less outcome that holds no clone view:
+  /// a service refusal (`Rejected`) whose submission has been released and
+  /// which a script-owned copy now replaces.
+  static void freeOutcomeGraph(zigzag::ArenaManifold &arena,
+                               const IoCellSchema &schema,
+                               OutcomeCell outcome) noexcept;
+};
+
+/// Whether @p cell is a script-owned record: an outcome carrying the `owned`
+/// field.
+[[nodiscard]] auto isOwnedOutcome(const zigzag::ArenaManifold &arena,
+                                  const IoCellSchema &schema,
+                                  zigzag::CellRef cell) -> bool;
+
+} // namespace xanadu::vortex
+
+#endif

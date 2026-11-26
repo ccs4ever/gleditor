@@ -34,6 +34,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -45,6 +46,7 @@
 #include "common/xanadu/vortex/frontend_diagnostics.hpp"
 #include "common/xanadu/vortex/frontend_token.hpp"
 #include "common/xanadu/vortex/io_host.hpp"
+#include "common/xanadu/vortex/owned_outcome.hpp"
 #include "common/xanadu/vortex/payload_resolver.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ast.hpp"
@@ -98,6 +100,12 @@ struct ScriptIoPorts {
   OpenFileFn openFile;
   CloseCapabilityFn closeCapability;
   CapabilityOfFn capabilityOf;
+  /// What named outcomes may retain between them, in physical chunk bytes
+  /// (`FileReadHostOptions::retainedPayloadBytes`). A copy that would pass it
+  /// is not made: that outcome stays the service's, as before the owned
+  /// record existed.
+  std::size_t retainedPayloadBytes{
+      vortex::FileReadHostOptions::defaultBudgetBytes};
 };
 
 /// The ports over a `FileReadHost`: reads are staged on the file endpoint
@@ -178,6 +186,15 @@ public:
 
   void wake(vortex::FrontendToken token, vortex::FrontendWake why) override;
 
+  /// Script-owned outcome records alive now (named outcomes whose request was
+  /// retired at once), and the physical payload bytes their leases pin.
+  [[nodiscard]] auto ownedRecordCount() const noexcept -> std::size_t {
+    return owned_.size() + finishedRecords_.size();
+  }
+  [[nodiscard]] auto retainedBytes() const noexcept -> std::size_t {
+    return retainedBytes_;
+  }
+
 private:
   struct Activation;
   struct Stepping;
@@ -198,6 +215,20 @@ private:
   /// gate exposes one; nullopt for an outcome that retained none.
   [[nodiscard]] auto payloadText(vortex::OutcomeCell outcome) const
       -> std::expected<std::optional<std::string>, vortex::FrontendDiagnostic>;
+  /// An outcome's status gate, reading a script-owned record's payload from
+  /// the runner's table (a record has no payload cell) and anything else
+  /// through the bridge.
+  [[nodiscard]] auto gated(vortex::OutcomeCell outcome) const
+      -> std::expected<vortex::GatedOutcome, vortex::FrontendDiagnostic>;
+  /// `io_own_outcome`: copy the finished outcome a named read yielded into a
+  /// script-owned record and retire its request (§12.1).
+  [[nodiscard]] auto ownOutcome(const zigzag::vortex::RelationQuery &query)
+      -> zigzag::vortex::RelationResult;
+  /// Give back every payload lease @p activation's records hold. Their cells
+  /// are freed now (@p freeCells) or, when rows may still name them, at the
+  /// next admission.
+  void releaseRecords(Activation &activation, bool freeCells) noexcept;
+  void freeFinishedRecords() noexcept;
   [[nodiscard]] auto now() const -> std::chrono::steady_clock::time_point {
     return ports_.host.now();
   }
@@ -295,6 +326,14 @@ private:
   /// the service: a refusal that is not a conflict (a stopped scheduler) never
   /// clears, and each try mints and retires a refusal cell.
   static constexpr std::size_t maxCloseAttempts = 4;
+  /// A script-owned record and what it costs: keyed by the record's cell and
+  /// validated against its incarnation, never rebuilt from cells.
+  std::unordered_map<zigzag::CellRef, vortex::OwnedOutcome> owned_;
+  /// Records of scripts that finished: payload leases already returned, cells
+  /// kept until the next admission because the rows a caller holds may name
+  /// them.
+  std::vector<vortex::OwnedOutcome> finishedRecords_;
+  std::size_t retainedBytes_{};
   std::vector<std::string> providers_;
   /// The whole token, so a waiter dropped with its request's cells can still
   /// tell its caller (an Abandoned wake) that the script is dead.

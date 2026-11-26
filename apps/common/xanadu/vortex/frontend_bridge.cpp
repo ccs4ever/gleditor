@@ -9,6 +9,8 @@
 #include <unordered_set>
 #include <utility>
 
+#include "common/xanadu/vortex/owned_outcome.hpp"
+
 namespace xanadu::vortex {
 namespace {
 
@@ -291,6 +293,18 @@ auto auditLanguageValue(const ArenaManifold &arena, const IoCellSchema &schema,
           tag && (*tag == IoCellTag::Waiter || *tag == IoCellTag::Capture)) {
         findings.push_back(
             {cell, "owner-only " + std::string{toString(*tag)} + " cell"});
+      }
+    }
+    // A script-owned record must have no road back to the service: a rank of
+    // the owner-only kind on it would be a leak the walk below never follows.
+    if (isOwnedOutcome(arena, schema, cell)) {
+      for (const auto which : ownerOnlyDimensions) {
+        if (arena.linked(cell, schema.dim(which), DimVector::POS) ||
+            arena.linked(cell, schema.dim(which), DimVector::NEG)) {
+          findings.push_back({cell, "owned outcome record has a " +
+                                        std::string{dimensionName(which)} +
+                                        " rank"});
+        }
       }
     }
     const auto text  = arena.textOf(cell);

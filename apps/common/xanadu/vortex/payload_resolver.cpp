@@ -437,6 +437,14 @@ auto PayloadResolver::liveLeases() const -> std::size_t {
   return state_->leases.size();
 }
 
+auto PayloadResolver::chunkBytes(const PayloadLease &lease) const
+    -> std::optional<std::size_t> {
+  const std::lock_guard lock(state_->mutex);
+  const auto held = state_->held(lease);
+  if (!held) return std::nullopt;
+  return held->bytes->size();
+}
+
 auto PayloadResolver::sourceReachable(const PayloadRef &ref) const -> bool {
   // See the header: reachable by address, not necessarily retainable.
   if (ref.kind == PayloadSourceKind::Durable) return true;

@@ -47,6 +47,14 @@ constexpr const char *readBytesFunctor = "read_bytes";
 //   RelationNext io_open_capability (outcome) -> found, capability
 //   $cap := the capability when the open minted one, the outcome otherwise
 //
+// Read ... as $r -- the outcome a name holds must outlive its request
+//
+//   RelationNext io_own_outcome (outcome) -> found, record
+//   $r := the record when the host copied the outcome and retired the
+//         request, the service's outcome itself when it kept it
+//
+// The record is also the statement's row, since the request's cells are gone.
+//
 // A name the compile has no binding for (vqueryc compiles with none) becomes a
 // text cell naming it, which no Submit accepts as a capability, so such a
 // program is inspectable and fails by value if it is ever run unbound.
@@ -206,14 +214,36 @@ VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
   }
   }
 
+  std::optional<CellRef> owned;
+  if (effect.kind == Kind::Read && !effect.detached && effect.resultVar) {
+    // The host copies the finished outcome by value and retires the request
+    // at once; if it declines (over its retention budget) the service's
+    // outcome stays the value, as before.
+    const auto record = fresh();
+    const auto keep   = emitOp(OpcodeKind::CopyCellRefs, "#IO_OWN_KEEP");
+    emitInput(keep, result);
+    emitOutput(keep, record);
+    const auto copied = relate(ownOutcomeRelation, {result});
+    const auto skip   = mintOpcode(OpcodeKind::Nop, "#IO_OWN_END");
+    const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#IO_OWNED");
+    emitInput(branch, copied.found);
+    emitInput(branch, skip);
+    const auto take = emitOp(OpcodeKind::CopyCellRefs, "#IO_OWN_TAKE");
+    emitInput(take, copied.answers.front());
+    emitOutput(take, record);
+    appendOpcode(skip);
+    owned = record;
+  }
+
   ioActions_.push_back({.submitOpcode = firstOpcode,
                         .awaitOpcode  = awaitOpcode,
                         .requestSlot  = requestSlot,
                         .statement    = statement});
   if (effect.resultVar)
-    streamBindings_[*effect.resultVar] = {binding.value_or(result)};
-  lastResultCells_ = {result};
-  return result;
+    streamBindings_[*effect.resultVar] = {
+        binding.value_or(owned.value_or(result))};
+  lastResultCells_ = {owned.value_or(result)};
+  return owned.value_or(result);
 }
 
 } // namespace xanadu::vql

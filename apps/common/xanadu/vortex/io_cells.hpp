@@ -25,8 +25,10 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/vortex/payload_resolver.hpp"
@@ -208,6 +210,24 @@ void reapIoRequest(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
 void reapIoWaiter(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
                   WaiterCell waiter) noexcept;
 
+/// One labelled field on @p record: a runtime-only field cell whose text is
+/// @p label, appended posward on @p rankDim, and its content cell (text
+/// @p value) linked posward on @p valueDim. The shape every outcome detail,
+/// progress count and payload range is written in. False when the arena
+/// refused or the rank is cyclic; the caller's choice point undoes the rest.
+[[nodiscard]] bool appendIoField(zigzag::ArenaManifold &arena,
+                                 zigzag::CellRef record, zigzag::DimRef rankDim,
+                                 zigzag::DimRef valueDim,
+                                 std::string_view label,
+                                 std::string_view value);
+
+/// Hang a Progress record off @p outcome: occurrence cell, Progress-tagged
+/// cell, and one labelled field per entry of @p fields in order.
+[[nodiscard]] bool addIoProgressFields(
+    zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+    zigzag::CellRef outcome,
+    std::span<const std::pair<std::string_view, std::string_view>> fields);
+
 /// The d.io.* dimensions through the arena's dimension registry
 /// (ArenaManifold::ensureDimension): minted on first use, found thereafter.
 [[nodiscard]] std::expected<IoCellSchema, IoCellError>
@@ -288,6 +308,14 @@ void releaseSubmissionCell(zigzag::ArenaManifold &arena,
 [[nodiscard]] std::expected<OutcomeCell, IoCellError>
 makeOutcomeCell(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
                 std::optional<RequestCell> request, IoOutcomeTag tag);
+
+/// An outcome cell no request owns, of any tag: the cell a script-owned copy
+/// of a terminal outcome is built on (owned_outcome.hpp). Unlike
+/// makeOutcomeCell it links nothing to a request and refuses nothing for want
+/// of one; the caller adds the field and progress ranks.
+[[nodiscard]] std::expected<OutcomeCell, IoCellError>
+makeDetachedOutcomeCell(zigzag::ArenaManifold &arena,
+                        const IoCellSchema &schema, IoOutcomeTag tag);
 
 /// Declared capability a source endpoint offers for a read's consistency
 /// requirement (plan §7.2). `Live` is best-effort observation of whatever

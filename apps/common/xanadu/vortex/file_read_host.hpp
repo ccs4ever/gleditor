@@ -80,6 +80,11 @@ struct FileReadHostOptions {
   std::size_t endpointRequests{defaultEndpointRequests};
   std::size_t payloadBytes{defaultPayloadBytes};
   std::size_t writeBytes{defaultWriteBytes};
+  /// What a script's named outcomes may retain between them (M7-VQL-c §12.1):
+  /// the physical chunks their payload leases pin. Unset means `budgetBytes`,
+  /// so retention never exceeds what the service itself would have held for
+  /// the same requests and adds no new ceiling.
+  std::optional<std::size_t> retainedPayloadBytes;
   std::chrono::milliseconds openDeadline{defaultOpenDeadline};
   /// Empty denies every open that asks to write, append or create: the safe
   /// default, so a host with no flag set can change no file.
@@ -164,6 +169,11 @@ public:
   /// Publish completions and deliver wakes; never blocks.
   auto pump(const std::size_t budget) -> std::size_t {
     return host_.pumpIo(budget);
+  }
+
+  /// The retention budget a script runner charges its owned records to.
+  [[nodiscard]] auto retainedPayloadBytes() const noexcept -> std::size_t {
+    return options_.retainedPayloadBytes.value_or(options_.budgetBytes);
   }
 
   [[nodiscard]] auto bridge() -> FrontendBridge & { return bridge_; }

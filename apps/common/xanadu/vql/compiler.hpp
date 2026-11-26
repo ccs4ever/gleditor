@@ -62,6 +62,10 @@ inline constexpr const char *handleCancelRelation = "io_handle_cancel";
 inline constexpr const char *openRelation = "io_open";
 /// The capability an Complete open outcome minted, when it minted one.
 inline constexpr const char *openCapabilityRelation = "io_open_capability";
+/// Copy a finished read's outcome into a script-owned record and retire its
+/// request, so a named outcome does not hold a service slot (M7-VQL-c §12.1).
+/// Answers the record, or nothing when the host keeps the service's outcome.
+inline constexpr const char *ownOutcomeRelation = "io_own_outcome";
 
 /// The relation an outcome path function (`io_tag`, `io_payload`, `io_bytes`,
 /// `io_error`, `io_detail`) compiles to; nullptr for any other name.

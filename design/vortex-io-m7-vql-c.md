@@ -1,11 +1,11 @@
 # M7-VQL-c: VQL write and capture
 
-Status: design note; stage C1 (adapter and host, §18) is built, the rest is not. It specifies the
-third M7-VQL slice of the [Vortex I/O implementation plan](vortex-io-implementation-plan.md): script
-**write effects** to a file endpoint, and **capture**, the explicit act that makes a script's input
-durable so results built from it may be persisted. It extends
-[`vql-query-language.md`](vql-query-language.md) §4.13 and changes no on-disk format and no core
-file (§14 lists the proposals considered and refused).
+Status: design note; stages C1 (adapter and host) and C1b (owned records) of §18 are built, the rest
+is not. It specifies the third M7-VQL slice of the
+[Vortex I/O implementation plan](vortex-io-implementation-plan.md): script **write effects** to a
+file endpoint, and **capture**, the explicit act that makes a script's input durable so results
+built from it may be persisted. It extends [`vql-query-language.md`](vql-query-language.md) §4.13
+and changes no on-disk format and no core file (§14 lists the proposals considered and refused).
 
 Where it lives. The plan's milestone table has rows for `M7-VQL` and no row for the `-b` or `-c`
 slices; slices are recorded as "implementation notes and deliberate deferrals" under the M7-VQL
@@ -863,6 +863,59 @@ Deviations and findings, recorded because the code disagreed with the note:
    (`SyncCompletesAfterTheWritesAdmittedBeforeIt`).
 1. **A symlinked parent swapped in after the grant** is still outside what a path check can promise;
    `O_NOFOLLOW` covers the final component only. Stated, not closed.
+
+### 18.2 Stage C1b as built
+
+C1b is the owned record of §12.1 and nothing else: no grammar, no write, no capture. What landed,
+with the places it differs from the text above:
+
+- **Where the copy happens.** A VQL `as $r` is a compile-time stream binding, so the runner never
+  sees a "binding moment". The compiler emits, after the Await of a named non-detached `read`
+  action, one relation call `io_own_outcome(outcome)` and a branch: the statement's value (and so
+  `$r`, and the row if it is the last statement) is the record the relation answers, or the
+  service's outcome when it answers nothing. The provider (`ScriptRunner::ownOutcome`) runs the copy
+  and the early retire on the owner thread, once per pass (no resume re-runs it).
+- **The record.** `vortex::OwnedOutcome` (`owned_outcome.{hpp,cpp}`, beside `FrontendBridge`):
+  `copy()` makes a request-less `IoCellTag::Outcome` cell of the same outcome tag
+  (`makeDetachedOutcomeCell`), copies the service outcome's field rank by value, adds the `owned`
+  field, and mints a `Progress` cell with the progress fields. No Request, Queue, Waiter, Clone,
+  Lease or Payload rank exists on it; `auditLanguageValue` reports an owned record that grew one.
+- **The payload lease.** Taken with `PayloadResolver::retain(range)` before the retire and held in
+  the record's host state. The runner's table (`owned_`) is keyed by the record cell and validated
+  against its incarnation; `gated()` answers a record's payload from it, so `io_payload`, `io_bytes`
+  and the final-action row read records through the same status gate.
+- **Budget.** `FileReadHostOptions::retainedPayloadBytes` (an `std::optional`, unset means
+  `budgetBytes`) reaches the runner as `ScriptIoPorts::retainedPayloadBytes`. A lease is charged at
+  its whole chunk (`PayloadResolver::chunkBytes`, new). Past the budget the lease is returned, the
+  copy is not made, the outcome stays the service's with its request admitted, and the runner logs
+  under `vortex.io.script`. A payload-free outcome costs nothing and is always copied.
+- **Endings.** Failure, abandonment, timeout and `~ScriptRunner` return the leases and free the
+  record cells at once. A script that finishes returns its leases at once (after reading the final
+  row's payload) but keeps the cells until the next admission, because the rows a caller holds may
+  be records, the rule `finished_` already follows. Cells are freed with `ArenaManifold::deleteCell`
+  (`LeaveBroken`, leaves first), not a new unlink loop.
+- **Shared helpers.** `appendIoField`, `addIoProgressFields` and `makeDetachedOutcomeCell` moved
+  into `io_cells`; `ArenaIoCellStore` and `CaptureCoordinator` delegate to them.
+
+Deviations and findings, recorded because the code disagreed with the note:
+
+1. **Only `read` actions are owned.** A detached read and `open` bind a request or a capability, not
+   an outcome. `await($h)` and `cancel($h)` run over a request the script may await or cancel again,
+   so retiring it at the first `await` would make the second a stale handle; they keep the service's
+   outcome. The cap the owner ruled out is the one named reads hit, and it is gone.
+1. **A named script's compiled program was never reclaimed.** `execution.cpp` kept the program of
+   any script that published a session binding, so every `as $r` run grew the arena by its whole
+   program (270 cells for the test script) whatever C1b did. An I/O script whose published bindings
+   are all streams now reclaims its program, with the published cells as roots beside the rows; a
+   functor or mount binding still keeps it. Criterion 15's "arena bounded" needs this.
+1. **Progress is what the service published**, which for a backend that streams none is zero, not
+   the progress inside its terminal result (the C1 finding 2 applies to the copy as to the source).
+1. **The ReadObservation (`d.io.source`) is not copied.** `capture($r)` (C3) needs the observation a
+   `Complete` read carries; C3 must copy that record by value too (and charge its lease), or
+   `capture` of a record has nothing to key overlap on.
+1. **A refused submission's `Rejected` outcome** is copied into a record like any other, and the
+   service's own `Rejected` cell, which no request reaps, is freed with it; before C1b a refusal's
+   outcome cell outlived its script.
 
 ## 19. Deferrals
 

@@ -140,6 +140,11 @@ public:
   /// the rest.
   [[nodiscard]] auto sourceReachable(const PayloadRef &ref) const -> bool;
   [[nodiscard]] auto liveLeases() const -> std::size_t;
+  /// The size of the whole chunk @p lease pins, which is what it costs in
+  /// memory whatever sub-range it names (plan §8.1: charged at physical
+  /// size). Absent for a lease that was released.
+  [[nodiscard]] auto chunkBytes(const PayloadLease &lease) const
+      -> std::optional<std::size_t>;
   /// Sources whose chunk is alive right now: each durable origin with a
   /// lease or token on its chunk plus each transient/proxy origin with a
   /// live registration pin, lease or owner token. Expired entries awaiting a

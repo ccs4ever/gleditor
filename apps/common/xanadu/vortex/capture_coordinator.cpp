@@ -127,24 +127,7 @@ std::expected<void, IoCellError> linkFresh(ArenaManifold &arena,
 bool appendField(ArenaManifold &arena, const CellRef record,
                  const DimRef rankDim, const DimRef valueDim,
                  const std::string_view label, const std::string_view value) {
-  const auto field              = arena.makeCell(label);
-  const auto fieldIncarnation   = arena.incarnationOf(field);
-  const auto content            = arena.makeCell(value);
-  const auto contentIncarnation = arena.incarnationOf(content);
-  if (!fieldIncarnation || !contentIncarnation ||
-      !arena.markRuntimeOnly(field) || !arena.markRuntimeOnly(content)) {
-    return false;
-  }
-  auto tail = record;
-  for (std::size_t visited = 0; visited <= arena.traversalBound(); ++visited) {
-    const auto next = arena.linked(tail, rankDim, DimVector::POS);
-    if (!next) break;
-    tail = *next;
-    if (visited == arena.traversalBound()) return false;
-  }
-  return static_cast<bool>(
-      arena.link(tail, rankDim, DimVector::POS, field) &&
-      arena.link(field, valueDim, DimVector::POS, content));
+  return appendIoField(arena, record, rankDim, valueDim, label, value);
 }
 
 auto number(const std::uint64_t value) -> std::string {
