@@ -25,10 +25,10 @@ constexpr std::array<std::string_view, ioDimensionCount> dimensionNames{
     "d.io.waiter",  "d.io.occurrence", "d.io.queue",      "d.io.clone",
     "d.io.source",  "d.io.range",      "d.io.provenance", "d.io.lease"};
 
-constexpr std::array<std::string_view, 11> cellTagNames{
+constexpr std::array<std::string_view, 12> cellTagNames{
     "Endpoint", "Capability", "Request",         "Payload",
     "Progress", "Outcome",    "ReadObservation", "CaptureReceipt",
-    "Waiter",   "Capture",    "Submission"};
+    "Waiter",   "Capture",    "Submission",      "StaleBinding"};
 
 constexpr std::array<std::string_view, 12> outcomeTagNames{
     "Rejected",        "Complete",  "EndOfStream", "Partial",
@@ -769,6 +769,13 @@ makeDetachedOutcomeCell(ArenaManifold &arena, const IoCellSchema &schema,
     if (!outcome) return std::unexpected{outcome.error()};
     return OutcomeCell{.cell        = outcome->cell,
                        .incarnation = outcome->incarnation};
+  });
+}
+
+std::expected<IoOccurrenceCell, IoCellError>
+makeStaleBindingCell(ArenaManifold &arena) {
+  return transact(arena, [&] {
+    return mint(arena, "stale binding", IoCellTag::StaleBinding);
   });
 }
 

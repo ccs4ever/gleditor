@@ -167,6 +167,14 @@ struct Persistability {
   }
 };
 
+/// What `ScriptRunner::forget()` dropped.
+struct ForgetReport {
+  /// The session variables unbound, by name.
+  std::vector<std::string> unbound;
+  /// The uncovered exposures forgotten.
+  std::size_t exposures{};
+};
+
 /// A woken token and why it came back.
 struct ScriptWake {
   vortex::FrontendToken token;
@@ -251,6 +259,17 @@ public:
     return assess();
   }
 
+  /// The owner's way out of a refused persist (decision of 2026-11-26): drop
+  /// the session's uncovered exposures and unbind every variable that is not a
+  /// runtime handle, so nothing uncaptured can reach `:save`, `-o` or
+  /// `--in-place` afterwards. Does nothing when every exposure is covered.
+  auto forget() -> ForgetReport;
+
+  /// Record which runtime handles the session variables name now. The driver
+  /// calls it after a plain line, so a name that line made is known before a
+  /// later script frees the handle it copied.
+  void noteBindings();
+
   /// Script-owned outcome records alive now (named outcomes whose request was
   /// retired at once), and the physical payload bytes their leases pin.
   [[nodiscard]] auto ownedRecordCount() const noexcept -> std::size_t {
@@ -308,12 +327,22 @@ private:
   void expose(const vortex::PayloadRange &range);
   /// Count the session's exposures against what the capture host covers.
   [[nodiscard]] auto assess() const -> Persistability;
-  /// Remember which runtime handles the session variables name, with the
-  /// incarnation each had when it was bound.
-  void noteBindings();
   /// Rebind every session variable whose handle was freed to the stale marker,
   /// so a reused arena slot is never read under the old name.
   void reconcileBindings() noexcept;
+  /// Retire the finished scripts' requests and free their records, with the
+  /// session's names recorded before and reconciled after.
+  void retireFinished();
+  /// Unbind every variable still naming the stale marker.
+  void forgetStaleVariables() noexcept;
+  /// The stale refusal when variable @p name names the stale marker.
+  [[nodiscard]] auto
+  staleName(const std::string &name,
+            std::optional<std::size_t> position = std::nullopt) const
+      -> std::optional<vortex::FrontendDiagnostic>;
+  /// Whether @p cell is a handle a session variable named whose allocation has
+  /// since been freed, whether or not the slot was reused.
+  [[nodiscard]] auto namesFreedHandle(zigzag::CellRef cell) const -> bool;
   /// A `VQL_IO_STALE_BINDING` refusal carrying @p message.
   [[nodiscard]] auto staleRefusal(std::string message)
       -> zigzag::vortex::RelationResult;

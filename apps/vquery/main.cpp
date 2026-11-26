@@ -170,8 +170,6 @@ resultRows(const xanadu::MultiStoreCoordinator &coordinator,
   return rows;
 }
 
-/// What the owner reads beside a pinned capture, in words; a diagnostic, not a
-/// control value.
 /// `:reconcile ID release` or `:reconcile ID promote [START LEN]`, parsed as a
 /// whole: the decision is durable and journaled, so a half-typed pair or a
 /// trailing token is a usage error rather than a guess at what was meant.
@@ -214,6 +212,8 @@ auto parseReconcile(const std::string &line)
   return std::pair{*id, xanadu::vortex::CaptureReconcileDecision{promote}};
 }
 
+/// What the owner reads beside a pinned capture, in words; a diagnostic, not a
+/// control value.
 auto captureReasonName(const xanadu::vortex::CaptureRecoveryReason reason)
     -> std::string_view {
   using Reason = xanadu::vortex::CaptureRecoveryReason;
@@ -260,6 +260,9 @@ void printHelpREPL() {
       << "  :reconcile ID release|promote [START LEN]  Decide one pinned "
          "capture: release it, or promote it to the span its journal names "
          "(or START LEN of the permascroll)\n"
+      << "  :forget               Drop what this session read but did not "
+         "capture and unbind every variable that is not an I/O handle, so "
+         ":save works again\n"
       << "  :stores               List currently loaded stores\n"
       << "  :save <path>          Save the last query rows as a result slice\n"
       << zigzag::LensRepl::helpText
@@ -887,11 +890,21 @@ int main(int argc, char *argv[]) {
           executionOptions.mode == xanadu::vql::QueryExecutionMode::Vortex)
         std::cout << executor.disassembly() << "\n";
       if (!execution) {
-        std::cerr << "Query failed: " << execution.error().message << "\n";
+        // A stale name answers a typed code; the operator that raised it is
+        // the engine's, not something the author can act on.
+        const auto &message = execution.error().message;
+        const auto typed =
+            message.find(xanadu::vortex::frontend_codes::vqlStaleBinding);
+        std::cerr << "Query failed: "
+                  << (typed == std::string::npos ? message
+                                                 : message.substr(typed))
+                  << "\n";
         return false;
       }
       results = *execution;
     }
+    // A name this line made is recorded while any handle it copied is live.
+    if (ioRunner) ioRunner->noteBindings();
 
     lastResults = results;
     hasResults  = true;
@@ -1264,6 +1277,25 @@ int main(int argc, char *argv[]) {
                         << " detail " << resumed.error().stableDetail << "\n";
           }
         }
+      }
+    } else if (line == ":forget") {
+      // The owner's way out of a refused :save: coverage is what the persist
+      // rule tracks, not taint, so the text a variable carries cannot be traced
+      // to its read. Every variable that is not a runtime handle goes.
+      const auto report =
+          ioRunner ? ioRunner->forget() : xanadu::vql::ForgetReport{};
+      if (report.exposures == 0 && report.unbound.empty()) {
+        std::cout << "Nothing to forget: every payload this session read is "
+                     "captured or none was read\n";
+      } else {
+        std::cout << "Forgot " << report.exposures << " uncaptured payload"
+                  << (1 == report.exposures ? "" : "s") << "; unbound";
+        for (const auto &name : report.unbound) std::cout << " $" << name;
+        if (report.unbound.empty()) std::cout << " nothing";
+        std::cout << "\n";
+        // Rows may be built from the text just dropped.
+        lastResults.clear();
+        hasResults = false;
       }
     } else if (line == ":stores") {
       std::cout << "Registered stores on ##/d.stores rank:\n";

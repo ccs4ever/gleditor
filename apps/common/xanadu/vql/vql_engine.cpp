@@ -121,6 +121,10 @@ VQLEngine::getVariable(std::string_view name) const {
   return {};
 }
 
+void VQLEngine::eraseVariable(const std::string_view name) {
+  env_.erase(std::string{name});
+}
+
 void VQLEngine::clearVariables() noexcept {
   env_.clear();
   functors_.clear();

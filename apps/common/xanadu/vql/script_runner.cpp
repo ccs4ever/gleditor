@@ -176,15 +176,44 @@ struct ScriptRunner::Activation final : vortex::FrontendActivation {
   std::vector<Extension> extensions;
 };
 
-ScriptRunner::ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
-                           ScriptIoPorts ports, QueryExecutionOptions options)
-    : session_(session), vm_(vm), ports_(std::move(ports)), options_(options),
-      staleMarker_(
-          session.coordinator().arena().makeCell(std::string{"stale handle"})) {
-  if (vm_.hasSubmitHandler()) {
+namespace {
+
+/// The runner's stale marker, minted only once nothing can still refuse the
+/// runner: a constructor that threw after minting would leak the cell, since
+/// no destructor runs.
+auto mintStaleMarker(VQLEngine &session, const zigzag::vortex::VortexVM &vm)
+    -> CellRef {
+  if (vm.hasSubmitHandler()) {
     throw std::logic_error(
         "a VortexVM has one Submit hook and another runner holds it");
   }
+  const auto marker =
+      vortex::makeStaleBindingCell(session.coordinator().arena());
+  if (!marker) throw std::runtime_error("the stale marker could not be minted");
+  return marker->cell;
+}
+
+/// Whether @p cell is the marker a freed handle's variable was rebound to.
+/// Decided by tag, so no reader depends on having been handed the marker's
+/// identity.
+auto isStaleBinding(const zigzag::ArenaManifold &arena, const CellRef cell)
+    -> bool {
+  const auto incarnation = arena.incarnationOf(cell);
+  if (!incarnation) return false;
+  const auto tag = vortex::ioCellTag(arena, cell, *incarnation);
+  return tag && *tag == vortex::IoCellTag::StaleBinding;
+}
+
+constexpr std::string_view staleBindingAdvice =
+    "a variable names an I/O handle that was freed when its script's rows "
+    "were retired; bind it again with 'as'";
+
+} // namespace
+
+ScriptRunner::ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
+                           ScriptIoPorts ports, QueryExecutionOptions options)
+    : session_(session), vm_(vm), ports_(std::move(ports)), options_(options),
+      staleMarker_(mintStaleMarker(session, vm)) {
   // The one admission hook of the VM this runner drives: a compiled action's
   // Submit lands here, once per executed instruction.
   vm_.setSubmitHandler(
@@ -244,9 +273,37 @@ ScriptRunner::~ScriptRunner() {
   owned_.clear();
   retainedBytes_ = 0;
   freeFinishedRecords();
+  // The engine outlives this runner, so no variable may keep naming a freed
+  // handle or the marker about to be freed: the first would alias whichever
+  // cell reuses its slot, the second the same. A name left is unbound.
+  reconcileBindings();
+  forgetStaleVariables();
   auto &arena = session_.coordinator().arena();
   if (const auto incarnation = arena.incarnationOf(staleMarker_))
     static_cast<void>(arena.freeCell(staleMarker_, *incarnation));
+}
+
+void ScriptRunner::forgetStaleVariables() noexcept {
+  try {
+    std::vector<std::string> names;
+    for (const auto &[name, cells] : session_.variables()) {
+      if (std::ranges::find(cells, staleMarker_) != cells.end())
+        names.push_back(name);
+    }
+    for (const auto &name : names) session_.eraseVariable(name);
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN(logCategory, "stale session variables stayed bound: {}",
+                      error.what());
+  }
+}
+
+void ScriptRunner::retireFinished() {
+  // Every name the session holds is recorded while its handle is still live;
+  // the free below is what would otherwise let a slot be reused unseen.
+  noteBindings();
+  retireAll(finished_);
+  freeFinishedRecords();
+  reconcileBindings();
 }
 
 auto ScriptRunner::diagnose(const std::string_view code, std::string message,
@@ -579,11 +636,16 @@ void ScriptRunner::installProviders() {
         name,
         [this, provider = std::move(provider)](
             const RelationQuery &query) -> RelationResult {
-          if (std::ranges::find(query.arguments, staleMarker_) !=
-              query.arguments.end()) {
-            return staleRefusal(
-                "a variable names an I/O handle that was freed when its "
-                "script's rows were retired; bind it again with 'as'");
+          // A name made by a plain line is recorded here, and a handle freed
+          // by a pump inside a running script is caught by incarnation, not
+          // only at the next entry point.
+          noteBindings();
+          if (std::ranges::any_of(query.arguments, [&](const CellRef argument) {
+                return isStaleBinding(query.arena, argument) ||
+                       namesFreedHandle(argument);
+              })) {
+            reconcileBindings();
+            return staleRefusal(std::string{staleBindingAdvice});
           }
           return provider(query);
         });
@@ -758,9 +820,7 @@ auto ScriptRunner::openPath(const RelationQuery &query) -> RelationResult {
   const HostCells hostCells{current_->executor.get(), query.arena};
   // Earlier scripts' rows are done with before this one admits anything, so a
   // budget they filled is free for this open.
-  retireAll(finished_);
-  freeFinishedRecords();
-  reconcileBindings();
+  retireFinished();
   const auto submission =
       ports_.openFile(path, rightsOf(static_cast<IoOpenMode>(*mode)));
   if (!submission) return refuse(submission.error().message);
@@ -831,6 +891,9 @@ auto ScriptRunner::captureBegin(const RelationQuery &query, const bool ranged)
   // Capture takes an outcome: text a script printed is scratch bytes with no
   // source observation to key overlap on (design §3).
   const auto incarnation = arena.incarnationOf(query.arguments[0]);
+  if (isStaleBinding(arena, query.arguments[0]))
+    return refuse(vortex::frontend_codes::vqlStaleBinding,
+                  std::string{staleBindingAdvice});
   const bool isOutcome =
       incarnation &&
       vortex::ioCellTag(arena, query.arguments[0], *incarnation) ==
@@ -856,9 +919,7 @@ auto ScriptRunner::captureBegin(const RelationQuery &query, const bool ranged)
   // The capture admits requests through the coordinator, so it is an
   // admission path: earlier scripts' rows are done with before it begins.
   const HostCells hostCells{current_->executor.get(), arena};
-  retireAll(finished_);
-  freeFinishedRecords();
-  reconcileBindings();
+  retireFinished();
 
   const auto rejected = [&](const vortex::IoErrorCode code,
                             const std::uint32_t detail) -> RelationResult {
@@ -992,6 +1053,9 @@ void ScriptRunner::releaseCaptures(Activation &activation,
 }
 
 auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
+  // Names made by plain lines since the last script are recorded before
+  // anything is freed, or a slot reused first would be taken for theirs.
+  noteBindings();
   reapClosing();
   reconcileBindings();
   // Everything that can be wrong with an action's own values is wrong before
@@ -1028,6 +1092,8 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
                      "captured",
                      index));
       if (!named.contains(action->captureVar)) {
+        if (const auto stale = staleName(action->captureVar, index))
+          return ScriptRunResult::failed(*stale);
         const auto &bound = session_.variables();
         const auto found  = bound.find(action->captureVar);
         if (found == bound.end() || found->second.size() != 1)
@@ -1070,6 +1136,8 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
         !named.contains(action->source.text)) {
       // An unbound name would compile to a text cell holding its own name,
       // and a write would put that in the file.
+      if (const auto stale = staleName(action->source.text, index))
+        return ScriptRunResult::failed(*stale);
       const auto &bound = session_.variables();
       const auto found  = bound.find(action->source.text);
       if (found == bound.end() || found->second.size() != 1)
@@ -1107,6 +1175,9 @@ auto ScriptRunner::number(const CellRef cell, const std::string &what,
     return std::unexpected{diagnose(vortex::frontend_codes::vqlEffectArgument,
                                     std::move(message), position)};
   };
+  if (isStaleBinding(session_.coordinator().arena(), cell))
+    return std::unexpected{diagnose(vortex::frontend_codes::vqlStaleBinding,
+                                    std::string{staleBindingAdvice}, position)};
   const auto rendered = session_.coordinator().core().render(cell);
   if (!rendered) return refuse(what + " has no value");
   std::int64_t value = 0;
@@ -1161,6 +1232,7 @@ auto ScriptRunner::capability(const std::string &name,
   const auto cell        = found->second[0];
   const auto incarnation = arena.incarnationOf(cell);
   if (!incarnation) return refuse("$" + name + " is not a live cell");
+  if (const auto stale = staleName(name)) return std::unexpected{*stale};
   const auto tag = vortex::ioCellTag(arena, cell, *incarnation);
   if (!tag || *tag != vortex::IoCellTag::Capability) {
     return refuse("$" + name + " is not a capability cell");
@@ -1378,9 +1450,7 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
   // This script's own earlier actions stay: `as $r` names their outcomes for
   // the statements after, and the admission budget bounds how many one script
   // can hold. They join finished_ when the script ends.
-  retireAll(finished_);
-  freeFinishedRecords();
-  reconcileBindings();
+  retireFinished();
   // The bytes of a write are frozen here, before anything is staged: no
   // worker can observe a half-built buffer.
   std::vector<std::byte> frozen;
@@ -1585,6 +1655,9 @@ auto ScriptRunner::sourceBytes(const CellRef source) const
   const auto incarnation = arena.incarnationOf(source);
   if (!incarnation) return refuse("the bytes to write are not a live cell");
   const auto tag = vortex::ioCellTag(arena, source, *incarnation);
+  if (tag && *tag == vortex::IoCellTag::StaleBinding)
+    return std::unexpected{diagnose(vortex::frontend_codes::vqlStaleBinding,
+                                    std::string{staleBindingAdvice})};
   if (!tag) {
     // A text cell: its text is the bytes, whatever they are.
     const auto text = arena.textOf(source);
@@ -1677,6 +1750,63 @@ auto ScriptRunner::payloadReleased(const zigzag::CellRef cell) const -> bool {
       finishedRecords_, [&](const vortex::OwnedOutcome &record) {
         return record.cell.cell == cell && record.payloadReleased;
       });
+}
+
+auto ScriptRunner::staleName(const std::string &name,
+                             const std::optional<std::size_t> position) const
+    -> std::optional<FrontendDiagnostic> {
+  const auto &bound = session_.variables();
+  const auto found  = bound.find(name);
+  if (found == bound.end()) return std::nullopt;
+  const auto &arena = session_.coordinator().arena();
+  if (!std::ranges::any_of(found->second, [&](const CellRef cell) {
+        return isStaleBinding(arena, cell);
+      }))
+    return std::nullopt;
+  return diagnose(vortex::frontend_codes::vqlStaleBinding,
+                  "$" + name + ": " + std::string{staleBindingAdvice},
+                  position);
+}
+
+auto ScriptRunner::namesFreedHandle(const CellRef cell) const -> bool {
+  const auto &arena = session_.coordinator().arena();
+  return std::ranges::any_of(bound_, [&](const auto &entry) {
+    return std::ranges::any_of(entry.second, [&](const BoundHandle &handle) {
+      return handle.cell == cell &&
+             !arena.matches(handle.cell, handle.incarnation);
+    });
+  });
+}
+
+auto ScriptRunner::forget() -> ForgetReport {
+  ForgetReport report;
+  const auto &arena = session_.coordinator().arena();
+  // Coverage, not taint, is what the persist rule tracks (owner decision Q2),
+  // so which variable carries uncaptured text cannot be told: any that holds
+  // a plain cell might. A runtime handle holds no text of its own and is the
+  // only thing kept; reading a payload through it exposes it afresh, which the
+  // rule then counts again.
+  const auto holdsOnlyHandles = [&](const std::vector<CellRef> &cells) {
+    return std::ranges::all_of(cells, [&](const CellRef cell) {
+      const auto incarnation = arena.incarnationOf(cell);
+      return incarnation && vortex::ioCellTag(arena, cell, *incarnation);
+    });
+  };
+  const auto verdict = assess();
+  if (verdict.persistable()) return report;
+  std::vector<std::string> doomed;
+  for (const auto &[name, cells] : session_.variables()) {
+    if (!holdsOnlyHandles(cells)) doomed.push_back(name);
+  }
+  for (const auto &name : doomed) session_.eraseVariable(name);
+  report.unbound = std::move(doomed);
+  // Only the uncovered ones go: a covered exposure is already durable, and
+  // keeping it keeps a later `:save` of its text honest.
+  auto *const host = captureHost();
+  report.exposures = std::erase_if(exposures_, [&](const auto &range) {
+    return host == nullptr || !host->coordinator().spansFor(range).has_value();
+  });
+  return report;
 }
 
 auto ScriptRunner::staleMarker() const -> zigzag::CellRef {
@@ -1830,6 +1960,7 @@ auto ScriptRunner::expireIfDue(const FrontendToken &token)
 }
 
 auto ScriptRunner::resume(ScriptWake wake) -> ScriptRunResult {
+  noteBindings();
   reapClosing();
   reconcileBindings();
   auto activation =

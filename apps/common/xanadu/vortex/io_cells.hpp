@@ -56,6 +56,10 @@ enum class IoCellTag : std::uint8_t {
   /// The managed `IoSubmissionValue` tagged sum a frontend binds and matches
   /// (plan §10): Admitted{request} or Refused{outcome}, never both.
   Submission,
+  /// What a session variable names once the handle it held was freed: a cell
+  /// carrying no payload and no text of its own, so no reader of text, bytes
+  /// or capabilities can mistake it for the value it replaced.
+  StaleBinding,
 };
 
 enum class IoOutcomeTag : std::uint8_t {
@@ -287,6 +291,13 @@ queuedRequests(const zigzag::ArenaManifold &arena, const IoCellSchema &schema,
 
 /// Which arm of the managed `IoSubmissionValue` sum a submission cell holds.
 enum class IoSubmissionTag : std::uint8_t { Admitted, Refused };
+
+/// Mint the runtime-only cell a session variable is rebound to when the I/O
+/// handle it named was freed. It is tagged `StaleBinding`, never plain text, so
+/// a reader that takes untagged cells for text (a write's source, a row) can
+/// tell it apart by tag alone.
+[[nodiscard]] std::expected<IoOccurrenceCell, IoCellError>
+makeStaleBindingCell(zigzag::ArenaManifold &arena);
 
 /// Mint the `Admitted{request}` arm. The request is reached through a clone
 /// view like every other reference to a request, so the sum never becomes a

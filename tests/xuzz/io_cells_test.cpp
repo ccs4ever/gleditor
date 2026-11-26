@@ -44,6 +44,18 @@ struct Topology {
   }
 };
 
+// A freed handle's variable is rebound to this cell; it must carry a tag of
+// its own, or a reader that takes untagged cells for text reads it as text.
+TEST(IoCellsTest, theStaleBindingCellHasATagNoReaderTakesForText) {
+  ArenaManifold arena;
+  const auto marker = makeStaleBindingCell(arena);
+  ASSERT_TRUE(marker);
+  const auto tag = ioCellTag(arena, marker->cell, marker->incarnation);
+  ASSERT_TRUE(tag);
+  EXPECT_EQ(*tag, IoCellTag::StaleBinding);
+  EXPECT_EQ(toString(*tag), "StaleBinding");
+}
+
 TEST(IoCellsTest, schemaDimensionsAreMintedOnceThroughTheRegistry) {
   ArenaManifold arena;
   const auto first = makeIoCellSchema(arena);

@@ -1272,6 +1272,169 @@ TEST_F(VQueryE2ETest, AStaleReceiptNameIsATypedRefusal) {
       << result.output;
 }
 
+namespace {
+
+/// A named read of @p length bytes at @p offset, returning its tag.
+std::string readNamed(const std::string &offset, const std::string &name) {
+  return "effect { let $s := submit($src, read_bytes(" + offset +
+         ", 4)); match $s { admitted($q) => await($q), refused($e) => $e } } "
+         "as $" +
+         name + "; return io_tag($" + name + ")";
+}
+
+std::size_t occurrences(const std::string &text, const std::string &needle) {
+  std::size_t count = 0;
+  for (auto at = text.find(needle); at != std::string::npos;
+       at      = text.find(needle, at + 1))
+    ++count;
+  return count;
+}
+
+} // namespace
+
+// M7-VQL-c r2 Vortex M1: the stale marker was an untagged text cell, so a
+// write read it as the text "stale handle" and completed. It is now a tagged
+// cell no byte reader accepts.
+TEST_F(VQueryE2ETest, AStaleNameAsAWriteSourceIsRefusedAndWritesNothing) {
+  const auto session = captureSession(testDir, "stale write bytes");
+  const auto dst     = testDir / "dst.txt";
+  const auto result  = repl(session, testDir,
+                            {":open src " + session.source.string(),
+                             readNamed("0", "a"), readNamed("100", "b"),
+                             "effect { open(\"" + dst.string() +
+                                 "\") for write create } as "
+                                  "$dst; " +
+                                 writeAction("dst", "write_bytes(0, $a)", "w") +
+                                 "return io_tag($w)"},
+                            "--io-write-root '" + testDir.string() + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_STALE_BINDING"), std::string::npos)
+      << result.output;
+  EXPECT_TRUE(!fs::exists(dst) || readAll(dst).empty())
+      << "the marker's text reached the file: " << readAll(dst);
+}
+
+TEST_F(VQueryE2ETest, AStaleNameIsNeverAPersistableRow) {
+  const auto session = captureSession(testDir, "stale row bytes");
+  const auto saved   = testDir / "stale.store";
+  const auto result =
+      repl(session, testDir,
+           {":open src " + session.source.string(), readNamed("0", "a"),
+            readNamed("100", "b"), "return $a", ":save " + saved.string()});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_PERSIST_HANDLE"), std::string::npos)
+      << result.output;
+  EXPECT_FALSE(fs::exists(saved));
+}
+
+TEST_F(VQueryE2ETest, AStaleNameGivenToCaptureOrSubmitIsATypedRefusal) {
+  const auto session = captureSession(testDir, "stale capture bytes");
+  const auto result =
+      repl(session, testDir,
+           {":open src " + session.source.string(), readNamed("0", "a"),
+            readNamed("100", "b"), "effect { capture($a) } as $c; return 1",
+            "return io_tag($a)"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  // Once as the capture's refusal, once as the plain line's.
+  EXPECT_GE(occurrences(result.output, "VQL_IO_STALE_BINDING"), 2U)
+      << result.output;
+  EXPECT_EQ(result.output.find("RelationNext"), std::string::npos)
+      << result.output;
+}
+
+// M7-VQL-c r2 Zigzag N1: a name made by a plain line after the script that
+// produced the handle was untracked, and aliased the reused slot.
+TEST_F(VQueryE2ETest, ACopyMadeByAPlainLetGoesStaleWithItsHandle) {
+  const auto session = captureSession(testDir, "alias bytes");
+  const auto result =
+      repl(session, testDir,
+           {":open src " + session.source.string(), readNamed("0", "ra"),
+            "let $y := $ra; return io_tag($y)", readNamed("500", "rb"),
+            "return io_tag($y)"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  // $y said Complete while its record lived and must not say EndOfStream (the
+  // reader of $rb) afterwards.
+  EXPECT_EQ(occurrences(result.output, "EndOfStream"), 1U) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_STALE_BINDING"), std::string::npos)
+      << result.output;
+  EXPECT_EQ(result.output.find("RelationNext"), std::string::npos)
+      << result.output;
+}
+
+TEST_F(VQueryE2ETest, ACopyMadeByALetWithNoQueryAfterItStillGoesStale) {
+  const auto session = captureSession(testDir, "alias bytes");
+  const auto result  = repl(session, testDir,
+                            {":open src " + session.source.string(),
+                             readNamed("0", "ra"), "let $y := $ra; return 1",
+                             readNamed("500", "rb"), "return io_tag($y)"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(occurrences(result.output, "EndOfStream"), 1U) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_STALE_BINDING"), std::string::npos)
+      << result.output;
+}
+
+// Owner decision 2026-11-26: :forget is the way out of a refused :save.
+TEST_F(VQueryE2ETest, ForgetLiftsTheRefusalAndUnbindsTheUncapturedText) {
+  const auto session = captureSession(testDir, "forgettable bytes");
+  const auto refused = testDir / "refused.store";
+  const auto fresh   = testDir / "fresh.store";
+  const auto result =
+      repl(session, testDir,
+           {":open src " + session.source.string(),
+            readAll64 + "let $t := io_payload($r); return 1", "return $t",
+            ":save " + refused.string(), ":forget", "return 1",
+            ":save " + fresh.string(), "return $t"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_PERSIST_NEEDS_CAPTURE"),
+            std::string::npos)
+      << result.output;
+  EXPECT_FALSE(fs::exists(refused));
+  EXPECT_NE(result.output.find("Forgot 1 uncaptured payload; unbound $t"),
+            std::string::npos)
+      << result.output;
+  EXPECT_TRUE(fs::exists(fresh)) << result.output;
+  // The text printed once, before :forget; afterwards $t names nothing.
+  EXPECT_EQ(occurrences(result.output, "forgettable bytes"), 1U)
+      << result.output;
+}
+
+TEST_F(VQueryE2ETest, ForgetNeverReachesWhatACaptureCovered) {
+  const auto session = captureSession(testDir, "kept bytes");
+  const auto saved   = testDir / "kept.store";
+  const auto result  = repl(session, testDir,
+                            {":open src " + session.source.string(),
+                             readAll64 + "effect { capture($r) } as $c; " +
+                                 "let $t := io_payload($r); return 1",
+                             ":forget", "return $t", ":save " + saved.string()});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("Nothing to forget"), std::string::npos)
+      << result.output;
+  EXPECT_NE(result.output.find("kept bytes"), std::string::npos)
+      << result.output;
+  EXPECT_TRUE(fs::exists(saved)) << result.output;
+}
+
+TEST_F(VQueryE2ETest, ForgetKeepsCapabilitiesAndOutcomeHandles) {
+  const auto session = captureSession(testDir, "handles stay");
+  const auto result =
+      repl(session, testDir,
+           {":open src " + session.source.string(),
+            readAll64 + "let $t := io_payload($r); return 1", ":forget",
+            "return io_tag($r)", "return io_tag($src)"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("Complete"), std::string::npos) << result.output;
+  EXPECT_NE(result.output.find("Capability"), std::string::npos)
+      << result.output;
+}
+
+TEST_F(VQueryE2ETest, ForgetWithNothingReadSaysSo) {
+  const auto session = captureSession(testDir, "unused");
+  const auto result  = repl(session, testDir, {":forget"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("Nothing to forget"), std::string::npos)
+      << result.output;
+}
+
 // The receipt `$c` is a runtime handle; persisting it was refused deep inside
 // promotion and, with `-o`, typed in as the words of a cell. It is a typed
 // refusal that names the road to what the author meant.

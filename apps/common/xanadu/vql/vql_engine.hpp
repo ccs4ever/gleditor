@@ -80,6 +80,8 @@ public:
   [[nodiscard]] std::vector<zigzag::CellRef>
   getVariable(std::string_view name) const;
   void clearVariables() noexcept;
+  /// Unbind one variable; a name not bound is left as it is.
+  void eraseVariable(std::string_view name);
   [[nodiscard]] const ContractBindings &variables() const noexcept {
     return env_;
   }
