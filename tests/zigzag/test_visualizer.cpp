@@ -515,6 +515,21 @@ TEST(ZigzagVisualizerTest, HomeAndDimensionCellsAccessibleInTree) {
 // dimension -- the splice, then two explicit clears of links the splice had
 // already cleared, because joining a cell's two neighbours displaces it from
 // both sides and linkCells() has no idempotence guard.
+TEST(ZigzagVisualizerTest, ACloneMasterWithViewsIsNotDeletedUnderItsViews) {
+  // M7-VQL gate r2, vortex minor 5.
+  ZigzagVisualizer viz("Sans 12");
+  ASSERT_TRUE(viz.insertConnectedCell("Master", "d.1", DimVector::POS));
+  const auto master = focusedCell(viz);
+  ASSERT_TRUE(viz.insertConnectedCell("View", "d.clone", DimVector::POS));
+  const auto view = focusedCell(viz);
+  viz.navigateFocus("d.clone", DimVector::NEG);
+  ASSERT_EQ(focusedCell(viz), master);
+  EXPECT_FALSE(viz.deleteFocusCell());
+  viz.navigateFocus("d.clone", DimVector::POS);
+  ASSERT_EQ(focusedCell(viz), view);
+  EXPECT_TRUE(viz.deleteFocusCell());
+}
+
 TEST(ZigzagVisualizerTest, DeletingACellCostsOneOperationPerDimension) {
   ZigzagVisualizer viz("Sans 12");
   ASSERT_TRUE(viz.insertConnectedCell("A", "d.1", DimVector::POS));

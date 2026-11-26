@@ -94,7 +94,18 @@ public:
   /// effect runs to its own end; its terminal is then dropped unpublished and
   /// its budget freed. A request already terminal is forgotten at once, and a
   /// stale or unknown handle is a no-op. Refused while a waiter is registered.
-  void orphanRequest(RequestCell);
+  enum class OrphanResult : std::uint8_t {
+    Orphaned,   ///< running; its terminal will be dropped unpublished
+    Forgotten,  ///< already terminal; forgotten at once
+    HasWaiters, ///< refused: a registered waiter still names it
+    Unknown,    ///< stale or unknown handle
+  };
+  auto orphanRequest(RequestCell) -> OrphanResult;
+  /// Requests ever orphaned or forgotten as orphans, for diagnosing a
+  /// request that stays in the budget.
+  [[nodiscard]] auto orphanCount() const noexcept -> std::uint64_t {
+    return orphanCount_;
+  }
   /// Free the graph of a request the service no longer indexes. A request
   /// retired while a submission view still named it was kept whole by the
   /// reaper and nothing re-reaps it once the view leaves; the owner calls this
@@ -188,6 +199,7 @@ private:
   void eraseRequestState(std::uint64_t tokenKey);
   /// Drop an orphaned request's state without touching any cell.
   void forgetOrphan(std::uint64_t tokenKey);
+  std::uint64_t orphanCount_{};
   [[nodiscard]] auto ensureTerminalOutcome(RequestState &)
       -> std::optional<OutcomeCell>;
 

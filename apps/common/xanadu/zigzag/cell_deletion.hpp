@@ -80,6 +80,22 @@ struct LinkEdit {
   bool operator==(const LinkEdit &) const = default;
 };
 
+/// The clone dimension of a caller that wants a clone master with views
+/// protected. A master is the head of its clone rank; deleting it either way
+/// (Repair or LeaveBroken) makes its first view the new head, which does not
+/// carry the master's content. That is the caller's decision, not the plan's:
+/// the default refuses, and @c promoteFirstView says the caller means it.
+struct CloneGuard {
+  DimRef dim{noCell};
+  bool promoteFirstView{false};
+};
+
+/// True when deleting the cell @p broken describes would leave views of a clone
+/// master without it and @p guard does not allow that.
+[[nodiscard]] bool
+orphansViews(const Neighbourhood &broken,
+             const std::optional<CloneGuard> &guard) noexcept;
+
 /**
  * @brief The fewest link writes that delete @p cell from @p ranks in @p mode.
  *
@@ -95,7 +111,8 @@ struct LinkEdit {
  * Clone ranks need no special case. A clone master is the head of its rank, so
  * Repair promotes its first view to master, and LeaveBroken leaves the views
  * as a rank headed by that first view; a view is just a member. A caller that
- * must not orphan a master's views checks first (see io_cells heldByViews).
+ * must not orphan a master's views passes a CloneGuard (orphansViews), or
+ * checks first as the io_cells reapers do (heldByViews).
  */
 void planDeletion(CellRef cell, const Neighbourhood &ranks, DeletionMode mode,
                   gleditor::cpp26::function_ref<void(const LinkEdit &)> emit);
@@ -109,14 +126,15 @@ void planRankDeletion(
 /**
  * @brief The deterministic cell a cursor on a deleted cell moves to.
  *
- * Order: the cursor's bound dimensions in their binding order, and along each
- * the posward neighbour first, then the negward one -- the order the xuzz view
- * (x, y, z) already used. When none of the bound dimensions yields a cell,
- * the cell's remaining connections in neighbourhood order, again posward
- * before negward. A cell with no usable connection sends the cursor to
- * @p home. @p eligible refuses candidates the caller cannot land on (a
- * protected or derived cell, a metadata dimension); it sees the dimension and
- * the candidate.
+ * Order, fixed and deterministic: (1) the cursor's bound dimensions in their
+ * binding order, and along each the posward neighbour before the negward one
+ * -- the order the xuzz view (x, y, z) already used, kept as the convention
+ * (it is an inherited choice, not derived: forward is the direction a reader
+ * keeps moving); (2) when no bound dimension yields a cell, the cell's other
+ * connections in neighbourhood order, again posward before negward; (3) with
+ * no usable connection, @p home. @p eligible refuses candidates the caller
+ * cannot land on (a protected or derived cell, a metadata dimension); it sees
+ * the dimension and the candidate.
  *
  * Pure: it reads only its arguments, so the engine and any UI call it alike.
  * nullopt only when there is no eligible neighbour and no home.

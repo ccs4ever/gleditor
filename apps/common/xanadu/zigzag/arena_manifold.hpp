@@ -271,6 +271,7 @@ enum class ArenaRefusal : std::uint8_t {
   CellLinked,       ///< freeCell() of a cell that still has a live link
   NotReleasable,    ///< freeCell() of a shadow, proxy, dimension or other cell
                     ///< that other arena state names
+  HoldsViews, ///< deleteCell() of a clone master whose views would lose it
 };
 
 class ArenaManifold;
@@ -307,6 +308,8 @@ toString(const ArenaRefusal refusal) noexcept {
     return "cell still linked";
   case ArenaRefusal::NotReleasable:
     return "cell cannot be released";
+  case ArenaRefusal::HoldsViews:
+    return "cell is a clone master with views";
   }
   return "unknown refusal";
 }
@@ -817,18 +820,22 @@ public:
    * Refused before anything is written, so a refusal changes nothing:
    * UnknownCell when @p ref is not live under @p incarnation, NotReleasable
    * for the home cell and for cells other arena state names (dimensions,
-   * proxies, quote and provenance cells). May throw what link() throws (a
+   * proxies, quote and provenance cells), and HoldsViews when @p clones is
+   * given, @p ref heads a clone rank with views and the guard does not allow
+   * promoting the first view (orphansViews). May throw what link() throws (a
    * shadow allocation, the link-run limit), possibly after some writes; under
    * a mark release() restores.
    */
   std::expected<Deletion, ArenaRefusal>
-  deleteCell(CellRef ref, AllocationIncarnation incarnation, DeletionMode mode);
+  deleteCell(CellRef ref, AllocationIncarnation incarnation, DeletionMode mode,
+             std::optional<CloneGuard> clones = std::nullopt);
 
   /// deleteCell() without the removal: break @p ref's connections (every
   /// dimension) and leave the cell in the arena, for a caller that frees it
   /// later or keeps it. Returns the neighbourhood it broke.
-  std::expected<Neighbourhood, ArenaRefusal> detachCell(CellRef ref,
-                                                        DeletionMode mode);
+  std::expected<Neighbourhood, ArenaRefusal>
+  detachCell(CellRef ref, DeletionMode mode,
+             std::optional<CloneGuard> clones = std::nullopt);
 
   /// detachCell() along one dimension, leaving the cell's other connections.
   /// The reapers' rank detach: Repair keeps the rest of the rank walkable.

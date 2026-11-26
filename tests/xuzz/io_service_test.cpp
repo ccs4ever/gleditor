@@ -610,6 +610,49 @@ TEST(IoServiceTest, OpenWhosePublishThrowsStillSettlesTheOpenUnbound) {
   EXPECT_EQ(harness.adapter.openSettledBound, 0U);
 }
 
+TEST(IoServiceTest, AnOrphanedOpenMintsNoEndpointButStillSettlesTheHook) {
+  // M7-VQL gate r2, vortex minor 3: an orphan's request cell is gone, so an
+  // endpoint minted for it could never be named or reaped.
+  Harness harness;
+  OpenSpec spec{.adapterKey      = testKey,
+                .locator         = {std::byte{0x2f}},
+                .requestedRights = 1,
+                .consistency     = 0,
+                .deadline =
+                    std::chrono::steady_clock::now() + std::chrono::seconds(5)};
+  const auto submitted = harness.service.admitOpen(spec);
+  ASSERT_TRUE(std::holds_alternative<Admitted>(submitted.value));
+  const auto request = std::get<Admitted>(submitted.value).request;
+  EXPECT_EQ(harness.service.orphanRequest(request),
+            IoService::OrphanResult::Orphaned);
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+  EXPECT_EQ(harness.cells.mintedEndpoints, 0U);
+  EXPECT_EQ(harness.cells.mintedCapabilities, 0U);
+  EXPECT_EQ(harness.adapter.openSettledCalls, 1U);
+  EXPECT_EQ(harness.adapter.openSettledBound, 0U);
+}
+
+TEST(IoServiceTest, OrphaningIsTypedAndCounted) {
+  // M7-VQL gate r2, vortex minor 2: a request with a waiter is refused by
+  // name, not silently, and every orphan is counted.
+  Harness harness;
+  const auto request  = harness.submit();
+  const auto awaiting = harness.service.await(request, {OwnerCell{22}, 1, 31});
+  ASSERT_TRUE(std::holds_alternative<Pending>(awaiting.value));
+  EXPECT_EQ(harness.service.orphanRequest(request),
+            IoService::OrphanResult::HasWaiters);
+  EXPECT_EQ(harness.service.orphanCount(), 0U);
+  EXPECT_EQ(harness.service.orphanRequest(RequestCell{9999, 1}),
+            IoService::OrphanResult::Unknown);
+  const auto other = harness.submit();
+  EXPECT_EQ(harness.service.orphanRequest(other),
+            IoService::OrphanResult::Orphaned);
+  EXPECT_EQ(harness.service.orphanCount(), 1U);
+}
+
 TEST(IoServiceTest,
      ShutdownStopsAdmissionAndCancelsQueuedRequestsWithoutRunning) {
   Harness harness;

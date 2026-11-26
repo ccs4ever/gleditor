@@ -598,18 +598,30 @@ void IoService::retireRequest(const RequestCell request) {
   eraseRequestState(found->first);
 }
 
-void IoService::orphanRequest(const RequestCell request) {
+auto IoService::orphanRequest(const RequestCell request) -> OrphanResult {
   const auto indexed =
       requestByCell_.find(std::pair{request.cell, request.incarnation});
-  if (indexed == requestByCell_.end()) return;
+  if (indexed == requestByCell_.end()) return OrphanResult::Unknown;
   const auto found = requests_.find(indexed->second);
-  if (found == requests_.end() || found->second.cell != request) return;
-  if (!found->second.waiters.empty()) return;
-  if (found->second.outcome || found->second.terminalRecord) {
-    forgetOrphan(found->first);
-    return;
+  if (found == requests_.end() || found->second.cell != request) {
+    return OrphanResult::Unknown;
   }
+  if (!found->second.waiters.empty()) {
+    // A waiter still holds a route to the request's outcome, so it is not
+    // unnameable yet; the caller decides what to do with the refusal.
+    GLEDITOR_LOG_DEBUG("vortex.io", "orphan refused: request has {} waiters",
+                       found->second.waiters.size());
+    return OrphanResult::HasWaiters;
+  }
+  ++orphanCount_;
+  if (found->second.outcome || found->second.terminalRecord) {
+    GLEDITOR_LOG_DEBUG("vortex.io", "terminal request forgotten as orphan");
+    forgetOrphan(found->first);
+    return OrphanResult::Forgotten;
+  }
+  GLEDITOR_LOG_DEBUG("vortex.io", "running request orphaned");
   found->second.orphaned = true;
+  return OrphanResult::Orphaned;
 }
 
 void IoService::forgetOrphan(const std::uint64_t tokenKey) {
@@ -772,7 +784,10 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
       }
       if (state.open) {
         std::optional<OpenedEndpoint> minted;
-        if (auto *complete = std::get_if<Complete>(&outcome)) {
+        // An orphan's request cell is gone, so an endpoint minted for it
+        // could never be named or reaped; the adapter is still told, with none.
+        if (auto *complete = std::get_if<Complete>(&outcome);
+            complete != nullptr && !state.orphaned) {
           const auto opened = cells_.mintOpenedEndpoint(*state.open);
           if (opened) {
             complete->value = *opened;

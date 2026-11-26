@@ -147,9 +147,32 @@ TEST(ArenaDeleteCellTest, aCloneMasterAndAClone) {
   ASSERT_TRUE(a.m.deleteCell(v1, a.inc(v1), DeletionMode::Repair));
   EXPECT_EQ(a.m.cloneMaster(v2, a.clone), master);
   // Deleting the master with Repair promotes the first remaining view.
-  ASSERT_TRUE(a.m.deleteCell(master, a.inc(master), DeletionMode::Repair));
+  ASSERT_TRUE(a.m.deleteCell(
+      master, a.inc(master), DeletionMode::Repair,
+      zigzag::CloneGuard{.dim = a.clone, .promoteFirstView = true}));
   EXPECT_EQ(a.m.cloneMaster(v2, a.clone), v2);
   EXPECT_EQ(a.m.linked(v2, a.clone, DimVector::NEG), std::nullopt);
+}
+
+TEST(ArenaDeleteCellTest,
+     aCloneMasterWithViewsIsRefusedUnlessPromotionIsChosen) {
+  // M7-VQL gate r2, vortex minor 5: the first view would become the master
+  // without the master's content, so the guarded deletion refuses by name
+  // and writes nothing, in either mode.
+  for (const auto mode : {DeletionMode::Repair, DeletionMode::LeaveBroken}) {
+    Arena a;
+    const auto master = a.cell("m"), v1 = a.cell("v1");
+    a.chain(a.clone, {master, v1});
+    const auto guard   = zigzag::CloneGuard{.dim = a.clone};
+    const auto refused = a.m.deleteCell(master, a.inc(master), mode, guard);
+    ASSERT_FALSE(refused);
+    EXPECT_EQ(refused.error(), ArenaRefusal::HoldsViews);
+    EXPECT_TRUE(a.m.contains(master));
+    EXPECT_EQ(a.m.linked(master, a.clone, DimVector::POS), v1);
+    // A view, and a master with no views, are never refused.
+    EXPECT_TRUE(a.m.deleteCell(v1, a.inc(v1), mode, guard));
+    EXPECT_TRUE(a.m.deleteCell(master, a.inc(master), mode, guard));
+  }
 }
 
 TEST(ArenaDeleteCellTest, deletionUnderAMarkIsUndoneByRelease) {

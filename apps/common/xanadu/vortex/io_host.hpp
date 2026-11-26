@@ -45,7 +45,8 @@ public:
   void retireRequest(RequestCell request);
   /// Forget a request whose cells were rolled back; see
   /// IoService::orphanRequest. It is never cancelled.
-  void orphanRequest(RequestCell request);
+  auto orphanRequest(RequestCell request) -> IoService::OrphanResult;
+  [[nodiscard]] auto orphanCount() const -> std::uint64_t;
   /// Retire @p request only when it is already terminal, so its outcome is
   /// readable and nobody is cancelled by the call. False for a request still
   /// running (which `retireRequest` would cancel), or a stale one.

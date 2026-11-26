@@ -34,6 +34,14 @@ Neighbourhood::along(const DimRef dim) const noexcept {
   return found == ranks.end() ? std::nullopt : std::optional{*found};
 }
 
+bool orphansViews(const Neighbourhood &broken,
+                  const std::optional<CloneGuard> &guard) noexcept {
+  if (!guard || guard->promoteFirstView) return false;
+  const auto ward = broken.along(guard->dim);
+  return ward && ward->posward && !ward->negward &&
+         *ward->posward != broken.cell;
+}
+
 void planRankDeletion(
     const CellRef cell, const RankNeighbours &ward, const DeletionMode mode,
     const gleditor::cpp26::function_ref<void(const LinkEdit &)> emit) {

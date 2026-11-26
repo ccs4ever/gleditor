@@ -206,9 +206,15 @@ void IoHost::retireRequest(const RequestCell request) {
   service_.retireRequest(request);
 }
 
-void IoHost::orphanRequest(const RequestCell request) {
+auto IoHost::orphanRequest(const RequestCell request)
+    -> IoService::OrphanResult {
   requireOwner();
-  service_.orphanRequest(request);
+  return service_.orphanRequest(request);
+}
+
+auto IoHost::orphanCount() const -> std::uint64_t {
+  requireOwner();
+  return service_.orphanCount();
 }
 
 auto IoHost::retireIfTerminal(const RequestCell request) -> bool {

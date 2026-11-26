@@ -607,6 +607,15 @@ bool ZigzagVisualizer::deleteFocusCell() {
   // dimension and leaves the cell with no links.
   const auto broken =
       zigzag::Neighbourhood::of(focus, engine_->manifold().dimensionsOf(focus));
+  // A clone master's views would lose their content with it; deleting views
+  // first (or the master as a whole group) is the user's explicit choice.
+  const auto cloneDim =
+      engine_->manifold().dimensionNamed("d.clone", engine_->store());
+  if (zigzag::orphansViews(
+          broken, cloneDim ? std::optional{zigzag::CloneGuard{.dim = *cloneDim}}
+                           : std::nullopt)) {
+    return false;
+  }
 
   // The cursor leaves along the first bound view dimension (x, y, z),
   // posward before negward, and is never put on a protected or derived cell

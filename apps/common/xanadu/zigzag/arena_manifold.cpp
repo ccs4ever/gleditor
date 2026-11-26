@@ -3009,11 +3009,15 @@ ArenaResult ArenaManifold::freeCell(const CellRef ref,
 }
 
 std::expected<Neighbourhood, ArenaRefusal>
-ArenaManifold::detachCell(const CellRef ref, const DeletionMode mode) {
+ArenaManifold::detachCell(const CellRef ref, const DeletionMode mode,
+                          const std::optional<CloneGuard> clones) {
   if (!contains(ref)) return std::unexpected{ArenaRefusal::UnknownCell};
   // The run is a span into storage the writes below move, so read it whole
   // first.
   auto broken = Neighbourhood::of(ref, dimensionsOf(ref));
+  if (orphansViews(broken, clones)) {
+    return std::unexpected{ArenaRefusal::HoldsViews};
+  }
   std::optional<ArenaRefusal> refused;
   planDeletion(ref, broken, mode, [&](const LinkEdit &edit) {
     if (refused) return;
@@ -3041,17 +3045,16 @@ ArenaManifold::detachFromRank(const CellRef ref, const DimRef dim,
   return ward;
 }
 
-std::expected<ArenaManifold::Deletion, ArenaRefusal>
-ArenaManifold::deleteCell(const CellRef ref,
-                          const AllocationIncarnation incarnation,
-                          const DeletionMode mode) {
+std::expected<ArenaManifold::Deletion, ArenaRefusal> ArenaManifold::deleteCell(
+    const CellRef ref, const AllocationIncarnation incarnation,
+    const DeletionMode mode, const std::optional<CloneGuard> clones) {
   if (!matches(ref, incarnation)) {
     return std::unexpected{ArenaRefusal::UnknownCell};
   }
   if (home() == ref || namedByArenaState(ref)) {
     return std::unexpected{ArenaRefusal::NotReleasable};
   }
-  auto broken = detachCell(ref, mode);
+  auto broken = detachCell(ref, mode, clones);
   if (!broken) return std::unexpected{broken.error()};
   Deletion result{.broken = *std::move(broken)};
   if (isEphemeral(ref)) {
