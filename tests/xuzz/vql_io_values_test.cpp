@@ -1225,17 +1225,8 @@ TEST(VqlIoJoinTest, ManyJoinAndWriteRunsLeaveTheArenaAndTheServiceBounded) {
   static_cast<void>(
       f.rows(open(path, "for write create", "seed") + "return io_tag($seed)"));
   const auto once = [&] {
-    // A script's `let` publishes a session variable whose cell lives until
-    // the session drops it (an engine-wide lifetime this slice does not
-    // change); the test plays the owner, so what remains is the slice's own.
-    if (const auto held = f.engine.variables().find("text");
-        held != f.engine.variables().end()) {
-      for (const auto cell : held->second) {
-        if (const auto incarnation = f.arena.incarnationOf(cell))
-          static_cast<void>(f.arena.freeCell(cell, *incarnation));
-      }
-      f.engine.setVariable("text", std::vector<zigzag::CellRef>{});
-    }
+    // Nothing frees `$text` by hand: rebinding it is what releases the last
+    // run's cell.
     auto result = f.run(
         "let $text := join($rows, \";\"); " + open(path, "for write", "o") +
         act("o", "write_bytes(0, $text)", "w") + "return io_tag($w)");

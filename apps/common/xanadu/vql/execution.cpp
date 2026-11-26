@@ -17,6 +17,7 @@
 
 #include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vortex/frontend_diagnostics.hpp"
+#include "common/xanadu/vortex/io_cells.hpp"
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/contracts.hpp"
 #include "common/xanadu/vql/frame_eligibility.hpp"
@@ -657,6 +658,7 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
     std::vector<zigzag::CellRef> publishedCells;
     if (session_) {
       ContractBindings published;
+      VQLEngine::OwnedBindings owned;
       std::unordered_map<std::string, std::vector<PathStep>> functors;
       publishMounts(session_, run->compiled_.sessionBindings);
       for (const auto &binding : run->compiled_.sessionBindings) {
@@ -668,15 +670,27 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
           continue;
         }
         auto &values = published[binding.name];
+        auto &minted = owned[binding.name];
         for (const auto slot : binding.slots) {
           const auto slotValues = vm_.resultCells(slot);
           values.insert(values.end(), slotValues.begin(), slotValues.end());
           publishedCells.insert(publishedCells.end(), slotValues.begin(),
                                 slotValues.end());
+          // Only a cell this run's program minted is the binding's to free: a
+          // store's row or an earlier script's cell is somebody else's, and an
+          // I/O cell (a request, an outcome record) has its own reapers.
+          for (const auto cell : slotValues) {
+            const auto incarnation = arena.incarnationOf(cell);
+            if (!incarnation ||
+                *incarnation <= run->preCompileMark.newestIncarnation ||
+                vortex::ioCellTag(arena, cell, *incarnation))
+              continue;
+            minted.push_back({cell, *incarnation});
+          }
         }
       }
-      session_->publishCompilerBindings(std::move(published),
-                                        std::move(functors));
+      session_->publishCompilerBindings(
+          std::move(published), std::move(functors), std::move(owned), cells);
       session_->publishUserDefs(run->query_.defs);
     }
     vm_.abortScopedChoices(cursor);

@@ -104,9 +104,23 @@ public:
   void publishMount(const std::string &dimName, SessionMount mount);
   /// Removes both spellings of @p dimName.
   void publishUnmount(const std::string &dimName);
+  /// A cell a script's own program minted for a `let`, with the incarnation
+  /// that proves the slot still holds that cell.
+  struct OwnedCell {
+    zigzag::CellRef cell;
+    zigzag::ArenaManifold::AllocationIncarnation incarnation;
+  };
+  using OwnedBindings = std::unordered_map<std::string, std::vector<OwnedCell>>;
+  /// Publish a script's `let`s. @p owned names the cells each binding's
+  /// program minted (a store row or an earlier script's cell is no one's to
+  /// free), which are freed when the name is rebound or erased, unless the new
+  /// binding, another name or @p keep (the rows the caller holds) still names
+  /// them: a script that rebinds a name every run would otherwise leave a cell
+  /// a run, up to a joined text's size.
   void publishCompilerBindings(
       ContractBindings bindings,
-      std::unordered_map<std::string, std::vector<PathStep>> functors);
+      std::unordered_map<std::string, std::vector<PathStep>> functors,
+      OwnedBindings owned = {}, std::span<const zigzag::CellRef> keep = {});
   [[nodiscard]] const std::unordered_map<std::string, DefDeclaration> &
   userDefs() const noexcept {
     return userDefs_;
@@ -340,6 +354,12 @@ private:
   std::unordered_map<std::string, std::uint32_t> historicalSpaces_;
 
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> env_;
+  /// What each `let` name's program minted; see publishCompilerBindings.
+  OwnedBindings ownedLets_;
+  /// Free the cells @p name's last binding minted, but not those @p keep or
+  /// another binding still names.
+  void releaseOwned(const std::string &name,
+                    std::span<const zigzag::CellRef> keep);
   /// Names bound to functors rather than cells; a name is in one or the other.
   std::unordered_map<std::string, FunctorSteps> functors_;
   std::string activePerspective_{};
