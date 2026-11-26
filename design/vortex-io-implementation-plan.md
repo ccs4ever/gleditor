@@ -1423,8 +1423,8 @@ M7-VQL-c (design only, nothing built): write effects (`write_bytes`, `append_byt
 (`effect { capture($r) }`, which routes a read outcome through `CaptureCoordinator` into the
 author's one permascroll) that lifts `VQL_IO_PERSIST_NEEDS_CAPTURE` only for runs whose every
 exposed payload range is covered by a committed capture. No core file changes. Design, proposals
-considered (P8 and P9, both refused), bounds, acceptance criteria, tests and stages C1-C5 are in
-[`vortex-io-m7-vql-c.md`](vortex-io-m7-vql-c.md).
+considered (P8 and P9, both refused), bounds, acceptance criteria, tests and stages C1-C5 and C1b
+(owned outcome records) are in [`vortex-io-m7-vql-c.md`](vortex-io-m7-vql-c.md).
 
 P6: the Submit opcode (applied with owner approval, `vortex_vm.{hpp,cpp}` only):
 

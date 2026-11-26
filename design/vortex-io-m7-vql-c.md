@@ -14,7 +14,7 @@ a row 16.9.
 
 ## 1. Scope
 
-**In.**
+**In.** (The owned-record form of §12.1 is in, by owner ruling.)
 
 1. **Write effects.** Writing bytes to a file endpoint opened for writing, through the existing
    `FileEndpointAdapter`/`FileSourceAdapter` write path and `IoService`: `write_bytes` (positional),
@@ -292,7 +292,7 @@ Argued:
   the text again as typed bytes (a second copy, no transclusion link). Price: those bytes occur
   twice in the permascroll. The captured cell from `io_captured($c)` is the right row and
   transcludes the span; the rule does not force it because refusing would turn "persist what I
-  printed" into an error after the author already paid for the capture. Open question Q2.
+  printed" into an error after the author already paid for the capture.
 - **Partial coverage refuses.** Capturing bytes `[0,10)` and exposing `[0,4096)` is `NeedsCapture`:
   the uncovered 4086 bytes were never captured.
 - **Evaluated at script end, not at persist time.** Translations may be evicted later (the
@@ -498,17 +498,13 @@ users work around" applies, and the honest answer is: the bound is a configured 
 statements the author is willing to write. The real fix is a host-side `copy` effect that streams
 between two capabilities in bounded chunks with progress and one terminal outcome; it needs its own
 design (chunk accounting, partial-failure contract) and is deferred (§19) rather than smuggled in
-here. Raised as Q4.
+here.
 
-**Slots held by a long script.** A request holds a service slot until reaped. A script of N writes
-holds up to `maxRequests` slots and the (N+1)th would be refused. The runner already retires a
-*terminal* request when the next action admits (`script_runner.hpp`: "finished\_ ... retired before
-the next script's first admission"); this slice extends that to a script's own *named-and-terminal*
-requests that nothing awaits again only if the script did not bind them with `as` (a bound name must
-stay readable until the script ends, so the rule cannot reap it). The price: a script that names
-every write outcome holds one slot per write and so is capped at 16 writes in flight-or-named, a
-limit authors can lift by not naming outcomes they never read. Stated, and listed under Q5 as the
-one place this design accepts a ceiling.
+**Slots held by a long script.** M7-VQL-b keeps every request a script admits until the script ends,
+so a script that names its outcomes is capped at `maxRequests` (16) of them. The owner ruled that
+cap out: an outcome bound with `as` is copied into a script-owned **owned record** (§12.1) and its
+service request is retired at once, so the slot is held only while the request runs. The cost moves
+from slots to the record's retained payload bytes, which are budgeted (§12.1).
 
 ## 11. Timeout, cancel and `~ScriptRunner`
 
@@ -570,6 +566,62 @@ existing graph conventions are reused (`io_cells.hpp` dimensions `Request`, `Out
   of the rank is the receipt; walking the rank is how a program enumerates.
 - **Exposure set.** Runner state (`std::vector<PayloadRange>` per activation) with no cell form: it
   is a host fact about leases, not data. It answers one question for one host call.
+
+### 12.1 The owned record (Q5, owner ruling)
+
+**Problem.** `as $r` binds the service's outcome cell, which lives in the request's graph; to keep
+`$r` readable the runner keeps the request admitted until the script ends. That caps named outcomes
+at the request budget and makes a payload-bearing outcome pin the request's completion reserve.
+
+**Design.** When a statement with `as $r` reaches a terminal outcome, the runner calls
+`OwnedOutcome::copy(outcome)` (host code in `apps/common/xanadu/vortex/`, beside `FrontendBridge`),
+then retires the request through `FrontendBridge::retire` immediately and binds `$r` to the record.
+
+- **Cells.** One arena cell tagged `IoCellTag::Outcome` (the same tag, so every existing reader of
+  an outcome treats it alike) carrying the *same* ranks the service's outcome has: the tag and
+  scalar fields on the field rank (`errorCode`, `stableDetail`, `cause`, `uncertain`), and a
+  `Progress` rank cell with the progress fields (`acceptedBytes`, `transferredBytes`,
+  `consumedBytes`, `sourceSequence`, `phase`). They are copied by value into cells the script owns,
+  so retiring the request frees nothing the record reads. The cell has no `Request`, `Queue`,
+  `Waiter`, `Clone` or `Lease` rank and so no way back to the service. A record is marked by a
+  single `Owned` field so `io_tag($r)` and `auditLanguageValue` can tell it apart; nothing else
+  differs.
+- **Payload.** A payload has no cell form (§12 above), so the record has no `Payload` rank. The
+  runner holds host state keyed by `(record cell, incarnation)`: `{PayloadRange, PayloadLease}`. The
+  lease is taken with `PayloadResolver::retain(range)` *before* the request is retired, so the bytes
+  stay resolvable when the service releases its own. The state is validated against the cell's
+  incarnation and dies with it (plan §3.2: native tables are never rebuilt from cells).
+- **Readers.** `io_tag`, `io_error`, `io_detail`, `io_bytes` and `io_uncertain` read through
+  `FrontendBridge::outcomeField`, which reads the field and progress ranks, so they work unchanged
+  on a record. `io_payload` and the shared status gate consult the runner's owned-record table
+  first, apply the same `tagMayCarryPayload` rule to the record's tag, and read through the record's
+  lease; for a service outcome they behave as today. `await($r)` and `cancel($r)` of a record are
+  the existing "a handle that is already an outcome is itself the value" case: a record is an
+  outcome.
+- **Budget and ownership.** The record's lease pins its whole physical chunk (plan §8.1, charged at
+  physical size). The runner keeps a total of those bytes against
+  `FileReadHostOptions::retainedPayloadBytes`, default `budgetBytes` (4 MiB): retention can never
+  exceed what the service itself would have held for the same requests, so it adds no new ceiling.
+  When a copy would pass it, the runner **does not copy**: that outcome stays the service's, its
+  request stays admitted (today's behaviour, slot and all), and the failure is logged under
+  `vortex.io.script`. No payload is dropped and no refusal is invented; the cap applies only past
+  the retained-bytes budget. Leases are released, in order, when the script ends, fails, is
+  abandoned or its runner is destroyed (`endActivation` and the destructor), with the record's cells
+  freed by the shared cell deletion (P7). An unnamed outcome is not copied and keeps its current
+  retirement rule.
+- **`capture($r)` on a record.** The provider resolves `$r` to a `PayloadRange` from the
+  owned-record table (else the gate, for a service outcome) and calls `CaptureCoordinator::prepare`,
+  which takes its own lease (`retain`) on the range. The record's lease is what keeps the bytes
+  resolvable until then, so capture works after the service request is gone. Capture of a record
+  whose payload was not copied (over budget) is the unchanged path.
+- **The coverage rule survives the copy.** The exposure set holds `PayloadRange` values, which name
+  an origin interval (`PayloadRef` plus offset and length), not a request or a lease. The record
+  keeps the same range, so an `io_payload($r)` exposure records it and `translationFor(range)` at
+  script end answers as before, whether the service outcome or its record was read.
+- **Refused alternative: keep a text cell of the payload in the record.** It is not binary-safe, it
+  would spool into the permascroll on `promote`, and `capture` takes ranges, not text. Refused
+  alternative: copy only the scalar fields and drop the payload. It is the silent loss the plan
+  forbids (a `Complete` read whose bytes vanish when named).
 
 Refused: representing the exposure set as cells (it would be reachable from rows, and the rows
 persist; the audit forbids owner-only tags in language values for exactly this reason,
@@ -720,6 +772,7 @@ battery is repeated.
 | `vql_io_capture_crash_test.cpp`                          | criterion 10: the coordinator's crash points injected through a script; timeout and `~ScriptRunner` mid-capture; reconcile then retry                                                              |
 | `vquery_e2e_test.cpp` extension                          | `--io-write-root`, `--capture-dir`, `:open -w`, `:captures`, `:reconcile`, `-o` / `--in-place` / `:save` over covered and uncovered runs, the existing `ActionRowsAreNotWrittenBy...` test updated |
 | `VqlScriptConformance` extension                         | the M7a harness over a write action (criterion 12)                                                                                                                                                 |
+| `vql_io_owned_record_test.cpp`                           | criteria 14 and 15: 100 named outcomes, field reads after retirement, payload through a record, capture and coverage over a record, the over-budget fallback, lease balance on every ending        |
 | arena-bound tests                                        | criterion 11, mirroring `ManyEffectScriptRunsLeaveTheArenaBounded`                                                                                                                                 |
 
 A UX pass follows the `ux-validation` skill: a journey "read a CSV, capture it, derive a result,
@@ -731,17 +784,19 @@ sync, read it back", each reachable from the REPL without a flag-only step beyon
 Each stage lands tested and committed alone; the gate is the plan's (a VQL expert and a Vortex
 expert, reports under `design/projects/vortex-io-implementation-review/m7-vql-c/`).
 
-| Stage | Content                                                                                                                                                                                                                                                         | Gate                         |
-| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| C1    | Adapter and host: write bytes carried in the prepared command and charged; `FileOpSpec::Sync`; rights bits for append and create; `O_NOFOLLOW`; `FileReadHostOptions::writeGrant` and `writeBytes`; owner-side staging for `Write`                              | adapter tests, criteria 2-4  |
-| C2    | VQL writes: grammar, reserved names, compile, `ScriptRunner::admit` decodes `write_bytes`/`append_bytes`/`sync`, `open ... for`, `io_uncertain`, `vquery --io-write-root`/`--io-write-bytes`/`:open -w -a`                                                      | criteria 1, 5, 12 for writes |
-| C3    | Capture core wiring: `FileReadHost`-sibling capture host (`CaptureHost` over `CaptureCoordinator`, `CapturePublisher`, `UserPermascrollCaptureSink`), `CaptureCoordinator::spansFor`, providers, bytecode loop, `capture`, `io_captured`, `io_tag` for receipts | criteria 6-8, 12             |
-| C4    | Persistence: exposure set, `ScriptRunner::persistability()`, `vquery` consults it, captured cells through `resultRows`/`writeResultSlice` (quote path for cells with no `store`), `--capture-dir`                                                               | criterion 9                  |
-| C5    | Recovery surface: lazy `recover()`/`resumePublications()`, `:captures`, `:reconcile`, timeout and destructor behaviour, crash tests, leak tests, UX journeys, docs (§4.13, plan notes, `vql-conformance.md`)                                                    | criteria 10, 11, 13          |
+| Stage | Content                                                                                                                                                                                                                                                                                              | Gate                         |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| C1    | Adapter and host: write bytes carried in the prepared command and charged; `FileOpSpec::Sync`; rights bits for append and create; `O_NOFOLLOW`; `FileReadHostOptions::writeGrant` and `writeBytes`; owner-side staging for `Write`                                                                   | adapter tests, criteria 2-4  |
+| C1b   | Owned records (§12.1): `OwnedOutcome::copy`, the runner's owned-record table with leases and `retainedPayloadBytes`, early `retire` of a named request, `io_payload` and the gate reading records, `auditLanguageValue` knowing the `Owned` field; independent of writes and testable on reads alone | criteria 14, 15              |
+| C2    | VQL writes: grammar, reserved names, compile, `ScriptRunner::admit` decodes `write_bytes`/`append_bytes`/`sync`, `open ... for`, `io_uncertain`, `vquery --io-write-root`/`--io-write-bytes`/`:open -w -a`                                                                                           | criteria 1, 5, 12 for writes |
+| C3    | Capture core wiring: `FileReadHost`-sibling capture host (`CaptureHost` over `CaptureCoordinator`, `CapturePublisher`, `UserPermascrollCaptureSink`), `CaptureCoordinator::spansFor`, providers, bytecode loop, `capture`, `io_captured`, `io_tag` for receipts                                      | criteria 6-8, 12             |
+| C4    | Persistence: exposure set, `ScriptRunner::persistability()`, `vquery` consults it, captured cells through `resultRows`/`writeResultSlice` (quote path for cells with no `store`), `--capture-dir`                                                                                                    | criterion 9                  |
+| C5    | Recovery surface: lazy `recover()`/`resumePublications()`, `:captures`, `:reconcile`, timeout and destructor behaviour, crash tests, leak tests, UX journeys, docs (§4.13, plan notes, `vql-conformance.md`)                                                                                         | criteria 10, 11, 13          |
 
-C2 and C3 are independent after C1 and may be built in either order or in parallel by two agents. C4
-needs C3. Sequencing writes first gives the gate a smaller review surface and a real use of `sync`
-and `within` before the larger capture protocol arrives.
+C1b needs only M7-VQL-b and may land before or alongside C1; C3's `capture($r)` and C4's exposure
+set read records, so both follow C1b. C2 and C3 are independent after C1 and may be built in either
+order or in parallel by two agents. C4 needs C3. Sequencing writes first gives the gate a smaller
+review surface and a real use of `sync` and `within` before the larger capture protocol arrives.
 
 Two implementation checks the stages must make before relying on this note: (a) that `resultRows`
 and `writeResultSlice` can carry a cell whose content is already a permascroll span but which names
@@ -766,23 +821,18 @@ if it does not; (b) that the lane rule orders two writes on one capability FIFO 
   address.
 - Remote (swarm) publication of a capture receipt; local capture invents no remote signature.
 
-## 20. Open questions for the owner
+## 20. Owner decisions (2026-11-26)
 
-- **Q1. The write grant.** Default deny with `--io-write-root DIR` (repeatable) is proposed. Is a
-  per-root grant the right granularity, or should a grant name individual paths, or is a single
-  `--io-allow-write` switch enough for a tool whose users already trust their scripts?
-- **Q2. Persisting derived text after a capture.** Allow it (a second typed copy of captured bytes
-  in the permascroll, §4.7) or refuse and require the captured cell (`io_captured`)? The note allows
-  it.
-- **Q3. Capture store location.** A dedicated store beside the permascroll (proposed) or the
-  author's tip store? The proposal avoids the single-writer conflict.
-- **Q4. Large writes.** Accept the one-bound-per-action limit until a `copy` effect is designed, or
-  make `copy` part of this slice? The note defers it.
-- **Q5. Named outcomes cap a script at the request budget.** Accept it (a script may stop naming
-  outcomes it does not read), or let the runner copy a named outcome's fields into a small owned
-  record so the request can be reaped early (a new owned-cell form)?
-- **Q6. Timeout during a capture.** Abandon and pin (proposed) is chosen over shielding; confirm.
-- **Q7. `sync`.** In this slice (proposed) or deferred? It is the only way a script can learn a
-  write is durable, so the note keeps it.
-- **Q8. `append`.** `O_APPEND` as an open mode (proposed) or deferred behind a stat-and-offset
-  `write_bytes`, which races with other writers?
+The open questions of the first draft are answered; each ruling is applied above.
+
+- **Q1, write roots.** Repeatable `vquery --io-write-root DIR`, default deny (§4.1).
+- **Q2, derived text.** Allowed: once every exposed payload range is covered by a committed capture,
+  derived or duplicated text persists (§4.7).
+- **Q3, capture store.** Dedicated, beside the permascroll (§5.6).
+- **Q4, large writes.** The 1 MiB per-action bound is accepted; the streaming `copy` effect is
+  deferred (§10, §19).
+- **Q5, named outcomes.** Added: an outcome bound with `as` is copied into a script-owned record and
+  its service slot reaped at once, removing the 16-request cap (§10, §12.1, stage C1b).
+- **Q6, timeout or `~ScriptRunner` mid-capture.** Abandon and pin (§11).
+- **Q7, `sync()`.** In scope (§4.4).
+- **Q8, append mode.** `O_APPEND` in scope (§4.3).
