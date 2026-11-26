@@ -116,11 +116,16 @@ public:
   /// free), which are freed when the name is rebound or erased, unless the new
   /// binding, another name or @p keep (the rows the caller holds) still names
   /// them: a script that rebinds a name every run would otherwise leave a cell
-  /// a run, up to a joined text's size.
+  /// a run, up to a joined text's size. Only a cell nothing else can reach is
+  /// freed: one with no links (a `%` run or a path-built structure is the
+  /// user's, linked into the space) and not held by a closure, whose capture
+  /// is by cell: @p captured names the session variables a closure of this
+  /// program captured, and their cells are never freed.
   void publishCompilerBindings(
       ContractBindings bindings,
       std::unordered_map<std::string, std::vector<PathStep>> functors,
-      OwnedBindings owned = {}, std::span<const zigzag::CellRef> keep = {});
+      OwnedBindings owned = {}, std::span<const zigzag::CellRef> keep = {},
+      std::span<const std::string> captured = {});
   [[nodiscard]] const std::unordered_map<std::string, DefDeclaration> &
   userDefs() const noexcept {
     return userDefs_;
@@ -356,6 +361,16 @@ private:
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> env_;
   /// What each `let` name's program minted; see publishCompilerBindings.
   OwnedBindings ownedLets_;
+  /// Cells a closure captured, with the incarnation that proves the slot still
+  /// holds them; see publishCompilerBindings.
+  std::unordered_map<zigzag::CellRef,
+                     zigzag::ArenaManifold::AllocationIncarnation>
+      capturedCells_;
+  /// Whether a replaced let cell may be deleted: it is the binding's alone,
+  /// still the cell it was, unlinked and in no closure.
+  [[nodiscard]] bool
+  freeable(const OwnedCell &held,
+           const std::unordered_set<zigzag::CellRef> &named) const;
   /// Free the cells @p name's last binding minted, but not those @p keep or
   /// another binding still names.
   void releaseOwned(const std::string &name,

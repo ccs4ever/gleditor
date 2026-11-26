@@ -197,6 +197,11 @@ struct CompilationResult {
   /// The last statement is a script I/O action, so its result is an outcome
   /// cell whose payload the host may append as text.
   bool finalIsIoEffect{false};
+  /// The session names some lambda or frame of the program captured. A
+  /// closure keeps the cells those names held when it was made, and nothing in
+  /// the arena says so, so the engine takes the names' cells as not its to
+  /// free.
+  std::vector<std::string> capturedNames;
 };
 
 /// Compares two microversions by causal ancestry: `<` is strict ancestor and

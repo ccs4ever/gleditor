@@ -194,7 +194,23 @@ void namedBySession(
 void VQLEngine::publishCompilerBindings(
     ContractBindings bindings,
     std::unordered_map<std::string, std::vector<PathStep>> functors,
-    OwnedBindings owned, const std::span<const zigzag::CellRef> keep) {
+    OwnedBindings owned, const std::span<const zigzag::CellRef> keep,
+    const std::span<const std::string> captured) {
+  // A closure holds the cell its name had when it was made: the one the name
+  // is bound to now, or the one this very script binds it to.
+  for (const auto &name : captured) {
+    for (const auto *cells : {&env_, &bindings}) {
+      const auto bound = cells->find(name);
+      if (bound == cells->end()) continue;
+      for (const auto cell : bound->second) {
+        if (const auto incarnation = arena().incarnationOf(cell))
+          capturedCells_[cell] = *incarnation;
+      }
+    }
+  }
+  std::erase_if(capturedCells_, [this](const auto &entry) {
+    return !arena().matches(entry.first, entry.second);
+  });
   auto nextEnv      = env_;
   auto nextFunctors = functors_;
   auto nextLenses   = putGetLenses_;
@@ -238,9 +254,7 @@ void VQLEngine::publishCompilerBindings(
   namedBySession(dynamicViews_, sessionMounts_, named);
   for (const auto &[name, cells] : replaced) {
     for (const auto &held : cells) {
-      if (named.contains(held.cell) ||
-          !arena().matches(held.cell, held.incarnation))
-        continue;
+      if (!freeable(held, named)) continue;
       // The one deletion every cell goes through (P7): links broken, then the
       // slot freed, so nothing is left naming it.
       if (const auto deleted = arena().deleteCell(
@@ -252,6 +266,20 @@ void VQLEngine::publishCompilerBindings(
       }
     }
   }
+}
+
+bool VQLEngine::freeable(
+    const OwnedCell &held,
+    const std::unordered_set<zigzag::CellRef> &named) const {
+  if (named.contains(held.cell) || capturedCells_.contains(held.cell) ||
+      !arena().matches(held.cell, held.incarnation))
+    return false;
+  // A link means something other than the name reaches the cell: `%` and the
+  // path-mutating programs build structure the user keeps.
+  return std::ranges::none_of(
+      arena().dimensionsOf(held.cell), [](const zigzag::DimLink &link) {
+        return link.pos != zigzag::noCell || link.neg != zigzag::noCell;
+      });
 }
 
 void VQLEngine::releaseOwned(const std::string &name,
@@ -267,9 +295,7 @@ void VQLEngine::releaseOwned(const std::string &name,
     for (const auto &owned : values) named.insert(owned.cell);
   namedBySession(dynamicViews_, sessionMounts_, named);
   for (const auto &cell : cells) {
-    if (named.contains(cell.cell) ||
-        !arena().matches(cell.cell, cell.incarnation))
-      continue;
+    if (!freeable(cell, named)) continue;
     static_cast<void>(arena().deleteCell(cell.cell, cell.incarnation,
                                          zigzag::DeletionMode::LeaveBroken,
                                          std::nullopt));

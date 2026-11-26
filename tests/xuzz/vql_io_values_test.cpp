@@ -1264,6 +1264,63 @@ TEST(VqlIoJoinTest, ManyJoinAndWriteRunsLeaveTheArenaAndTheServiceBounded) {
   EXPECT_EQ(slurp(path), "r0;r1;r2;r3");
 }
 
+// ---- Freeing a replaced let -------------------------------------------------
+
+TEST(VqlIoLetFreeTest, AClosureKeepsTheCellItCaptured) {
+  FileWorld f;
+  EXPECT_EQ(f.rows("let $t := \"abc\"; return $t"), (Texts{"abc"}));
+  EXPECT_EQ(f.rows("let $g := \\($x) $t + \"!\"; return $g(1)"),
+            (Texts{"abc!"}));
+  EXPECT_EQ(f.rows("let $t := \"z\"; return $t"), (Texts{"z"}));
+  EXPECT_EQ(f.rows("return $g(1)"), (Texts{"abc!"}))
+      << "the closure still reads the cell it captured, not a freed one";
+}
+
+TEST(VqlIoLetFreeTest, AClosureKeepsAJoinedTextItCaptured) {
+  FileWorld f;
+  f.bindRows(3);
+  EXPECT_EQ(f.rows("let $t := join($rows, \"-\"); return $t"),
+            (Texts{"r0-r1-r2"}));
+  EXPECT_EQ(f.rows("let $g := \\($x) $t + \"!\"; return $g(1)"),
+            (Texts{"r0-r1-r2!"}));
+  EXPECT_EQ(f.rows("let $t := \"z\"; return $t"), (Texts{"z"}));
+  EXPECT_EQ(f.rows("return $g(1)"), (Texts{"r0-r1-r2!"}));
+}
+
+TEST(VqlIoLetFreeTest, StructureAPercentMintedIsTheUsersNotTheNames) {
+  FileWorld f;
+  EXPECT_EQ(f.rows("let $r := #/d.1%%%; return join(#/d.1/count(), \"\")"),
+            (Texts{"3"}));
+  const auto held = f.engine.variables().find("r");
+  ASSERT_NE(held, f.engine.variables().end());
+  ASSERT_EQ(held->second.size(), 3U);
+  std::vector<std::pair<zigzag::CellRef, std::uint64_t>> minted;
+  for (const auto cell : held->second) {
+    const auto incarnation = f.arena.incarnationOf(cell);
+    ASSERT_TRUE(incarnation.has_value());
+    minted.emplace_back(cell, *incarnation);
+  }
+  EXPECT_EQ(f.rows("let $r := 0; return join(#/d.1/count(), \"\")"),
+            (Texts{"3"}))
+      << "rebinding $r leaves the cells the user linked on d.1";
+  for (const auto &[cell, incarnation] : minted)
+    EXPECT_EQ(f.arena.incarnationOf(cell), incarnation)
+        << "a cell linked on d.1 is still the cell it was";
+}
+
+TEST(VqlIoLetFreeTest, ANameThatAliasesAReplacedCellKeepsItsText) {
+  FileWorld f;
+  f.bindRows(2);
+  EXPECT_EQ(f.rows("let $t := join($rows, \"+\"); return $t"),
+            (Texts{"r0+r1"}));
+  EXPECT_EQ(f.rows("let $u := $t; return $u"), (Texts{"r0+r1"}));
+  EXPECT_EQ(f.rows("let $t := \"z\"; return $t"), (Texts{"z"}));
+  EXPECT_EQ(f.rows("return $u"), (Texts{"r0+r1"}));
+  EXPECT_EQ(f.rows("let $m := join($rows, \"-\"); return $m"),
+            (Texts{"r0-r1"}));
+  EXPECT_EQ(f.rows("let $m := $m; return $m"), (Texts{"r0-r1"}));
+}
+
 // ---- The payload-less outcome constructor ----------------------------------
 
 TEST(VqlIoSummaryTest, ASummaryKeepsTheTagTheErrorAndTheUncertainFlag) {

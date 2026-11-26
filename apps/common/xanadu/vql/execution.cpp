@@ -689,8 +689,9 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
           }
         }
       }
-      session_->publishCompilerBindings(
-          std::move(published), std::move(functors), std::move(owned), cells);
+      session_->publishCompilerBindings(std::move(published),
+                                        std::move(functors), std::move(owned),
+                                        cells, run->compiled_.capturedNames);
       session_->publishUserDefs(run->query_.defs);
     }
     vm_.abortScopedChoices(cursor);
