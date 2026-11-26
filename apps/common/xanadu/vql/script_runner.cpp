@@ -150,6 +150,10 @@ struct ScriptRunner::Activation final : vortex::FrontendActivation {
   /// The owned records this script made, so each ending can give back their
   /// payload leases.
   std::vector<CellRef> ownedCells;
+  /// The captures this script began (a capture cell, or the refusal outcome
+  /// that ended one before any request), so each ending can abandon or free
+  /// them through the capture host.
+  std::vector<CellRef> captures;
   /// Each open outcome the script's `open` actions produced, with whether it
   /// minted a capability, so a later read through a failed open can say which
   /// open failed and how.
@@ -224,6 +228,11 @@ ScriptRunner::~ScriptRunner() {
       retireAll(activation->admitted, true);
   }
   reapClosing(true);
+  // A capture a dropped activation left in flight is abandoned, not finished:
+  // the coordinator pins it by phase, and the awaited step is orphaned.
+  for (const auto &weak : live_) {
+    if (const auto activation = weak.lock()) releaseCaptures(*activation, true);
+  }
   // Every record the runner made goes with it, including those of an
   // activation its caller dropped without ending.
   for (auto &[cell, record] : owned_) {
@@ -485,6 +494,24 @@ auto liveOutcome(const RelationQuery &query, const std::string &who)
   return outcome;
 }
 
+/// Whether the single argument is a capture's receipt: not an outcome, so the
+/// outcome fields answer nothing for it rather than failing the script.
+auto isCaptureReceipt(const RelationQuery &query) -> bool {
+  if (query.arguments.size() != 1) return false;
+  const auto incarnation = query.arena.incarnationOf(query.arguments[0]);
+  if (!incarnation) return false;
+  const auto tag =
+      vortex::ioCellTag(query.arena, query.arguments[0], *incarnation);
+  return tag && *tag == vortex::IoCellTag::CaptureReceipt;
+}
+
+/// The refusals a capture can make as a value, each a stable detail of the
+/// error code it rides on.
+constexpr std::uint32_t captureDetailNoPayload      = 1;
+constexpr std::uint32_t captureDetailObservation    = 2;
+constexpr std::uint32_t captureDetailRange          = 3;
+constexpr std::uint32_t captureDetailUnreadableGate = 4;
+
 /// An outcome field a path function reads, by the name the cell store wrote.
 struct FieldRelation {
   const char *relation;
@@ -518,6 +545,9 @@ void ScriptRunner::installProviders() {
       return answerOnce(query, query.arena.makeCell(std::string{"Capability"}));
     if (kind && *kind == vortex::IoCellTag::Request)
       return answerOnce(query, query.arena.makeCell(std::string{"Request"}));
+    if (kind && *kind == vortex::IoCellTag::CaptureReceipt)
+      return answerOnce(query,
+                        query.arena.makeCell(std::string{"CaptureReceipt"}));
     const auto outcome = liveOutcome(query, "io_tag");
     if (!outcome) return std::unexpected(outcome.error());
     const auto tag = vortex::ioOutcomeTag(query.arena, *outcome);
@@ -527,6 +557,7 @@ void ScriptRunner::installProviders() {
   for (const auto &entry : fieldRelations) {
     install(entry.relation,
             [this, entry](const RelationQuery &query) -> RelationResult {
+              if (isCaptureReceipt(query)) return answerOnce(query, {});
               const auto outcome = liveOutcome(query, entry.function);
               if (!outcome) return std::unexpected(outcome.error());
               const auto text =
@@ -541,6 +572,7 @@ void ScriptRunner::installProviders() {
   // record counted (zero for a backend that reports no progress).
   install(outcomeBytesRelation,
           [this](const RelationQuery &query) -> RelationResult {
+            if (isCaptureReceipt(query)) return answerOnce(query, {});
             const auto outcome = liveOutcome(query, "io_bytes");
             if (!outcome) return std::unexpected(outcome.error());
             const auto gate = gated(*outcome);
@@ -557,6 +589,7 @@ void ScriptRunner::installProviders() {
   // whose tag exposes no payload (or retained none) answers nothing.
   install(outcomePayloadRelation,
           [this](const RelationQuery &query) -> RelationResult {
+            if (isCaptureReceipt(query)) return answerOnce(query, {});
             const auto outcome = liveOutcome(query, "io_payload");
             if (!outcome) return std::unexpected(outcome.error());
             if (query.position != 0)
@@ -570,6 +603,26 @@ void ScriptRunner::installProviders() {
   install(ownOutcomeRelation,
           [this](const RelationQuery &query) -> RelationResult {
             return ownOutcome(query);
+          });
+  install(captureBeginRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            return captureBegin(query, false);
+          });
+  install(captureRangeRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            return captureBegin(query, true);
+          });
+  install(captureArmRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            return captureArm(query);
+          });
+  install(captureStepRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            return captureStep(query);
+          });
+  install(outcomeCapturedRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            return capturedCells(query);
           });
   install(handleArmRelation,
           [this](const RelationQuery &query) -> RelationResult {
@@ -685,6 +738,188 @@ auto ScriptRunner::openCapability(const RelationQuery &query)
   return answerOnce(query, capability->cell);
 }
 
+auto ScriptRunner::captureBegin(const RelationQuery &query, const bool ranged)
+    -> RelationResult {
+  const auto refuse = [&](const std::string_view code,
+                          std::string message) -> RelationResult {
+    stageFailure_ = diagnose(code, std::move(message));
+    return std::unexpected(stageFailure_->message);
+  };
+  const std::size_t arity = ranged ? 3 : 1;
+  if (query.arguments.size() != arity)
+    return refuse(vortex::frontend_codes::vqlEffectArgument,
+                  "capture expects an outcome" +
+                      std::string{ranged ? ", an offset and a length" : ""});
+  if (current_ == nullptr)
+    return refuse(vortex::frontend_codes::vqlScriptFailed,
+                  "a capture ran outside any script activation");
+  const auto capture = captureHost();
+  if (capture == nullptr)
+    return refuse(vortex::frontend_codes::vqlCaptureUnavailable,
+                  "this program built no capture stack");
+  auto &arena = query.arena;
+  // Capture takes an outcome: text a script printed is scratch bytes with no
+  // source observation to key overlap on (design §3).
+  const auto incarnation = arena.incarnationOf(query.arguments[0]);
+  const bool isOutcome =
+      incarnation &&
+      vortex::ioCellTag(arena, query.arguments[0], *incarnation) ==
+          vortex::IoCellTag::Outcome;
+  if (!isOutcome)
+    return refuse(vortex::frontend_codes::vqlCaptureSource,
+                  "capture takes an outcome that exposes a payload");
+  const vortex::OutcomeCell source{query.arguments[0], *incarnation};
+
+  std::uint64_t offset = 0;
+  std::optional<std::uint64_t> length;
+  if (ranged) {
+    const auto first =
+        number(query.arguments[1], "the capture offset", std::nullopt);
+    if (!first) return refuse(first.error().code, first.error().message);
+    const auto second =
+        number(query.arguments[2], "the capture length", std::nullopt);
+    if (!second) return refuse(second.error().code, second.error().message);
+    offset = *first;
+    length = *second;
+  }
+
+  // The capture admits requests through the coordinator, so it is an
+  // admission path: earlier scripts' rows are done with before it begins.
+  const HostCells hostCells{current_->executor.get(), arena};
+  retireAll(finished_);
+  freeFinishedRecords();
+
+  const auto rejected = [&](const vortex::IoErrorCode code,
+                            const std::uint32_t detail) -> RelationResult {
+    const auto refused = ports_.host.refuse({code, detail});
+    const auto outcome = std::get<vortex::Refused>(refused.value).outcome;
+    current_->captures.push_back(outcome.cell);
+    return std::optional<RelationAnswer>{
+        RelationAnswer{.nextPosition = 1,
+                       .limit        = 1,
+                       .answers = std::vector<CellRef>(arity, outcome.cell)}};
+  };
+
+  const auto gate = gated(source);
+  if (!gate)
+    return rejected(vortex::IoErrorCode::Unresolved,
+                    captureDetailUnreadableGate);
+  if (!gate->payload)
+    return rejected(vortex::IoErrorCode::Unresolved, captureDetailNoPayload);
+  // The exact observation, not a re-read: a capture keeps what the outcome
+  // retained. Where the read recorded an observation it must bind these very
+  // bytes, or the outcome is not the observation's.
+  const auto found       = owned_.find(source.cell);
+  const auto observation = found != owned_.end() && found->second.cell == source
+                               ? found->second.observation
+                               : vortex::outcomeCellReadObservation(
+                                     arena, ports_.bridge.schema(), source);
+  if (observation && observation->payload &&
+      !(*observation->payload == *gate->payload))
+    return rejected(vortex::IoErrorCode::Unresolved, captureDetailObservation);
+
+  vortex::PayloadRange selection = *gate->payload;
+  if (length) {
+    const auto whole = gate->payload->length;
+    if (offset > whole || *length > whole - offset)
+      return rejected(vortex::IoErrorCode::InvalidRequest, captureDetailRange);
+    selection.offset += offset;
+    selection.length = *length;
+  }
+  const auto handle = capture->begin(selection);
+  current_->captures.push_back(handle);
+  return std::optional<RelationAnswer>{
+      RelationAnswer{.nextPosition = 1,
+                     .limit        = 1,
+                     .answers      = std::vector<CellRef>(arity, handle)}};
+}
+
+auto ScriptRunner::captureArm(const RelationQuery &query) -> RelationResult {
+  const auto capture = captureHost();
+  if (capture == nullptr || query.arguments.size() != 2) {
+    stageFailure_ = diagnose(vortex::frontend_codes::vqlCaptureUnavailable,
+                             "no capture is in flight to continue");
+    return std::unexpected(stageFailure_->message);
+  }
+  const auto next = capture->next(query.arguments[0]);
+  if (!next) {
+    stageFailure_ = diagnose(vortex::frontend_codes::vqlScriptFailed,
+                             "the capture's state is gone");
+    return std::unexpected(stageFailure_->message);
+  }
+  constexpr std::int64_t requestArm = 0;
+  constexpr std::int64_t valueArm   = 1;
+  const auto &arena                 = query.arena;
+  if (const auto *waiting = std::get_if<vortex::CaptureWaiting>(&*next)) {
+    return std::optional<RelationAnswer>{
+        RelationAnswer{.nextPosition = 1,
+                       .limit        = 1,
+                       .answers      = {query.arena.makeScalarCell(requestArm),
+                                        waiting->request.cell}}};
+  }
+  static_cast<void>(arena);
+  return std::optional<RelationAnswer>{RelationAnswer{
+      .nextPosition = 1,
+      .limit        = 1,
+      .answers      = {query.arena.makeScalarCell(valueArm),
+                       std::get<vortex::CaptureFinished>(*next).value}}};
+}
+
+auto ScriptRunner::captureStep(const RelationQuery &query) -> RelationResult {
+  const auto capture = captureHost();
+  if (capture == nullptr || query.arguments.size() != 2 ||
+      current_ == nullptr) {
+    stageFailure_ = diagnose(vortex::frontend_codes::vqlCaptureUnavailable,
+                             "no capture is in flight to continue");
+    return std::unexpected(stageFailure_->message);
+  }
+  const auto stepIncarnation = query.arena.incarnationOf(query.arguments[1]);
+  const std::optional<vortex::OutcomeCell> outcome =
+      stepIncarnation &&
+              vortex::ioOutcomeTag(
+                  query.arena,
+                  vortex::OutcomeCell{query.arguments[1], *stepIncarnation})
+          ? std::optional{vortex::OutcomeCell{query.arguments[1],
+                                              *stepIncarnation}}
+          : std::nullopt;
+  if (!outcome) {
+    stageFailure_ = diagnose(vortex::frontend_codes::vqlScriptFailed,
+                             "a capture step ended with no outcome");
+    return std::unexpected(stageFailure_->message);
+  }
+  // The receipt, the snapshot and the captured cells are the host's.
+  const HostCells hostCells{current_->executor.get(), query.arena};
+  capture->advance(query.arguments[0], *outcome);
+  return std::optional<RelationAnswer>{
+      RelationAnswer{.nextPosition = 1,
+                     .limit        = 1,
+                     .answers      = {query.arguments[0], query.arguments[0]}}};
+}
+
+auto ScriptRunner::capturedCells(const RelationQuery &query) -> RelationResult {
+  const auto capture = captureHost();
+  if (capture == nullptr || query.arguments.size() != 1 || query.position < 0)
+    return std::optional<RelationAnswer>{std::nullopt};
+  const auto cell = capture->capturedCell(
+      query.arguments[0], static_cast<std::size_t>(query.position));
+  if (!cell) return std::optional<RelationAnswer>{std::nullopt};
+  return std::optional<RelationAnswer>{RelationAnswer{
+      .nextPosition = query.position + 1, .limit = 1, .answers = {*cell}}};
+}
+
+void ScriptRunner::releaseCaptures(Activation &activation,
+                                   const bool freeCells) noexcept {
+  const auto host = captureHost();
+  for (const auto handle : std::exchange(activation.captures, {})) {
+    if (host == nullptr) continue;
+    if (freeCells) {
+      host->release(handle);
+    } else {
+      finishedCaptures_.push_back(handle);
+    }
+  }
+}
+
 auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
   reapClosing();
   // Everything that can be wrong with an action's own values is wrong before
@@ -704,6 +939,32 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
     };
     if (action->kind == IoEffectStatement::Kind::Open) {
       if (action->resultVar) opensLater.insert(*action->resultVar);
+      remember();
+      continue;
+    }
+    if (action->kind == IoEffectStatement::Kind::Capture) {
+      if (captureHost() == nullptr)
+        return ScriptRunResult::failed(
+            diagnose(vortex::frontend_codes::vqlCaptureUnavailable,
+                     "this program built no capture stack, so nothing can be "
+                     "captured",
+                     index));
+      if (!named.contains(action->captureVar)) {
+        const auto &bound = session_.variables();
+        const auto found  = bound.find(action->captureVar);
+        if (found == bound.end() || found->second.size() != 1)
+          return ScriptRunResult::failed(
+              diagnose(vortex::frontend_codes::vqlEffectArgument,
+                       "$" + action->captureVar +
+                           " is not bound to exactly one outcome to capture",
+                       index));
+      }
+      if (action->captureRanged) {
+        if (const auto offset = operand(action->offset, index); !offset)
+          return ScriptRunResult::failed(offset.error());
+        if (const auto length = operand(action->maxBytes, index); !length)
+          return ScriptRunResult::failed(length.error());
+      }
       remember();
       continue;
     }
@@ -876,7 +1137,12 @@ auto ScriptRunner::ownOutcome(const RelationQuery &query) -> RelationResult {
                         "the service keeps the outcome");
       return keep;
     }
-    const auto size = ports_.payloads.chunkBytes(*taken).value_or(0);
+    // The record also keeps the read's observation by value, whose locator is
+    // charged beside the chunk.
+    const auto observed =
+        vortex::outcomeCellReadObservation(arena, schema, outcome);
+    const auto size = ports_.payloads.chunkBytes(*taken).value_or(0) +
+                      (observed ? observed->locator.size() : 0);
     if (size > ports_.retainedPayloadBytes ||
         retainedBytes_ > ports_.retainedPayloadBytes - size) {
       ports_.payloads.release(taken->lease);
@@ -899,7 +1165,7 @@ auto ScriptRunner::ownOutcome(const RelationQuery &query) -> RelationResult {
     return keep;
   }
   const auto cell = record->cell.cell;
-  retainedBytes_ += record->chunkBytes;
+  retainedBytes_ += record->chunkBytes + record->observationBytes();
   owned_.insert_or_assign(cell, *std::move(record));
   current_->ownedCells.push_back(cell);
   // Nothing reads the service's outcome again: the record has every field it
@@ -923,7 +1189,8 @@ void ScriptRunner::releaseRecords(Activation &activation,
     if (found == owned_.end()) continue;
     auto record = std::move(found->second);
     owned_.erase(found);
-    retainedBytes_ -= std::min(retainedBytes_, record.chunkBytes);
+    retainedBytes_ -=
+        std::min(retainedBytes_, record.chunkBytes + record.observationBytes());
     record.releasePayload(ports_.payloads);
     if (freeCells) {
       record.freeCells(session_.coordinator().core().arena(),
@@ -935,6 +1202,10 @@ void ScriptRunner::releaseRecords(Activation &activation,
 }
 
 void ScriptRunner::freeFinishedRecords() noexcept {
+  if (const auto host = captureHost()) {
+    for (const auto handle : finishedCaptures_) host->release(handle);
+  }
+  finishedCaptures_.clear();
   for (auto &record : finishedRecords_)
     record.freeCells(session_.coordinator().core().arena(),
                      ports_.bridge.schema());
@@ -1195,6 +1466,7 @@ void ScriptRunner::endActivation(Activation &activation) noexcept {
   // No caller holds rows from a script that failed or was abandoned, so its
   // records go now.
   releaseRecords(activation, true);
+  releaseCaptures(activation, true);
   // Terminal requests leave the budget before the closes are admitted.
   retireAll(activation.admitted);
   closeOpened(activation);
@@ -1287,6 +1559,9 @@ auto ScriptRunner::finish(const std::shared_ptr<Activation> &activation,
     Activation &activation;
     ~ReleaseOnExit() { runner.releaseRecords(activation, false); }
   } releasing{*this, *activation};
+  // A finished script's captures stay until the next admission: its rows may
+  // be the receipt.
+  releaseCaptures(*activation, false);
   ScriptRows rows = done.rows;
   if (done.finalIsIoEffect && !rows.empty()) {
     // The compiled action yields its outcome cell; the retained bytes, when
@@ -1338,6 +1613,9 @@ auto ScriptRunner::expireIfDue(const FrontendToken &token)
   activation->parked.reset();
   abandonAll(activation->admitted);
   releaseRecords(*activation, true);
+  // A capture past its append is retired uncertain and pinned by the
+  // coordinator: never finished in the background, never resubmitted.
+  releaseCaptures(*activation, true);
   closeOpened(*activation);
   return diagnose(vortex::frontend_codes::vqlScriptTimeout,
                   "the script did not finish within its overall deadline; the "
@@ -1432,7 +1710,8 @@ auto fileScriptPorts(vortex::FileReadHost &host) -> ScriptIoPorts {
       },
       [&host](const vortex::CapabilityCell capability) {
         return staged(host.stageSync(capability), "sync");
-      }};
+      },
+      [&host]() -> vortex::CaptureHost * { return host.capture(); }};
 }
 
 auto driveToCompletion(ScriptRunner &runner, ScriptRunResult first,

@@ -69,6 +69,19 @@ inline constexpr const char *openCapabilityRelation = "io_open_capability";
 /// Answers the record, or nothing when the host keeps the service's outcome.
 inline constexpr const char *ownOutcomeRelation = "io_own_outcome";
 
+/// A capture as three relations over one loop (design §6.2): begin prepares
+/// the capture and requests its append (the second form carries an offset and
+/// a length of the payload), arm answers whether the program awaits a request
+/// (arm 0) or holds the value (arm 1), step takes the next step once the
+/// awaited request ended. The host answers all of them; the VM and the compiler
+/// name no capture schema.
+inline constexpr const char *captureBeginRelation = "io_capture_begin";
+inline constexpr const char *captureRangeRelation = "io_capture_range";
+inline constexpr const char *captureArmRelation   = "io_capture_arm";
+inline constexpr const char *captureStepRelation  = "io_capture_step";
+/// The cells that are a receipt's captured bytes, one per translated piece.
+inline constexpr const char *outcomeCapturedRelation = "io_outcome_captured";
+
 /// The relation an outcome path function (`io_tag`, `io_payload`, `io_bytes`,
 /// `io_error`, `io_detail`, `io_uncertain`) compiles to; nullptr for any other
 /// name.
@@ -80,6 +93,7 @@ outcomeFunctionRelation(const std::string_view name) noexcept {
   if (name == "io_error") return outcomeErrorRelation;
   if (name == "io_detail") return outcomeDetailRelation;
   if (name == "io_uncertain") return outcomeUncertainRelation;
+  if (name == "io_captured") return outcomeCapturedRelation;
   return nullptr;
 }
 

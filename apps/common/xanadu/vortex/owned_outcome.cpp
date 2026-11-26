@@ -61,6 +61,7 @@ auto OwnedOutcome::copy(ArenaManifold &arena, const IoCellSchema &schema,
   };
   const auto tag = ioOutcomeTag(arena, source);
   if (!tag) return fail(tag.error());
+  auto observation    = outcomeCellReadObservation(arena, schema, source);
   const auto fields   = fieldsOf(arena, schema, source.cell);
   const auto progress = progressOf(arena, schema, source.cell)
                             .transform([&](const CellRef cell) {
@@ -102,9 +103,10 @@ auto OwnedOutcome::copy(ArenaManifold &arena, const IoCellSchema &schema,
       static_cast<void>(arena.release(mark));
       return fail(IoCellError::ArenaRefused);
     }
-    return OwnedOutcome{.cell       = *record,
-                        .payload    = std::move(payload),
-                        .chunkBytes = chunkBytes};
+    return OwnedOutcome{.cell        = *record,
+                        .payload     = std::move(payload),
+                        .chunkBytes  = chunkBytes,
+                        .observation = std::move(observation)};
   } catch (...) {
     static_cast<void>(arena.release(mark));
     if (payload) resolver.release(payload->lease);

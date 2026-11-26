@@ -682,8 +682,10 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
       } else if (const auto *effect =
                      std::get_if<IoEffectStatement>(&statement)) {
         result = compileIoEffect(*effect, index);
-        // A detached read yields its request handle, not an outcome.
-        finalIsIoEffect_ = !(effect->kind == IoEffectStatement::Kind::Read &&
+        // A detached read yields its request handle, and a capture its
+        // receipt: neither is an outcome whose payload the host appends.
+        finalIsIoEffect_ = effect->kind != IoEffectStatement::Kind::Capture &&
+                           !(effect->kind == IoEffectStatement::Kind::Read &&
                              effect->detached);
       } else {
         result = compileWatchOrPerspectiveStatement(statement);

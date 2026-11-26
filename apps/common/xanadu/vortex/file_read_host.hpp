@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "common/xanadu/vortex/arena_io_cell_store.hpp"
+#include "common/xanadu/vortex/capture_host.hpp"
 #include "common/xanadu/vortex/file_endpoint_adapter.hpp"
 #include "common/xanadu/vortex/frontend_bridge.hpp"
 #include "common/xanadu/vortex/frontend_diagnostics.hpp"
@@ -184,6 +185,21 @@ public:
     return diagnostics_;
   }
   [[nodiscard]] auto schema() const -> const IoCellSchema & { return schema_; }
+  [[nodiscard]] auto arena() -> zigzag::ArenaManifold & { return arena_; }
+
+  /// Build the capture stack over this host's service, arena and payloads
+  /// (M7-VQL-c §13, §18 C3): the coordinator's append adapter is registered
+  /// with the service and its spec cells join this host's request decoder. The
+  /// host owns the capture host so that it is destroyed after the service,
+  /// whose workers run the coordinator's adapter until they stop. @p sink and
+  /// @p publisher are the caller's and must outlive this host. Calling it
+  /// twice replaces nothing: the first stack stays and is returned.
+  auto attachCapture(CaptureByteSink &sink, CapturePublisher *publisher,
+                     CaptureHostOptions options) -> CaptureHost &;
+  /// The capture stack, when one was attached.
+  [[nodiscard]] auto capture() noexcept -> CaptureHost * {
+    return capture_.get();
+  }
   [[nodiscard]] auto adapter() -> FileEndpointAdapter & { return adapter_; }
 
 private:
@@ -193,6 +209,9 @@ private:
   PayloadResolver payloads_;
   FileEndpointAdapter adapter_;
   ArenaIoCellStore cells_;
+  /// Declared before the service so it is destroyed after it: the service's
+  /// destructor joins the workers that execute the coordinator's adapter.
+  std::unique_ptr<CaptureHost> capture_;
   std::unique_ptr<IoService> service_;
   IoHost host_;
   FrontendDiagnosticRegistry diagnostics_;

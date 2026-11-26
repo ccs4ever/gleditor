@@ -590,9 +590,15 @@ struct IoByteSource {
 ///
 /// A submit may also describe `write_bytes(off, src)`, `append_bytes(src)` or
 /// `sync()`; all take the same `within`, match arms and `as`.
+///
+///   Capture: `capture($r)` or `capture($r, off, len)` makes the payload an
+///           outcome retained durable in the author's permascroll and yields
+///           the capture's receipt, or the outcome that refused or ended it.
+///           It is not one request (an append, then durable steps), so it has
+///           no submit form: it is its own statement.
 struct IoEffectStatement {
   /// `Read` is the submit shape; which request it submits is `request`.
-  enum class Kind : std::uint8_t { Read, Await, Cancel, Open };
+  enum class Kind : std::uint8_t { Read, Await, Cancel, Open, Capture };
   Kind kind{Kind::Read};
   IoRequestKind request{IoRequestKind::ReadBytes};
   /// WriteBytes and AppendBytes: the bytes to send.
@@ -612,6 +618,10 @@ struct IoEffectStatement {
   bool detached{false};
   /// Await and Cancel: the handle variable (a request, or a refusal outcome).
   std::string handleVar;
+  /// Capture: the outcome variable, and the selected sub-range of its payload
+  /// (`offset`, `maxBytes` read as offset and length) when @ref captureRanged.
+  std::string captureVar;
+  bool captureRanged{false};
   /// Open: the path.
   IoOpenPath openPath;
   /// `effect { ... } as $r`: the outcome cell (for Open, the capability the

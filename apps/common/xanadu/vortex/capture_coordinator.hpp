@@ -419,6 +419,22 @@ public:
   [[nodiscard]] auto translationFor(const PayloadRange &range) const
       -> std::optional<xanadu::PrimediaSpan>;
 
+  /// The permanent spans @p range maps to, in source order, one per committed
+  /// slot it crosses (slots that are contiguous in the permascroll are already
+  /// one). Unlike translationFor() the range may cross translations that are
+  /// not adjacent in the permascroll, which is what a selection captured over
+  /// two appends is. std::nullopt when any byte of it is uncovered, pending or
+  /// pinned: a partial answer would name bytes that were never captured.
+  [[nodiscard]] auto spansFor(const PayloadRange &range) const
+      -> std::optional<std::vector<xanadu::PrimediaSpan>>;
+
+  /// Classify captures whose cell was freed (a script abandoned mid-capture):
+  /// a capture past AppendRequested is retired uncertain and its intervals
+  /// pinned, an earlier one frees its reservations. The same sweep every
+  /// mutating call starts with, exposed so an owner that abandoned a capture
+  /// can see the pin now rather than at the next capture.
+  void reapAbandoned();
+
   /// What the coordinator is holding and what it has let go, so a refusal
   /// that names a bound can be told apart from another.
   struct StateCounts {

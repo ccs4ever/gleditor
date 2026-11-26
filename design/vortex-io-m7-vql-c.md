@@ -1,7 +1,7 @@
 # M7-VQL-c: VQL write and capture
 
-Status: design note; stages C1 (adapter and host), C1b (owned records) and C2 (VQL writes) of §18
-are built, the rest is not. It specifies the third M7-VQL slice of the
+Status: design note; stages C1 (adapter and host), C1b (owned records), C2 (VQL writes) and C3
+(capture wiring) of §18 are built, the rest is not. It specifies the third M7-VQL slice of the
 [Vortex I/O implementation plan](vortex-io-implementation-plan.md): script **write effects** to a
 file endpoint, and **capture**, the explicit act that makes a script's input durable so results
 built from it may be persisted. It extends [`vql-query-language.md`](vql-query-language.md) §4.13
@@ -981,6 +981,101 @@ Notes for C3: `sourceBytes` is the one place that turns an outcome (service or o
 retained bytes and is the model for `capture($r)`'s lease; a capture of a record still needs the
 `ReadObservation` C1b did not copy. A write's source outcome is read as bytes, never as text, so the
 C4 exposure set must not count it as an exposure.
+
+### 18.4 Stage C3 as built
+
+C3 is the capture wiring and nothing of persistence: `capture`, `io_captured` and the capture host.
+The persist refusal `VQL_IO_PERSIST_NEEDS_CAPTURE` is unchanged (C4 lifts it). What landed, with the
+places it differs from the text above:
+
+- **`CaptureHost`** (`capture_host.{hpp,cpp}`, language-neutral, beside `FrontendBridge`). It owns a
+  `CaptureCoordinator` over the host's service and turns the coordinator's protocol into three calls
+  a loop can make between awaits: `begin(range)` (lazy `recover()` and `resumePublications()` on the
+  first capture, then `prepare` and `appendRequest`), `next(handle)` (await this request, or take
+  this value) and `advance(handle, outcome)` (`commit`, then `continueCommit`). `release(handle)`
+  frees a finished capture's cells, or abandons an unfinished one. `FileReadHost::attachCapture`
+  builds it: the coordinator's append adapter is registered with the service, its spec cells join
+  the host's request decoder, and the capture host is a member declared before the service so it is
+  destroyed after the service has joined the workers that run the adapter.
+- **Lowering** (`compile_io_effect.cpp`):
+  `relate(io_capture_begin | io_capture_range, [$r(, off, len)])`, then a loop
+  `arm = relate(io_capture_arm, [h, h])` (two answers: arm 0 or 1, and the request to await or the
+  value), `BranchFalseCell arm`, `Await`, `relate(io_capture_step, [h, outcome])`, jump to the loop.
+  One `Await` opcode is the parked site, so the existing resume path needs no change and `begin`
+  cannot run twice. A capture is not the final row of a script as an outcome whose payload the host
+  appends (`finalIsIoEffect` is false for it).
+- **The handle** is the coordinator's `CaptureCell` (or, for a refusal before any request, the
+  `Rejected` outcome); it is a program-local slot and never a script value. The value is the receipt
+  cell the coordinator mints, whose `d.io.range` rank (the `Range` dimension) the host fills with
+  one `makeCell(PrimediaSpan)` per piece from the new `CaptureCoordinator::spansFor(range)`, taken
+  at commit while the translation is certainly in the map. `io_captured($c)` walks that rank by
+  relation position, so it is an ordinary multi-answer `RelationNext` loop. `io_tag` answers
+  `CaptureReceipt`; `io_error`, `io_detail`, `io_uncertain`, `io_payload` and `io_bytes` answer
+  nothing for a receipt instead of failing the script.
+- **A failed step's value is its own outcome.** The step outcome is copied into an `OwnedOutcome`
+  before the coordinator retires its request, so a `Cancelled`, `TimedOut` or `Failed` append or
+  durable step is what the script reads. A refusal before any request (no payload, a range outside
+  it, an unreadable journal, a pinned or pending overlap, a bound) is the coordinator's or the
+  host's `Rejected`.
+- **Owned records keep the observation.** `OwnedOutcome::observation` is the `ReadObservationRecord`
+  copied by value (locator, generation, extent, bound range); its locator bytes are charged to
+  `retainedPayloadBytes` beside the payload chunk. `capture` requires the observation, where there
+  is one, to bind the very range the outcome retained (`Rejected(Unresolved, 2)` otherwise), and
+  keys overlap on that range's origin. `ScriptRunner::ownedObservation` exposes it for tests.
+- **Endings.** A script that fails, times out, is abandoned or whose runner is destroyed abandons
+  its unfinished captures: the capture cell dies, the awaited step is orphaned (never cancelled,
+  never finished in the background) and `CaptureCoordinator::reapAbandoned` (new, the sweep every
+  mutating call starts with) pins the capture by phase at once. A finished script's captures are
+  freed at the next admission, in `freeFinishedRecords`, beside its records. `capture` is an
+  admission path, so it calls `retireAll(finished_)` and `freeFinishedRecords()` first.
+- **Refusals as values** (`Rejected`): no payload `Unresolved` detail 1; observation mismatch
+  `Unresolved` 2; range outside the payload `InvalidRequest` 3; unreadable gate `Unresolved` 4.
+  Diagnostics: `VQL_IO_CAPTURE_UNAVAILABLE` (checked before anything runs) and
+  `VQL_IO_CAPTURE_SOURCE` (a value that is not an outcome).
+
+Deviations and findings, recorded because the code disagreed with the note:
+
+1. **`capture` is contextual, not reserved.** Reserving it as a call name (the C2 treatment of
+   `write_bytes`) would break an ordinary `def pure capture()` that existing tests define and call.
+   It is a call only inside `effect { }`.
+1. **A capture's publication appends bytes to the permascroll beyond the content.** The published
+   receipt's scalar cells spool their canonical text (R6), so the permascroll grows by about 76
+   bytes a capture more than the selection's length. The content's size is the sum of the journal's
+   `Append` lengths; a test that measured the permascroll's size would be measuring the receipt.
+1. **Abandoned pins cannot block a later capture in the same process.** A pin is keyed on the
+   transient origin of the abandoned script's read, and the record that names that origin dies with
+   the script, so no later capture can overlap it. What a pin keeps is the reported orphan bytes and
+   the reconcile decision (and, after a restart, the durable-origin pins recovery rebuilds). §11's
+   "a later capture overlapping those bytes is `Rejected(Conflict)`" holds for a coordinator whose
+   caller still holds the origin, which a script cannot after it ends.
+1. **A capture the coordinator refuses after its append succeeded keeps no retry.** The failed
+   capture ends with the step's outcome, the host never calls `commit` again, and the capture cell's
+   release pins it by phase. The coordinator's "retriable through `commit()`" is not offered to a
+   script (no silent retry, §9).
+1. **The unverified item, (a) of §18.** `resultRows` loses a captured cell today:
+   `ArenaManifold::quotedContent` answers nothing for a bare `makeCell(PrimediaSpan)` cell in an
+   arena with no store behind it, so the row would be typed in again. `writeResultSlice` itself can
+   carry the span: `QuotedSpans::store` need only be some `Store` over the author's permascroll
+   (`canCarry` compares the permascrolls of a local span), and the capture store is one. The C4
+   change is vquery-local: in `resultRows`, when `quotedContent` is empty and the cell's content is
+   non-scratch spans, quote them against the capture store.
+   `ACapturedCellNamesNoStoreSoOnlyAQuotedSpanCarriesIt` pins both halves.
+1. **`--capture-dir`, `:captures` and `:reconcile` are not in C3.** `fileScriptPorts` asks the host
+   for its capture stack (`FileReadHost::capture()`), so a host that never calls `attachCapture`
+   (today every `vquery`) gets `VQL_IO_CAPTURE_UNAVAILABLE`, which is the intended state until C4
+   builds the stack lazily from `--capture-dir`.
+
+Notes for C4 and C5. C4: the exposure set reads `gated()` ranges as before;
+`ScriptRunner::persistability()` can ask `CaptureHost::coordinator().translationFor(range)`; the
+captured cells' content spans are local-scroll, so `promote`'s quoting path needs the `resultRows`
+change above, not a core change. C5: `CaptureHost::freeRun` deletes the capture cell, the
+occurrences and clone view of its request, the receipt and the captured cells, leaves first, but a
+capture still leaves cells behind. Measured over 20 runs each, a script that opens and reads leaves
+11 arena cells a run (§18.3 finding 2) and the same script with a `capture` leaves 73, so about 62
+are the capture's. They are not identified: the coordinator mints an endpoint, a capability and a
+spec cell per append and never frees them, the append and the two durable steps are service requests
+whose graphs the service reaps, and the relation answers a loop mints each pass are program cells.
+Criterion 11 for captures needs that accounting; C3 does not claim it.
 
 ## 19. Deferrals
 

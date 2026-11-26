@@ -48,6 +48,21 @@ constexpr const char *syncFunctor        = "sync";
 //   jump END
 //   WAIT: Await $h                  -> result
 //
+// Capture -- effect { capture($r[, off, len]) } [as $c]
+//
+//   RelationNext io_capture_begin | io_capture_range ($r[, off, len]) -> h
+//   LOOP: RelationNext io_capture_arm (h, h) -> arm, x
+//   BranchFalseCell arm, WAIT        ; arm 0: x is the request to await
+//   CopyCellRefs x                   -> result       ; arm 1: x is the value
+//   jump END
+//   WAIT: Await x                    -> step
+//   RelationNext io_capture_step (h, step)
+//   jump LOOP
+//
+// begin runs once (a resume continues at the Await); the host takes the next
+// step of the capture each pass, so a capture is its append plus one or two
+// durable steps, and a refusal or failure ends the loop with an outcome.
+//
 // Open -- effect { open("path") } [as $cap]
 //
 //   RelationNext io_open (path, mode) -> handle      ; the request or Rejected
@@ -203,6 +218,50 @@ VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
     firstOpcode = call.opcode;
     awaitOpcode = awaitOrKeep(call.answers.front(), handle, result);
     requestSlot = handle;
+    break;
+  }
+  case Kind::Capture: {
+    // A capture is a loop over the three relations of its host (design §6.2):
+    // begin once, then until the host says it holds the value, await the
+    // request it names and let it take the next step. A resume continues at
+    // the Await, so begin never runs twice.
+    std::vector<CellRef> arguments{bound(effect.captureVar)};
+    if (effect.captureRanged) {
+      arguments.push_back(operand(effect.offset));
+      arguments.push_back(operand(effect.maxBytes));
+    }
+    const auto begun = relate(effect.captureRanged ? captureRangeRelation
+                                                   : captureBeginRelation,
+                              arguments);
+    firstOpcode        = begun.opcode;
+    const auto capture = begun.answers.front();
+    const auto loop    = mintOpcode(OpcodeKind::Nop, "#IO_CAPTURE_LOOP");
+    const auto waiting = mintOpcode(OpcodeKind::Nop, "#IO_CAPTURE_WAIT");
+    const auto end     = mintOpcode(OpcodeKind::Nop, "#IO_CAPTURE_END");
+    appendOpcode(loop);
+    // Two answers: arm 0 or 1, and the request to await or the value.
+    const auto arm   = relate(captureArmRelation, {capture, capture});
+    const auto armed = emitOp(OpcodeKind::BranchFalseCell, "#IO_CAPTURE_ARM");
+    emitInput(armed, arm.answers[0]);
+    emitInput(armed, waiting);
+    const auto keep = emitOp(OpcodeKind::CopyCellRefs, "#IO_CAPTURE_VALUE");
+    emitInput(keep, arm.answers[1]);
+    emitOutput(keep, result);
+    const auto leave = emitOp(OpcodeKind::BranchFalseCell, "#IO_CAPTURE_LEAVE");
+    emitInputConstant(leave, false);
+    emitInput(leave, end);
+    appendOpcode(waiting);
+    const auto stepOutcome = fresh();
+    const auto await       = emitOp(OpcodeKind::Await, "#IO_CAPTURE_AWAIT");
+    emitInput(await, arm.answers[1]);
+    emitOutput(await, stepOutcome);
+    relate(captureStepRelation, {capture, stepOutcome});
+    const auto again = emitOp(OpcodeKind::BranchFalseCell, "#IO_CAPTURE_AGAIN");
+    emitInputConstant(again, false);
+    emitInput(again, loop);
+    appendOpcode(end);
+    awaitOpcode = await;
+    requestSlot = arm.answers[1];
     break;
   }
   case Kind::Open: {

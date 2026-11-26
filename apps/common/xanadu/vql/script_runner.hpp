@@ -41,6 +41,7 @@
 
 #include <gleditor/cpp26.hpp>
 
+#include "common/xanadu/vortex/capture_host.hpp"
 #include "common/xanadu/vortex/file_read_host.hpp"
 #include "common/xanadu/vortex/frontend_bridge.hpp"
 #include "common/xanadu/vortex/frontend_diagnostics.hpp"
@@ -131,6 +132,11 @@ struct ScriptIoPorts {
   StageWriteFn stageWrite;
   StageAppendFn stageAppend;
   StageSyncFn stageSync;
+  /// The capture stack a `capture` action drives, asked for each time one runs
+  /// so a host may build it lazily. Empty, or answering null, means this host
+  /// can capture nothing and the script stops with
+  /// `VQL_IO_CAPTURE_UNAVAILABLE` before anything runs.
+  std::function<vortex::CaptureHost *()> captureHost;
 };
 
 /// The ports over a `FileReadHost`: reads are staged on the file endpoint
@@ -219,6 +225,20 @@ public:
   [[nodiscard]] auto retainedBytes() const noexcept -> std::size_t {
     return retainedBytes_;
   }
+  /// What the read observed, kept by value in the record @p record names (the
+  /// service's observation cell leaves with its request). Nullopt for a cell
+  /// that is not a live record or one that carried no observation.
+  [[nodiscard]] auto ownedObservation(zigzag::CellRef record) const
+      -> std::optional<vortex::ReadObservationRecord> {
+    const auto found = owned_.find(record);
+    if (found != owned_.end()) return found->second.observation;
+    // A finished script's records are kept, payload returned, until the next
+    // admission.
+    for (const auto &held : finishedRecords_) {
+      if (held.cell.cell == record) return held.observation;
+    }
+    return std::nullopt;
+  }
 
 private:
   struct Activation;
@@ -254,6 +274,29 @@ private:
   /// script-owned record and retire its request (§12.1).
   [[nodiscard]] auto ownOutcome(const zigzag::vortex::RelationQuery &query)
       -> zigzag::vortex::RelationResult;
+  /// `capture($r[, off, len])` as three relations the compiled loop calls
+  /// (design §6.2): begin makes the capture and requests its append, arm says
+  /// whether the program awaits a request or holds the value, step takes the
+  /// next step once the awaited request ended. `ranged` is the three-argument
+  /// begin. The capture host's cells are the host's, never the program's.
+  [[nodiscard]] auto captureBegin(const zigzag::vortex::RelationQuery &query,
+                                  bool ranged)
+      -> zigzag::vortex::RelationResult;
+  [[nodiscard]] auto captureArm(const zigzag::vortex::RelationQuery &query)
+      -> zigzag::vortex::RelationResult;
+  [[nodiscard]] auto captureStep(const zigzag::vortex::RelationQuery &query)
+      -> zigzag::vortex::RelationResult;
+  [[nodiscard]] auto capturedCells(const zigzag::vortex::RelationQuery &query)
+      -> zigzag::vortex::RelationResult;
+  /// The capture host a `capture` action drives, when this host has one.
+  [[nodiscard]] auto captureHost() const -> vortex::CaptureHost * {
+    return ports_.captureHost ? ports_.captureHost() : nullptr;
+  }
+  /// End every capture @p activation began: an unfinished one is abandoned
+  /// (the coordinator pins it by phase), a finished one is freed now
+  /// (@p freeCells) or at the next admission, when rows may still name its
+  /// receipt.
+  void releaseCaptures(Activation &activation, bool freeCells) noexcept;
   /// Give back every payload lease @p activation's records hold. Their cells
   /// are freed now (@p freeCells) or, when rows may still name them, at the
   /// next admission.
@@ -363,6 +406,9 @@ private:
   /// kept until the next admission because the rows a caller holds may name
   /// them.
   std::vector<vortex::OwnedOutcome> finishedRecords_;
+  /// Finished scripts' captures, kept until the next admission for the same
+  /// reason as finishedRecords_: a caller's rows may be the receipt.
+  std::vector<zigzag::CellRef> finishedCaptures_;
   std::size_t retainedBytes_{};
   std::vector<std::string> providers_;
   /// The whole token, so a waiter dropped with its request's cells can still

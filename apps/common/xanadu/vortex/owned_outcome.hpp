@@ -35,6 +35,17 @@ struct OwnedOutcome {
   /// What the lease pins: the whole physical chunk (plan §8.1), which is what
   /// a retention budget charges.
   std::size_t chunkBytes{};
+  /// What the read observed (locator, generation, extent), copied by value
+  /// from the service outcome's d.io.source cell: a capture of the record keys
+  /// its overlap on the observation, which the record would otherwise have
+  /// lost with the request. Absent for an outcome that carried none.
+  std::optional<ReadObservationRecord> observation;
+
+  /// The bytes the observation's own strings occupy, charged beside the
+  /// payload chunk: the record keeps them for as long as it lives.
+  [[nodiscard]] auto observationBytes() const noexcept -> std::size_t {
+    return observation ? observation->locator.size() : 0;
+  }
 
   /// Copy @p source's tag, scalar fields and progress into a new record. The
   /// copy takes ownership of @p payload: on any failure the lease is released

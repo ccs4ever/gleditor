@@ -635,6 +635,48 @@ auto CaptureCoordinator::translationFor(const PayloadRange &range) const
                               .length = range.length};
 }
 
+auto CaptureCoordinator::spansFor(const PayloadRange &range) const
+    -> std::optional<std::vector<xanadu::PrimediaSpan>> {
+  if (range.length == 0 || range.offset + range.length < range.offset) {
+    return std::nullopt;
+  }
+  const auto found = translations_.find(range.origin);
+  if (found == translations_.end()) return std::nullopt;
+  const auto &slots       = found->second;
+  const std::uint64_t end = range.offset + range.length;
+  auto slot               = slots.upper_bound(range.offset);
+  if (slot == slots.begin()) return std::nullopt;
+  --slot;
+  std::vector<xanadu::PrimediaSpan> spans;
+  std::uint64_t at = range.offset;
+  while (at < end) {
+    if (slot == slots.end()) return std::nullopt;
+    const auto &entry = slot->second;
+    // A gap or a slot that is not committed ends the walk: the bytes between
+    // were never captured.
+    if (entry.kind != TranslationSlot::Kind::Committed ||
+        entry.srcOffset > at || entry.srcOffset + entry.srcLength <= at) {
+      return std::nullopt;
+    }
+    const auto take = std::min(end, entry.srcOffset + entry.srcLength) - at;
+    const xanadu::PrimediaSpan piece{.scroll = entry.dst.scroll,
+                                     .start  = entry.dst.start +
+                                              (at - entry.srcOffset),
+                                     .length = take};
+    if (!spans.empty() && spans.back().scroll == piece.scroll &&
+        spans.back().start + spans.back().length == piece.start) {
+      spans.back().length += take;
+    } else {
+      spans.push_back(piece);
+    }
+    at += take;
+    ++slot;
+  }
+  return spans;
+}
+
+void CaptureCoordinator::reapAbandoned() { sweepDead(); }
+
 auto CaptureCoordinator::stateCounts() const noexcept -> StateCounts {
   return StateCounts{.translationSlots    = translationSlots_,
                      .retainedCaptures    = retainedCaptures_,

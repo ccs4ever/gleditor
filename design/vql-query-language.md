@@ -2504,6 +2504,48 @@ return io_tag($w), io_bytes($w), io_tag($d)
 - Rows of a script that wrote are still not persisted by `-o`, `--in-place` or `:save`
   (`VQL_IO_PERSIST_NEEDS_CAPTURE`); only capture (M7-VQL-c C3-C4) changes that.
 
+**Capturing a read (M7-VQL-c C3).** Input is transient unless a script explicitly makes it durable.
+`capture` is its own statement, not a `submit`, because a capture is three requests (an append to
+the author's permascroll, then one or two durable steps), and it takes an outcome, never text:
+
+```vql
+effect { open("data/in.csv") } as $f;
+effect {
+  let $s := submit($f, read_bytes(0, 65536));
+  match $s { admitted($q) => await($q), refused($e) => $e }
+} as $r;
+effect { capture($r) } as $c;          -- or capture($r, 128, 512): bytes [128, 640) of the payload
+return io_tag($c), io_captured($c)
+```
+
+- The value `$c` is the capture's **receipt** (`io_tag` answers `CaptureReceipt`), or the outcome
+  that ended it: a `Rejected` when nothing was requested (no payload, a range outside it, a bound,
+  an unreadable journal), or the step's own `Failed`, `Cancelled` or `TimedOut`. A refusal is a
+  value the script reads with `io_tag`, `io_error` and `io_detail`; `io_error`, `io_detail`,
+  `io_payload` and `io_bytes` answer nothing for a receipt.
+- `io_captured($c)` is the capture's content: one arena cell per translated piece of the selection,
+  in source order, whose content is the permanent permascroll span (no scratch, no copy). For
+  anything but a receipt it answers nothing. Provenance is not repeated in the arena: the receipt
+  published in the capture store holds source kind, source, generation, occurrence and offset as
+  structure, and the span is the shared address that finds it.
+- Overlap is keyed on the observation, not the content: capturing `[0,10)` then `[5,15)` of one read
+  appends only `[10,15)`; capturing the same selection twice appends once; a second read of the same
+  file is a new observation and appends again.
+- A named outcome is an owned record whose payload lease and read observation are kept by value, so
+  a capture works after the read's request was retired.
+- Reading, rendering and `io_payload` never capture, and a capture has no `within` or detached form.
+  `await($c)` and `cancel($c)` of a receipt are `VQL_IO_EFFECT_ARGUMENT`.
+- A host with no capture stack stops a script that holds a `capture` before anything runs
+  (`VQL_IO_CAPTURE_UNAVAILABLE`); `capture` of a value that is not an outcome is
+  `VQL_IO_CAPTURE_SOURCE`. `capture` is a call name only inside `effect { }`, so a user function of
+  that name keeps working.
+- A script that times out or is destroyed mid-capture **abandons** it: the awaited step is orphaned,
+  never cancelled and never finished in the background, and the coordinator pins the capture's
+  intervals by phase for `reconcile`. The capture journal is recovered on the first capture of a
+  session, not at start.
+- Rows of a script that captured are still not persisted by `-o`, `--in-place` or `:save`
+  (`VQL_IO_PERSIST_NEEDS_CAPTURE`); lifting that is C4.
+
 ## 5. Memory Management & Topological Garbage Collection
 
 Persistent operations and primedia are append-only. Severing links changes current topology and
@@ -2774,6 +2816,7 @@ table.
 | 16.8    | `current` | 2026-11-25 | **M7-VQL-b gate polish** (4.13): the deadline a `within` request earns holds only while the request runs; a runner destroyed with a read running asks the backend to stop it; a refused close is retried only after another close finishes, at most four times.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 16.9    | `current` | 2026-11-26 | **M7-VQL-c design (4.13), nothing built**: script write effects (`write_bytes`, `append_bytes`, `sync`, `open(...) for write\|append` behind a host write grant) and explicit `capture($r)`, whose receipt and `io_captured($c)` cells quote the author's permascroll; `VQL_IO_PERSIST_NEEDS_CAPTURE` is lifted only for a run whose exposed payload ranges are all covered. Specified in [vortex-io-m7-vql-c.md](vortex-io-m7-vql-c.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 16.10   | `current` | 2026-11-26 | **M7-VQL-c C2: write effects** (4.13): `open(p) for write\|append [create]`, and `write_bytes(off, src)`, `append_bytes(src)` and `sync()` as `submit` descriptions (so `within`, `as`, handles and `cancel` apply); `src` is a text cell or an outcome (byte for byte); `io_uncertain($r)` joins the outcome functions; `write_bytes`, `append_bytes` and `sync` become reserved call names; `vquery --io-write-root DIR` (repeatable, default deny), `--io-write-bytes N` and `:open -w\|-wc\|-a\|-ac`; new diagnostic `VQL_IO_WRITE_SOURCE`. No existing program changes meaning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 16.11   | `current` | 2026-11-26 | **M7-VQL-c C3: capture effects** (4.13): `effect { capture($r[, off, len]) } as $c` over an outcome (a service outcome or an owned record) lowers to a relation loop of begin, arm and step around one `Await`; the value is the receipt (`io_tag` `CaptureReceipt`) or the refusing or failed outcome, and `io_captured($c)` answers the cells whose content is the permanent permascroll span. New diagnostics `VQL_IO_CAPTURE_UNAVAILABLE` and `VQL_IO_CAPTURE_SOURCE`; `capture` is contextual (not reserved). Persist refusal unchanged.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix

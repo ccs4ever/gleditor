@@ -2300,6 +2300,19 @@ IoEffectStatement Parser::parseIoEffectStatement() {
     simple(IoEffectStatement::Kind::Cancel, "cancel");
     effect.handleVar = consumeVariable("a request handle").stringValue;
     consume(TokenKind::CloseParen, "Expected ')' after the handle");
+  } else if (checkWord("capture") && peekToken().is(TokenKind::OpenParen)) {
+    // `capture` is contextual: it is a call name only inside `effect { ... }`,
+    // so an ordinary function of that name still defines and calls.
+    simple(IoEffectStatement::Kind::Capture, "capture");
+    effect.captureVar = consumeVariable("an outcome variable").stringValue;
+    if (match(TokenKind::Comma)) {
+      effect.captureRanged = true;
+      effect.offset        = parseIoOperand();
+      consume(TokenKind::Comma,
+              "Expected ',' between the offset and the length");
+      effect.maxBytes = parseIoOperand();
+    }
+    consume(TokenKind::CloseParen, "Expected ')' after the capture arguments");
   } else if (checkWord("open") && peekToken().is(TokenKind::OpenParen)) {
     simple(IoEffectStatement::Kind::Open, "open");
     if (check(TokenKind::StringLiteral)) {

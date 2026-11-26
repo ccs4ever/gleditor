@@ -48,6 +48,10 @@ constexpr std::array builtins{
     Builtin{FrontendId::Vql, frontend_codes::vqlWriteSource,
             "a write's byte source is neither a text cell nor an outcome that "
             "exposes a payload"},
+    Builtin{FrontendId::Vql, frontend_codes::vqlCaptureUnavailable,
+            "a capture action ran on a host with no capture stack"},
+    Builtin{FrontendId::Vql, frontend_codes::vqlCaptureSource,
+            "capture was handed a value that is not an outcome"},
     Builtin{FrontendId::Vql, frontend_codes::vqlEffectNeedsRunner,
             "script I/O action can park and runs only through a runner"},
     Builtin{FrontendId::Vql, frontend_codes::vqlPersistNeedsCapture,

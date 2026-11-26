@@ -67,6 +67,12 @@ inline constexpr std::string_view vqlEffectArgument = "VQL_IO_EFFECT_ARGUMENT";
 /// A write or append names a byte source that is not readable as bytes: not a
 /// text cell, or an outcome that retained no payload.
 inline constexpr std::string_view vqlWriteSource = "VQL_IO_WRITE_SOURCE";
+/// A `capture` action ran on a host that built no capture stack (`vqueryc`, a
+/// test host, a capture directory that cannot be opened).
+inline constexpr std::string_view vqlCaptureUnavailable =
+    "VQL_IO_CAPTURE_UNAVAILABLE";
+/// `capture` was handed a value that is not an outcome.
+inline constexpr std::string_view vqlCaptureSource = "VQL_IO_CAPTURE_SOURCE";
 /// A synchronous executor was asked to run a script holding an I/O action. The
 /// action compiles to bytecode but can park, and there is no blocking
 /// fallback, so such a script runs only through begin/resume (the runner).

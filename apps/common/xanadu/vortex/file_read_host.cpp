@@ -151,10 +151,22 @@ FileReadHost::FileReadHost(zigzag::vortex::VortexVM &vm,
                            FileReadHostOptions options)
     : arena_(arena), options_(options),
       schema_(makeIoCellSchema(arena).value()),
-      cells_(arena, schema_, payloads_,
-             makeFileRequestDecoder(arena, fileDataAdapterKey,
-                                    options.payloadBytes),
-             makeFileCloseDecoder(adapter_), makeOpenGrant(options.writeGrant)),
+      cells_(
+          arena, schema_, payloads_,
+          [this, files = makeFileRequestDecoder(arena, fileDataAdapterKey,
+                                                options.payloadBytes)](
+              const CapabilityCell capability, const OwnerCell specification)
+              -> std::expected<CellRequest, IoErrorInfo> {
+            // A capture's spec cells are the coordinator's to recognise;
+            // everything else is a file operation.
+            if (capture_) {
+              if (auto request = capture_->coordinator().decodeAppendRequest(
+                      capability, specification))
+                return *request;
+            }
+            return files(capability, specification);
+          },
+          makeFileCloseDecoder(adapter_), makeOpenGrant(options.writeGrant)),
       service_(makeService(options, payloads_, cells_)),
       host_(*service_, arena, vm),
       diagnostics_(FrontendDiagnosticRegistry::withBuiltins()),
@@ -169,6 +181,17 @@ FileReadHost::~FileReadHost() {
   if (service_) {
     static_cast<void>(service_->requestShutdown(ShutdownMode::CancelPending));
   }
+}
+
+auto FileReadHost::attachCapture(CaptureByteSink &sink,
+                                 CapturePublisher *publisher,
+                                 CaptureHostOptions options) -> CaptureHost & {
+  if (!capture_) {
+    capture_ =
+        std::make_unique<CaptureHost>(arena_, schema_, payloads_, *service_,
+                                      sink, publisher, std::move(options));
+  }
+  return *capture_;
 }
 
 auto FileReadHost::openSpec(const std::string_view path,
