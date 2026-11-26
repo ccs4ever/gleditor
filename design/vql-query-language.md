@@ -2339,13 +2339,16 @@ names `submit`, `await` and `read_bytes` cannot be called in any expression (a r
 projection or `return` value). Queries, rows, filters and projections stay pure: a script action
 cannot be reached once per row.
 
-**Multiplicity.** An action submits once each time execution reaches it. The runner cuts the script
-at its actions; every stretch of ordinary statements runs through the Vortex VM exactly as before,
-and a stretch that yields a thousand rows does not repeat the action. Two actions submit twice, in
-order. A script's result is that of its final executed statement: an action's value is its outcome
-cell, followed by the retained bytes as one text cell only when the outcome's terminal tag exposes a
-payload (`Complete`, or `Partial`, `Failed`, `Cancelled` or `TimedOut` that kept bytes).
-`EndOfStream`, `Rejected` and every other tag is an outcome row alone.
+**Multiplicity.** An action submits once each time execution reaches it. The whole script is one
+program (see "Bytecode form"); every stretch of ordinary statements runs through the Vortex VM
+exactly as before, and a stretch that yields a thousand rows does not repeat the action. Two actions
+submit twice, in order. A script's result is that of its final executed statement: an action's value
+is its outcome cell, followed by the retained bytes as one text cell only when the outcome's
+terminal tag exposes a payload (`Complete`, or `Partial`, `Failed`, `Cancelled` or `TimedOut` that
+kept bytes). The text cell holds the bytes as UTF-8: bytes that are not valid UTF-8 (a bound that
+cuts a multibyte character included), and a payload the host cannot read, are `VQL_SCRIPT_FAILED`,
+never a row that renders as something else. `EndOfStream`, `Rejected` and every other tag is an
+outcome row alone.
 
 **Pending.** A request that is not terminal parks the script: the runner returns a token (the
 suspended script, the action's statement index and the request) and the host wakes that token when
@@ -2371,8 +2374,21 @@ loop that answers the VM's submit hook (decode the description, stage the read, 
 bridge), routes the parked token, and reads a finished action's payload. `VQLCompiler::compile` and
 `vqueryc` compile the script; a capability or operand variable with no binding at compile time
 becomes a text cell naming it, which no Submit accepts, so the program is inspectable and fails by
-value if run unbound. The runner checks every action's capability and operands before anything
-compiles, so a bad later action fails the script before an earlier statement runs.
+value if run unbound. Before anything compiles, the runner checks every action's capability (a
+capability cell) and operands (non-negative integers or variables bound to one); a bad later action
+there fails the script before an earlier statement runs. The bounds of a staged read (the retention
+ceiling, whether the capability is a file) are checked when that action stages its read, so a later
+action that exceeds them fails the script after the earlier actions have run (reads are idempotent).
+
+**Persistence.** The rows of a script that ends in an action hold bytes the author never captured.
+`vquery` refuses `-o`, `--in-place` and `:save` for them with `VQL_IO_PERSIST_NEEDS_CAPTURE` and
+writes nothing; a later query that does not end in an action is saved as before. A capture command
+that routes the bytes through `CaptureCoordinator` is deferred. `def` of `submit`, `await` or
+`read_bytes` is refused with `VQL_IO_QUERY_CONTEXT`, the code a call of them gets.
+
+**Concurrent scripts.** One runner may hold several parked scripts. Each keeps its own actions (the
+submission sum and request), so resuming them in any order binds each token to its own request. The
+rows of a finished script stay readable until the next action any script admits.
 
 ______________________________________________________________________
 
@@ -2639,6 +2655,7 @@ table.
 | 16.0    | `current` | 2026-10-21 | **Structural Typing, Unified Shape Contracts & Topological Functors**: Gradual structural type system with atomic handles (`Cell`, `Dim`, `Store`, `Slice`, `Version`), `Dim` renaming; `Doc` unified into `Slice`; unified shape contracts enabling seamless coexistence of destructuring, type contracts, defaults, and parameter aliasing (`$v: Cell { +d.codec: $c: String }`); first-class point-free traversal functors (`/+d.parent / /+d.title`); proposed packed CurriedMorphism layout and specialized traversal lowering (unbuilt; no ABI or timing guarantee).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 16.2    | `current` | 2026-11-25 | **Script I/O actions (`effect`)**, milestone M7-VQL of the Vortex I/O plan: a top-level script statement `effect { let $s := submit($cap, read_bytes(off, max)); match $s { admitted($q) => await($q), refused($e) => $e } }` (4.13). A new statement, so no existing program changes meaning. It submits once per reached action, parks on Pending and resumes the same request, yields the outcome (and its payload where the status gate allows) as the script value, and is refused with `VQL_IO_QUERY_CONTEXT` as a row, block, def, lambda, watch or perspective action and as a call of `submit`/`await`/`read_bytes` in any expression. `submit`, `await` and `read_bytes` become reserved call names. A script holding an action had no bytecode form in this first cut; it was lowered the same day (16.3).                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 16.3    | `current` | 2026-11-25 | **Effect clauses lower to bytecode**: `MakeTerm` + `Submit` + a branch on the submission arm + `Await` (4.13), the language-neutral `Submit` opcode of the Vortex I/O plan P6. `VQL_IO_EFFECT_NOT_COMPILABLE` is gone; the synchronous executor refuses an action with `VQL_IO_EFFECT_NEEDS_RUNNER`, `vqueryc` compiles it. No existing program changes meaning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 16.4    | `current` | 2026-11-25 | **M7-VQL gate round 1** (4.13): several scripts may be parked on one runner, each with its own submission; `vquery` refuses to make action rows durable (`VQL_IO_PERSIST_NEEDS_CAPTURE`); `def` of a reserved I/O name is refused; a payload that cannot be read or is not UTF-8 is `VQL_SCRIPT_FAILED`; the pre-flight text now says what it checks.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix

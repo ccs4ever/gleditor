@@ -1242,8 +1242,9 @@ M7-VQL implementation notes and deliberate deferrals:
   the whole script, since an action is a statement and not a block. `QueryExecutor::execute` is
   synchronous and cannot wait, so it refuses a script holding an action with
   `VQL_IO_EFFECT_NEEDS_RUNNER` (replacing `VQL_IO_EFFECT_NOT_COMPILABLE`); `VQLCompiler::compile`,
-  `vqueryc` and `:asm` compile it. A script's actions are validated (capability, operands) before
-  anything compiles, so a bad later action now fails the script before an earlier statement runs.
+  `vqueryc` and `:asm` compile it. A script's actions are pre-flighted for capability-ness and
+  non-negative integer operands before anything compiles, so a bad later action then fails the
+  script before an earlier statement runs; the staged-read bounds are checked at stage time (r1).
 - Values. The script's result is its final executed statement's rows, as before. An action's value
   is the outcome cell, then one text cell with the retained bytes only when the shared status gate
   exposes a payload. A refusal is a `Rejected` outcome row (nothing started) and the script goes on;
@@ -1268,7 +1269,12 @@ M7-VQL implementation notes and deliberate deferrals:
   would null on destruction. `vqueryc` is compile-only and opens no file or endpoint; it compiles an
   action (a capability variable it has no binding for becomes a text cell naming it, which no Submit
   accepts, so running that program unbound fails by value). The host is built lazily, so a plain
-  query starts no worker.
+  query starts no worker. The persistence paths were audited in gate r1: `-o`, `--in-place` and
+  `:save` would have written an action's payload text into the permascroll with no capture decision,
+  so they are refused with `VQL_IO_PERSIST_NEEDS_CAPTURE` for rows of a script ending in an action
+  (e2e `ActionRowsAreNotWrittenByOutputStoreInPlaceOrSave`); `:open` takes a path with spaces; the
+  open still has no deadline or cancel, and `lastResults` after a script that fails post-admission
+  may name retired cells (deferred).
 - Harness. `ConformanceDriver` gained `collectWakes()` (default empty) and `pumpDriver`, because a
   language whose runner is not the driver itself must forward the wakes its runner received; the M7a
   drivers are unchanged. `VqlScriptConformance` instantiates all five checks with a driver that runs
@@ -1286,9 +1292,23 @@ Deferred, by design:
   the examples document): the script sees the outcome cell and the gated payload text, and the host
   inspects the tag. Binding the action's result to a variable for later statements is also absent,
   so statements after an action cannot name its value.
-- Retiring the request: the outcome cell is the script's value, so the runner does not
-  `retireRequest`; the request index and outcome cells live until the host drops them, which a
-  one-shot CLI never notices and a long-lived host must handle.
+- Gate r1 (round 1 of the M7-VQL review; `m7-vql/r1-disposition.md`): the runner keeps
+  per-activation submissions (several scripts may park together, resumed in any order; finished
+  scripts' rows stay readable until the next admission by any activation; a failed, abandoned or
+  backtracked action is accounted for, a running orphan never cancelled); a second runner on a VM is
+  refused; `vquery` refuses `-o`, `--in-place` and `:save` of action rows with
+  `VQL_IO_PERSIST_NEEDS_CAPTURE` until a capture command exists (deferred); payload read failures
+  and non-UTF-8 bytes are `VQL_SCRIPT_FAILED`. **Priced retention (deferred, proposal P7):** a
+  parked script cuts its pre-compile mark, so each action keeps its compiled program, about 37-40
+  cells per run (pinned by `AnEffectScriptRunRetainsAPricedConstantNumberOfCells`). Reclaiming them
+  needs the arena to name a cell's ranks (an `ArenaManifold` core change), because compile cells sit
+  in spin/grab/step ranks shared with cells outside the program; a bounded-by-construction attempt
+  with only the known system dimensions freed 2-3 of 27 cells and was dropped. P7 proposes
+  `ArenaManifold::detachAll(CellRef)` (join neighbours on every rank) so `freeCell` can reclaim a
+  program's region at completion.
+- Retiring the request: the outcome cell is the script's value, so a finished script's request is
+  retired through `FrontendBridge::retire` only when the next action is admitted (or the runner
+  ends), never earlier.
 - Write, capture, `message` and frame modes, `stable` reads, and any action other than a bounded
   read of one file capability; reads over a loop or per row (refused until an explicit later gate).
 - The runner needs a `VQLEngine` session (it supplies the bound capability and operand cells at
@@ -1320,8 +1340,21 @@ P6: the Submit opcode (applied with owner approval, `vortex_vm.{hpp,cpp}` only):
   never re-executes it. Backtracking does not recall a request: `Fail` restores arena cells and
   choice state, but the admitted request is an effect in the service, so executing a Submit again
   after backtracking (or twice in a loop) creates a new operation, as the plan's multiplicity rule
-  says. The abandoned submission cells go with the arena rollback; the request stays with the host
-  to retire.
+  says. The abandoned submission cells go with the arena rollback, and the request cannot be left
+  naming cells that no longer exist (M7-VQL gate r1, vortex M1: each pass of a retry loop leaked an
+  admitted request until the budget of 16 refused everything). Chosen semantics: **the host is told
+  before the cells go.** `VortexVM::setSubmitRollbackHandler` is called once per Submit admitted
+  since the rolled-back choice point (backtracking, a scoped abort, a failed mutation group), newest
+  first, while the sum, request and payload cells still exist; the VM only passes the `VmSubmission`
+  it already holds and guarantees the order. The host decides. `ScriptRunner` orphans the request
+  (`IoHost::orphanRequest` -> `IoService::orphanRequest`): it is **not cancelled and not recalled**
+  (backtracking does not undo a world effect), it runs to its own terminal, and the service then
+  drops its state without publishing an outcome cell (nothing can name it) and frees its budget.
+  Refused alternatives: refusing Submit under a live older choice point (contradicts "a new
+  execution creates a new operation, including after backtracking"); keeping the cells outside the
+  trail (the arena has no such region and the rank links of the endpoint queue are
+  trail-journalled); cancelling on rollback (a recall, wrong for any future write). The VM also
+  refuses an arm ordinal above 1.
 - Pattern matching reuses existing opcodes: `BranchFalseCell` on the arm ordinal selects the arm,
   `Await` takes the payload. No second opcode was needed.
 
