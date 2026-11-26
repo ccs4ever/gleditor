@@ -2566,13 +2566,14 @@ is [`vortex-io-m7-vql-d.md`](vortex-io-m7-vql-d.md).
   `rejected($code, $detail)`, `cancelled($uncertain)` and `timed_out($uncertain)`; the other tags
   bind nothing; `_` as a binder ignores a field. A binder is a stream, empty when the outcome lacks
   the field. Each arm is one return item. The match is exhaustive: the parser knows the operation of
-  an outcome the same script named with `as` (a read can end with eleven tags, a write, append or
-  sync with eight, each including `rejected`), so a missing tag, a tag the operation cannot produce,
-  a repeat, an arm after `_`, or a wrong binder count is `VQL_IO_MATCH` before anything runs. A name
-  the parser cannot place must name all twelve tags or use `_`. A request handle, an `open` name and
-  a capture receipt are refused by name (await the handle; read the others with `io_tag`), and a
-  value that is not an outcome at run time is the same code. A match is refused as an action is
-  (`VQL_IO_QUERY_CONTEXT`) and needs the runner. `io_cause($r)` answers why a `partial` stopped.
+  an outcome the same script named with `as` (a read can end with twelve tags, a write, append or
+  sync with eight, each including `rejected` and `conflict`), so a missing tag, a tag the operation
+  cannot produce, a repeat, an arm after `_`, or a wrong binder count is `VQL_IO_MATCH` before
+  anything runs. A name the parser cannot place must name all twelve tags or use `_`. A request
+  handle, an `open` name and a capture receipt are refused by name (await the handle; read the
+  others with `io_tag`), and a value that is not an outcome at run time is the same code. A match is
+  refused as an action is (`VQL_IO_QUERY_CONTEXT`) and needs the runner. `io_cause($r)` answers why
+  a `partial` stopped.
 
 - **`await($h) as $r`** (and `cancel($h) as $c`) is an owned record like a named read's, but `$h`
   stays admitted and awaitable: a second `await($h)` yields the outcome again and the script's end
@@ -2583,10 +2584,14 @@ is [`vortex-io-m7-vql-d.md`](vortex-io-m7-vql-d.md).
   exactly one value when the action is reached; none or several is `VQL_IO_EFFECT_ARGUMENT`, and a
   non-number offset is the same code. Nothing is submitted for it.
 
-- **`join(rows, separator)`** is a pure aggregate: the rows' scalars as text with one separator
-  between each pair, one text cell, `""` for no rows. A text longer than `maxJoinedTextBytes` (1
-  MiB, the default write bound) is `VQL_IO_BOUND`, never truncated. A join of many rows costs a few
-  VM cycles a row, so a host raises `maxCycles` for a large one (the 10^4-row test runs with 10^6).
+- **`join(rows, separator)`** answers one cell with the rows' text and one separator between each
+  pair, `""` for no rows. A row that quotes text stays quoted: the result's content is the run of
+  the rows' own spans with the separator (and any number) as new text, and a lone row is returned
+  itself; rows of a loaded store are copied as text when there are several. A text longer than
+  `maxJoinedTextBytes` (1 MiB, the default write bound; `vquery --io-write-bytes` raises both) is
+  `VQL_IO_BOUND`, refused before it is built. A join costs one relation call a row, so a host raises
+  `maxCycles` for a large one (the 10^4-row test runs with 10^6). A number used as a write source is
+  written as its canonical text.
 
 - **A failed capture step** keeps its tag and uncertainty under arena pressure (a payload-less
   summary record), instead of a generic refusal.
@@ -2932,6 +2937,7 @@ table.
 | 16.14   | `current` | 2026-11-26 | **M7-VQL-c gate round 1** (4.13): the persistence rule is session-scoped (every payload any script exposed as text, checked on any line that persists), runtime-handle rows are refused on every line, a session variable naming a freed handle answers `VQL_IO_STALE_BINDING`, `:reconcile` parses its decision whole. No existing program changes meaning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 16.15   | `current` | 2026-11-26 | **M7-VQL-c gate round 2** (4.13): the REPL command `:forget` drops the session's uncaptured exposures and unbinds every variable that is not an I/O handle, so a refused `:save` can be recovered from; a stale name is refused by tag wherever bytes, capabilities, outcomes or numbers are read (a write source no longer writes the words "stale handle"), and a name a plain `let` copied from a handle goes stale with it; a stale refusal on a plain line names the code without the engine operator. No existing program changes meaning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 16.16   | `current` | 2026-11-26 | **M7-VQL-d: values** (4.13): `match` over an outcome (exhaustive, `_` allowed, `VQL_IO_MATCH` before anything runs), `await($h) as $r` as an owned record that leaves `$h` awaitable, a script `let` as a write source, offset or length, the pure `join(rows, separator)` aggregate (`VQL_IO_BOUND` past 1 MiB), `io_cause`, and a payload-less summary for a failed capture step. `match` and `join` are new names used only in these positions; no existing program changes meaning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 16.17   | `current` | 2026-11-26 | **M7-VQL-d gate round 1** (4.13): a read can end with `conflict` (twelve tags) and a match without `_` refuses an unmatched tag at run time; a number is written as its canonical text; `join` keeps the spans its rows quote and bounds the text as it builds; a rebound script `let` frees what its last program minted. No existing program changes meaning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix

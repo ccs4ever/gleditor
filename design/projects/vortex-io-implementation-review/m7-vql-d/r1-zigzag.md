@@ -8,24 +8,24 @@ the `let` leak.
 Tally: BLOCKING 0, MAJOR 2, MINOR 3.
 
 Method: read the diff and design; ran `build/vquery` (rebuilt by the VQL critic, has `io_match_tag`)
-and `build/xudu-dump` headless, XDG dirs under `/tmp/claude-1000/zz/`. `build/xuzz_test` predates the
-slice (no `JoinWorld`), so no gtest was run.
+and `build/xudu-dump` headless, XDG dirs under `/tmp/claude-1000/zz/`. `build/xuzz_test` predates
+the slice (no `JoinWorld`), so no gtest was run.
 
 Checked and found sound (no finding):
 
 - **R8.** Nothing in the diff touches `Store` or emits an operation. `summary`, `io_match_tag`,
   `io_cause`, `join` and the `let` narrowing allocate only in the arena or the VM's value slots.
-- **2-degree rank rule.** `summary` writes through the same `appendIoField` on
-  Occurrence/State that `copy` uses, one field cell per label with its value on State
-  (`owned_outcome.cpp:134-145`). No new dimension, no fan-in.
+- **2-degree rank rule.** `summary` writes through the same `appendIoField` on Occurrence/State that
+  `copy` uses, one field cell per label with its value on State (`owned_outcome.cpp:134-145`). No
+  new dimension, no fan-in.
 - **P7.** `summary` frees through the existing `freeOutcomeGraph` (`owned_outcome.cpp:171-204`,
   `deleteCell(..., LeaveBroken)`), and `await ... as` records go through `releaseRecords` and
   `retire`. There is no new unlink loop.
 - **Mark discipline of `summary`.** It releases the mark on every failure and on a throw
   (`owned_outcome.cpp:131-151`), as `copy` does.
-- **Tags.** `io_match_tag` answers an integer from a `switch` (`script_runner.cpp:1475`), so the
-  tag is a computed scalar, not text parsed from a cell. Binders reuse the field relations
-  already in the tree. No side table.
+- **Tags.** `io_match_tag` answers an integer from a `switch` (`script_runner.cpp:1475`), so the tag
+  is a computed scalar, not text parsed from a cell. Binders reuse the field relations already in
+  the tree. No side table.
 - **Permascroll writes by `join`.** `join` mints no primedia in the permascroll while the script
   runs. `-o` is the only way it reaches the permascroll (M1).
 
@@ -62,28 +62,28 @@ typing, which is the transcopyright hazard the capture journal exists to prevent
 **Fix.** At minimum, a row count of one returns the row cell itself (no copy). Better, assemble the
 result by `setContent` from the rows' spans plus one interned separator, so quoted rows stay quoted
 and only the separators are new. If the owner accepts a computed-text result, add the refused
-alternative and its price to design §3 and to `vql-query-language.md` §4.13, and say in the join
-doc that its result is new text, not a quotation.
+alternative and its price to design §3 and to `vql-query-language.md` §4.13, and say in the join doc
+that its result is new text, not a quotation.
 
-### M2. A `let` that is rebound per script run is never freed, and `join` makes the leaked cell up to 1 MiB
+### M2. A `let` rebound each run is never freed, and `join` makes the leaked cell up to 1 MiB
 
 **Problem.** `VQLEngine::bindName` overwrites `env_[name]` without freeing the old cells
 (`vql_engine.cpp:424-429`), and the slice makes `let $t := join(...)` the intended way to feed a
 write (design §2 a3). Each rerun leaves the previous `$t` cell, and the string it owns in the VM
-value slots, alive in the arena. Nothing reclaims it between scripts (`execution.cpp:381-386`
-rolls back only the pre-compile mark, and the `let` is published after it).
+value slots, alive in the arena. Nothing reclaims it between scripts (`execution.cpp:381-386` rolls
+back only the pre-compile mark, and the `let` is published after it).
 
-**Failure scenario.** A long `vquery` REPL session runs the same `let $t := join(rows, ","); ...
-write_bytes(0, $t)` script 1000 times with `--io-write-bytes` raised to the join bound. Each run
-leaves one `$t` cell holding up to 1 MiB of text. That is roughly 1 GiB for a repeated one-line
-script, and `liveCells()` grows by one per run.
+**Failure scenario.** A long `vquery` REPL session runs the same
+`let $t := join(rows, ","); ... write_bytes(0, $t)` script 1000 times with `--io-write-bytes` raised
+to the join bound. Each run leaves one `$t` cell holding up to 1 MiB of text. That is roughly 1 GiB
+for a repeated one-line script, and `liveCells()` grows by one per run.
 
 **Evidence.** `vql_engine.cpp:424-429`; design §5 "A script `let` is a session variable afterwards
-... leaves one cell a run". The pin `ManyJoinAndWriteRunsLeave...` (`vql_io_values_test.cpp:1040-1071`)
-frees the old `$text` binding by hand ("the test plays the owner", `:1048-1055`), so it measures
-what a runner would leave if it did the freeing, not what it leaves. The design calls this
-"engine behaviour", but the slice turned a small leak into a bounded-only-by-1-MiB one and wrote a
-test that hides it.
+... leaves one cell a run". The pin `ManyJoinAndWriteRunsLeave...`
+(`vql_io_values_test.cpp:1040-1071`) frees the old `$text` binding by hand ("the test plays the
+owner", `:1048-1055`), so it measures what a runner would leave if it did the freeing, not what it
+leaves. The design calls this "engine behaviour", but the slice turned a small leak into a
+bounded-only-by-1-MiB one and wrote a test that hides it.
 
 **Fix.** Free the cells a `let` rebinding replaces. The runner already tracks bound handles in
 `noteBindings`/`reconcileBindings`; the same place can free a replaced non-handle `let` cell once no
