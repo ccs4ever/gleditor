@@ -183,6 +183,28 @@ FileReadHost::~FileReadHost() {
   }
 }
 
+auto FileReadHost::pump(const std::size_t budget) -> std::size_t {
+  const auto work = host_.pumpIo(budget);
+  std::erase_if(deferredReaps_, [&](const DeferredReap &deferred) {
+    if (arena_.matches(deferred.request.cell, deferred.request.incarnation)) {
+      // A no-op while the service still tracks the request or a view names it.
+      host_.reapRetiredRequest(deferred.request);
+      if (arena_.matches(deferred.request.cell, deferred.request.incarnation))
+        return false;
+    }
+    // One attempt: with the request gone only a view some other owner holds
+    // can still refuse, and that owner reaps its own side.
+    static_cast<void>(reapIoEndpoint(arena_, schema_, deferred.endpoint));
+    return true;
+  });
+  return work;
+}
+
+void FileReadHost::reapWhenEnded(const RequestCell closeRequest,
+                                 const EndpointCell endpoint) {
+  deferredReaps_.push_back({closeRequest, endpoint});
+}
+
 auto FileReadHost::attachCapture(CaptureByteSink &sink,
                                  CapturePublisher *publisher,
                                  CaptureHostOptions options) -> CaptureHost & {

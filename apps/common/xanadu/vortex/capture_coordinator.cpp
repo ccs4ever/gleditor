@@ -716,6 +716,13 @@ void CaptureCoordinator::sweepStepGraphs() {
   };
   std::erase_if(steps_, [&](const StepGraph &step) {
     if (!step.request) return false;
+    // An abandoned capture's awaited step is orphaned, and the service forgets
+    // an orphan at its terminal without touching cells (it assumes its owner
+    // freed them). Once the service no longer tracks the request nothing else
+    // reaps it, and it still names this step's capability. The reap is a no-op
+    // while the request is tracked or any capture still views it.
+    if (arena_.matches(step.request->cell, step.request->incarnation))
+      service_.reapRetiredRequest(*step.request);
     if (arena_.matches(step.request->cell, step.request->incarnation))
       return false;
     if (specInUse(step)) return false;

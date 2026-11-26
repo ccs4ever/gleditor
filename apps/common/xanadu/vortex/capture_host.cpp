@@ -324,6 +324,15 @@ void CaptureHost::release(const CellRef handle) noexcept {
   coordinator_.reapAbandoned();
 }
 
+void CaptureHost::reapAbandoned() noexcept {
+  try {
+    coordinator_.reapAbandoned();
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN(logCategory, "reaping abandoned captures stopped: {}",
+                      error.what());
+  }
+}
+
 auto CaptureHost::capturedCell(const CellRef receipt,
                                const std::size_t index) const
     -> std::optional<CellRef> {

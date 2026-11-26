@@ -145,6 +145,10 @@ struct ScriptIoPorts {
   /// `VQL_IO_CAPTURE_UNAVAILABLE`. Empty: nothing to build.
   std::function<std::expected<vortex::CaptureHost *, std::string>()>
       ensureCaptureHost;
+  /// Hands a close the runner is leaving running (it is being destroyed, and
+  /// the worker is busy) to the host, which frees the close's graph and the
+  /// endpoint's once the close has ended. Empty: those cells stay.
+  std::function<void(vortex::RequestCell, vortex::EndpointCell)> reapWhenEnded;
 };
 
 /// The ports over a `FileReadHost`: reads are staged on the file endpoint

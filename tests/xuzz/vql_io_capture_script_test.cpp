@@ -767,3 +767,103 @@ TEST(VqlIoCaptureLeakTest, ManyCaptureRunsLeaveTheArenaAndTheStacksBounded) {
 }
 
 } // namespace
+
+namespace {
+
+/// How a script is abandoned while its capture's append is inside the sink.
+enum class Abandon { Timeout, DestroyedRunner };
+
+/// Start a script that captures, hold its append in the sink, abandon the
+/// script, then let the orphaned append finish: the step is never cancelled,
+/// so the residue it leaves can only be freed once it has ended.
+void abandonMidCapture(CaptureWorld &w, const std::string &path,
+                       const Abandon how) {
+  constexpr auto scriptTimeout = std::chrono::milliseconds{1};
+  constexpr auto settle        = std::chrono::milliseconds{2};
+  constexpr auto idleWait      = std::chrono::milliseconds{1};
+  constexpr int turnBound      = 20'000;
+  w.sink->close();
+  const auto already = w.sink->entered();
+  if (how == Abandon::Timeout) w.runner->setScriptTimeout(scriptTimeout);
+  auto result    = w.start(open(path, "f") + read("f", "0, 64", "r") +
+                           captureOf("r", "c") + "return io_tag($c)");
+  bool abandoned = false;
+  for (int turns = 0; turns < turnBound && !abandoned; ++turns) {
+    auto *parked = std::get_if<ScriptRunResult::Parked>(&result.value);
+    if (parked == nullptr) break;
+    w.host->pump(16);
+    if (auto woken = w.runner->takeWake()) {
+      result = w.runner->resume(std::move(*woken));
+      continue;
+    }
+    if (w.sink->entered() <= already) {
+      std::this_thread::sleep_for(idleWait);
+      continue;
+    }
+    if (how == Abandon::Timeout) {
+      std::this_thread::sleep_for(settle);
+      abandoned = w.runner->expireIfDue(parked->token).has_value();
+    } else {
+      abandoned = true;
+    }
+  }
+  ASSERT_TRUE(abandoned) << "the script never reached its append";
+  if (how == Abandon::DestroyedRunner) {
+    w.runner.reset();
+    w.runner = std::make_unique<ScriptRunner>(
+        w.engine, w.vm, xanadu::vql::fileScriptPorts(*w.host));
+  } else {
+    w.runner->setScriptTimeout(std::nullopt);
+  }
+  w.sink->open();
+  // The append lands on its own; nothing resubmits it.
+  for (int turns = 0; turns < turnBound && w.host->service().requestCount() > 1;
+       ++turns) {
+    w.host->pump(16);
+    std::this_thread::sleep_for(idleWait);
+  }
+}
+
+void expectAbandonedCapturesBounded(const Abandon how, const std::size_t runs) {
+  CaptureWorld w;
+  const auto path        = w.put("in.txt", "leak probe bytes");
+  const auto idle        = open(path, "g") + "return io_tag($g)";
+  const auto settleArena = [&] {
+    // Two admissions retire the previous run's closes and scaffolding.
+    for (int i = 0; i < 3; ++i) dropRows(w, w.run(idle));
+  };
+  constexpr std::size_t warmRuns = 3;
+  for (std::size_t i = 0; i < warmRuns; ++i) abandonMidCapture(w, path, how);
+  settleArena();
+  const auto warmSlots = w.arena.cellCount();
+  const auto warmLive  = w.arena.liveCells();
+  for (std::size_t i = 0; i < runs; ++i) abandonMidCapture(w, path, how);
+  settleArena();
+  EXPECT_EQ(w.arena.cellCount(), warmSlots) << "the slot high-water mark";
+  EXPECT_EQ(w.arena.liveCells(), warmLive) << "live arena cells";
+  EXPECT_LE(w.host->service().requestCount(), 3U) << "service requests";
+  EXPECT_EQ(w.coordinator().stateCounts().stepGraphs, 0U)
+      << "an orphaned step's scaffolding is freed once the step ends";
+  EXPECT_LE(w.host->capture()->liveRuns(), 1U) << "capture runs";
+  EXPECT_EQ(w.runner->ownedRecordCount(), 0U);
+  // The pin is the design: one per abandoned capture, each reconcilable.
+  const auto pinned = w.coordinator().pinnedCaptures();
+  EXPECT_EQ(pinned.size(), warmRuns + runs);
+  for (const auto id : pinned) {
+    EXPECT_TRUE(
+        w.coordinator().reconcile(id, xanadu::vortex::ReconcileRelease{}));
+  }
+  EXPECT_TRUE(w.coordinator().pinnedCaptures().empty());
+}
+
+constexpr std::size_t abandonedRuns = 1'000;
+
+TEST(VqlIoCaptureLeakTest, ManyTimedOutCapturesLeaveTheArenaBounded) {
+  expectAbandonedCapturesBounded(Abandon::Timeout, abandonedRuns);
+}
+
+TEST(VqlIoCaptureLeakTest, ManyDestroyedRunnersMidCaptureLeaveTheArenaBounded) {
+  expectAbandonedCapturesBounded(Abandon::DestroyedRunner, abandonedRuns);
+}
+
+} // namespace

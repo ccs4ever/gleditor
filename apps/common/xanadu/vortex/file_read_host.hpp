@@ -167,10 +167,17 @@ public:
   [[nodiscard]] auto stageSync(CapabilityCell capability)
       -> std::expected<zigzag::CellRef, StageReadError>;
 
-  /// Publish completions and deliver wakes; never blocks.
-  auto pump(const std::size_t budget) -> std::size_t {
-    return host_.pumpIo(budget);
-  }
+  /// Publish completions and deliver wakes; never blocks. Also finishes the
+  /// reaping that `reapWhenEnded` took over.
+  auto pump(std::size_t budget) -> std::size_t;
+
+  /// Take over the cleanup of a close a departing owner left running (a
+  /// runner destroyed with a file still open and its worker busy): when
+  /// @p closeRequest has ended, its graph and then @p endpoint's graph are
+  /// freed on a later `pump`. The request is the caller's to have orphaned,
+  /// never cancelled; nothing can name either graph once the owner is gone,
+  /// so nothing else would free them. Owner thread.
+  void reapWhenEnded(RequestCell closeRequest, EndpointCell endpoint);
 
   /// The retention budget a script runner charges its owned records to.
   [[nodiscard]] auto retainedPayloadBytes() const noexcept -> std::size_t {
@@ -216,6 +223,11 @@ private:
   IoHost host_;
   FrontendDiagnosticRegistry diagnostics_;
   FrontendBridge bridge_;
+  struct DeferredReap {
+    RequestCell request;
+    EndpointCell endpoint;
+  };
+  std::vector<DeferredReap> deferredReaps_;
 
   /// Mint the spec cell tagged @p tag and stage @p op under it on the file
   /// @p capability names; shared by every stage* above.

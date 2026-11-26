@@ -1217,31 +1217,61 @@ journal: a death mid-write leaves a prefix and the restarted host has nothing to
 derive and `:save`, close, reopen and read the slice (the row quotes the capture and `:captures` in
 the next process lists it); write a report with `:open -wc`, `sync()`, read it back; the same write
 without `--io-write-root` is "Open failed". Findings recorded: the empty REPL line above (fixed); an
-**abandoned** capture (script timeout mid-append) still leaves about 27 arena cells a run, the
-opened file's graph (its open outcome keeps a view on the capability, so `reapIoEndpoint` refuses)
-and the capture's own; bounded by the abandoned scripts a session has, not freed, and listed under
-deferrals; a result row is the caller's, so a long `vquery` session grows by its printed rows as it
-always has.
+**abandoned** capture left arena cells (fixed after C5, below); a result row is the caller's, so a
+long `vquery` session grows by its printed rows as it always has.
+
+**Abandoned captures (after C5).** The first accounting blamed the opened file's graph, kept by its
+open outcome's view on the capability. That was wrong: the open request is reaped with its view when
+the script is abandoned, and the file's graph goes at the next admission once its close ends.
+Counting every live cell per phase of a script timed out inside the sink (the append held at a gate,
+then released) found two residues, both of them cells that nothing frees because the service forgets
+a **running** request it was told to orphan at its terminal and touches no cell
+(`IoService::orphanRequest` assumes its caller already freed them):
+
+1. **The orphaned append's scaffolding, 11 cells a run** after a timeout: the append request with
+   its field and clone cells, the capability, endpoint, queue and the capture's spec cell, held by a
+   `StepGraph` that `sweepStepGraphs` freed only when the request was already gone. Abandonment
+   hands the request to the service (`orphanRequest`, never cancelled, §11), so nothing reaped it
+   when it ended. `sweepStepGraphs` now asks the service to reap a step's request (a no-op while the
+   service tracks it or any view names it), then frees the graph through `freeStepGraph`, as before.
+   The runner's reaping turns call the new `CaptureHost::reapAbandoned()` so the residue goes when
+   the step ends, not at the next capture.
+1. **A destroyed runner's running close, 25 cells a run** (the 11 above plus the open's graph and
+   the close's): `~ScriptRunner` closes the opened file, but the worker is busy in the append, so
+   the close is running when the runner orphans it. The runner is gone, so nobody reaped the close
+   request or the endpoint. The runner now hands the pair to `FileReadHost::reapWhenEnded`, and
+   `FileReadHost::pump` frees the request graph and then the endpoint (`reapIoEndpoint`) once the
+   close has ended. Nothing is cancelled.
+
+The pin is untouched: each abandoned capture stays in `pinnedCaptures()` and reconciles through
+`reconcile` or `:reconcile`; only cells no worker, coordinator or pin reads are freed, on the owner
+thread. No core file changed. Tests (`VqlIoCaptureLeakTest`):
+`ManyTimedOutCapturesLeaveTheArenaBounded` and `ManyDestroyedRunnersMidCaptureLeaveTheArenaBounded`,
+each 10^3 abandoned runs with the append held in the sink and released: slot high-water mark, live
+cells, service requests, step graphs and capture runs unchanged, pins equal to runs and all
+released. Fail-before, with both fixes removed: 11 cells a run over 10^3 timeouts (11108 live
+against 108) and 25 over 10^3 destroyed runners (25150 against 150), with 1003 step graphs. A script
+whose worker never finishes (a sink that never returns) keeps its graph: the cells are in use.
 
 ## Acceptance criteria, closed
 
-| #   | Criterion                              | Status                                                                                                                                                                       |
-| --- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Writes are values                      | Met (C2)                                                                                                                                                                     |
-| 2   | No authority from the script           | Met (C1, C2)                                                                                                                                                                 |
-| 3   | Frozen at submit, charged at admission | Met (C1)                                                                                                                                                                     |
-| 4   | Ordering                               | Met (C1)                                                                                                                                                                     |
-| 5   | Multiplicity and resume                | Met (C2)                                                                                                                                                                     |
-| 6   | Capture explicit and journal-ordered   | Met (C3)                                                                                                                                                                     |
-| 7   | Overlap reuses                         | Met (C3)                                                                                                                                                                     |
-| 8   | Capture failure is a value             | Met (C3)                                                                                                                                                                     |
-| 9   | Persistence gated by coverage          | Met (C4); a receipt row is `VQL_IO_PERSIST_HANDLE` (C5)                                                                                                                      |
-| 10  | Crash and abandon                      | Met: the five points through a script, timeout and destroyed-runner pins (C3), `:captures` lists a pin and `:reconcile` releases it (C5)                                     |
-| 11  | Leaks                                  | Met for 10^4 write runs and 10^3 capture runs (arena, service requests, `stepGraphs`, capture runs); **not** for an abandoned capture, which leaves about 27 cells (finding) |
-| 12  | No core change, no blocking            | Met: core files untouched; the only owner-thread I/O is the stated recovery and reconcile exception; the M7a conformance harness passes unchanged                            |
-| 13  | Format                                 | Met (`make format-check`, `make lint`)                                                                                                                                       |
-| 14  | Owned records                          | Met (C1b)                                                                                                                                                                    |
-| 15  | Retention bounded                      | Met (C1b); 10^4 named-outcome runs stay bounded and their opens' graphs are now freed too                                                                                    |
+| #   | Criterion                              | Status                                                                                                                                                                   |
+| --- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Writes are values                      | Met (C2)                                                                                                                                                                 |
+| 2   | No authority from the script           | Met (C1, C2)                                                                                                                                                             |
+| 3   | Frozen at submit, charged at admission | Met (C1)                                                                                                                                                                 |
+| 4   | Ordering                               | Met (C1)                                                                                                                                                                 |
+| 5   | Multiplicity and resume                | Met (C2)                                                                                                                                                                 |
+| 6   | Capture explicit and journal-ordered   | Met (C3)                                                                                                                                                                 |
+| 7   | Overlap reuses                         | Met (C3)                                                                                                                                                                 |
+| 8   | Capture failure is a value             | Met (C3)                                                                                                                                                                 |
+| 9   | Persistence gated by coverage          | Met (C4); a receipt row is `VQL_IO_PERSIST_HANDLE` (C5)                                                                                                                  |
+| 10  | Crash and abandon                      | Met: the five points through a script, timeout and destroyed-runner pins (C3), `:captures` lists a pin and `:reconcile` releases it (C5)                                 |
+| 11  | Leaks                                  | Met for 10^4 write runs and 10^3 capture runs (arena, service requests, `stepGraphs`, capture runs); and for abandoned captures, timed out or destroyed (10^3 runs each) |
+| 12  | No core change, no blocking            | Met: core files untouched; the only owner-thread I/O is the stated recovery and reconcile exception; the M7a conformance harness passes unchanged                        |
+| 13  | Format                                 | Met (`make format-check`, `make lint`)                                                                                                                                   |
+| 14  | Owned records                          | Met (C1b)                                                                                                                                                                |
+| 15  | Retention bounded                      | Met (C1b); 10^4 named-outcome runs stay bounded and their opens' graphs are now freed too                                                                                |
 
 ## 19. Deferrals
 
@@ -1255,9 +1285,6 @@ always has.
 - A pure aggregate that joins many rows into one text cell so a script can write a query's rows.
 - Writes through `message`-mode endpoints, sockets, and any non-file endpoint.
 - `system://settings` entries for the write and capture bounds (M8); a UI for `:reconcile`.
-- Freeing the cells an **abandoned** capture leaves (about 27 a run: the opened file's graph, kept
-  by its open outcome's view on the capability, and the capture's own); the pin is the design, the
-  arena residue is not.
 - Linking a result row to the capture receipt as an xanalink rather than by shared permascroll
   address.
 - Remote (swarm) publication of a capture receipt; local capture invents no remote signature.

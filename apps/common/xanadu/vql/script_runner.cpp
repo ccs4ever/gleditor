@@ -311,6 +311,10 @@ bool ScriptRunner::retire(const Admitted &entry, const bool force) noexcept {
     if (!force) return false;
     ports_.bridge.release(entry.submission);
     orphan(*entry.request);
+    // The close still has to reach the descriptor, so it is not cancelled,
+    // and its cells and the file's are the host's to free when it ends.
+    if (entry.closes && ports_.reapWhenEnded)
+      ports_.reapWhenEnded(*entry.request, *entry.closes);
   } else {
     // The close's outcome is read before the retire takes it with the request.
     const auto closed =
@@ -451,6 +455,12 @@ void ScriptRunner::reapClosing(const bool force) noexcept {
   const auto before = closing_.size();
   retireAll(closing_, force);
   closesFinished_ += before - closing_.size();
+  // An abandoned capture's orphaned step ends on its own schedule and nothing
+  // else visits it again, so each reaping turn gives its residue a chance to
+  // go.
+  if (!force) {
+    if (const auto capture = captureHost()) capture->reapAbandoned();
+  }
 }
 
 void ScriptRunner::rolledBack(
@@ -1800,7 +1810,12 @@ auto fileScriptPorts(vortex::FileReadHost &host) -> ScriptIoPorts {
       [&host](const vortex::CapabilityCell capability) {
         return staged(host.stageSync(capability), "sync");
       },
-      [&host]() -> vortex::CaptureHost * { return host.capture(); }};
+      [&host]() -> vortex::CaptureHost * { return host.capture(); },
+      {},
+      [&host](const vortex::RequestCell close,
+              const vortex::EndpointCell endpoint) {
+        host.reapWhenEnded(close, endpoint);
+      }};
 }
 
 auto driveToCompletion(ScriptRunner &runner, ScriptRunResult first,

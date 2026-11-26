@@ -1434,8 +1434,11 @@ M7-VQL-c implementation notes (built in stages C1-C5; gate pending):
   capture host and coordinator freeing receipt, capture and per-step scaffolding cells (open 10,
   read 11 and capture 73 live cells a run, now 0); 10^4 write runs and 10^3 capture runs bounded;
   the journal's crash hook at each durable step through a script.
-- Deferred: the arena residue of an abandoned capture (about 27 cells a run); the other deferrals of
-  the design note's §19.
+- Abandoned captures: the residue (11 cells a run after a timeout, 25 after a destroyed runner) was
+  the orphaned append's scaffolding and the running close's graph, which the service forgets at
+  their end without freeing; the coordinator and `FileReadHost::pump` now free them once the step
+  ends. 10^3 abandoned runs of each kind stay bounded; the pins stay by design.
+- Deferred: the other deferrals of the design note's §19.
 - Gate status: **pending** (a VQL expert and a Vortex expert; reports under
   `projects/vortex-io-implementation-review/m7-vql-c/`).
 

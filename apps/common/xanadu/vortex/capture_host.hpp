@@ -119,6 +119,13 @@ public:
   /// background. A finished capture is just freed. Idempotent.
   void release(zigzag::CellRef handle) noexcept;
 
+  /// Free what an abandoned capture's orphaned step left once that step has
+  /// ended (its request, endpoint, capability and spec cells), and classify
+  /// any capture whose cell died. Owner only; the runner calls it on its own
+  /// reaping turns, so the residue is freed when the step completes rather
+  /// than at the next capture. Never touches a step still running.
+  void reapAbandoned() noexcept;
+
   /// The @p index-th cell of the capture content of @p receipt, in source
   /// order; nullopt past the end or for anything that is not a receipt.
   [[nodiscard]] auto capturedCell(zigzag::CellRef receipt,
