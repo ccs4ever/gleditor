@@ -753,6 +753,15 @@ list).
    `auditLanguageValue` finds no native id in a write, capture or receipt value; the M7a conformance
    harness passes unchanged.
 1. **Format.** `make format-check` and `make lint` pass; this note passes mdformat and mdl.
+1. **Owned records.** A script that names 100 write or read outcomes in a row is not refused for
+   slots and the service holds at most the requests then running; each named outcome's tag, fields,
+   error, detail, uncertainty and byte count read after its request was retired, and a named payload
+   reads through `io_payload` after retirement; `capture($r)` on a record appends the same bytes as
+   on a service outcome; the coverage rule gives the same answer for a record and a service outcome.
+1. **Retention is bounded and degrades by value.** Named payloads past `retainedPayloadBytes` are
+   not copied, stay the service's requests, and still read correctly; every lease is released at
+   script end, failure, abandonment and runner destruction (the resolver's lease count returns to
+   its baseline), and 10^4 named-outcome runs leave the arena bounded.
 
 ## 17. Test plan
 
@@ -761,19 +770,19 @@ with their code once: file-write adapter tests are extended where `FileEndpointA
 already live; capture tests extend `io_capture_test.cpp` only for what scripts add; no library
 battery is repeated.
 
-| Test group (new file or extension)                       | Proves                                                                                                                                                                                             |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vql_io_write_test.cpp` (parser, compiler)               | grammar, reserved names, `VQL_IO_QUERY_CONTEXT` for every new form in every refused context, `vqueryc` compiles                                                                                    |
-| `vql_io_write_test.cpp` (runner, fake backend)           | all outcomes of criterion 1, resume, multiplicity, rollback orphan, `within`, detached and `cancel`                                                                                                |
-| `vql_io_write_test.cpp` (real files, temp dir)           | criteria 2, 3, 4 with `FileReadHost`: grant roots, symlink and `..` escape, bound and budget charging, ordering, `sync` ordering, `O_APPEND` atomic append, `create` exclusivity                   |
-| `io_file_adapter_test` extension                         | write bytes travel in the prepared command (C1); `Sync` kind; `O_NOFOLLOW`; create flag                                                                                                            |
-| `vql_io_capture_test.cpp` (script over real coordinator) | criteria 6, 7, 8: journal order, overlap, refusals as values, `io_captured` span equality                                                                                                          |
-| `vql_io_capture_test.cpp` (persistence)                  | criterion 9 through `ScriptRunner::persistability()` and a `Store` round trip; partial coverage; derived text                                                                                      |
-| `vql_io_capture_crash_test.cpp`                          | criterion 10: the coordinator's crash points injected through a script; timeout and `~ScriptRunner` mid-capture; reconcile then retry                                                              |
-| `vquery_e2e_test.cpp` extension                          | `--io-write-root`, `--capture-dir`, `:open -w`, `:captures`, `:reconcile`, `-o` / `--in-place` / `:save` over covered and uncovered runs, the existing `ActionRowsAreNotWrittenBy...` test updated |
-| `VqlScriptConformance` extension                         | the M7a harness over a write action (criterion 12)                                                                                                                                                 |
-| `vql_io_owned_record_test.cpp`                           | criteria 14 and 15: 100 named outcomes, field reads after retirement, payload through a record, capture and coverage over a record, the over-budget fallback, lease balance on every ending        |
-| arena-bound tests                                        | criterion 11, mirroring `ManyEffectScriptRunsLeaveTheArenaBounded`                                                                                                                                 |
+| Test group (new file or extension)                       | Proves                                                                                                                                                                                                            |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vql_io_write_test.cpp` (parser, compiler)               | grammar, reserved names, `VQL_IO_QUERY_CONTEXT` for every new form in every refused context, `vqueryc` compiles                                                                                                   |
+| `vql_io_write_test.cpp` (runner, fake backend)           | all outcomes of criterion 1, resume, multiplicity, rollback orphan, `within`, detached and `cancel`                                                                                                               |
+| `vql_io_write_test.cpp` (real files, temp dir)           | criteria 2, 3, 4 with `FileReadHost`: grant roots, symlink and `..` escape, bound and budget charging, ordering, `sync` ordering, `O_APPEND` atomic append, `create` exclusivity                                  |
+| `io_file_adapter_test` extension                         | write bytes travel in the prepared command (C1); `Sync` kind; `O_NOFOLLOW`; create flag                                                                                                                           |
+| `vql_io_capture_test.cpp` (script over real coordinator) | criteria 6, 7, 8: journal order, overlap, refusals as values, `io_captured` span equality                                                                                                                         |
+| `vql_io_capture_test.cpp` (persistence)                  | criterion 9 through `ScriptRunner::persistability()` and a `Store` round trip; partial coverage; derived text                                                                                                     |
+| `vql_io_capture_crash_test.cpp`                          | criterion 10: the coordinator's crash points injected through a script; timeout and `~ScriptRunner` mid-capture; reconcile then retry                                                                             |
+| `vquery_e2e_test.cpp` extension                          | `--io-write-root`, `--capture-dir`, `:open -w`, `:captures`, `:reconcile`, `-o` / `--in-place` / `:save` over covered and uncovered runs, the existing `ActionRowsAreNotWrittenBy...` test updated                |
+| `VqlScriptConformance` extension                         | the M7a harness over a write action (criterion 12)                                                                                                                                                                |
+| `vql_io_owned_record_test.cpp`                           | criteria 14 and 15 (the last two of §16): 100 named outcomes, field reads after retirement, payload through a record, capture and coverage over a record, the over-budget fallback, lease balance on every ending |
+| arena-bound tests                                        | criterion 11, mirroring `ManyEffectScriptRunsLeaveTheArenaBounded`                                                                                                                                                |
 
 A UX pass follows the `ux-validation` skill: a journey "read a CSV, capture it, derive a result,
 save it, close vquery, reopen and see the slice quote the capture" and a journey "write a report,
