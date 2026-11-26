@@ -580,9 +580,10 @@ TEST(VqlIoScriptTest, DestroyingARunnerCancelsItsWaiterNotItsRequest) {
     parked  = *token;
     request = token->request;
   }
-  EXPECT_EQ(w.scheduler->cancels, 0U) << "the request is never cancelled";
+  EXPECT_EQ(w.scheduler->cancels, 1U)
+      << "nobody can read the outcome, so the backend is asked to stop";
   EXPECT_EQ(w.service.requestCount(), 1U)
-      << "it runs to its own end; the runner's destruction orphaned it";
+      << "it stays orphaned until the backend ends it";
   w.complete(0, EndOfStream{{}});
   static_cast<void>(w.pump());
   EXPECT_EQ(w.service.requestCount(), 0U)
@@ -1494,6 +1495,119 @@ TEST(VqlIoDeadlineTest, TheDriverReportsTheTimeoutAndLeavesNoBudgetBehind) {
   s.w.complete(0, Cancelled{{}, {}, false});
   static_cast<void>(s.w.pump());
   EXPECT_EQ(s.w.service.requestCount(), 0U) << "no budget left behind";
+}
+
+// vql gate r2 N2: a request's own deadline extends the script's only while the
+// request runs; once it ends early a later unbounded await is cut at the
+// script's own deadline.
+TEST(VqlIoDeadlineTest, AnExtensionEndsWithTheRequestThatEarnedIt) {
+  ScriptWorld s;
+  auto now = std::chrono::steady_clock::time_point{};
+  s.w.service.setClock([&now] { return now; });
+  s.runner.setScriptTimeout(std::chrono::milliseconds{500});
+  const auto begun =
+      s.run("effect { let $s := submit($cap, read_bytes(0, 16)) within 5 s; "
+            "match $s { admitted($q) => await($q), refused($e) => $e } }; " +
+            std::string{readOnCap});
+  ASSERT_NE(parkedToken(begun), nullptr);
+  now += std::chrono::milliseconds{100};
+  s.w.complete(0, EndOfStream{{}});
+  const auto second = s.wakeAndResume();
+  const auto *token = parkedToken(second);
+  ASSERT_NE(token, nullptr) << "the second read waits";
+  now =
+      std::chrono::steady_clock::time_point{} + std::chrono::milliseconds{499};
+  EXPECT_FALSE(s.runner.expireIfDue(*token));
+  now += std::chrono::milliseconds{1};
+  EXPECT_TRUE(s.runner.expireIfDue(*token))
+      << "the finished request's extension is gone";
+}
+
+TEST(VqlIoDeadlineTest, AnExtensionHoldsWhileItsRequestStillRuns) {
+  ScriptWorld s;
+  auto now = std::chrono::steady_clock::time_point{};
+  s.w.service.setClock([&now] { return now; });
+  s.runner.setScriptTimeout(std::chrono::milliseconds{500});
+  const auto begun =
+      s.run("effect { let $s := submit($cap, read_bytes(0, 16)) within 5 s; "
+            "match $s { admitted($q) => $q, refused($e) => $e } } as $h; " +
+            std::string{readOnCap});
+  const auto *token = parkedToken(begun);
+  ASSERT_NE(token, nullptr);
+  now += std::chrono::milliseconds{500};
+  EXPECT_FALSE(s.runner.expireIfDue(*token))
+      << "the detached bounded request still runs";
+}
+
+// vortex gate r2 MINOR 1 and 4: what the runner leaves behind when it goes,
+// and a close the service keeps refusing.
+struct OwnedRunnerWorld {
+  World w;
+  VQLEngine engine{w.core};
+  std::size_t closeTries{};
+  std::unique_ptr<ScriptRunner> runner;
+
+  OwnedRunnerWorld() {
+    engine.setVariable("cap", w.capability.cell);
+    runner = std::make_unique<ScriptRunner>(
+        engine, w.vm,
+        ScriptIoPorts{w.bridge, w.host, w.payloads, w.diagnostics,
+                      [this](CapabilityCell, std::uint64_t, std::uint64_t)
+                          -> std::expected<CellRef, FrontendDiagnostic> {
+                        return w.specification();
+                      },
+                      [this](std::string_view)
+                          -> std::expected<SubmissionCell, FrontendDiagnostic> {
+                        return w.bridge.submit(w.capability, w.specification());
+                      },
+                      [this](CapabilityCell cap)
+                          -> std::expected<SubmissionCell, FrontendDiagnostic> {
+                        ++closeTries;
+                        w.refuseAdmission = true;
+                        auto refused = w.bridge.submit(cap, w.specification());
+                        w.refuseAdmission = false;
+                        return refused;
+                      },
+                      [this](OutcomeCell) -> std::optional<CapabilityCell> {
+                        return w.capability;
+                      }});
+  }
+};
+
+TEST(VqlIoOpenTest, ARefusedCloseIsNotRetriedAtEveryReap) {
+  OwnedRunnerWorld o;
+  const auto begun = o.runner->run(
+      Parser("effect { open(\"x\") } as $f; return io_tag($f)").parseQuery());
+  ASSERT_NE(parkedToken(begun), nullptr);
+  o.w.complete(0, Complete{{}, {}, {}});
+  static_cast<void>(o.w.pump());
+  auto woken = o.runner->takeWake();
+  ASSERT_TRUE(woken.has_value());
+  const auto done = o.runner->resume(*std::move(woken));
+  ASSERT_NE(completedRows(done), nullptr);
+  EXPECT_EQ(o.closeTries, 1U) << "the close was tried once and refused";
+  const auto cells    = o.w.arena.liveCells();
+  constexpr int reaps = 20;
+  for (int i = 0; i < reaps; ++i) static_cast<void>(o.runner->takeWake());
+  EXPECT_EQ(o.closeTries, 1U)
+      << "no close finished, so nothing could have cleared the refusal";
+  EXPECT_EQ(o.w.arena.liveCells(), cells)
+      << "no refusal cell is minted and retired per reap";
+}
+
+TEST(VqlIoScriptTest, DestroyingARunnerStopsAReadThatNeverEnds) {
+  OwnedRunnerWorld o;
+  const auto result =
+      o.runner->run(Parser(std::string{startOnCap} + " as $h").parseQuery());
+  ASSERT_NE(completedRows(result), nullptr);
+  ASSERT_EQ(o.w.service.requestCount(), 1U);
+  o.runner.reset();
+  EXPECT_EQ(o.w.scheduler->cancels, 1U) << "the orphan was asked to stop";
+  EXPECT_EQ(o.w.service.requestCount(), 1U) << "still accounted for";
+  // The backend honours the stop.
+  o.w.complete(0, Cancelled{{}, {.phase = IoPhase::Terminal}, false});
+  static_cast<void>(o.w.pump());
+  EXPECT_EQ(o.w.service.requestCount(), 0U) << "the slot is free again";
 }
 
 // ---- The shared conformance harness ---------------------------------------

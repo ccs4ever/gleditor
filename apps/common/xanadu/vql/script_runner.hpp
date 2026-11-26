@@ -239,6 +239,8 @@ private:
   /// and the service forgets the request at its end. True when done with it.
   [[nodiscard]] bool retire(const Admitted &entry, bool force = false) noexcept;
   void retireAll(std::vector<Admitted> &entries, bool force = false) noexcept;
+  /// Ask every running request of @p entries to stop, for a runner going away.
+  void stopRunning(const std::vector<Admitted> &entries) noexcept;
   /// Release every request of @p entries now: a running one is asked to stop
   /// and retired once its terminal lands. For a script the host gave up on.
   void abandonAll(std::vector<Admitted> &entries) noexcept;
@@ -279,7 +281,20 @@ private:
   /// Capabilities whose close was refused (by value) and is tried again at the
   /// next `reapClosing`: an opened file's lifetime is the script's, so a
   /// refusal never ends it.
-  std::vector<vortex::CapabilityCell> unclosed_;
+  struct Unclosed {
+    vortex::CapabilityCell capability;
+    std::size_t attempts{};
+    /// `closesFinished_` when it was last tried: a refusal that is a conflict
+    /// with a close in flight can only clear when one finishes, so it is not
+    /// tried again before that.
+    std::size_t seenFinished{};
+  };
+  std::vector<Unclosed> unclosed_;
+  std::size_t closesFinished_{};
+  /// How many times a refused close is tried before the capability is left to
+  /// the service: a refusal that is not a conflict (a stopped scheduler) never
+  /// clears, and each try mints and retires a refusal cell.
+  static constexpr std::size_t maxCloseAttempts = 4;
   std::vector<std::string> providers_;
   /// The whole token, so a waiter dropped with its request's cells can still
   /// tell its caller (an Abandoned wake) that the script is dead.

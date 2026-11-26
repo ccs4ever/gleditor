@@ -115,8 +115,18 @@ struct ScriptRunner::Activation final : vortex::FrontendActivation {
     bool minted{};
   };
   std::vector<OpenOutcome> openOutcomes;
-  /// The overall deadline of the script, when it has one.
+  /// The overall deadline of the script, when it has one, as it stands
+  /// without any request's own deadline.
   std::optional<std::chrono::steady_clock::time_point> deadline;
+  /// A `within` request's own deadline plus the script timeout: the script
+  /// outlives the request's TimedOut outcome by its own timeout. The extension
+  /// holds only while the request runs, so a later unbounded await is cut at
+  /// `deadline` once the request has ended.
+  struct Extension {
+    vortex::RequestCell request;
+    std::chrono::steady_clock::time_point until;
+  };
+  std::vector<Extension> extensions;
 };
 
 ScriptRunner::ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
@@ -154,10 +164,16 @@ ScriptRunner::~ScriptRunner() {
   // holds leaves the service's accounting: a terminal one is retired, and a
   // running one (a detached read, a close just admitted) is forced out, which
   // orphans it. An orphan is not cancelled; it runs to its own end and its
-  // terminal is dropped unpublished and its budget freed. The files a script
-  // opened are closed first.
+  // terminal is dropped unpublished and its budget freed. A read that never
+  // ends would hold its slot for the service's life, so each running one is
+  // asked to stop first (never a close, which must reach the descriptor). The
+  // files a script opened are closed first.
   for (const auto &weak : live_) {
     if (const auto activation = weak.lock()) closeOpened(*activation);
+  }
+  stopRunning(finished_);
+  for (const auto &weak : live_) {
+    if (const auto activation = weak.lock()) stopRunning(activation->admitted);
   }
   retireAll(finished_, true);
   for (const auto &weak : live_) {
@@ -236,6 +252,17 @@ bool ScriptRunner::retire(const Admitted &entry, const bool force) noexcept {
   return true;
 }
 
+void ScriptRunner::stopRunning(const std::vector<Admitted> &entries) noexcept {
+  const auto &arena = session_.coordinator().arena();
+  for (const auto &entry : entries) {
+    if (entry.request &&
+        arena.matches(entry.request->cell, entry.request->incarnation) &&
+        !ports_.host.isTerminal(*entry.request)) {
+      static_cast<void>(ports_.host.cancelRequest(*entry.request));
+    }
+  }
+}
+
 void ScriptRunner::retireAll(std::vector<Admitted> &entries,
                              const bool force) noexcept {
   std::erase_if(entries,
@@ -298,18 +325,35 @@ void ScriptRunner::closeOpened(Activation &activation) noexcept {
   const auto opened = std::exchange(activation.opened, {});
   if (!ports_.closeCapability) return;
   for (const auto capability : opened) {
-    if (!closeOne(capability)) unclosed_.push_back(capability);
+    if (!closeOne(capability))
+      unclosed_.push_back({capability, 1, closesFinished_});
   }
 }
 
 void ScriptRunner::reapClosing(const bool force) noexcept {
   if (!unclosed_.empty() && ports_.closeCapability) {
-    const auto retry = std::exchange(unclosed_, {});
-    for (const auto capability : retry) {
-      if (!closeOne(capability) && !force) unclosed_.push_back(capability);
+    auto retry = std::exchange(unclosed_, {});
+    for (auto &held : retry) {
+      if (!force && held.seenFinished == closesFinished_) {
+        unclosed_.push_back(held);
+        continue;
+      }
+      if (closeOne(held.capability)) continue;
+      if (force) continue;
+      if (++held.attempts >= maxCloseAttempts) {
+        GLEDITOR_LOG_WARN(logCategory,
+                          "a close stayed refused after {} tries; the "
+                          "endpoint is left open",
+                          held.attempts);
+        continue;
+      }
+      held.seenFinished = closesFinished_;
+      unclosed_.push_back(held);
     }
   }
+  const auto before = closing_.size();
   retireAll(closing_, force);
+  closesFinished_ += before - closing_.size();
 }
 
 void ScriptRunner::rolledBack(
@@ -776,9 +820,11 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
     // A request with its own deadline is not cut short by the script's: the
     // script gets until the request's deadline plus its own timeout, so the
     // request's TimedOut outcome (a value) is what the script reads.
-    current_->deadline =
-        std::max(*current_->deadline,
-                 now() + *within + std::min(*scriptTimeout_, maxDeadline));
+    if (entry.request) {
+      current_->extensions.push_back(
+          {*entry.request,
+           now() + *within + std::min(*scriptTimeout_, maxDeadline)});
+    }
   }
   if (const auto *refused = std::get_if<vortex::Refused>(&*matched))
     return {*submission, 1, refused->outcome.cell};
@@ -946,10 +992,18 @@ auto ScriptRunner::expireIfDue(const FrontendToken &token)
     -> std::optional<FrontendDiagnostic> {
   const auto activation =
       std::dynamic_pointer_cast<Activation>(token.activation);
-  if (!activation || !activation->parked || !activation->deadline ||
-      now() < *activation->deadline) {
+  if (!activation || !activation->parked || !activation->deadline) {
     return std::nullopt;
   }
+  auto due          = *activation->deadline;
+  const auto &arena = session_.coordinator().arena();
+  std::erase_if(activation->extensions, [&](const Activation::Extension &held) {
+    return !arena.matches(held.request.cell, held.request.incarnation) ||
+           ports_.host.isTerminal(held.request);
+  });
+  for (const auto &held : activation->extensions)
+    due = std::max(due, held.until);
+  if (now() < due) return std::nullopt;
   GLEDITOR_LOG_DEBUG(logCategory, "a parked script passed its deadline");
   // The script gave up: the request it waits on is asked to stop, its waiter
   // and route go, and its requests are released. Nothing resumes it.
