@@ -44,6 +44,10 @@ class MultiStoreCoordinator;
 
 namespace xanadu::vql {
 
+/// The relation `io_tag($outcome)` compiles to; the I/O script host answers it
+/// (ScriptRunner), since the VM and the compiler name no I/O schema.
+inline constexpr const char *outcomeTagRelation = "io_outcome_tag";
+
 inline constexpr std::size_t maxCompiledShapePredicateRules  = 4096;
 inline constexpr std::size_t maxCompiledShapeProjectionRules = 4096;
 

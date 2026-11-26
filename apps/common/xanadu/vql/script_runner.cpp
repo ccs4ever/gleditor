@@ -120,9 +120,32 @@ ScriptRunner::ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
       [this](const zigzag::vortex::VmSubmission &abandoned) {
         rolledBack(abandoned);
       });
+  vm_.setRelationProvider(
+      outcomeTagRelation,
+      [](const zigzag::vortex::RelationQuery &query)
+          -> zigzag::vortex::RelationResult {
+        if (query.arguments.size() != 1)
+          return std::unexpected("io_tag expects one outcome argument");
+        if (query.position != 0)
+          return std::optional<zigzag::vortex::RelationAnswer>{std::nullopt};
+        const auto incarnation = query.arena.incarnationOf(query.arguments[0]);
+        if (!incarnation)
+          return std::unexpected("io_tag: the argument is not a live cell");
+        const auto tag = vortex::ioOutcomeTag(
+            query.arena, vortex::OutcomeCell{query.arguments[0], *incarnation});
+        if (!tag)
+          return std::unexpected("io_tag: the argument is not an outcome");
+        return std::optional<zigzag::vortex::RelationAnswer>{
+            zigzag::vortex::RelationAnswer{
+                .nextPosition = 1,
+                .limit        = 1,
+                .answers      = {query.arena.makeCell(
+                    std::string{vortex::toString(*tag)})}}};
+      });
 }
 
 ScriptRunner::~ScriptRunner() {
+  vm_.setRelationProvider(outcomeTagRelation, nullptr);
   vm_.setSubmitHandler({});
   vm_.setSubmitRollbackHandler({});
   for (const auto &[continuation, held] : parked_) {
@@ -390,11 +413,10 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
     fail(diagnose(vortex::frontend_codes::vqlScriptFailed,
                   "a Submit ran outside any script activation"));
   }
-  // The previous actions' outcomes are no longer what this script can name,
-  // and finished scripts' rows were returned to their callers, so those
-  // requests are retired here: a long session holds the live and the latest
-  // finished action's requests, not every one.
-  retireAll(current_->admitted);
+  // Finished scripts' rows were returned to their callers, so their requests
+  // are retired here. This script's own earlier actions stay: `as $r` names
+  // their outcomes for the statements after, and the admission budget bounds
+  // how many one script can hold. They join finished_ when the script ends.
   retireAll(finished_);
   latest_ = *submission;
   Admitted entry{.submission = *submission, .request = std::nullopt};

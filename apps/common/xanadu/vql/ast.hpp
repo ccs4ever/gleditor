@@ -541,6 +541,9 @@ struct IoEffectStatement {
   IoOperand maxBytes{std::int64_t{0}};
   std::string requestVar;
   std::string refusalVar;
+  /// `effect { ... } as $r`: the outcome cell, named for the statements that
+  /// follow so they can read its tag with io_tag($r) and keep it.
+  std::optional<std::string> resultVar;
 };
 
 struct Statement

@@ -85,6 +85,7 @@ VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
 
   ioActions_.push_back(
       {.submitOpcode = submit, .awaitOpcode = await, .statement = statement});
+  if (effect.resultVar) streamBindings_[*effect.resultVar] = {result};
   lastResultCells_ = {result};
   return result;
 }

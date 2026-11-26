@@ -107,7 +107,7 @@ bool VQLCompiler::isSemanticQuantifierBuiltin(const std::string_view name) {
 
 bool VQLCompiler::isPathFunction(const std::string_view name) {
   return name == "sort_into" || name == "find" || name == "contains" ||
-         name == "count";
+         name == "count" || name == "io_tag";
 }
 
 bool VQLCompiler::isLensFunction(const std::string_view name) {

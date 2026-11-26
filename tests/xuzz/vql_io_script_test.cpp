@@ -852,6 +852,42 @@ TEST(VqlIoScriptTest, RegistryEntriesNeverGoStaleUnderSlotReuse) {
   }
 }
 
+TEST(VqlIoScriptTest, AnActionsOutcomeIsNamedForLaterStatementsAndItsTagRead) {
+  // M7-VQL-b: `as $r` binds the outcome; io_tag($r) reads its tag as text.
+  ScriptWorld s;
+  const auto rows =
+      finishRead(s, std::string{readOnCap} + " as $r; return io_tag($r)");
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(s.w.arena.textOf(rows.front()), "EndOfStream");
+}
+
+TEST(VqlIoScriptTest, TwoBoundActionsKeepBothOutcomesUntilTheScriptEnds) {
+  ScriptWorld s;
+  const auto begun = s.run(std::string{readOnCap} + " as $a; " + readOnCap +
+                           " as $b; return $a");
+  ASSERT_NE(parkedToken(begun), nullptr);
+  s.w.complete(0, EndOfStream{{}});
+  const auto second = s.wakeAndResume();
+  ASSERT_NE(parkedToken(second), nullptr);
+  s.w.complete(1, EndOfStream{{}});
+  const auto done  = s.wakeAndResume();
+  const auto *rows = completedRows(done);
+  ASSERT_NE(rows, nullptr);
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_TRUE(s.w.arena.contains(rows->front()))
+      << "the first outcome survives the second admission";
+}
+
+TEST(VqlIoScriptTest, IoTagOfANonOutcomeFailsTheScriptByValue) {
+  ScriptWorld s;
+  s.engine.setVariable("plain", s.w.arena.makeCell("x"));
+  const auto begun = s.run(std::string{readOnCap} + "; return io_tag($plain)");
+  ASSERT_NE(parkedToken(begun), nullptr);
+  s.w.complete(0, EndOfStream{{}});
+  const auto done = s.wakeAndResume();
+  EXPECT_NE(failedDiagnostic(done), nullptr);
+}
+
 TEST(VqlIoScriptTest, RegistrationsNeverReachedByRowsKeepTheirCells) {
   // M7-VQL gate r3, vql minor 2: a pivot, shape or lens whose result is not a
   // row has nothing but the registry naming its cells, so only keepIfNamed

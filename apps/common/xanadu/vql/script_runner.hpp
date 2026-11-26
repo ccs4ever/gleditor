@@ -45,6 +45,7 @@
 #include "common/xanadu/vortex/payload_resolver.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ast.hpp"
+#include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/execution.hpp"
 
 namespace xanadu::vql {

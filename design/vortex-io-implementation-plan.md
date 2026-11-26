@@ -1310,6 +1310,9 @@ Deferred, by design:
 - Retiring the request: the outcome cell is the script's value, so a finished script's request is
   retired through `FrontendBridge::retire` only when the next action is admitted (or the runner
   ends), never earlier.
+- M7-VQL-b (done): `effect { ... } as $r` names the outcome for later statements; `io_tag($r)` reads
+  its tag through a host relation provider; a script's own requests stay admitted until it ends.
+  Still absent: cancel, a script-level open, a per-script deadline.
 - Write, capture, `message` and frame modes, `stable` reads, and any action other than a bounded
   read of one file capability; reads over a loop or per row (refused until an explicit later gate).
 - The runner needs a `VQLEngine` session (it supplies the bound capability and operand cells at

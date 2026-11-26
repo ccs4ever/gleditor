@@ -2358,6 +2358,9 @@ IoEffectStatement Parser::parseIoEffectStatement() {
   consume(TokenKind::CloseBrace, "Expected '}' to close the match");
   match(TokenKind::Semicolon);
   consume(TokenKind::CloseBrace, "Expected '}' to close 'effect'");
+  if (match(TokenKind::KwAs)) {
+    effect.resultVar = consumeVariable("an outcome variable").stringValue;
+  }
   return effect;
 }
 
