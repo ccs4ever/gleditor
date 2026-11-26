@@ -17,6 +17,22 @@ plan's §13 milestone table and §14 refusals, and [`vortex-io-redesign.md`](vor
 might need a core file it is named in §5 as a candidate proposal, with the minimal alternative, and
 nothing proceeds without its own approval.
 
+## Owner decisions (2026-11-26)
+
+The owner answered the ten questions of §7. Eight take the recommended answer; Q2 does not. The
+slices below were adjusted where a ruling changes them (only slice e).
+
+| #      | ruling                                                                                                                                                                  | effect on the text                                                                                      |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Q1     | `match` is exhaustive, `_` allowed, a missing tag is a compile diagnostic (as recommended)                                                                              | slice d as drafted                                                                                      |
+| Q2     | **Yes**: a script may close any capability it can name, host-bound ones (`--io-file`, `:open`) included. `VQL_IO_CLOSE_NOT_OWNED` is dropped; `:close NAME` still added | slice e rewritten; the host-bound name goes stale with the typed stale-binding diagnostic after a close |
+| Q3     | A detached capture alive at script end: wait, bounded by the script timeout; on timeout abandon and pin; no background completion (as recommended)                      | slice f as drafted                                                                                      |
+| Q4     | Destructive verbs granted per verb on the root, `--io-write-root DIR[:verbs]`, default today's set (as recommended)                                                     | slice h as drafted                                                                                      |
+| Q5     | `mkdir` and `list` in, `rmdir` out; an oversize line is `Overflow` with the cursor unmoved and the bytes retained; framing language-neutral, VQL first (as recommended) | slices h, j as drafted                                                                                  |
+| Q6     | No process endpoints in M7-VQL (as recommended)                                                                                                                         | slice k as drafted                                                                                      |
+| Q7/Q8  | No loop iteration ceiling; a generation guard names an explicit prior read outcome (as recommended)                                                                     | slices l, g as drafted                                                                                  |
+| Q9/Q10 | Spell `stable` now with a typed refusal; the `ux-validation` journeys are required at exit (as recommended)                                                             | slices k, m as drafted                                                                                  |
+
 ## 1. What "complete against the contract" means
 
 The M7-VQL row (plan line 790) is narrow: an effect in script grammar only, `ExecutionBlock`
@@ -57,7 +73,7 @@ the reason. "Where" cites the first place the item was deferred.
 | a3  | A script-local `let` as a write source, offset or length                                    | `m7-vql-c.md` §19 (line 1346); `m7-vql-c/r1-disposition.md` ("vql m2 resolution")                                     | d     |
 | a4  | A pure aggregate joining many rows into one text cell, so a script can write a query's rows | `m7-vql-c.md` §19 (line 1339)                                                                                         | d     |
 | a5  | Payload-less detached outcome constructor (a failed step copy under budget pressure)        | `m7-vql-c/r1-disposition.md` ("vortex m2")                                                                            | d     |
-| a6  | Close a capability early from the script; close one the script did not open                 | plan:1416 ("Deferred in M7-VQL-b")                                                                                    | e     |
+| a6  | Close a capability early from the script; close any it can name, host-bound included        | plan:1416 ("Deferred in M7-VQL-b")                                                                                    | e     |
 | a7  | A refused close at runner destruction is not retried                                        | `m7-vql-c.md` §19 (line 1346); `m7-vql-c/r1-disposition.md:24` (engineer m4)                                          | e     |
 | a8  | `within` on `open`; `within` in a unit finer than milliseconds                              | plan:1417                                                                                                             | e     |
 | a9  | A deterministic end-to-end timeout test with a real, blocking file                          | plan:1413                                                                                                             | e     |
@@ -282,13 +298,19 @@ every ending admits one, plan:1365-1372). `open(...) within 250 ms` sets the ope
 `within 500 us` and `within 2 s` join `ms`/`s`; the clock keeps millisecond ticks internally and
 rounds a finer deadline up, stated, never down.
 
-**Closing capabilities the script did not open (a6, the question half).** Host-bound capabilities
-(`--io-file`, `:open`) live for the session by design (vql §4.13 "Opening a file"). Letting a script
-close one would let a script revoke authority the human gave for the session, and a later script
-would find its name pointing at nothing. Recommended ruling (Q2): refuse it with a typed code
-(`VQL_IO_CLOSE_NOT_OWNED`), and give the human `:close NAME` in `vquery`, which is the same close
-path from the REPL. Refused alternative: let a script close any capability. It turns a read-only
-grant into a one-shot grant without telling the person who made the grant.
+**Closing any capability the script can name (a6, ruled 2026-11-26, Q2).** The owner ruled that a
+script may close any capability it can name, host-bound ones (`--io-file`, `:open`) included. This
+is **not** the draft recommendation, which was to refuse with `VQL_IO_CLOSE_NOT_OWNED`; that code is
+dropped. The consequence the slice must define rather than leave open: closing a host-bound
+capability must leave the host and REPL binding in a defined state. The ruling is that the **session
+name stays bound and goes stale**: the next use of it ends with the typed stale-binding diagnostic
+(`VQL_IO_STALE_BINDING`, the same code a stale `let` marker already earns), never a silent
+rebinding, never a dangling descriptor. The host's own record of the capability (the grant, the
+path, the mode) is retired with the close, so `:open` of the same name afterwards mints a fresh
+capability. The REPL also gets `:close NAME`, the same close path from the human's seat, so the
+human has what the script has. The price the owner accepted: a script can turn a session grant into
+a one-shot grant. The mitigation is only visibility: the close is an ordinary journal-visible
+request, and a `:close`/script close of a host-bound name is logged by name.
 
 **a7, refused close at destruction.** The destructor has no host pump (`r1-disposition.md:24`), so a
 refused close has nothing to retry with. Resolution: when the runner dies with a close the service
@@ -304,13 +326,14 @@ with the temp directory under `build/`, headless, with a bounded real wait.
 **Depends.** d (the examples `match` on `Complete`/`TimedOut`).
 
 **Acceptance.** Early close admits one close request and the script-end path does not duplicate it;
-closing a host-bound name is `VQL_IO_CLOSE_NOT_OWNED`; a refused close at destruction is retried and
-ends with no descriptor left (count open fds before and after); `within` on `open` ends a blocked
-open as `TimedOut` on a FIFO; a sub-millisecond `within` rounds up, never down.
+closing a host-bound name succeeds and leaves the session name stale (`VQL_IO_STALE_BINDING` on the
+next use), and `:close NAME` does the same from the REPL; a refused close at destruction is retried
+and ends with no descriptor left (count open fds before and after); `within` on `open` ends a
+blocked open as `TimedOut` on a FIFO; a sub-millisecond `within` rounds up, never down.
 
 **Core change?** No.
 
-**Owner questions.** Q2.
+**Owner questions.** Q2 (ruled: any capability may be closed).
 
 **Gate.** VQL, Vortex, engineer (descriptor lifetime, FIFO test validity, close ordering).
 
@@ -689,7 +712,7 @@ Each has a recommended answer; none blocks the slices before its own.
 | #   | slice | question                                                                                                                                                        | recommended answer                                                                                                                                                                |
 | --- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Q1  | d     | The outcome `match` syntax: exhaustive with `_`, or free-form with an implicit fallthrough?                                                                     | Exhaustive, `_` allowed, missing tag is a compile diagnostic. A silent fallthrough is the "forgot `EndOfStream`" bug the match exists to end.                                     |
-| Q2  | e     | May a script close a host-bound capability?                                                                                                                     | No: `VQL_IO_CLOSE_NOT_OWNED`; add REPL `:close NAME`. A script must not revoke authority a human granted for the session.                                                         |
+| Q2  | e     | May a script close a host-bound capability?                                                                                                                     | Ruled 2026-11-26: yes, any capability it can name; `VQL_IO_CLOSE_NOT_OWNED` dropped; REPL `:close NAME` still added; the session name goes stale.                                 |
 | Q3  | f     | A script ends while a detached capture is still running: wait, abandon-and-pin, or background-complete?                                                         | Wait (structured completion), bounded by the script timeout; the timeout path then abandons and pins as today. Background completion is refused.                                  |
 | Q4  | h     | Grant granularity for destructive verbs                                                                                                                         | Per verb on the write root (`DIR[:verbs]`); default the present set. A script cannot grant, and an ungranted verb is `Rejected` before work starts.                               |
 | Q5  | h, j  | Directories (`mkdir`, `list` in; `rmdir`, recursive removal out); line oversize policy (`Overflow`, cursor unmoved); who builds framing (VQL first, VPL reuses) | As stated: `mkdir` and `list` in, `rmdir` refused; `Overflow` retains rather than drains; VQL builds frames over a file first and VPL consumes them.                              |
@@ -741,7 +764,7 @@ adapters (§2.2); the frontend is complete when it can ask for them and take a t
 | A loop construct inside `for` (row traversal with effects) | it is exactly the incidental fan-out the redesign forbids; `each` is explicit and over materialised rows                                      |
 | Defer the `stable` request until an adapter exists         | the first adapter would need a VQL change under another milestone's gate                                                                      |
 | Expose `ProcessIoAdapter` with a human-granted command     | grant does not fix the unstoppable `popen` read; two hung children starve the pool                                                            |
-| Let a script close any capability                          | converts a session grant into a one-shot grant without the granter knowing                                                                    |
+| Refuse a script's close of a host-bound capability         | the draft recommendation; the owner ruled against it (2026-11-26, Q2): the script may close what it can name                                  |
 | Reserve every new verb as a call name                      | breaks user `def`s (`capture` precedent); a contextual head is enough                                                                         |
 | A core "iterate" opcode up front                           | measurement first (S-l); the capture loop already shows existing opcodes suffice                                                              |
 | Add the settings entries here                              | M8 owns `system://settings`; this roadmap hands over the list                                                                                 |
@@ -749,6 +772,7 @@ adapters (§2.2); the frontend is complete when it can ask for them and take a t
 
 ## 10. Change history
 
-| version | date       | change                                                                                                                               |
-| ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 0.1     | 2026-11-26 | First draft: inventory of 23 in-scope items and 11 out-of-scope owners, slices d to m, ten owner questions, one conditional proposal |
+| version | date       | change                                                                                                                                                                             |
+| ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0.1     | 2026-11-26 | First draft: inventory of 23 in-scope items and 11 out-of-scope owners, slices d to m, ten owner questions, one conditional proposal                                               |
+| 0.2     | 2026-11-26 | Owner decisions recorded: Q2 ruled yes (a script may close any capability it can name; `VQL_IO_CLOSE_NOT_OWNED` dropped; host-bound names go stale), the other nine as recommended |
