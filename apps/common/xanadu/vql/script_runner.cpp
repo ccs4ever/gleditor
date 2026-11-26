@@ -202,6 +202,13 @@ ScriptRunner::~ScriptRunner() {
   for (const auto &name : providers_) vm_.setRelationProvider(name, nullptr);
   vm_.setSubmitHandler({});
   vm_.setSubmitRollbackHandler({});
+  // A parked activation may be owned only by parked_ (its caller dropped the
+  // token): hold every live one strongly before parked_ is cleared, or the
+  // loops below would find nothing to close, retire or release.
+  std::vector<std::shared_ptr<Activation>> alive;
+  for (const auto &weak : live_) {
+    if (auto activation = weak.lock()) alive.push_back(std::move(activation));
+  }
   for (const auto &[continuation, held] : parked_) {
     static_cast<void>(continuation);
     static_cast<void>(ports_.host.cancelWaiter(held.waiter));
@@ -218,24 +225,15 @@ ScriptRunner::~ScriptRunner() {
   // ends would hold its slot for the service's life, so each running one is
   // asked to stop first (never a close, which must reach the descriptor). The
   // files a script opened are closed first.
-  for (const auto &weak : live_) {
-    if (const auto activation = weak.lock()) closeOpened(*activation);
-  }
+  for (const auto &activation : alive) closeOpened(*activation);
   stopRunning(finished_);
-  for (const auto &weak : live_) {
-    if (const auto activation = weak.lock()) stopRunning(activation->admitted);
-  }
+  for (const auto &activation : alive) stopRunning(activation->admitted);
   retireAll(finished_, true);
-  for (const auto &weak : live_) {
-    if (const auto activation = weak.lock())
-      retireAll(activation->admitted, true);
-  }
+  for (const auto &activation : alive) retireAll(activation->admitted, true);
   reapClosing(true);
   // A capture a dropped activation left in flight is abandoned, not finished:
   // the coordinator pins it by phase, and the awaited step is orphaned.
-  for (const auto &weak : live_) {
-    if (const auto activation = weak.lock()) releaseCaptures(*activation, true);
-  }
+  for (const auto &activation : alive) releaseCaptures(*activation, true);
   // Every record the runner made goes with it, including those of an
   // activation its caller dropped without ending.
   for (auto &[cell, record] : owned_) {

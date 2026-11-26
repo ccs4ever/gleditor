@@ -430,6 +430,58 @@ TEST(VqlIoCaptureAbandonTest,
   EXPECT_EQ(w.host->capture()->liveRuns(), 0U);
 }
 
+namespace {
+/// Park a script mid-capture with the append held inside the sink.
+auto parkMidCapture(CaptureWorld &w, const std::string &path)
+    -> ScriptRunResult {
+  w.sink->close();
+  auto result =
+      w.start(open(path, "f") + read("f", "0, 64", "r") + captureOf("r", "c"));
+  for (int turns = 0; turns < 20000; ++turns) {
+    if (!std::holds_alternative<ScriptRunResult::Parked>(result.value)) break;
+    w.host->pump(16);
+    if (auto woken = w.runner->takeWake()) {
+      result = w.runner->resume(std::move(*woken));
+      continue;
+    }
+    if (w.sink->entered() >= 1) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return result;
+}
+} // namespace
+
+TEST(VqlIoCaptureAbandonTest, ADroppedParkedTokenStillPinsAtRunnerDestruction) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "token dropped");
+  {
+    auto result = parkMidCapture(w, path);
+    ASSERT_TRUE(w.sink->waitEntered(1)) << "the append is inside the sink";
+    // The caller discards its token: parked_ is then the activation's only
+    // owner, and the runner must still release the capture it holds.
+    [[maybe_unused]] const auto dropped = std::move(result);
+  }
+  w.runner.reset();
+  EXPECT_EQ(w.coordinator().pinnedCaptures().size(), 1U);
+  EXPECT_EQ(w.host->capture()->liveRuns(), 0U);
+}
+
+// A capture the runner never reached is abandoned by the host's destructor
+// while the service is alive; the canary for the order the members die in.
+TEST(VqlIoCaptureAbandonTest, DestroyingTheHostWithALiveCaptureIsSafe) {
+  CaptureWorld w;
+  const auto path = w.put("in.txt", "host destroyed");
+  auto result     = parkMidCapture(w, path);
+  ASSERT_TRUE(w.sink->waitEntered(1));
+  // The runner is leaked on purpose: destroying it first would release the
+  // capture, and this test is about a run only the host still holds.
+  [[maybe_unused]] static ScriptRunner *leaked = nullptr;
+  leaked                                       = w.runner.release();
+  w.sink->open();
+  w.host.reset();
+  SUCCEED();
+}
+
 // ---- Recovery
 // -----------------------------------------------------------------
 

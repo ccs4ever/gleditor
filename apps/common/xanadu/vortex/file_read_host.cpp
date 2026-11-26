@@ -181,6 +181,10 @@ FileReadHost::~FileReadHost() {
   if (service_) {
     static_cast<void>(service_->requestShutdown(ShutdownMode::CancelPending));
   }
+  // The capture host outlives the service (the workers run the coordinator's
+  // adapter until the service joins them), so its runs must be abandoned here,
+  // while the service they reap through is still alive.
+  if (capture_) capture_->abandonAll();
 }
 
 auto FileReadHost::pump(const std::size_t budget) -> std::size_t {

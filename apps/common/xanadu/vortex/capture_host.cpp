@@ -42,12 +42,23 @@ CaptureHost::CaptureHost(zigzag::ArenaManifold &arena,
 }
 
 CaptureHost::~CaptureHost() {
-  // Every run still held is abandoned the way a script's end would: the cells
-  // go, and the coordinator (itself about to go) is never asked anything.
+  // The service this host reaps through may already be gone, so a run still
+  // held here only has its cells dropped; the owner abandons runs through
+  // abandonAll() while the service lives.
   for (auto &[handle, run] : runs_) {
     static_cast<void>(handle);
-    freeRun(run);
+    freeRun(run, false);
   }
+}
+
+void CaptureHost::abandonAll() noexcept {
+  std::vector<CellRef> handles;
+  handles.reserve(runs_.size());
+  for (const auto &[handle, run] : runs_) {
+    static_cast<void>(run);
+    handles.push_back(handle);
+  }
+  for (const auto handle : handles) release(handle);
 }
 
 auto CaptureHost::ready() -> std::expected<void, IoErrorInfo> {
@@ -230,7 +241,7 @@ void CaptureHost::dropCaptureCell(const CaptureCell capture) noexcept {
   }
 }
 
-void CaptureHost::freeRun(Run &run) noexcept {
+void CaptureHost::freeRun(Run &run, const bool serviceAlive) noexcept {
   try {
     const auto drop = [&](const CellRef cell) {
       if (const auto incarnation = arena_.incarnationOf(cell))
@@ -281,7 +292,8 @@ void CaptureHost::freeRun(Run &run) noexcept {
     // The view that kept the retired append request whole is gone: its graph
     // (outcome, progress, endpoint and capability fields) is the service's to
     // free now, and nothing else would re-reap it.
-    if (run.appendRequest) service_.reapRetiredRequest(*run.appendRequest);
+    if (run.appendRequest && serviceAlive)
+      service_.reapRetiredRequest(*run.appendRequest);
     // The capture cell goes last. An unfinished capture's death is how the
     // coordinator learns it was abandoned (it pins by phase on its next
     // sweep), so this is the abandon, not a cleanup.
@@ -318,7 +330,7 @@ void CaptureHost::release(const CellRef handle) noexcept {
     // gain (design §11).
     static_cast<void>(service_.orphanRequest(*run.awaited));
   }
-  freeRun(run);
+  freeRun(run, true);
   // The cell's death is what the coordinator classifies; make it now so the
   // pin is visible to whoever asks next.
   coordinator_.reapAbandoned();

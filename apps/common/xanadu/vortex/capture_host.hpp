@@ -118,6 +118,9 @@ public:
   /// orphaned in the service, never cancelled and never finished in the
   /// background. A finished capture is just freed. Idempotent.
   void release(zigzag::CellRef handle) noexcept;
+  /// Release every run still held. The owner calls it while the service is
+  /// alive; the destructor then has nothing left to reap through it.
+  void abandonAll() noexcept;
 
   /// Free what an abandoned capture's orphaned step left once that step has
   /// ended (its request, endpoint, capability and spec cells), and classify
@@ -165,7 +168,7 @@ private:
   void finish(Run &run, CaptureReceiptCell receipt);
   void fail(Run &run, OutcomeCell refused,
             std::optional<OwnedOutcome> ownedStep);
-  void freeRun(Run &run) noexcept;
+  void freeRun(Run &run, bool serviceAlive) noexcept;
   void dropCaptureCell(CaptureCell capture) noexcept;
 
   zigzag::ArenaManifold &arena_;
