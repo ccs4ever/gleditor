@@ -20,6 +20,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_loader.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/capture_journal.hpp"
 
 namespace {
 
@@ -1042,4 +1043,223 @@ TEST_F(VQueryE2ETest, AnUnopenableCaptureStoreIsTheTypedRefusal) {
   EXPECT_EQ(result.exitCode, 1) << result.output;
   EXPECT_NE(result.output.find("VQL_IO_CAPTURE_UNAVAILABLE"), std::string::npos)
       << result.output;
+}
+
+// ---- M7-VQL-c C5: the recovery surface and the journeys it enables ----------
+
+namespace {
+
+/// A REPL session of @p lines against @p session's data home.
+auto repl(const CaptureSession &session, const fs::path &dir,
+          const std::vector<std::string> &lines, const std::string &flags = {})
+    -> ProcessResult {
+  static int counter = 0;
+  const auto input   = dir / ("repl" + std::to_string(counter++) + ".vql");
+  {
+    std::ofstream script(input);
+    for (const auto &line : lines) script << line << "\n";
+    script << ":quit\n";
+  }
+  return runVQuery(flags + " < '" + input.string() + "'",
+                   session.dataHome.string());
+}
+
+/// The journal a crashed session leaves: one Append intent and no outcome.
+void leaveCrashedIntent(const fs::path &directory) {
+  fs::create_directories(directory);
+  xanadu::vortex::CaptureJournal journal(directory / "capture.journal",
+                                         std::nullopt);
+  xanadu::vortex::CaptureJournalRecord record;
+  record.appendLength = 11;
+  record.intervals    = {xanadu::vortex::CaptureSourceInterval{
+         .sourceKind = xanadu::vortex::PayloadSourceKind::Durable,
+         .source     = xanadu::localScroll,
+         .generation = 0,
+         .occurrence = 7,
+         .srcOffset  = 0,
+         .srcLength  = 11,
+         .dstOffset  = 0}};
+  ASSERT_TRUE(
+      journal
+          .appendRecord(xanadu::vortex::CaptureJournalRecordKind::Append, 1,
+                        record)
+          .has_value());
+}
+
+} // namespace
+
+TEST_F(VQueryE2ETest,
+       CapturesAndReconcileSayWhenThereIsNothingAndBuildNothing) {
+  const auto session = captureSession(testDir, "unused");
+  const auto result =
+      repl(session, testDir, {":captures", ":reconcile 1 release"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("No captures: nothing has been captured"),
+            std::string::npos)
+      << result.output;
+  EXPECT_NE(result.output.find("Nothing to reconcile"), std::string::npos)
+      << result.output;
+  EXPECT_FALSE(fs::exists(session.captureDir()))
+      << "asking builds no journal or store";
+}
+
+TEST_F(VQueryE2ETest, CapturesListsTheStoreAfterACaptureInTheSameSession) {
+  const auto session = captureSession(testDir, "captured then listed");
+  const auto result  = repl(session, testDir,
+                            {":open src " + session.source.string(),
+                             readAll64 + "effect { capture($r) } as $c; "
+                                          "return io_tag($c)",
+                             ":captures"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("CaptureReceipt"), std::string::npos)
+      << result.output;
+  EXPECT_NE(
+      result.output.find("Capture store: " + session.captureDir().string()),
+      std::string::npos)
+      << result.output;
+  EXPECT_NE(result.output.find("Pinned captures: 0"), std::string::npos)
+      << result.output;
+  EXPECT_NE(result.output.find("Orphan bytes: 0"), std::string::npos)
+      << result.output;
+}
+
+TEST_F(VQueryE2ETest, ACrashedSessionsPinIsListedReleasedAndStaysReleased) {
+  const auto session = captureSession(testDir, "unused");
+  ASSERT_NO_FATAL_FAILURE(leaveCrashedIntent(session.captureDir()));
+  const auto result = repl(session, testDir,
+                           {":captures", ":reconcile 99 release",
+                            ":reconcile 1 release", ":captures"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  const auto &out = result.output;
+  EXPECT_NE(out.find("Pinned captures: 1"), std::string::npos) << out;
+  EXPECT_NE(out.find("Orphan bytes: 11"), std::string::npos) << out;
+  EXPECT_NE(out.find("capture 1: an append intent with no outcome, 11 bytes"),
+            std::string::npos)
+      << out;
+  // One decision, refused by name, never retried.
+  EXPECT_NE(out.find("Reconcile refused"), std::string::npos) << out;
+  EXPECT_NE(out.find("Released capture 1"), std::string::npos) << out;
+  // The second listing, after the release, has no pin.
+  const auto first = out.find("Pinned captures: 1");
+  EXPECT_NE(out.find("Pinned captures: 0", first), std::string::npos) << out;
+
+  // The release was journaled: a new process finds nothing pinned.
+  const auto again = repl(session, testDir, {":captures"});
+  EXPECT_NE(again.output.find("Pinned captures: 0"), std::string::npos)
+      << again.output;
+}
+
+TEST_F(VQueryE2ETest, ReconcileNamesItsFormWhenGivenOnlyHalfOfIt) {
+  const auto session = captureSession(testDir, "unused");
+  const auto result =
+      repl(session, testDir, {":reconcile", ":reconcile 1", ":reconcile x"});
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  std::size_t usages = 0;
+  for (auto at = result.output.find("Usage: :reconcile");
+       at != std::string::npos;
+       at = result.output.find("Usage: :reconcile", at + 1))
+    ++usages;
+  EXPECT_EQ(usages, 3U) << result.output;
+}
+
+// The receipt `$c` is a runtime handle; persisting it was refused deep inside
+// promotion and, with `-o`, typed in as the words of a cell. It is a typed
+// refusal that names the road to what the author meant.
+TEST_F(VQueryE2ETest, PersistingTheReceiptItselfIsATypedRefusal) {
+  const auto session = captureSession(testDir, "receipt bytes");
+  const auto out     = testDir / "receipt.store";
+  const auto result = session.run("-o '" + out.string() + "' -e '" + readAll64 +
+                                  "effect { capture($r) } as $c; return $c'");
+  EXPECT_EQ(result.exitCode, 1) << result.output;
+  EXPECT_NE(result.output.find("VQL_IO_PERSIST_HANDLE"), std::string::npos)
+      << result.output;
+  EXPECT_NE(result.output.find("io_captured"), std::string::npos)
+      << result.output;
+  EXPECT_FALSE(fs::exists(out));
+}
+
+// A refused capture still builds the stack it ran in: the journal and store
+// are created when a script holding `capture` is about to run, not on success
+// (design §13 builds on need and the note asks nothing finer).
+TEST_F(VQueryE2ETest, ARefusedCaptureStillCreatesTheCaptureDirectory) {
+  const auto session = captureSession(testDir, "x");
+  const auto result  = session.run("-e '" + readAll64 +
+                                   "effect { capture($r, 100, 5) } as $c; "
+                                    "return io_tag($c)'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "Rejected\n");
+  EXPECT_TRUE(fs::exists(session.captureDir()));
+}
+
+// UX journey: read a file, capture it, derive a result, save it, close vquery,
+// reopen and see the slice quote the capture. Every step is a REPL line; the
+// flags are the two grants and the capture store's home.
+TEST_F(VQueryE2ETest, JourneyReadCaptureDeriveSaveCloseReopenAndSeeTheQuote) {
+  const auto session = captureSession(testDir, "alpha,beta\n1,2\n");
+  const auto saved   = testDir / "journey.store";
+  const auto first =
+      repl(session, testDir,
+           {":open src " + session.source.string(),
+            readAll64 + "effect { capture($r) } as $c; return io_captured($c)",
+            ":captures", ":save " + saved.string()});
+  ASSERT_EQ(first.exitCode, 0) << first.output;
+  EXPECT_NE(first.output.find("alpha,beta"), std::string::npos) << first.output;
+  ASSERT_TRUE(fs::exists(saved)) << first.output;
+
+  // A second process: nothing of the first is in memory.
+  const auto perma  = session.permascroll();
+  const auto loaded = xanadu::loadStore(saved, perma);
+  const auto rows   = xanadu::readResultSlice(*loaded, loaded->latest());
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(rows.front().text, "alpha,beta\n1,2\n");
+  ASSERT_TRUE(rows.front().quote.has_value());
+  EXPECT_EQ(perma->read(rows.front().quote->spans.front()),
+            "alpha,beta\n1,2\n");
+  const auto reopened = repl(session, testDir, {":captures"});
+  EXPECT_NE(reopened.output.find("Pinned captures: 0"), std::string::npos)
+      << reopened.output;
+  EXPECT_NE(reopened.output.find("Recovered captures: 1"), std::string::npos)
+      << "the capture is in the journal the next session recovers: "
+      << reopened.output;
+}
+
+// UX journey: write a report, sync it, read it back, from the REPL, with the
+// one grant.
+TEST_F(VQueryE2ETest, JourneyWriteAReportSyncItAndReadItBack) {
+  const auto session = captureSession(testDir, "unused");
+  const auto report  = testDir / "report.txt";
+  const auto submit  = [](const std::string &cap, const std::string &what,
+                         const std::string &as) {
+    return "effect { let $s := submit($" + cap + ", " + what +
+           "); match $s { admitted($q) => await($q), refused($e) => $e } } "
+            "as $" +
+           as + "; ";
+  };
+  const auto result =
+      repl(session, testDir,
+           {":open -wc out " + report.string(),
+            submit("out", "write_bytes(0, \"quarterly report\")", "w") +
+                submit("out", "sync()", "d") + "return io_tag($w), io_tag($d)",
+            ":open back " + report.string(),
+            submit("back", "read_bytes(0, 64)", "r") + "return io_payload($r)"},
+           "--io-write-root '" + testDir.string() + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("Opened " + report.string() + " for change"),
+            std::string::npos)
+      << result.output;
+  EXPECT_NE(result.output.find("quarterly report"), std::string::npos)
+      << result.output;
+  EXPECT_EQ(readAll(report), "quarterly report");
+}
+
+// Writing is the invoking human's grant: with no root, the same journey is a
+// refused open, not a silent success.
+TEST_F(VQueryE2ETest, JourneyWriteWithoutAGrantIsRefusedAtTheOpen) {
+  const auto session = captureSession(testDir, "unused");
+  const auto report  = testDir / "denied.txt";
+  const auto result =
+      repl(session, testDir, {":open -wc out " + report.string()});
+  EXPECT_NE(result.output.find("Open failed"), std::string::npos)
+      << result.output;
+  EXPECT_FALSE(fs::exists(report));
 }

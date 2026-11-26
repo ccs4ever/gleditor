@@ -38,6 +38,7 @@
 #include "common/xanadu/vortex/capture_coordinator.hpp"
 #include "common/xanadu/vortex/capture_publication.hpp"
 #include "common/xanadu/vortex/file_read_host.hpp"
+#include "common/xanadu/vortex/io_cells.hpp"
 #include "common/xanadu/vortex/mesh_cli.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
@@ -167,6 +168,32 @@ resultRows(const xanadu::MultiStoreCoordinator &coordinator,
   return rows;
 }
 
+/// What the owner reads beside a pinned capture, in words; a diagnostic, not a
+/// control value.
+auto captureReasonName(const xanadu::vortex::CaptureRecoveryReason reason)
+    -> std::string_view {
+  using Reason = xanadu::vortex::CaptureRecoveryReason;
+  switch (reason) {
+  case Reason::None:
+    return "no reason recorded";
+  case Reason::OpenIntent:
+    return "an append intent with no outcome";
+  case Reason::UncertainAbort:
+    return "the append may have run before it was abandoned";
+  case Reason::AmbiguousJournal:
+    return "records out of order";
+  case Reason::SpanBeyondPermascroll:
+    return "its span ends past the permascroll";
+  case Reason::PublicationIncomplete:
+    return "its publication is incomplete";
+  case Reason::InvalidTranslation:
+    return "its intervals disagree";
+  case Reason::MapConflict:
+    return "its translation conflicts with another";
+  }
+  return "unknown";
+}
+
 void printHelpREPL() {
   std::cout
       << "VQL Interactive REPL Commands:\n"
@@ -184,6 +211,11 @@ void printHelpREPL() {
          "--io-write-root\n"
       << "  :timeout [MS|off]     Show or set how long a parked script may "
          "wait before it is abandoned\n"
+      << "  :captures             List captures: the store, what recovery "
+         "found, orphan bytes and pinned captures\n"
+      << "  :reconcile ID release|promote [START LEN]  Decide one pinned "
+         "capture: release it, or promote it to the span its journal names "
+         "(or START LEN of the permascroll)\n"
       << "  :stores               List currently loaded stores\n"
       << "  :save <path>          Save the last query rows as a result slice\n"
       << zigzag::LensRepl::helpText
@@ -733,7 +765,27 @@ int main(int argc, char *argv[]) {
   const auto refuseDurableAction = [&]() -> bool {
     if (!resultsFromAction) return false;
     const auto verdict = ioRunner ? ioRunner->persistability() : std::nullopt;
-    if (verdict && verdict->persistable()) return false;
+    if (verdict && verdict->persistable()) {
+      // Covered input may be persisted, but a row that is itself a runtime
+      // handle (the receipt `$c`, a capability, a request) names native state
+      // no store can hold: promotion would refuse it deep inside, so it is
+      // refused here by name, with the road to what the author meant.
+      const auto &arena = coordinator.arena();
+      for (const auto cell : lastResults) {
+        const auto incarnation = arena.incarnationOf(cell);
+        if (!incarnation) continue;
+        const auto tag = xanadu::vortex::ioCellTag(arena, cell, *incarnation);
+        if (!tag || *tag == xanadu::vortex::IoCellTag::Outcome) continue;
+        std::cerr << xanadu::vortex::frontend_codes::vqlPersistHandle
+                  << ": a result row is a runtime I/O handle ("
+                  << xanadu::vortex::toString(*tag)
+                  << "), which no store can hold; return "
+                     "io_captured($c) to persist what a capture made "
+                     "durable\n";
+        return true;
+      }
+      return false;
+    }
     std::cerr << xanadu::vortex::frontend_codes::vqlPersistNeedsCapture
               << ": the result comes from a script that turned "
               << (verdict ? verdict->uncovered : std::size_t{}) << " payload"
@@ -823,7 +875,20 @@ int main(int argc, char *argv[]) {
         const auto val = coordinator.core().render(c);
         if (!val) continue;
         if (std::holds_alternative<std::string>(*val)) {
-          std::cout << std::get<std::string>(*val) << "\n";
+          auto text = std::get<std::string>(*val);
+          // A captured cell's content is a span of the author's permascroll,
+          // which the arena alone cannot read: without this the REPL printed
+          // an empty line for the bytes the author had just captured.
+          if (text.empty()) {
+            const auto content = coordinator.arena().contentOf(c);
+            if (std::ranges::any_of(
+                    content, [](const xanadu::PrimediaSpan &span) {
+                      return xanadu::scratchScroll != span.scroll;
+                    })) {
+              text = coordinator.arena().textOf(c, *permascroll);
+            }
+          }
+          std::cout << text << "\n";
         } else if (std::holds_alternative<double>(*val)) {
           std::cout << std::get<double>(*val) << "\n";
         } else if (std::holds_alternative<std::int64_t>(*val)) {
@@ -1054,6 +1119,117 @@ int main(int argc, char *argv[]) {
       } else if (bindFile(name, path, rights)) {
         std::cout << "Opened " << path << (flagged ? " for change" : "")
                   << " as $" << name << "\n";
+      }
+    } else if (line == ":captures") {
+      // Reading the capture store is not a capture: with no stack built and no
+      // journal on disk there is nothing to report and nothing is created.
+      // With a journal, the stack is built (as a first `capture` would) and
+      // its recovery run -- the owner-thread exception design §8 names -- so
+      // what a crashed session left is what this prints.
+      const auto journal = captureDirectory() / "capture.journal";
+      if (!io || io->capture() == nullptr) {
+        std::error_code missing;
+        if (!std::filesystem::exists(journal, missing)) {
+          std::cout << "No captures: nothing has been captured (no journal at "
+                    << journal.string() << ")\n";
+          continue;
+        }
+      }
+      const auto stack = ensureCapture();
+      if (!stack) {
+        std::cerr << "Captures unavailable: " << stack.error() << "\n";
+        continue;
+      }
+      auto &captures = **stack;
+      if (const auto ready = captures.ready(); !ready) {
+        std::cerr << "Capture recovery refused: "
+                  << xanadu::vortex::toString(ready.error().code) << " detail "
+                  << ready.error().stableDetail << "\n";
+        continue;
+      }
+      const auto &coordinator = captures.coordinator();
+      const auto &report      = captures.recoveredReport();
+      const auto counts       = coordinator.stateCounts();
+      const auto pins         = coordinator.pinnedDetails();
+      std::cout << "Capture store: " << captureDirectory().string() << "\n"
+                << "Recovered captures: "
+                << (report ? report->entries.size() : 0U) << "\n"
+                << "Orphan bytes: " << (report ? report->orphanBytes : 0U)
+                << "\n"
+                << "Translations: " << counts.translationSlots << " (evicted "
+                << counts.evictedTranslations << ")\n"
+                << "Pinned captures: " << pins.size() << "\n";
+      for (const auto &pin : pins) {
+        std::cout << "  capture " << pin.capture << ": "
+                  << captureReasonName(pin.reason) << ", " << pin.appendLength
+                  << " bytes may be appended";
+        if (pin.span)
+          std::cout << ", journal names span " << pin.span->start << "+"
+                    << pin.span->length;
+        std::cout << "\n";
+      }
+    } else if (line == ":reconcile" || line.starts_with(":reconcile ")) {
+      std::istringstream iss(line);
+      std::string cmd, verb;
+      xanadu::vortex::CaptureId id{};
+      iss >> cmd >> id >> verb;
+      std::optional<xanadu::vortex::CaptureReconcileDecision> decision;
+      if (!iss.fail() && verb == "release") {
+        decision = xanadu::vortex::ReconcileRelease{};
+      } else if (!iss.fail() && verb == "promote") {
+        xanadu::vortex::ReconcilePromote promote;
+        std::uint64_t start{};
+        std::uint64_t length{};
+        if (iss >> start >> length) {
+          promote.span = xanadu::PrimediaSpan{
+              .scroll = xanadu::localScroll, .start = start, .length = length};
+          decision = promote;
+        } else if (iss.eof()) {
+          decision = promote;
+        }
+      }
+      const auto journal = captureDirectory() / "capture.journal";
+      std::error_code missing;
+      if (!decision) {
+        std::cout << "Usage: :reconcile ID release | :reconcile ID promote "
+                     "[START LEN]\n";
+      } else if ((!io || io->capture() == nullptr) &&
+                 !std::filesystem::exists(journal, missing)) {
+        std::cout << "Nothing to reconcile: no capture journal at "
+                  << journal.string() << "\n";
+      } else if (const auto stack = ensureCapture(); !stack) {
+        std::cerr << "Captures unavailable: " << stack.error() << "\n";
+      } else if (const auto ready = (*stack)->ready(); !ready) {
+        std::cerr << "Capture recovery refused: "
+                  << xanadu::vortex::toString(ready.error().code) << " detail "
+                  << ready.error().stableDetail << "\n";
+      } else {
+        // One decision, once: a refusal is printed and the pin kept, never
+        // retried here.
+        auto &coordinator = (*stack)->coordinator();
+        const auto done   = coordinator.reconcile(id, *decision);
+        if (!done) {
+          std::cerr << "Reconcile refused: "
+                    << xanadu::vortex::toString(done.error().code) << " detail "
+                    << done.error().stableDetail << " (capture " << id
+                    << " stays pinned)\n";
+        } else {
+          std::cout << (done->resolution ==
+                                xanadu::vortex::CaptureReconcileResult::
+                                    Resolution::Promoted
+                            ? "Promoted capture "
+                            : "Released capture ")
+                    << id << "\n";
+          if (done->publicationPending) {
+            const auto resumed = coordinator.resumePublications();
+            if (resumed)
+              std::cout << "Published " << *resumed << " capture(s)\n";
+            else
+              std::cerr << "Publication still pending: "
+                        << xanadu::vortex::toString(resumed.error().code)
+                        << " detail " << resumed.error().stableDetail << "\n";
+          }
+        }
       }
     } else if (line == ":stores") {
       std::cout << "Registered stores on ##/d.stores rank:\n";

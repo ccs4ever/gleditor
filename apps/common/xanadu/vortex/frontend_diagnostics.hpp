@@ -84,6 +84,11 @@ inline constexpr std::string_view vqlEffectNeedsRunner =
 /// a capture decision or provenance.
 inline constexpr std::string_view vqlPersistNeedsCapture =
     "VQL_IO_PERSIST_NEEDS_CAPTURE";
+/// A front end was asked to make durable a row that is a runtime I/O handle (a
+/// capability, request, waiter, submission or capture receipt). Such a cell
+/// names live native state that no store can hold; what a capture made
+/// durable is the cells `io_captured` answers, so that is what to return.
+inline constexpr std::string_view vqlPersistHandle = "VQL_IO_PERSIST_HANDLE";
 /// A query segment of a script failed (the QueryError category and message
 /// ride in the diagnostic's message).
 inline constexpr std::string_view vqlScriptFailed = "VQL_SCRIPT_FAILED";

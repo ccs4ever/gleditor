@@ -57,6 +57,8 @@ constexpr std::array builtins{
     Builtin{FrontendId::Vql, frontend_codes::vqlPersistNeedsCapture,
             "rows produced by an I/O action cannot be made durable without an "
             "explicit capture"},
+    Builtin{FrontendId::Vql, frontend_codes::vqlPersistHandle,
+            "a result row is a runtime I/O handle that no store can hold"},
     Builtin{FrontendId::Vql, frontend_codes::vqlScriptFailed,
             "a query segment of a script failed"},
     Builtin{FrontendId::Vql, frontend_codes::vqlScriptTimeout,
