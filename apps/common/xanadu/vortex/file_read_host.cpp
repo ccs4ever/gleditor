@@ -119,8 +119,12 @@ auto writeRootGrant(const std::vector<std::filesystem::path> &roots,
                     const std::uint64_t rights) -> WriteGrant {
   std::vector<std::filesystem::path> canonicalRoots;
   for (const auto &root : roots) {
-    if (const auto canonical = canonicalLocator(root.string()))
-      canonicalRoots.push_back(*canonical);
+    if (auto canonical = canonicalLocator(root.string())) {
+      // weakly_canonical keeps the empty last element of "dir/" when dir does
+      // not exist yet, which would never match a file name beneath it.
+      if (!canonical->has_filename()) *canonical = canonical->parent_path();
+      canonicalRoots.push_back(*std::move(canonical));
+    }
   }
   return [canonicalRoots = std::move(canonicalRoots),
           rights](const std::string_view locator) -> std::uint64_t {

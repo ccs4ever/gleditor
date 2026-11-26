@@ -327,8 +327,14 @@ void CaptureHost::release(const CellRef handle) noexcept {
   if (run.awaited && unfinished) {
     // The step still running is forgotten at its end, never cancelled here:
     // stopping an fsync mid-record would manufacture an uncertain pin for no
-    // gain (design §11).
-    static_cast<void>(service_.orphanRequest(*run.awaited));
+    // gain (design §11). The one exception is a script's timeout, which asks
+    // the step to stop before it releases the handle (ScriptRunner::
+    // expireIfDue); a destroyed runner does not.
+    const auto orphaned = service_.orphanRequest(*run.awaited);
+    if (orphaned == IoService::OrphanResult::HasWaiters)
+      GLEDITOR_LOG_WARN(logCategory,
+                        "a capture was released with its waiter still "
+                        "registered; its step stays tracked");
   }
   freeRun(run, true);
   // The cell's death is what the coordinator classifies; make it now so the

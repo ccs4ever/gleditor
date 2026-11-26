@@ -266,6 +266,17 @@ TEST_F(FileWriteHostTest, ASiblingWhoseNameStartsWithTheRootIsOutside) {
       open(base_ / "rootlike" / "a.txt", createWrite).capability.has_value());
 }
 
+// weakly_canonical keeps an empty last element for a missing "dir/", which
+// would never match a file beneath it, even after the directory exists.
+TEST_F(FileWriteHostTest,
+       ARootWithATrailingSlashThatDoesNotExistYetStillGrants) {
+  const auto later = base_ / "later";
+  const auto grant = writeRootGrant({later.string() + "/"});
+  fs::create_directories(later);
+  EXPECT_NE(grant((later / "a.txt").string()), 0U);
+  EXPECT_EQ(grant(later.string()), 0U);
+}
+
 TEST_F(FileWriteHostTest, TheRootItselfIsNotAWritableFile) {
   FileReadHostOptions options;
   options.writeGrant = grantFor(root_);

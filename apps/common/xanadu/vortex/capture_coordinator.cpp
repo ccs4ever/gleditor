@@ -715,7 +715,11 @@ void CaptureCoordinator::sweepStepGraphs() {
     });
   };
   std::erase_if(steps_, [&](const StepGraph &step) {
-    if (!step.request) return false;
+    if (!step.request) {
+      // Never admitted: a refused capture freed it at once, and a free that
+      // failed then is retried here, since no request will ever name it.
+      return !specInUse(step) && freeStepGraph(step);
+    }
     // An abandoned capture's awaited step is orphaned, and the service forgets
     // an orphan at its terminal without touching cells (it assumes its owner
     // freed them). Once the service no longer tracks the request nothing else
