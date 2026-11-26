@@ -445,7 +445,23 @@ bool ScriptRunner::retire(const Admitted &entry, const bool force) noexcept {
     // The close's outcome is read before the retire takes it with the request.
     const auto closed =
         entry.closes && entry.request && closeCompleted(*entry.request);
+    // A refusal has no request, so no request's reaping takes its Rejected
+    // outcome along: the submission's release frees only the sum, and the
+    // outcome's field, state and progress cells (five or six a run) would stay
+    // for the arena's life. Whoever kept a copy holds a record of its own.
+    std::optional<vortex::OutcomeCell> refusal;
+    if (!entry.request) {
+      const auto matched = ports_.bridge.match(entry.submission);
+      if (const auto *refused =
+              matched ? std::get_if<vortex::Refused>(&*matched) : nullptr) {
+        refusal = refused->outcome;
+      }
+    }
     ports_.bridge.retire(entry.submission);
+    if (refusal) {
+      vortex::OwnedOutcome::freeOutcomeGraph(
+          session_.coordinator().arena(), ports_.bridge.schema(), *refusal);
+    }
     // The file is closed and nothing names its cells any more: they are not a
     // request's, so no reaper takes them, and left alone they cost an arena
     // one endpoint graph per file opened.
@@ -1380,8 +1396,7 @@ auto ScriptRunner::ownOutcome(const RelationQuery &query,
   // The entry the statement admitted: the request whose outcome this is, or,
   // for a refusal, the submission holding this Rejected outcome.
   const auto &schema = ports_.bridge.schema();
-  auto &entries      = current_->admitted;
-  const auto entry   = std::ranges::find_if(entries, [&](const Admitted &held) {
+  const auto holds   = [&](const Admitted &held) {
     if (held.request) {
       return arena.linked(held.request->cell,
                             schema.dim(vortex::IoDimension::Outcome),
@@ -1391,8 +1406,18 @@ auto ScriptRunner::ownOutcome(const RelationQuery &query,
     const auto *refused =
         matched ? std::get_if<vortex::Refused>(&*matched) : nullptr;
     return refused != nullptr && refused->outcome == outcome;
-  });
-  if (entry == entries.end()) return keep;
+  };
+  // A handle an earlier script left running sits in the finished list, not in
+  // this script's own admissions; awaiting it here must still name an owned
+  // record, or the name would be the service's outcome, freed when the next
+  // admission retires its request.
+  auto *entries = &current_->admitted;
+  auto entry    = std::ranges::find_if(*entries, holds);
+  if (entry == entries->end()) {
+    entries = &finished_;
+    entry   = std::ranges::find_if(*entries, holds);
+    if (entry == entries->end()) return keep;
+  }
 
   const auto gate = ports_.bridge.gate(outcome);
   if (!gate) return keep;
@@ -1451,14 +1476,7 @@ auto ScriptRunner::ownOutcome(const RelationQuery &query,
   // must find it, and the script's end retires it with the rest.
   if (!retireRequest) return answerOnce(query, cell);
   const auto retired = *entry;
-  const bool refused = !retired.request.has_value();
-  if (retire(retired)) {
-    entries.erase(entry);
-    // A refusal has no request whose reaping takes its outcome along: the
-    // service's cells are only the Rejected outcome, which the record has
-    // replaced.
-    if (refused) vortex::OwnedOutcome::freeOutcomeGraph(arena, schema, outcome);
-  }
+  if (retire(retired)) entries->erase(entry);
   return answerOnce(query, cell);
 }
 

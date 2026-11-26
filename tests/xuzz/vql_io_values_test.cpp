@@ -716,6 +716,75 @@ TEST(VqlIoAwaitRecordTest,
   EXPECT_LE(s.w.service.requestCount(), 1U);
 }
 
+TEST(VqlIoAwaitRecordTest, AnAwaitOfAHandleAnEarlierScriptAdmittedIsOwnedToo) {
+  // The detached read outlives the script that started it; the name made by
+  // awaiting it later must still be a record, not the service's outcome, which
+  // the next admission frees along with the request.
+  ValueWorld s;
+  auto first = s.run(detachedAs("h") + "return 1");
+  ASSERT_NE(std::get_if<ScriptRunResult::Completed>(&first.value), nullptr)
+      << ValueWorld::failure(first);
+  auto second = s.run("effect { await($h) } as $r; return io_tag($r)");
+  ASSERT_TRUE(ValueWorld::parked(second)) << ValueWorld::failure(second);
+  second           = s.finish(s.completeWithPayload());
+  const auto *done = std::get_if<ScriptRunResult::Completed>(&second.value);
+  ASSERT_NE(done, nullptr) << ValueWorld::failure(second);
+  EXPECT_EQ(s.texts(done->value), (Texts{"Complete"}));
+  EXPECT_EQ(s.runner->ownedRecordCount(), 1U)
+      << "the name is the script's own record";
+  // The record is released with the next admission; the name then answers the
+  // typed stale refusal (`io_tag` has no stale check of its own, `match` does).
+  const auto third = s.run(detachedAs("g") + "return 1");
+  ASSERT_NE(std::get_if<ScriptRunResult::Completed>(&third.value), nullptr)
+      << ValueWorld::failure(third);
+  const auto fourth = s.run("match $r { _ => (1) }");
+  EXPECT_EQ(ValueWorld::code(fourth), "VQL_IO_STALE_BINDING")
+      << ValueWorld::failure(fourth);
+}
+
+TEST(VqlIoAwaitRecordTest, ManyRefusedNamedAwaitRunsLeaveTheArenaBounded) {
+  // A refusal has no request whose reaping frees its Rejected outcome, so the
+  // runner's retire must; the record copy is the script's own.
+  ValueWorld s;
+  s.w.refuseAdmission = true;
+  const auto once     = [&] {
+    auto result = s.run(detachedAs("h") + "effect { await($h) } as $r; "
+                                              "return io_tag($r)");
+    const auto *done = std::get_if<ScriptRunResult::Completed>(&result.value);
+    ASSERT_NE(done, nullptr) << ValueWorld::failure(result);
+    for (const auto row : done->value) {
+      if (const auto incarnation = s.w.arena.incarnationOf(row))
+        static_cast<void>(s.w.arena.freeCell(row, *incarnation));
+    }
+    s.freeOldSpecs();
+  };
+  for (std::size_t i = 0; i < 8; ++i) once();
+  const auto warmLive        = s.w.arena.liveCells();
+  constexpr std::size_t runs = 10'000;
+  for (std::size_t i = 0; i < runs; ++i) once();
+  EXPECT_EQ(s.w.arena.liveCells(), warmLive);
+}
+
+TEST(VqlIoAwaitRecordTest, ManyPlainDetachedRefusalRunsLeaveTheArenaBounded) {
+  ValueWorld s;
+  s.w.refuseAdmission = true;
+  const auto once     = [&] {
+    auto result      = s.run(detachedAs("h") + "return io_tag($h)");
+    const auto *done = std::get_if<ScriptRunResult::Completed>(&result.value);
+    ASSERT_NE(done, nullptr) << ValueWorld::failure(result);
+    for (const auto row : done->value) {
+      if (const auto incarnation = s.w.arena.incarnationOf(row))
+        static_cast<void>(s.w.arena.freeCell(row, *incarnation));
+    }
+    s.freeOldSpecs();
+  };
+  for (std::size_t i = 0; i < 8; ++i) once();
+  const auto warmLive        = s.w.arena.liveCells();
+  constexpr std::size_t runs = 10'000;
+  for (std::size_t i = 0; i < runs; ++i) once();
+  EXPECT_EQ(s.w.arena.liveCells(), warmLive);
+}
+
 TEST(VqlIoMatchRunTest, ManyMatchRunsLeaveTheArenaAndTheServiceBounded) {
   ValueWorld s;
   const auto once = [&] {
