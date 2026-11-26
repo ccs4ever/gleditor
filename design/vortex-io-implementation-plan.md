@@ -833,8 +833,9 @@ M4 known gaps carried forward (recorded 2026-11-24, review fix round):
 - `ensureTerminalOutcome` re-mints a refusal cell on every poll/await while `publishTerminal` keeps
   refusing, instead of caching one; request retirement bounds the growth but the re-mint itself is
   deliberate, not redesigned.
-- `OpenSpec.deadline` is frozen on the request but nothing enforces it; no adapter or scheduler path
-  reads it, so expiry never produces `TimedOut`.
+- ~~`OpenSpec.deadline` is frozen on the request but nothing enforces it~~ (closed by M7-VQL-b:
+  `IoService::pump` ends a request whose deadline has passed as `TimedOut`, on an injectable clock;
+  `OpenSpec::deadline` is now optional and a non-open request takes a deadline at `submit`).
 - `UnionSourceAdapter` members must present disjoint staged-key spaces for concurrently in-flight
   requests: `abandonStaged` sees only the spec cell, so two live same-key specs on different members
   misroute the earlier abandon onto the other's live staged entry (documented on the class;
@@ -1273,8 +1274,8 @@ M7-VQL implementation notes and deliberate deferrals:
   `:save` would have written an action's payload text into the permascroll with no capture decision,
   so they are refused with `VQL_IO_PERSIST_NEEDS_CAPTURE` for rows of a script ending in an action
   (e2e `ActionRowsAreNotWrittenByOutputStoreInPlaceOrSave`); `:open` takes a path with spaces; the
-  open still has no deadline or cancel, and `lastResults` after a script that fails post-admission
-  may name retired cells (deferred).
+  open has no deadline or cancel here, and `lastResults` after a script that fails post-admission
+  may name retired cells (all three closed by M7-VQL-b).
 - Harness. `ConformanceDriver` gained `collectWakes()` (default empty) and `pumpDriver`, because a
   language whose runner is not the driver itself must forward the wakes its runner received; the M7a
   drivers are unchanged. `VqlScriptConformance` instantiates all five checks with a driver that runs
@@ -1311,18 +1312,89 @@ Deferred, by design:
   retired through `FrontendBridge::retire` only when the next action is admitted (or the runner
   ends), never earlier.
 - M7-VQL-b (done): `effect { ... } as $r` names the outcome for later statements; `io_tag($r)` reads
-  its tag through a host relation provider; a script's own requests stay admitted until it ends.
-  Still absent: cancel, a script-level open, a per-script deadline.
+  its tag through a host relation provider; a script's own requests stay admitted until it ends. The
+  rest of the milestone (fields, cancel, deadlines, open) is in "M7-VQL-b implementation notes and
+  deliberate deferrals" below.
 - Write, capture, `message` and frame modes, `stable` reads, and any action other than a bounded
   read of one file capability; reads over a loop or per row (refused until an explicit later gate).
 - The runner needs a `VQLEngine` session (it supplies the bound capability and operand cells at
   compile time and the host-side payload read). The whole script is one program, so a statement
   after an action sees the earlier ones' bindings as it would without an action; an action's own
   value is still not nameable by later statements.
-- No overall timeout on a parked script: it waits for the backend's own deadline (open has one; a
-  read has none yet), and cancelling a request stays a separate explicit action.
+- (Closed by M7-VQL-b.) A parked script now has an optional overall deadline and a request can be
+  cancelled from the script.
 - `submit`, `await` and `read_bytes` are reserved call names; a user `def` of those names can no
   longer be called.
+
+M7-VQL-b implementation notes and deliberate deferrals:
+
+- Layering. Nothing here touches a core file. The new request descriptions are cells (`read_bytes`
+  gains optional `amount, unit` terms), the new host operations are relation providers and the
+  existing `Submit`/`Await` opcodes, and the I/O changes are in `IoService`, `IoHost`,
+  `FrontendBridge`, `FileReadHost` and the VQL front end. `OpenSpec::deadline` became
+  `std::optional` (no epoch sentinel), `IoAdapter` and the scheduler are unchanged.
+- Deadlines (the M4 gap). `IoService` owns an `IoClock` (`setClock`, default the steady clock) and a
+  per-request optional deadline: an open's `OpenSpec::deadline`, or `submit(..., within)` measured
+  on that clock. `pump` first ends every request past its deadline through the same `stopRequest`
+  body `cancelRequest` uses (queued work is removed, running work gets its stop token) and marks it
+  `expired`, so the `Cancelled` terminal the backend reports is published as `TimedOut` with the
+  backend's `uncertain` flag. A completion the backend had already delivered wins the race, and a
+  user cancel that came first stays `Cancelled`. A request with no deadline is never touched.
+  Enforcement happens on the owner thread in `pump`, so an idle program that never pumps never
+  expires anything, which is the same contract as every other completion. Refused alternatives: a
+  timer thread (would publish cells off the owner thread), a deadline per adapter (every adapter
+  would reimplement it; the scheduler's stop token already is the one stop path), and `TimedOut`
+  decided by the adapter (it cannot know the owner's clock).
+- Outcome fields. `io_payload`, `io_bytes`, `io_error` and `io_detail` are relation providers beside
+  `io_tag`. The payload goes through `FrontendBridge::gate` and the byte count prefers the retained
+  payload's length, because the cell store records the service's progress counters and a backend
+  that reports no progress leaves `transferredBytes` at zero. `FrontendBridge::outcomeField` is the
+  one reader of the outcome's scalar fields.
+- Handles. A read ending `admitted($q) => $q` is *detached*: both arms copy the arm payload, so the
+  value is the request handle or the `Rejected` outcome. `await($h)` and `cancel($h)` are one shape:
+  a provider says whether the handle is a request (arm 0) or an outcome (arm 1), `cancel`'s also
+  asks the request's backend to stop, then the shared `BranchFalseCell`/`Await`/`CopyCellRefs`
+  lowering waits for a request and passes an outcome through. The parked token's request is the cell
+  the `Await` reads (`ParkedProgram::request`), no longer "the activation's last submission".
+  Refused alternative: a `Cancel` opcode (core file, and cancellation is host policy, not VM
+  semantics).
+- Per-row and loops. The M7-VQL acceptance is "submit runs once per reached script action" and "no
+  per-row fan-out until an explicit later gate"; `for` is row traversal, so a script action in a
+  `for` body stays `VQL_IO_QUERY_CONTEXT` for every shape. Running a script N times submits N times
+  (existing test). There is no script-level loop construct to give N iterations.
+- Script-level open. `open` admits through `FrontendBridge::admitOpen` as its own submission and
+  awaits it with the same lowering; `as $f` binds the capability a `Complete` open minted
+  (`io_open_capability`), or the outcome when it minted none. The runner records each capability the
+  provider hands out; every ending of the script (finish, failure, abandon, destruction) admits
+  `IoHost::closeEndpoint` for it (the file close path), and the closes are reaped as they go
+  terminal. The close request is queued behind the endpoint's in-flight work by the existing lane
+  rule. A runner torn down does not wait for a close to finish. `admitOpen` keeps its profile gate
+  (an actor profile refuses it as a value). The off-owner rule is unchanged: it runs on the owner
+  thread, and the file is opened on a worker.
+- Script deadline. `ScriptRunner::setScriptTimeout` (and `setClock`) give each script started
+  afterwards a deadline; `expireIfDue(token)` abandons a parked script past it: waiter and route
+  dropped, the awaited request asked to stop (`retireRequest`), its requests released, files closed,
+  diagnostic `VQL_SCRIPT_TIMEOUT` with the action's index. `driveToCompletion` calls it on every
+  idle turn. `vquery --script-timeout MS|off` defaults to a named 30 s (`defaultScriptTimeout`, with
+  its rationale at the constant) pending `system://settings` in M8; `:timeout` shows and sets it.
+- `lastResults`. A script that holds an action clears the saved results before it runs, because its
+  first admission retires the rows before it; `:save`, `-o` and `--in-place` then find none rather
+  than cells that no longer exist.
+- Running detached reads. A request a script started and nothing awaited is kept in the runner's
+  finished list and retired when a later admission finds it terminal; a runner destroyed first
+  leaves it as it always left a running request.
+
+Deferred in M7-VQL-b:
+
+- Matching outcome fields in script syntax (`outcome(complete($payload, ..), ..)` of the examples
+  document): fields are read with path functions instead.
+- A deterministic end-to-end timeout test with a real file: a regular file never blocks, so expiry
+  is proved on injected clocks (service, runner and driver) and the CLI is tested for the flag, the
+  REPL command and a script that finishes inside its deadline.
+- Closing a capability the script did not open, and closing one early from the script.
+- A read bound's `within` in a unit finer than milliseconds; `within` on `open`, whose deadline is
+  the host's open deadline (`FileReadHostOptions::openDeadline`).
+- Write, capture, `message` and frame modes, and per-row reads, remain refused.
 
 P6: the Submit opcode (applied with owner approval, `vortex_vm.{hpp,cpp}` only):
 

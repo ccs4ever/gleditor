@@ -76,6 +76,14 @@ submit. A refusal takes the `refused` arm and starts no work. Querying/rendering
 remains pure. A payload may be explicitly captured by the host after inspecting its source/range;
 the VQL snippet does not make it permanent.
 
+As built (M7-VQL and M7-VQL-b, `vql-query-language.md` §4.13), the script reads an outcome with path
+functions instead of the proposed `outcome(...)` match: `effect { ... } as $r` names it and
+`io_tag($r)`, `io_payload($r)` (only where the status gate exposes bytes), `io_bytes($r)`,
+`io_error($r)` and `io_detail($r)` read its fields. `submit(...) within 250 ms`, a detached read
+(`admitted($q) => $q`), `effect { await($h) }`, `effect { cancel($h) }` and
+`effect { open("path") } as $cap` complete the surface; every terminal tag, `TimedOut` and
+`Cancelled` included, is a value.
+
 ## VPL: shape-preserving request and outcome arrays
 
 The host supplies `Caps` and `Specs` as equally shaped VPL views. Shape agreement is checked before

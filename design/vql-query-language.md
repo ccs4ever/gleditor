@@ -2330,7 +2330,7 @@ variables bound to one non-negative numeric cell. `submit` always yields the man
 outcome cell, so a refusal is the script's value rather than an error and is never awaited. The
 spelling follows the I/O frontend contract in the
 [implementation plan](vortex-io-implementation-plan.md) §10; only this fixed shape is accepted, and
-matching on an outcome's tag and fields inside the script is not yet part of the grammar.
+an outcome's tag and fields are read with path functions (M7-VQL-b, below), not matched.
 
 **Where it may stand.** Only as a top-level statement of the query's own script body. It is refused
 with `VQL_IO_QUERY_CONTEXT`, at parse time and before anything runs, as the action of a
@@ -2393,12 +2393,69 @@ rows of a finished script stay readable until the next action any script admits.
 ______________________________________________________________________
 
 **Naming the outcome (M7-VQL-b).** `effect { ... } as $r` binds the action's outcome cell to `$r`
-for the statements after it in the same script; `io_tag($r)` is a path function that answers the
-outcome's tag as a text cell,. It is answered by the host that runs scripts (`ScriptRunner`), so it
-fails by value in the synchronous executor and in `vqueryc`, which have no host. Cancel, a
-script-level open, a per-script deadline, write, capture and other endpoints are still absent; the
-first three need request cells nameable by the script, and the last three need protocol work and
-owner approval.
+for the statements after it in the same script. A script's own requests stay admitted until it ends,
+so every named outcome is readable throughout.
+
+**Reading an outcome.** Five path functions read one field of an outcome as a cell, each answered by
+the host that runs scripts (`ScriptRunner`) through a relation provider, so the VM and the compiler
+name no I/O schema. They fail by value in the synchronous executor and in `vqueryc`, which have no
+host, and on an argument that is not an outcome.
+
+| function         | answers                                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------------------- |
+| `io_tag($r)`     | the tag as text (`Complete`, `EndOfStream`, `Failed`, `Cancelled`, `TimedOut`, `Rejected`, ...)           |
+| `io_payload($r)` | the retained bytes as UTF-8 text, only where the shared terminal-status gate exposes a payload; else none |
+| `io_bytes($r)`   | the retained byte count (the payload's length), else the progress record's `transferredBytes`             |
+| `io_error($r)`   | the error code of a `Failed` or `Rejected` outcome (`BackendFailure`, `BudgetExceeded`, ...); else none   |
+| `io_detail($r)`  | that error's stable detail number; else none                                                              |
+
+"Else none" is an empty result, not an error, as for `find`. `io_tag` also names what a script holds
+that is not an outcome: `Capability` for the capability an `open` minted and `Request` for a handle
+a detached read returned.
+
+**Handles, `await` and `cancel`.** A read whose admitted arm is `$q` instead of `await($q)` starts
+the request and does not wait: its value is the request handle, or the `Rejected` outcome on a
+refusal. A name given with `as` makes it a handle later actions take:
+
+```vql
+effect {
+  let $s := submit($src, read_bytes(0, 4096)) within 250 ms;
+  match $s { admitted($q) => $q, refused($e) => $e }
+} as $h;
+effect { cancel($h) } as $c;
+return io_tag($c)
+```
+
+`effect { await($h) } as $r` parks until the handle's request is terminal and yields its outcome;
+the runner re-awaits the one request and never submits again. `effect { cancel($h) }` asks the
+request's backend to stop and then waits like `await`: the outcome is `Cancelled` when the stop won,
+and the request's own terminal outcome when the read had finished first (the race belongs to the
+backend, and either result is a value). A handle that is already an outcome (a refusal, or a request
+that ended and was awaited) is itself the value of both, so cancelling a terminal request is a no-op
+that returns the outcome it had. A handle that is neither a request nor an outcome is
+`VQL_IO_EFFECT_ARGUMENT`. All three forms are top-level script statements and are refused with
+`VQL_IO_QUERY_CONTEXT` anywhere a `submit` is. Loops: a script action is reached once per script
+run, and the plan keeps per-row fan-out refused (`for` over an action is `VQL_IO_QUERY_CONTEXT`)
+until an explicit later gate; running a script N times submits N times.
+
+**Deadlines.** `submit(...) within N ms` (or `s`; `N` a literal or a `$variable` bound to a
+non-negative number) gives one request a deadline measured on the I/O service's clock from its
+admission. The service asks the backend to stop and the outcome is `TimedOut` as a value, with the
+backend's `uncertain` flag; a request that had finished before the deadline was noticed keeps its
+own outcome. A script as a whole has an optional overall deadline set on the runner
+(`ScriptRunner::setScriptTimeout`; `vquery --script-timeout MS|off`, default 30000, and the REPL
+`:timeout [MS|off]`). A script still parked when it passes is abandoned: the request it awaited is
+asked to stop, the script's requests are released, and the driver reports `VQL_SCRIPT_TIMEOUT` with
+the action's statement index. No rows are produced.
+
+**Opening a file.** `effect { open("path") } as $f` (or `open($path)` with a text variable) opens a
+file read-only through the file endpoint adapter and yields the open outcome as the statement's
+value. `$f` is the capability the open minted, usable by later reads in the script; if the open did
+not complete (the file is missing, the open timed out) `$f` is the outcome itself and a later read
+on it fails the script at that statement. The capability's lifetime is the script's: when the script
+ends, fails, is abandoned or its runner is destroyed, each file it opened is closed through the file
+close path, as its own request, never on the evaluation thread. Capabilities bound by the host
+(`--io-file`, `:open`) live for the session and are not closed by a script.
 
 ## 5. Memory Management & Topological Garbage Collection
 
@@ -2665,6 +2722,7 @@ table.
 | 16.3    | `current` | 2026-11-25 | **Effect clauses lower to bytecode**: `MakeTerm` + `Submit` + a branch on the submission arm + `Await` (4.13), the language-neutral `Submit` opcode of the Vortex I/O plan P6. `VQL_IO_EFFECT_NOT_COMPILABLE` is gone; the synchronous executor refuses an action with `VQL_IO_EFFECT_NEEDS_RUNNER`, `vqueryc` compiles it. No existing program changes meaning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 16.4    | `current` | 2026-11-25 | **M7-VQL gate round 1** (4.13): several scripts may be parked on one runner, each with its own submission; `vquery` refuses to make action rows durable (`VQL_IO_PERSIST_NEEDS_CAPTURE`); `def` of a reserved I/O name is refused; a payload that cannot be read or is not UTF-8 is `VQL_SCRIPT_FAILED`; the pre-flight text now says what it checks.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 16.5    | `current` | 2026-11-25 | **M7-VQL-b: naming an action's outcome** (4.13): `effect { ... } as $r` binds the outcome cell for the statements after it, and `io_tag($r)` reads its tag (`EndOfStream`, `Failed`, `TimedOut`, ...) as text, answered by the I/O script host through a relation provider, so the VM and compiler name no I/O schema. A script's earlier requests now stay admitted until the script ends. A new suffix and a new call name: no existing program changes meaning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 16.6    | `current` | 2026-11-25 | **M7-VQL-b: outcome fields, handles, cancel, deadlines, open** (4.13): `io_payload`, `io_bytes`, `io_error` and `io_detail` join `io_tag` (payload gated by the terminal status); a read may end `=> $q` (detached, yielding the request handle); `effect { await($h) }`, `effect { cancel($h) }` and `effect { open("path") }` are new script actions; \`submit(...) within N ms                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 [toc-01]: #1-architectural-foundations--operational-invariants
 [toc-02]: #2-syntactic-token--structural-shorthand-matrix
