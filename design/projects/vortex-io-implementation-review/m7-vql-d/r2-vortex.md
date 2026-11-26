@@ -35,7 +35,7 @@ None.
 
 ## MAJOR
 
-### M1. Join providers are registered per execution on the one shared VM, so another script's end unregisters them under a parked script
+### M1. Join providers registered per execution vanish under a parked script
 
 **Problem.** `QueryExecutor::beginVortex` calls `vm_.setRelationProvider("join_step"/"join_end")`
 with a walk of its own and queues an undo that sets both to `nullptr` (`execution.cpp:456-466`). The

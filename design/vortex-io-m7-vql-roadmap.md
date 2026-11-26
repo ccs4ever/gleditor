@@ -32,6 +32,12 @@ slices below were adjusted where a ruling changes them (only slice e).
 | Q6     | No process endpoints in M7-VQL (as recommended)                                                                                                                         | slice k as drafted                                                                                      |
 | Q7/Q8  | No loop iteration ceiling; a generation guard names an explicit prior read outcome (as recommended)                                                                     | slices l, g as drafted                                                                                  |
 | Q9/Q10 | Spell `stable` now with a typed refusal; the `ux-validation` journeys are required at exit (as recommended)                                                             | slices k, m as drafted                                                                                  |
+| P11    | **Approved** (2026-11-26, after the M7-VQL-d gate round 1): a mixed-namespace content run, or a quote with a scratch separator, in `ArenaManifold`                      | new slice `M7-VQL-d2 (P11)` before e; until it lands, multi-row foreign joins are interned text         |
+
+P11 is a small core slice of its own, reviewed by the zigzag and Vortex critics, built after the
+M7-VQL-d gate closes. It exists so that a multi-row `join` of rows that are another store's cells
+keeps their transclusion identity (`m7-vql-d.md` §8); until it lands the documented behaviour is
+that several foreign rows are joined as interned text and a lone foreign row is returned itself.
 
 ## 1. What "complete against the contract" means
 
@@ -127,7 +133,7 @@ the reason. "Where" cites the first place the item was deferred.
 ## 3. Ordering: dependency and risk
 
 ```text
-d values  ->  e lifecycle  ->  f capture completion
+d values  ->  d2 (P11)  ->  e lifecycle  ->  f capture completion
                     \                   \
                      g containment+guards -> h namespace ops -> i copy
                                                     \
@@ -216,6 +222,14 @@ so frees each iteration's outcome and the P6 rollback handler would orphan each 
 (plan:1471-1490); the loop's results would have to be host-held, which is the host-driven design
 again.
 
+**P11 (approved 2026-11-26): mixed-namespace content run for `ArenaManifold`** (slice d2).
+`arena_manifold.{hpp,cpp}`. Justification: a cell's content run has no per-span namespace and
+`makeQuote` takes one space and no scratch span, so joining rows that are quotes of several stores
+with a separator cannot keep the rows quoted (`m7-vql-d.md` §8). The owner approved a run that may
+mix namespaces, or a quote with a scratch separator, as its own small slice after the M7-VQL-d gate,
+gated by the zigzag and Vortex critics; `join` over several foreign rows then returns a quote
+instead of interned text.
+
 No other slice reserves a number. P8 and P9 stay refused (`m7-vql-c.md` §14).
 
 ## 6. The slices
@@ -284,6 +298,14 @@ primitives), and that is the first place to look at the gate.
 **Owner questions.** Q1 below (match form).
 
 **Gate.** VQL, Vortex, zigzag (a2 creates owned records, cells). Round budget: two.
+
+### 6.1b M7-VQL-d2 (P11): quoted multi-row join
+
+**Scope.** P11 only: the mixed-namespace content run (or a quote with a scratch separator) in
+`ArenaManifold`, and `join` using it for several foreign rows. Nothing else changes.
+
+**Core change?** Yes, the one named in §5, approved by the owner. **Gate.** zigzag and Vortex
+critics; round budget two.
 
 ### 6.2 M7-VQL-e: lifecycle (close, deadlines on open, the real timeout test)
 
@@ -776,3 +798,4 @@ adapters (§2.2); the frontend is complete when it can ask for them and take a t
 | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0.1     | 2026-11-26 | First draft: inventory of 23 in-scope items and 11 out-of-scope owners, slices d to m, ten owner questions, one conditional proposal                                               |
 | 0.2     | 2026-11-26 | Owner decisions recorded: Q2 ruled yes (a script may close any capability it can name; `VQL_IO_CLOSE_NOT_OWNED` dropped; host-bound names go stale), the other nine as recommended |
+| 0.3     | 2026-11-26 | Owner approved P11 (mixed-namespace content run) as slice M7-VQL-d2, between d and e                                                                                               |

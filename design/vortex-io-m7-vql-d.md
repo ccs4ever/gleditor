@@ -154,16 +154,36 @@ verdicts are in
   span. So a lone foreign row is returned itself (identity kept, `-o` writes the same operations as
   `return ##`, checked with `xudu-dump`), and several foreign rows are joined as interned text.
   Keeping them quoted needs a core change to `ArenaManifold` (a mixed-namespace run or a quote with
-  a scratch separator): proposal P11, not made here.
+  a scratch separator): proposal P11, not made here. **The owner approved P11 on 2026-11-26** as its
+  own small core slice, `M7-VQL-d2 (P11)`, after this gate and reviewed by the zigzag and Vortex
+  critics (roadmap §5, §6.1b). Until it lands, several foreign rows are interned text.
 - **`join` now needs a host that registers `join_step` and `join_end`** (`QueryExecutor` does); a
   bytecode file from `vqueryc` runs only under such a host, as `find` already requires `prose_hits`.
 - **Double retention charge** (an owned record charges the chunk its service outcome also holds) is
   deferred: charging once needs lease identity in the budget, and the failure is a budget-edge
   fallback to the service outcome, never an overrun.
 
+## 8b. Gate round 2 fixes
+
+Reports: [`r2-vql.md`](projects/vortex-io-implementation-review/m7-vql-d/r2-vql.md),
+[`r2-vortex.md`](projects/vortex-io-implementation-review/m7-vql-d/r2-vortex.md); verdicts in
+[`r2-disposition.md`](projects/vortex-io-implementation-review/m7-vql-d/r2-disposition.md).
+
+- **A replaced `let` frees only a cell nothing else reaches.** "Minted by this program" was not
+  "owned by this name". A cell is freed only when it has no link on any dimension (`%` and path
+  programs build structure the user keeps) and no closure of any program captured its name (the
+  compiler reports the captured names; the engine keeps those cells, by incarnation, and never frees
+  them). Price: a cell a closure captured is not reclaimed when its name is rebound.
+- **`join_step` and `join_end` outlive the run that registered them.** They were registered on the
+  shared VM with an undo that nulled them, so one script's end unregistered them under a parked
+  script. There is no undo now; each begin registers again, which is safe because a walk is reset at
+  its first step and no park falls inside one.
+- **An await of a handle another parked script admitted** is searched in that script's list too.
+
 ## 9. Change history
 
-| version | date       | change                                                |
-| ------- | ---------- | ----------------------------------------------------- |
-| 0.1     | 2026-11-26 | Design and as-built for M7-VQL-d; gate pending        |
-| 0.2     | 2026-11-26 | Gate round 1 fixes (sections 7 and 8); join rewritten |
+| version | date       | change                                                    |
+| ------- | ---------- | --------------------------------------------------------- |
+| 0.1     | 2026-11-26 | Design and as-built for M7-VQL-d; gate pending            |
+| 0.2     | 2026-11-26 | Gate round 1 fixes (sections 7 and 8); join rewritten     |
+| 0.3     | 2026-11-26 | Gate round 2 fixes (section 8b); P11 approved as slice d2 |
