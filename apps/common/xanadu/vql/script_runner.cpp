@@ -312,10 +312,35 @@ bool ScriptRunner::retire(const Admitted &entry, const bool force) noexcept {
     ports_.bridge.release(entry.submission);
     orphan(*entry.request);
   } else {
+    // The close's outcome is read before the retire takes it with the request.
+    const auto closed =
+        entry.closes && entry.request && closeCompleted(*entry.request);
     ports_.bridge.retire(entry.submission);
+    // The file is closed and nothing names its cells any more: they are not a
+    // request's, so no reaper takes them, and left alone they cost an arena
+    // one endpoint graph per file opened.
+    if (closed) {
+      static_cast<void>(vortex::reapIoEndpoint(session_.coordinator().arena(),
+                                               ports_.bridge.schema(),
+                                               *entry.closes));
+    }
   }
   if (latest_ && *latest_ == entry.submission) latest_.reset();
   return true;
+}
+
+bool ScriptRunner::closeCompleted(const vortex::RequestCell request) const {
+  const auto &arena  = session_.coordinator().arena();
+  const auto outcome = arena.linked(
+      request.cell, ports_.bridge.schema().dim(vortex::IoDimension::Outcome),
+      zigzag::DimVector::POS);
+  const auto incarnation =
+      outcome ? arena.incarnationOf(*outcome) : std::nullopt;
+  if (!incarnation) return false;
+  const auto tag = vortex::ioOutcomeTag(
+      arena,
+      vortex::OutcomeCell{.cell = *outcome, .incarnation = *incarnation});
+  return tag && *tag == vortex::IoOutcomeTag::Complete;
 }
 
 void ScriptRunner::stopRunning(const std::vector<Admitted> &entries) noexcept {
@@ -356,6 +381,10 @@ void ScriptRunner::abandonAll(std::vector<Admitted> &entries) noexcept {
 
 bool ScriptRunner::closeOne(const vortex::CapabilityCell capability) noexcept {
   try {
+    // Resolved before the close: once it completes the capability's binding
+    // is still readable, but this is the only place that has both.
+    const auto endpoint = vortex::capabilityEndpoint(
+        session_.coordinator().arena(), ports_.bridge.schema(), capability);
     const auto closing = ports_.closeCapability(capability);
     if (!closing) {
       // Not an open file any more (already closed): nothing to retry.
@@ -372,7 +401,9 @@ bool ScriptRunner::closeOne(const vortex::CapabilityCell capability) noexcept {
     }
     if (const auto *accepted = std::get_if<vortex::Admitted>(&*matched)) {
       closing_.push_back(
-          {.submission = *closing, .request = accepted->request});
+          {.submission = *closing,
+           .request    = accepted->request,
+           .closes     = endpoint ? std::optional{*endpoint} : std::nullopt});
       return true;
     }
     ports_.bridge.retire(*closing);
@@ -1346,6 +1377,13 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
       std::unexpected{unstaged()};
   if (spec) {
     submission = ports_.bridge.submit(capability, *spec, within);
+    // The spec is the host's decoding key, read inside submit and echoed to
+    // the adapter only as a number the service forgets at the terminal; it is
+    // staged and consumed within this one call, so no later stage can meet a
+    // reused slot. Nothing frees it otherwise: one cell per request, for ever.
+    if (const auto incarnation = arena.incarnationOf(*spec)) {
+      static_cast<void>(arena.freeCell(*spec, *incarnation));
+    }
   } else if (spec.error().refusal) {
     // The host's own bound said no: a value the script reads, like any
     // admission refusal, never a failed script.

@@ -323,6 +323,74 @@ void reapIoRequest(ArenaManifold &arena, const IoCellSchema &schema,
   }
 }
 
+bool reapIoEndpoint(ArenaManifold &arena, const IoCellSchema &schema,
+                    const EndpointCell endpoint) noexcept {
+  if (!arena.matches(endpoint.cell, endpoint.incarnation)) return false;
+  const auto tag = ioCellTag(arena, endpoint.cell, endpoint.incarnation);
+  if (!tag || *tag != IoCellTag::Endpoint) return false;
+  const auto cloneDim = schema.dim(IoDimension::Clone);
+  const auto fieldDim = schema.dim(IoDimension::Endpoint);
+  try {
+    const auto queue = arena.linked(
+        endpoint.cell, schema.dim(IoDimension::Occurrence), DimVector::POS);
+    if (queue &&
+        arena.linked(*queue, schema.dim(IoDimension::Queue), DimVector::POS)) {
+      GLEDITOR_LOG_DEBUG("vortex.io.cells",
+                         "endpoint kept: requests still queued");
+      return false;
+    }
+    // Every view on the endpoint's clone rank must be a capability's endpoint
+    // field (view <- occurrence <- capability); one request view, or any other
+    // owner, means the graph is still in use.
+    std::vector<CellRef> capabilities;
+    auto at = endpoint.cell;
+    for (std::size_t visited = 0; visited <= arena.traversalBound();
+         ++visited) {
+      const auto view = arena.linked(at, cloneDim, DimVector::POS);
+      if (!view) break;
+      at                    = *view;
+      const auto occurrence = arena.linked(*view, fieldDim, DimVector::NEG);
+      const auto owner =
+          occurrence ? arena.linked(*occurrence, fieldDim, DimVector::NEG)
+                     : std::nullopt;
+      const auto ownerIncarnation =
+          owner ? arena.incarnationOf(*owner) : std::nullopt;
+      if (!ownerIncarnation) return false;
+      const auto ownerTag = ioCellTag(arena, *owner, *ownerIncarnation);
+      if (!ownerTag || *ownerTag != IoCellTag::Capability) {
+        GLEDITOR_LOG_DEBUG("vortex.io.cells",
+                           "endpoint kept: a {} still views it",
+                           ownerTag ? std::string{toString(*ownerTag)}
+                                    : std::string{"stale cell"});
+        return false;
+      }
+      // A request that still views this capability keeps it.
+      if (arena.linked(*owner, cloneDim, DimVector::POS) ||
+          arena.linked(*owner, cloneDim, DimVector::NEG)) {
+        GLEDITOR_LOG_DEBUG("vortex.io.cells",
+                           "endpoint kept: a capability has views");
+        return false;
+      }
+      capabilities.push_back(*owner);
+    }
+    constexpr std::array capabilityDims{
+        IoDimension::Endpoint, IoDimension::Capability, IoDimension::Occurrence,
+        IoDimension::State};
+    for (const auto capability : capabilities) {
+      freeOwnedGraph(arena, schema, capability, capabilityDims, "capability");
+    }
+    // What remains of the endpoint is its queue; the clone rank is empty now.
+    if (arena.linked(endpoint.cell, cloneDim, DimVector::POS)) return false;
+    constexpr std::array endpointDims{IoDimension::Occurrence};
+    freeOwnedGraph(arena, schema, endpoint.cell, endpointDims, "endpoint");
+    return !arena.matches(endpoint.cell, endpoint.incarnation);
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN("vortex.io.cells", "endpoint reap stopped: {}",
+                      error.what());
+    return false;
+  }
+}
+
 void reapIoWaiter(ArenaManifold &arena, const IoCellSchema &schema,
                   const WaiterCell waiter) noexcept {
   if (!arena.matches(waiter.cell, waiter.incarnation)) return;

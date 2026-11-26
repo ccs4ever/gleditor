@@ -203,6 +203,21 @@ void detachClonedField(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
 void reapIoRequest(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
                    RequestCell request) noexcept;
 
+/// Free a closed endpoint's graph: its capabilities (with their rights fields
+/// and the views they filed on the endpoint's and on an authorising
+/// capability's clone ranks), its queue, and the endpoint itself. The cells of
+/// a closed file are not any request's, so the request reaper never takes
+/// them; whoever has seen the close complete and retired calls this, and
+/// closed endpoints no longer cost an arena a graph each.
+///
+/// Refuses, having freed nothing, while anything still names the graph: a
+/// request on the queue, a request viewing the endpoint or a capability, or a
+/// view from a cell that is not a capability. True when the graph is gone.
+/// Never frees an endpoint the service might still serve: call it only after
+/// the endpoint's close request reached its terminal outcome.
+bool reapIoEndpoint(zigzag::ArenaManifold &arena, const IoCellSchema &schema,
+                    EndpointCell endpoint) noexcept;
+
 /// Free a retired waiter's graph (its request field occurrence and view, and
 /// the cursor, incarnation and continuation records), leaf first, after its
 /// request view leaves the request's clone rank. A waiter with clone views of

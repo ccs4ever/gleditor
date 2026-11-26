@@ -12,7 +12,9 @@
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -32,6 +34,7 @@
 #include "common/xanadu/vql/script_runner.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "io_frontend_conformance.hpp"
+#include "vql_capture_world.hpp"
 
 namespace {
 
@@ -46,187 +49,7 @@ using xanadu::vql::ScriptRunner;
 using xanadu::vql::ScriptRunResult;
 using xanadu::vql::VQLEngine;
 
-auto read(const std::string &cap, const std::string &range,
-          const std::string &name, const std::string &within = {})
-    -> std::string {
-  return "effect { let $s := submit($" + cap + ", read_bytes(" + range + "))" +
-         (within.empty() ? "" : " within " + within) +
-         "; match $s { admitted($q) => await($q), refused($e) => $e } } as $" +
-         name + "; ";
-}
-
-auto open(const std::string &path, const std::string &name) -> std::string {
-  return "effect { open(\"" + path + "\") } as $" + name + "; ";
-}
-
-auto captureOf(const std::string &source, const std::string &name,
-               const std::string &range = {}) -> std::string {
-  return "effect { capture($" + source + (range.empty() ? "" : ", " + range) +
-         ") } as $" + name + "; ";
-}
-
-/// A sink over the real permascroll whose append waits at a gate, so a
-/// capture can be caught between its intent and its bytes.
-class GatedSink final : public CaptureByteSink {
-public:
-  explicit GatedSink(xanadu::UserPermascroll &permascroll)
-      : inner_(permascroll) {}
-  auto append(const std::span<const std::byte> bytes)
-      -> xanadu::PrimediaSpan override {
-    {
-      std::unique_lock lock(mutex_);
-      ++entered_;
-      changed_.notify_all();
-      changed_.wait(lock, [&] { return !closed_; });
-    }
-    return inner_.append(bytes);
-  }
-  auto sync() -> bool override { return inner_.sync(); }
-  auto highWaterBytes() const -> std::uint64_t override {
-    return inner_.highWaterBytes();
-  }
-  auto read(const xanadu::PrimediaSpan &span) const
-      -> std::optional<std::vector<std::byte>> override {
-    return inner_.read(span);
-  }
-  void close() {
-    std::scoped_lock lock(mutex_);
-    closed_ = true;
-  }
-  void open() {
-    {
-      std::scoped_lock lock(mutex_);
-      closed_ = false;
-    }
-    changed_.notify_all();
-  }
-  [[nodiscard]] auto entered() -> int {
-    std::scoped_lock lock(mutex_);
-    return entered_;
-  }
-  /// Wait until a worker is parked inside append().
-  auto waitEntered(const int count = 1) -> bool {
-    std::unique_lock lock(mutex_);
-    return changed_.wait_for(lock, std::chrono::seconds(10),
-                             [&] { return entered_ >= count; });
-  }
-
-private:
-  UserPermascrollCaptureSink inner_;
-  std::mutex mutex_;
-  std::condition_variable changed_;
-  bool closed_{false};
-  int entered_{};
-};
-
-/// Everything a capture script needs: a file host, a real permascroll, a
-/// capture store and journal, and a runner.
-struct CaptureWorld {
-  zigzag::ArenaManifold arena;
-  zigzag::vortex::VortexCore core{arena};
-  zigzag::vortex::VortexVM vm{core};
-  VQLEngine engine{core};
-  fs::path base;
-  std::shared_ptr<xanadu::UserPermascroll> perma;
-  std::unique_ptr<GatedSink> sink;
-  std::unique_ptr<xanadu::Store> store;
-  std::unique_ptr<CapturePublisher> publisher;
-  std::unique_ptr<xanadu::vortex::FileReadHost> host;
-  std::unique_ptr<ScriptRunner> runner;
-
-  explicit CaptureWorld(
-      const std::size_t retained =
-          xanadu::vortex::FileReadHostOptions::defaultBudgetBytes,
-      const bool attach = true, const fs::path &reuse = {}) {
-    static std::uint32_t counter = 0;
-    base = reuse.empty() ? fs::weakly_canonical(fs::temp_directory_path()) /
-                               ("vql_io_capture_" + std::to_string(::getpid()) +
-                                "_" + std::to_string(counter++))
-                         : reuse;
-    fs::create_directories(base / "data");
-    xanadu::UserPermascroll::Config config;
-    config.storageDir = base / "permascroll";
-    perma             = std::make_shared<xanadu::UserPermascroll>(config);
-    sink              = std::make_unique<GatedSink>(*perma);
-    store             = std::make_unique<xanadu::Store>(perma);
-    publisher =
-        std::make_unique<CapturePublisher>(*store, base / "capture-store");
-    xanadu::vortex::FileReadHostOptions options;
-    options.retainedPayloadBytes = retained;
-    host = std::make_unique<xanadu::vortex::FileReadHost>(vm, arena, options);
-    if (attach) {
-      host->attachCapture(
-          *sink, publisher.get(),
-          CaptureHostOptions{.journalPath = base / "capture.journal"});
-    }
-    runner = std::make_unique<ScriptRunner>(
-        engine, vm, xanadu::vql::fileScriptPorts(*host));
-  }
-  ~CaptureWorld() {
-    sink->open();
-    runner.reset();
-    host.reset();
-    std::error_code ec;
-    fs::remove_all(base, ec);
-  }
-  auto put(const std::string &name, const std::string &content) -> std::string {
-    const auto path = base / "data" / name;
-    std::ofstream(path, std::ios::binary | std::ios::trunc) << content;
-    return path.string();
-  }
-  auto start(const std::string &source) -> ScriptRunResult {
-    return runner->run(Parser(source).parseQuery());
-  }
-  auto run(const std::string &source)
-      -> std::expected<std::vector<zigzag::CellRef>, FrontendDiagnostic> {
-    return xanadu::vql::driveToCompletion(
-        *runner, start(source), [&] { host->pump(16); },
-        [] { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
-  }
-  auto rows(const std::string &source) -> std::vector<std::string> {
-    const auto result = run(source);
-    EXPECT_TRUE(result.has_value())
-        << (result ? "" : result.error().code + ": " + result.error().message);
-    std::vector<std::string> out;
-    if (result)
-      for (const auto cell : *result) out.push_back(arena.textOf(cell));
-    return out;
-  }
-  auto failure(const std::string &source) -> std::string {
-    const auto result = run(source);
-    return result ? std::string{} : result.error().code;
-  }
-  [[nodiscard]] auto permascrollBytes() const -> std::uint64_t {
-    return sink->highWaterBytes();
-  }
-  /// What the captures appended: the lengths on the journal's Append intents.
-  /// The permascroll also grows by the publication's own scalar text, which is
-  /// not capture content, so its size is not the measure.
-  [[nodiscard]] auto appendedBytes() const -> std::uint64_t {
-    xanadu::vortex::CaptureJournal journal(base / "capture.journal",
-                                           std::nullopt);
-    std::uint64_t total = 0;
-    for (const auto &record : journal.recover().records) {
-      if (record.kind == xanadu::vortex::CaptureJournalRecordKind::Append)
-        total += record.appendLength;
-    }
-    return total;
-  }
-  auto captured(const std::string &prefix) -> std::vector<zigzag::CellRef> {
-    const auto result = run(prefix + "return io_captured($c)");
-    EXPECT_TRUE(result.has_value())
-        << (result ? "" : result.error().code + ": " + result.error().message);
-    return result ? *result : std::vector<zigzag::CellRef>{};
-  }
-  /// The text a captured cell quotes, read from the permascroll.
-  [[nodiscard]] auto quotedText(const zigzag::CellRef cell) const
-      -> std::string {
-    return arena.textOf(cell, *perma);
-  }
-  [[nodiscard]] auto coordinator() -> xanadu::vortex::CaptureCoordinator & {
-    return host->capture()->coordinator();
-  }
-};
+using namespace vql_capture_world;
 
 // ---- Grammar ----------------------------------------------------------------
 
@@ -894,6 +717,53 @@ TEST(VqlIoPersistabilityTest, AStackThatCannotBeBuiltIsTheTypedRefusal) {
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error().code, "VQL_IO_CAPTURE_UNAVAILABLE");
   EXPECT_NE(result.error().message.find("unreadable"), std::string::npos);
+}
+
+} // namespace
+
+// ---- Leaks (design criterion 11) -------------------------------------------
+
+namespace {
+
+/// Free a run's rows as the next query of a session would; they are the
+/// caller's, so the bound is on everything else.
+void dropRows(CaptureWorld &w,
+              const std::expected<std::vector<zigzag::CellRef>,
+                                  xanadu::vortex::FrontendDiagnostic> &result) {
+  ASSERT_TRUE(result.has_value());
+  for (const auto cell : *result) {
+    if (const auto incarnation = w.arena.incarnationOf(cell))
+      static_cast<void>(w.arena.freeCell(cell, *incarnation));
+  }
+}
+
+TEST(VqlIoCaptureLeakTest, ManyCaptureRunsLeaveTheArenaAndTheStacksBounded) {
+  CaptureWorld w;
+  const auto path   = w.put("in.txt", "leak probe bytes");
+  const auto script = open(path, "f") + read("f", "0, 64", "r") +
+                      captureOf("r", "c") + "return io_tag($c)";
+  constexpr std::size_t warmRuns = 8;
+  constexpr std::size_t runs     = 1'000;
+  for (std::size_t i = 0; i < warmRuns; ++i) dropRows(w, w.run(script));
+  // An admission frees the previous run's receipt, record and scaffolding;
+  // measure both ends at the same point of that cycle.
+  const auto idle = open(path, "g") + "return io_tag($g)";
+  dropRows(w, w.run(idle));
+  const auto warmSlots = w.arena.cellCount();
+  const auto warmLive  = w.arena.liveCells();
+  for (std::size_t i = 0; i < runs; ++i) dropRows(w, w.run(script));
+  dropRows(w, w.run(idle));
+  EXPECT_EQ(w.arena.cellCount(), warmSlots) << "the slot high-water mark";
+  EXPECT_EQ(w.arena.liveCells(), warmLive) << "live arena cells";
+  EXPECT_LE(w.host->service().requestCount(), 3U) << "service requests";
+  EXPECT_LE(w.host->capture()->liveRuns(), 1U) << "capture runs";
+  const auto counts = w.coordinator().stateCounts();
+  EXPECT_EQ(counts.stepGraphs, 0U) << "endpoint/capability/spec scaffolding";
+  // Each run is a fresh observation, so each keeps one translation until the
+  // map's own bound evicts it; that is the coordinator's budget, not a leak.
+  EXPECT_LE(counts.translationSlots, warmRuns + runs);
+  EXPECT_TRUE(w.coordinator().pinnedCaptures().empty());
+  EXPECT_EQ(w.runner->ownedRecordCount(), 0U);
 }
 
 } // namespace

@@ -141,6 +141,9 @@ private:
     std::optional<RequestCell> awaited;
     /// The append request, kept until the commit that validates it returns.
     std::optional<RequestCell> append;
+    /// The append request, kept after `append` is reset so that freeing the
+    /// run can reap its graph once the capture's view of it is gone.
+    std::optional<RequestCell> appendRequest;
     std::optional<CellRef> value;
     /// A step outcome copied out of the service before the coordinator retires
     /// its request, so it can be the value.

@@ -542,6 +542,103 @@ TEST(VqlIoWriteFileTest, AWriteRunLeavesNoMoreBehindThanAReadRun) {
   EXPECT_LE(write, read);
 }
 
+// Criterion 11: a run's cells are the host's, so a session that writes for ever
+// holds what is live, not what ran. Rows belong to the caller (vquery keeps
+// the last query's), so the test frees them as a next query would.
+TEST(VqlIoWriteFileTest, ManyWriteRunsLeaveTheArenaAndTheServiceBounded) {
+  FileWorld f;
+  const auto path = (f.root / "bounded.log").string();
+  static_cast<void>(
+      f.rows(open(path, "for append create", "seed") + "return io_tag($seed)"));
+  const auto once = [&](const std::string &script) {
+    auto result = f.run(script);
+    ASSERT_TRUE(result.has_value());
+    for (const auto cell : *result) {
+      if (const auto incarnation = f.arena.incarnationOf(cell))
+        static_cast<void>(f.arena.freeCell(cell, *incarnation));
+    }
+  };
+  const auto script =
+      open(path, "for append", "o") + act("o", "append_bytes(\"y\")", "w") +
+      act("o", "append_bytes(\"z\")", "x") + "return io_tag($w), io_bytes($x)";
+  constexpr std::size_t warmRuns = 8;
+  constexpr std::size_t runs     = 10'000;
+  for (std::size_t i = 0; i < warmRuns; ++i) once(script);
+  const auto warmSlots    = f.arena.cellCount();
+  const auto warmLive     = f.arena.liveCells();
+  const auto warmRequests = f.host->service().requestCount();
+  for (std::size_t i = 0; i < runs; ++i) once(script);
+  EXPECT_EQ(f.arena.cellCount(), warmSlots);
+  EXPECT_EQ(f.arena.liveCells(), warmLive);
+  EXPECT_EQ(f.host->service().requestCount(), warmRequests);
+  EXPECT_EQ(slurp(path).size(), (warmRuns + runs) * 2);
+}
+
+// The closed file's endpoint, capability and fields were never reclaimed (ten
+// cells a run) until the runner freed them when the close was done.
+TEST(VqlIoWriteFileTest, AnOpenedAndClosedFileLeavesNoCellsBehind) {
+  FileWorld f;
+  const auto path = (f.root / "closed.log").string();
+  static_cast<void>(
+      f.rows(open(path, "for append create", "seed") + "return io_tag($seed)"));
+  const auto once = [&] {
+    auto result = f.run(open(path, "for append", "o") +
+                        act("o", "sync()", "d") + "return io_tag($d)");
+    ASSERT_TRUE(result.has_value());
+    for (const auto cell : *result) {
+      if (const auto incarnation = f.arena.incarnationOf(cell))
+        static_cast<void>(f.arena.freeCell(cell, *incarnation));
+    }
+  };
+  for (std::size_t i = 0; i < 4; ++i) once();
+  const auto warm            = f.arena.liveCells();
+  constexpr std::size_t runs = 50;
+  for (std::size_t i = 0; i < runs; ++i) once();
+  EXPECT_EQ(f.arena.liveCells(), warm);
+}
+
+// Design §8: a write has no journal, so a process that dies mid-write leaves
+// some prefix of the bytes and nothing records which, and a restarted program
+// resumes nothing. The death is the host going away with the write admitted and
+// never pumped; the file is then whatever the worker got to.
+TEST(VqlIoWriteFileTest, ADeathMidWriteLeavesAPrefixAndNothingResumes) {
+  FileWorld f;
+  const auto path       = (f.root / "dies.bin").string();
+  constexpr auto length = std::size_t{256} * 1024;
+  const std::string bytes(length, 'k');
+  static_cast<void>(
+      f.rows(open(path, "for write create", "seed") + "return io_tag($seed)"));
+  const auto begun =
+      f.start(open(path, "for write", "o") +
+              detached("o", "write_bytes(0, \"" + bytes + "\")", "h") +
+              "return io_tag($h)");
+  // Drive the open only far enough for the write to be admitted, then die.
+  for (int turns = 0; turns < 2000 && f.host->service().requestCount() < 2;
+       ++turns) {
+    f.host->pump(16);
+    if (auto woken = f.runner->takeWake()) {
+      static_cast<void>(f.runner->resume(std::move(*woken)));
+    }
+  }
+  static_cast<void>(begun);
+  f.runner.reset();
+  f.host.reset();
+  const auto left = slurp(path);
+  EXPECT_LE(left.size(), length);
+  EXPECT_EQ(left, bytes.substr(0, left.size())) << "what landed is a prefix";
+
+  // The restarted program has no parked script and no journal: it runs
+  // nothing it was not asked to, so the file does not move.
+  xanadu::vortex::FileReadHostOptions options;
+  f.host =
+      std::make_unique<xanadu::vortex::FileReadHost>(f.vm, f.arena, options);
+  f.runner = std::make_unique<ScriptRunner>(
+      f.engine, f.vm, xanadu::vql::fileScriptPorts(*f.host));
+  for (int turns = 0; turns < 100; ++turns) f.host->pump(16);
+  EXPECT_EQ(f.host->service().requestCount(), 0U);
+  EXPECT_EQ(slurp(path), left);
+}
+
 // ---- Fake backend: outcomes a file cannot be made to give
 // ----------------------
 

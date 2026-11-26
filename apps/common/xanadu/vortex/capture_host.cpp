@@ -1,8 +1,10 @@
 #include "common/xanadu/vortex/capture_host.hpp"
 
 #include <algorithm>
+#include <array>
 #include <exception>
 #include <ranges>
+#include <unordered_set>
 #include <utility>
 
 #include <gleditor/logging.hpp>
@@ -89,11 +91,12 @@ auto CaptureHost::begin(const PayloadRange &selection) -> CellRef {
     return outcome.cell;
   }
   const auto request = std::get<Admitted>(appended.admission.value).request;
-  runs_.emplace(capture.cell, Run{.capture   = capture,
-                                  .selection = selection,
-                                  .phase     = Phase::Appending,
-                                  .awaited   = request,
-                                  .append    = request});
+  runs_.emplace(capture.cell, Run{.capture       = capture,
+                                  .selection     = selection,
+                                  .phase         = Phase::Appending,
+                                  .awaited       = request,
+                                  .append        = request,
+                                  .appendRequest = request});
   return capture.cell;
 }
 
@@ -200,6 +203,24 @@ void CaptureHost::fail(Run &run, const OutcomeCell refused,
 void CaptureHost::dropCaptureCell(const CaptureCell capture) noexcept {
   try {
     if (!arena_.matches(capture.cell, capture.incarnation)) return;
+    // The coordinator mirrors a capture's id, digest, length and intervals as
+    // labelled fields on the cell (an Occurrence rank of field cells, each
+    // with a State value); they are the capture's own, so they go first.
+    std::vector<CellRef> owned{capture.cell};
+    std::unordered_set<CellRef> seen{capture.cell};
+    for (std::size_t at = 0; at < owned.size(); ++at) {
+      for (const auto which : {IoDimension::Occurrence, IoDimension::State}) {
+        const auto next =
+            arena_.linked(owned[at], schema_.dim(which), DimVector::POS);
+        if (next && seen.insert(*next).second) owned.push_back(*next);
+      }
+    }
+    for (const auto cell : owned | std::views::drop(1) | std::views::reverse) {
+      if (const auto incarnation = arena_.incarnationOf(cell))
+        static_cast<void>(arena_.deleteCell(cell, *incarnation,
+                                            zigzag::DeletionMode::LeaveBroken,
+                                            std::nullopt));
+    }
     static_cast<void>(arena_.deleteCell(capture.cell, capture.incarnation,
                                         zigzag::DeletionMode::LeaveBroken,
                                         std::nullopt));
@@ -236,23 +257,31 @@ void CaptureHost::freeRun(Run &run) noexcept {
         const auto receipt = arena_.linked(
             *holder, schema_.dim(IoDimension::Outcome), DimVector::POS);
         if (receipt) {
-          std::vector<CellRef> chain;
-          auto at = *receipt;
-          for (std::size_t visited = 0; visited <= arena_.traversalBound();
-               ++visited) {
-            const auto step = arena_.linked(at, schema_.dim(IoDimension::Range),
-                                            DimVector::POS);
-            if (!step) break;
-            chain.push_back(*step);
-            at = *step;
+          // The receipt's whole graph: the captured cells on its range rank
+          // and the field cells (id, sequence, digest, pieces ...) with their
+          // values. Nothing else links into it, so every reachable cell is
+          // the capture's own; leaves go first.
+          constexpr std::array dims{IoDimension::Range, IoDimension::Occurrence,
+                                    IoDimension::State};
+          std::vector<CellRef> owned{*receipt};
+          std::unordered_set<CellRef> seen{*receipt};
+          for (std::size_t at = 0; at < owned.size(); ++at) {
+            for (const auto which : dims) {
+              const auto next =
+                  arena_.linked(owned[at], schema_.dim(which), DimVector::POS);
+              if (next && seen.insert(*next).second) owned.push_back(*next);
+            }
           }
-          doomed.insert(doomed.end(), chain.rbegin(), chain.rend());
-          doomed.push_back(*receipt);
+          doomed.insert(doomed.end(), owned.rbegin(), owned.rend());
         }
         doomed.push_back(*holder);
       }
     }
     for (const auto cell : doomed) drop(cell);
+    // The view that kept the retired append request whole is gone: its graph
+    // (outcome, progress, endpoint and capability fields) is the service's to
+    // free now, and nothing else would re-reap it.
+    if (run.appendRequest) service_.reapRetiredRequest(*run.appendRequest);
     // The capture cell goes last. An unfinished capture's death is how the
     // coordinator learns it was abandoned (it pins by phase on its next
     // sweep), so this is the abandon, not a cleanup.

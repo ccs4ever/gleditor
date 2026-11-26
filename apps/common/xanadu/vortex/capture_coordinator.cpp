@@ -681,7 +681,8 @@ auto CaptureCoordinator::stateCounts() const noexcept -> StateCounts {
   return StateCounts{.translationSlots    = translationSlots_,
                      .retainedCaptures    = retainedCaptures_,
                      .evictedTranslations = evictedTranslations_,
-                     .evictedCaptures     = evictedCaptures_};
+                     .evictedCaptures     = evictedCaptures_,
+                     .stepGraphs          = steps_.size()};
 }
 
 void CaptureCoordinator::releaseDeferredHolds() {
@@ -692,7 +693,38 @@ void CaptureCoordinator::releaseDeferredHolds() {
   });
 }
 
+bool CaptureCoordinator::freeStepGraph(const StepGraph &step) noexcept {
+  try {
+    if (!reapIoEndpoint(arena_, schema_, step.endpoint)) return false;
+    if (arena_.matches(step.spec, step.specIncarnation)) {
+      static_cast<void>(arena_.freeCell(step.spec, step.specIncarnation));
+    }
+    return true;
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_WARN(kLog, "a step graph was not freed: {}", error.what());
+    return false;
+  }
+}
+
+void CaptureCoordinator::sweepStepGraphs() {
+  const auto specInUse = [&](const StepGraph &step) {
+    return std::ranges::any_of(pending_, [&](const auto &entry) {
+      const auto &pending = entry.second;
+      return (pending.spec && pending.spec->cell == step.spec) ||
+             (pending.durable && pending.durable->spec == step.spec);
+    });
+  };
+  std::erase_if(steps_, [&](const StepGraph &step) {
+    if (!step.request) return false;
+    if (arena_.matches(step.request->cell, step.request->incarnation))
+      return false;
+    if (specInUse(step)) return false;
+    return freeStepGraph(step);
+  });
+}
+
 void CaptureCoordinator::sweepDead() {
+  sweepStepGraphs();
   releaseDeferredHolds();
   for (auto it = pending_.begin(); it != pending_.end();) {
     if (arena_.matches(it->first.first, it->first.second)) {
@@ -1458,6 +1490,11 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
     return submitRefusal({IoErrorCode::BackendFailure, 1});
   }
   const auto specKey = static_cast<std::uint32_t>(specCell);
+  steps_.push_back(StepGraph{.endpoint        = *endpoint,
+                             .capability      = *capability,
+                             .spec            = specCell,
+                             .specIncarnation = *specInc,
+                             .request         = std::nullopt});
 
   // The append intent is durable BEFORE the sink sees a byte: a crash can
   // then never leave permascroll bytes with no journal trace. The worker's own
@@ -1490,6 +1527,7 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
                          .captureId   = captureId,
                          .writeIntent = writeIntent};
   if (const auto staged = adapter_.stageAt(specKey, std::move(spec)); !staged) {
+    if (freeStepGraph(steps_.back())) steps_.pop_back();
     return submitRefusal(staged.error());
   }
   // Publish the spec linkage BEFORE submit: the request decoder runs
@@ -1507,9 +1545,11 @@ auto CaptureCoordinator::appendRequest(const CaptureCell capture)
     // never reaches the service's abandonStaged path.
     adapter_.abandon(specKey);
     pending.spec.reset();
+    if (freeStepGraph(steps_.back())) steps_.pop_back();
     return CaptureAppend{std::move(admitted)};
   }
-  const auto &request = std::get<Admitted>(admitted.value).request;
+  const auto &request   = std::get<Admitted>(admitted.value).request;
+  steps_.back().request = request;
 
   // Record the append request in this exact CaptureCell through a clone
   // view of the request (capture -d.io.request-> occurrence -> view), so
@@ -1661,8 +1701,14 @@ auto CaptureCoordinator::submitDurable(
     return refuse({IoErrorCode::BackendFailure, 1});
   }
   const auto specKey = static_cast<std::uint32_t>(specCell);
+  steps_.push_back(StepGraph{.endpoint        = *endpoint,
+                             .capability      = *capability,
+                             .spec            = specCell,
+                             .specIncarnation = *specInc,
+                             .request         = std::nullopt});
   if (const auto staged = adapter_.stageDurableAt(specKey, std::move(step));
       !staged) {
+    if (freeStepGraph(steps_.back())) steps_.pop_back();
     return refuse(staged.error());
   }
   // Linked before submit: the request decoder runs inside service_.submit
@@ -1677,9 +1723,11 @@ auto CaptureCoordinator::submitDurable(
     adapter_.abandon(specKey);
     adapter_.complete(specKey);
     pending.durable.reset();
+    if (freeStepGraph(steps_.back())) steps_.pop_back();
     return CaptureCommitResult{std::get<Refused>(admitted.value)};
   }
   pending.durable->request = std::get<Admitted>(admitted.value).request;
+  steps_.back().request    = pending.durable->request;
   return CaptureCommitResult{CommitPending{*pending.durable->request}};
 }
 
@@ -2415,6 +2463,19 @@ auto CaptureCoordinator::pinnedCaptures() const -> std::vector<CaptureId> {
   ids.reserve(pinned_.size());
   for (const auto &entry : pinned_) ids.push_back(entry.first);
   return ids;
+}
+
+auto CaptureCoordinator::pinnedDetails() const -> std::vector<PinnedDetail> {
+  std::vector<PinnedDetail> details;
+  details.reserve(pinned_.size());
+  for (const auto &[id, pin] : pinned_) {
+    details.push_back(PinnedDetail{
+        .capture      = id,
+        .reason       = pin.reason,
+        .appendLength = pin.record.appendLength,
+        .span = pin.hasSpan ? std::optional{pin.record.span} : std::nullopt});
+  }
+  return details;
 }
 
 void CaptureCoordinator::erasePinnedSlots(const CaptureId captureId) {

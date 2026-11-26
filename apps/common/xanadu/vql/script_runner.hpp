@@ -367,6 +367,9 @@ private:
   struct Admitted {
     vortex::SubmissionCell submission;
     std::optional<vortex::RequestCell> request;
+    /// For a close: the endpoint it closes, whose cells are freed once the
+    /// close is terminal and retired.
+    std::optional<vortex::EndpointCell> closes{};
   };
   /// Release an action's sum and retire its request when terminal. A request
   /// whose cells the arena rolled back (a failed run, a backtracked Submit) is
@@ -376,6 +379,8 @@ private:
   /// and the service forgets the request at its end. True when done with it.
   [[nodiscard]] bool retire(const Admitted &entry, bool force = false) noexcept;
   void retireAll(std::vector<Admitted> &entries, bool force = false) noexcept;
+  /// Whether the close @p request published a Complete outcome.
+  [[nodiscard]] bool closeCompleted(vortex::RequestCell request) const;
   /// Ask every running request of @p entries to stop, for a runner going away.
   void stopRunning(const std::vector<Admitted> &entries) noexcept;
   /// Release every request of @p entries now: a running one is asked to stop

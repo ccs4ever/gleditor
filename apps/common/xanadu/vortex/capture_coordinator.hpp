@@ -450,6 +450,10 @@ public:
     /// Durable-origin captures whose journal records compaction dropped
     /// because every translation they backed had been evicted.
     std::size_t evictedCaptures{};
+    /// Request-scaffolding graphs (endpoint, capability, spec cell) minted
+    /// for steps whose request has not yet been reaped: bounded by the steps
+    /// in flight, and back to zero when they are done.
+    std::size_t stepGraphs{};
   };
   [[nodiscard]] auto stateCounts() const noexcept -> StateCounts;
 
@@ -564,6 +568,16 @@ public:
 
   /// CaptureIds whose intervals are pinned awaiting reconcile().
   [[nodiscard]] auto pinnedCaptures() const -> std::vector<CaptureId>;
+  /// What an owner needs to decide one pin: why it is held, how many bytes
+  /// its append may have written, and the span its journal names, if any
+  /// (without one a promote must be given the span).
+  struct PinnedDetail {
+    CaptureId capture{};
+    CaptureRecoveryReason reason{CaptureRecoveryReason::None};
+    std::uint64_t appendLength{};
+    std::optional<xanadu::PrimediaSpan> span;
+  };
+  [[nodiscard]] auto pinnedDetails() const -> std::vector<PinnedDetail>;
   /// Resolve one pinned capture explicitly, journaling the decision before
   /// acting on it so a restart replays it. Refuses (and keeps the pin) when
   /// verification of a Promote fails: nothing is ever guessed into identity.
@@ -663,6 +677,23 @@ private:
   using PendingKey = std::pair<zigzag::CellRef, AllocationIncarnation>;
 
   void sweepDead();
+  /// The scaffolding one append or durable step minted so that its request has
+  /// an endpoint, a capability and a spec cell of its own.
+  struct StepGraph {
+    EndpointCell endpoint;
+    CapabilityCell capability;
+    zigzag::CellRef spec;
+    AllocationIncarnation specIncarnation;
+    /// Set once admitted; a refused step has none and is freed at once.
+    std::optional<RequestCell> request;
+  };
+  /// Free the graphs of steps whose request was reaped and whose spec no
+  /// pending capture still reads (the append's spec is read at the second
+  /// durable step). Owner only; called with every sweep.
+  void sweepStepGraphs();
+  /// Free one step graph now; false when something still names it.
+  bool freeStepGraph(const StepGraph &step) noexcept;
+  std::vector<StepGraph> steps_;
   /// Free journal holds a retired capture could not give back while its
   /// worker step was still appending under them (see retire()). Owner only.
   void releaseDeferredHolds();
