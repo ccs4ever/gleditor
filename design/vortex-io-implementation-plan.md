@@ -1396,7 +1396,15 @@ M7-VQL-b implementation notes and deliberate deferrals:
   deadline plus the timeout, so the request's `TimedOut` value, not `VQL_SCRIPT_TIMEOUT`, is what
   the script sees. A backend that ignores a stop request never reports `TimedOut`; the script
   timeout is then the bound. `expireDue` walks an ordered deadline index (`O(due)` per pump, not
-  `O(maxRequests)`).
+  `O(maxRequests)`). The extension lasts only while that request runs: when it ends early a later
+  unbounded await is cut at the script's own deadline. A runner destroyed with a read still running
+  asks the backend to stop it before orphaning it (never a close), so a read that never ends does
+  not hold its slot for the service's life. A close the service refuses is retried only after
+  another close has finished (a conflict clears no sooner), at most four tries, then logged and left
+  to the service.
+- Gate status: **M7-VQL-b gate passed** in round 2 (both experts approved with zero BLOCKING and
+  zero MAJOR); see
+  [`m7-vql-b/README.md`](projects/vortex-io-implementation-review/m7-vql-b/README.md).
 
 Deferred in M7-VQL-b:
 

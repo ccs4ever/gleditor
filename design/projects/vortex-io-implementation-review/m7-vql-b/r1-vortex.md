@@ -12,7 +12,7 @@ None.
 
 ## MAJOR
 
-### M1. `expireIfDue` can orphan the awaited request instead of stopping it, and no test proves the stop
+### M1. `expireIfDue` can orphan the awaited request instead of stopping it
 
 **Problem.** `expireIfDue` resets `activation->parked` (destroying the `ProgramRun`, whose `close()`
 runs `abortScopedChoices` and so `releaseChoiceMark` and `rolledBack`) before `abandonAll`. For a
@@ -70,7 +70,7 @@ exactly when resources are tight.
   `reapClosing`.
 - A close for an owned endpoint arguably should not be budget-refusable. If so, say so in the plan.
 
-### M3. `~ScriptRunner` forgets running requests and close requests, a permanent leak while the service outlives it
+### M3. `~ScriptRunner` forgets running and close requests, a permanent leak
 
 **Problem.** The destructor calls `retireAll(finished_)`, `retireAll(activation->admitted)` and
 `reapClosing()` with `force=false`. `retire(..., false)` returns false for a non-terminal request,
