@@ -107,7 +107,8 @@ bool VQLCompiler::isSemanticQuantifierBuiltin(const std::string_view name) {
 
 bool VQLCompiler::isPathFunction(const std::string_view name) {
   return name == "sort_into" || name == "find" || name == "contains" ||
-         name == "count" || outcomeFunctionRelation(name) != nullptr;
+         name == "count" || name == "join" ||
+         outcomeFunctionRelation(name) != nullptr;
 }
 
 bool VQLCompiler::isLensFunction(const std::string_view name) {
@@ -440,6 +441,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   remainingClosedFunctorTemplateWork_ =
       options.limits.maxClosedFunctorTemplateWork;
   remainingClosureCaptureWork_     = options.limits.maxClosureCaptureWork;
+  maxJoinedTextBytes_              = options.limits.maxJoinedTextBytes;
   nextFunctorVariantOrdinal_       = 0;
   nextClosureLambdaId_             = 0;
   remainingGeneratedOpcodes_       = options.limits.maxGeneratedOpcodes;
@@ -488,6 +490,7 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   ioActions_.clear();
   failingStatement_.reset();
   finalIsIoEffect_ = false;
+  letNames_.clear();
 
   try {
     const auto resultCell = compileQuery(query);
@@ -687,6 +690,9 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
         finalIsIoEffect_ = effect->kind != IoEffectStatement::Kind::Capture &&
                            !(effect->kind == IoEffectStatement::Kind::Read &&
                              effect->detached);
+      } else if (const auto *match =
+                     std::get_if<IoMatchStatement>(&statement)) {
+        result = compileIoMatch(*match, index);
       } else {
         result = compileWatchOrPerspectiveStatement(statement);
       }

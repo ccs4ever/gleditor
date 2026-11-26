@@ -1,6 +1,9 @@
+#include <array>
 #include <string>
 
+#include "common/xanadu/vortex/frontend_diagnostics.hpp"
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/io_match.hpp"
 
 namespace xanadu::vql {
 using zigzag::CellRef;
@@ -86,10 +89,7 @@ std::optional<CellRef>
 VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
                              const std::size_t statement) {
   const auto bound = [&](const std::string &name) -> CellRef {
-    if (const auto found = streamBindings_.find(name);
-        found != streamBindings_.end() && found->second.size() == 1)
-      return found->second.front();
-    return emitConstant(std::string{"$"} + name);
+    return ioBoundCell(name);
   };
   const auto operand = [&](const IoOperand &value) -> CellRef {
     if (const auto *literal = std::get_if<std::int64_t>(&value))
@@ -98,29 +98,9 @@ VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
   };
   const auto fresh = [&] { return core_.arena().makeCell(); };
 
-  // One RelationNext call: the single answer per argument is the host's value.
-  struct Related {
-    CellRef opcode;
-    CellRef found;
-    std::vector<CellRef> answers;
-  };
   const auto relate = [&](const char *relation,
-                          const std::vector<CellRef> &arguments) -> Related {
-    const auto call = emitOp(OpcodeKind::RelationNext, "#IO_RELATION");
-    emitInputConstant(call, std::string{relation});
-    emitInputConstant(call, std::int64_t{0});
-    emitInputConstant(call, std::int64_t{0});
-    for (const auto argument : arguments) emitInput(call, argument);
-    const auto found = fresh();
-    emitOutput(call, found);
-    emitOutput(call, fresh());
-    emitOutput(call, fresh());
-    std::vector<CellRef> answers;
-    for (std::size_t i = 0; i < arguments.size(); ++i) {
-      answers.push_back(fresh());
-      emitOutput(call, answers.back());
-    }
-    return {call, found, std::move(answers)};
+                          const std::vector<CellRef> &arguments) {
+    return ioRelate(relation, arguments);
   };
 
   // `arm` is 0 for a request to await and nonzero for an outcome that already
@@ -302,15 +282,22 @@ VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
   }
 
   std::optional<CellRef> owned;
-  if (effect.kind == Kind::Read && !effect.detached && effect.resultVar) {
-    // The host copies the finished outcome by value and retires the request
-    // at once; if it declines (over its retention budget) the service's
-    // outcome stays the value, as before.
+  // A read names its outcome by a record and retires its request at once. An
+  // `await($h) as $r` (or `cancel`) names a record too, but the handle stays
+  // admitted and awaitable: a second `await($h)` must still find its request,
+  // so the copy leaves it in place and the script's end retires it.
+  const bool namesRead = effect.kind == Kind::Read && !effect.detached;
+  const bool namesHandleOutcome =
+      effect.kind == Kind::Await || effect.kind == Kind::Cancel;
+  if ((namesRead || namesHandleOutcome) && effect.resultVar) {
+    // The host copies the finished outcome by value; if it declines (over its
+    // retention budget) the service's outcome stays the value, as before.
     const auto record = fresh();
     const auto keep   = emitOp(OpcodeKind::CopyCellRefs, "#IO_OWN_KEEP");
     emitInput(keep, result);
     emitOutput(keep, record);
-    const auto copied = relate(ownOutcomeRelation, {result});
+    const auto copied =
+        relate(namesRead ? ownOutcomeRelation : ownCopyRelation, {result});
     const auto skip   = mintOpcode(OpcodeKind::Nop, "#IO_OWN_END");
     const auto branch = emitOp(OpcodeKind::BranchFalseCell, "#IO_OWNED");
     emitInput(branch, copied.found);
@@ -326,11 +313,198 @@ VQLCompiler::compileIoEffect(const IoEffectStatement &effect,
                         .awaitOpcode  = awaitOpcode,
                         .requestSlot  = requestSlot,
                         .statement    = statement});
-  if (effect.resultVar)
+  if (effect.resultVar) {
+    letNames_.erase(*effect.resultVar);
     streamBindings_[*effect.resultVar] = {
         binding.value_or(owned.value_or(result))};
+  }
   lastResultCells_ = {owned.value_or(result)};
   return owned.value_or(result);
+}
+
+VQLCompiler::IoRelated
+VQLCompiler::ioRelate(const char *relation,
+                      const std::vector<CellRef> &arguments) {
+  const auto fresh = [&] { return core_.arena().makeCell(); };
+  const auto call  = emitOp(OpcodeKind::RelationNext, "#IO_RELATION");
+  emitInputConstant(call, std::string{relation});
+  emitInputConstant(call, std::int64_t{0});
+  emitInputConstant(call, std::int64_t{0});
+  for (const auto argument : arguments) emitInput(call, argument);
+  const auto found = fresh();
+  emitOutput(call, found);
+  emitOutput(call, fresh());
+  emitOutput(call, fresh());
+  std::vector<CellRef> answers;
+  for (std::size_t i = 0; i < arguments.size(); ++i) {
+    answers.push_back(fresh());
+    emitOutput(call, answers.back());
+  }
+  return {call, found, std::move(answers)};
+}
+
+CellRef VQLCompiler::ioBoundCell(const std::string &name) {
+  const auto found = streamBindings_.find(name);
+  if (found == streamBindings_.end() ||
+      (found->second.size() != 1 && !letNames_.contains(name)))
+    return emitConstant(std::string{"$"} + name);
+  if (!letNames_.contains(name)) return found->second.front();
+
+  // A name this script's own `let` bound holds a stream of rows, not the one
+  // cell a host binds a session variable to. Narrowing it here, and refusing
+  // by a typed code when it is not exactly one, is what keeps an empty or
+  // several-valued `let` from being written as nothing, or as its own name.
+  const auto fresh  = [&] { return core_.arena().makeCell(); };
+  const auto refuse = [&](const CellRef condition, const char *what) {
+    const auto assertion = emitOp(OpcodeKind::Assert, "#IO_LET_ASSERT");
+    emitInput(assertion, condition);
+    emitInputConstant(
+        assertion, std::string{vortex::frontend_codes::vqlEffectArgument} +
+                       ": $" + name + " " + what);
+  };
+  const auto begin = emitOp(OpcodeKind::StreamBegin, "#IO_LET_BEGIN");
+  for (const auto cell : found->second) emitInput(begin, cell);
+  const auto iterator = fresh();
+  emitOutput(begin, iterator);
+  const auto next = emitOp(OpcodeKind::IteratorNext, "#IO_LET_NEXT");
+  emitInput(next, iterator);
+  const auto item    = fresh();
+  const auto present = fresh();
+  emitOutput(next, item);
+  emitOutput(next, present);
+  refuse(present, "holds no value, so an action cannot use it");
+  const auto more = emitOp(OpcodeKind::IteratorNext, "#IO_LET_EXTRA");
+  emitInput(more, iterator);
+  const auto extra       = fresh();
+  const auto extraExists = fresh();
+  emitOutput(more, extra);
+  emitOutput(more, extraExists);
+  const auto none = emitOp(OpcodeKind::Not, "#IO_LET_NOT");
+  emitInput(none, extraExists);
+  const auto alone = fresh();
+  emitOutput(none, alone);
+  refuse(alone, "holds several values, and an action needs exactly one");
+  return item;
+}
+
+std::optional<CellRef>
+VQLCompiler::compileIoMatch(const IoMatchStatement &match,
+                            const std::size_t statement) {
+  // match $r { tag($a, $b) => item, ..., _ => item }
+  //
+  //   RelationNext io_match_tag ($r) -> ordinal      ; the host refuses a
+  //                                                  ; value that is no outcome
+  //   per arm:  Eq ordinal, TAG ; BranchFalseCell -> NEXT
+  //             per binder: RelationNext <field relation> ($r) -> found, x
+  //                         a stream that is empty unless found
+  //             the arm's row item, as a one-item `return`, into the result
+  //             jump END
+  //   NEXT: ...
+  //   END
+  //
+  // The dispatch is a branch on the ordinal the host answers, and every
+  // binder is a relation the path functions already use, so the match names
+  // no outcome schema and adds no opcode. An arm after the last tag a typed
+  // exhaustive match names cannot run, and the parser has already refused a
+  // match that could fall through.
+  const auto subject    = ioBoundCell(match.subject);
+  const auto resultStream = emitStreamClear();
+  const auto dispatched = ioRelate(matchTagRelation, {subject});
+  ioActions_.push_back({.submitOpcode = dispatched.opcode,
+                        .awaitOpcode  = std::nullopt,
+                        .requestSlot  = std::nullopt,
+                        .statement    = statement});
+  const auto ordinal = dispatched.answers.front();
+  const auto end     = mintOpcode(OpcodeKind::Nop, "#IO_MATCH_END");
+  for (const auto &arm : match.arms) {
+    const auto next = mintOpcode(OpcodeKind::Nop, "#IO_MATCH_NEXT");
+    if (arm.tag) {
+      const auto same = emitOp(OpcodeKind::Eq, "#IO_MATCH_TAG");
+      emitInput(same, ordinal);
+      emitInputConstant(same, static_cast<std::int64_t>(*arm.tag));
+      const auto chosen = core_.arena().makeCell();
+      emitOutput(same, chosen);
+      const auto skip = emitOp(OpcodeKind::BranchFalseCell, "#IO_MATCH_SKIP");
+      emitInput(skip, chosen);
+      emitInput(skip, next);
+    }
+    {
+      auto variables     = varBindings_;
+      auto streams       = streamBindings_;
+      auto functors      = functorBindings_;
+      auto lets          = letNames_;
+      const auto context = ambientContext_;
+      struct Restore {
+        VQLCompiler &compiler;
+        decltype(variables) &variables;
+        decltype(streams) &streams;
+        decltype(functors) &functors;
+        decltype(lets) &lets;
+        const decltype(context) &context;
+        ~Restore() {
+          compiler.varBindings_     = std::move(variables);
+          compiler.streamBindings_  = std::move(streams);
+          compiler.functorBindings_ = std::move(functors);
+          compiler.letNames_        = std::move(lets);
+          compiler.ambientContext_  = context;
+        }
+      } const restore{*this, variables, streams, functors, lets, context};
+
+      if (arm.tag) {
+        const auto fields = ioMatchFieldsOf(*arm.tag);
+        for (std::size_t i = 0; i < arm.binders.size(); ++i) {
+          if (!arm.binders[i] || !fields[i]) continue;
+          const char *relation = outcomePayloadRelation;
+          switch (*fields[i]) {
+          case IoMatchField::Payload:
+            relation = outcomePayloadRelation;
+            break;
+          case IoMatchField::ErrorCode:
+            relation = outcomeErrorRelation;
+            break;
+          case IoMatchField::Detail:
+            relation = outcomeDetailRelation;
+            break;
+          case IoMatchField::Uncertain:
+            relation = outcomeUncertainRelation;
+            break;
+          case IoMatchField::Cause:
+            relation = outcomeCauseRelation;
+            break;
+          }
+          const auto field  = ioRelate(relation, {subject});
+          const auto stream = emitStreamClear();
+          const auto absent = mintOpcode(OpcodeKind::Nop, "#IO_MATCH_ABSENT");
+          const auto branch =
+              emitOp(OpcodeKind::BranchFalseCell, "#IO_MATCH_FIELD");
+          emitInput(branch, field.found);
+          emitInput(branch, absent);
+          const std::array answer{field.answers.front()};
+          emitAppendStream(stream, answer);
+          appendOpcode(absent);
+          functorBindings_.erase(*arm.binders[i]);
+          letNames_.erase(*arm.binders[i]);
+          streamBindings_[*arm.binders[i]] = {stream};
+          varBindings_[*arm.binders[i]]    = stream;
+        }
+      }
+      // The arm is a one-item `return`: the same lowering of a path or a
+      // parenthesised value as anywhere else, so nothing new can differ.
+      const auto armRows = compileExecutionBlock(ExecutionBlock{
+          .action = ActionClause{.clause = ReturnClause{.items = {arm.body}}}});
+      if (armRows) {
+        const std::array rows{*armRows};
+        emitAppendStream(resultStream, rows);
+      }
+    }
+    const auto leave = emitOp(OpcodeKind::BranchFalseCell, "#IO_MATCH_LEAVE");
+    emitInputConstant(leave, false);
+    emitInput(leave, end);
+    appendOpcode(next);
+  }
+  appendOpcode(end);
+  lastResultCells_ = {resultStream};
+  return resultStream;
 }
 
 } // namespace xanadu::vql

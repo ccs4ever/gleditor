@@ -1,0 +1,1071 @@
+// M7-VQL-d: values (design/vortex-io-m7-vql-d.md). An outcome `match` in
+// script syntax (exhaustive, `_` allowed, a missing tag is a diagnostic before
+// anything runs); `await($h) as $r` as an owned record that leaves `$h`
+// awaitable; a script-local `let` as a write source, offset or length; the pure
+// `join` aggregate over rows; and the payload-less outcome constructor. No new
+// world effect: nothing here submits more than the reads and writes a script
+// names, which the tests count.
+
+#include <algorithm>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <memory>
+#include <string>
+#include <thread>
+#include <unistd.h>
+#include <vector>
+
+#include <gtest/gtest.h>
+
+#include "common/xanadu/vortex/file_read_host.hpp"
+#include "common/xanadu/vortex/owned_outcome.hpp"
+#include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vql/execution.hpp"
+#include "common/xanadu/vql/io_match.hpp"
+#include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/vql/script_runner.hpp"
+#include "common/xanadu/vql/vql_engine.hpp"
+#include "io_frontend_conformance.hpp"
+
+namespace {
+
+using namespace xuzz_conformance;
+namespace fs = std::filesystem;
+using xanadu::vql::hasIoEffect;
+using xanadu::vql::IoMatchStatement;
+using xanadu::vql::IoMatchTag;
+using xanadu::vql::ParseError;
+using xanadu::vql::Parser;
+using xanadu::vql::QueryExecutionError;
+using xanadu::vql::QueryExecutor;
+using xanadu::vql::ScriptIoPorts;
+using xanadu::vql::ScriptRunner;
+using xanadu::vql::ScriptRunResult;
+using xanadu::vql::VQLEngine;
+
+constexpr auto matchCode = "VQL_IO_MATCH";
+
+constexpr IoProgress terminalProgress{.transferredBytes = 2,
+                                      .phase            = IoPhase::Terminal};
+
+auto parseFailure(const std::string &source) -> std::string {
+  try {
+    Parser(source).parseQuery();
+  } catch (const ParseError &error) {
+    return error.what();
+  }
+  return {};
+}
+
+/// A read of $cap awaited and named, the shape every match test starts from.
+auto readAs(const std::string &name) -> std::string {
+  return "effect { let $s := submit($cap, read_bytes(0, 16)); "
+         "match $s { admitted($q) => await($q), refused($e) => $e } } as $" +
+         name + "; ";
+}
+
+/// The same read started and not awaited: `$name` is the request handle.
+auto detachedAs(const std::string &name) -> std::string {
+  return "effect { let $s := submit($cap, read_bytes(0, 16)); "
+         "match $s { admitted($q) => $q, refused($e) => $e } } as $" +
+         name + "; ";
+}
+
+// ---- Grammar and static checks ---------------------------------------------
+
+TEST(VqlIoMatchGrammarTest, ArmsPatternsAndBindersParse) {
+  const auto query =
+      Parser(readAs("r") +
+             "match $r { complete($p) => $p, partial($p, $why) => $why, "
+             "failed(_, $d) => $d, end_of_stream => (\"eof\"), "
+             "timed_out($u) => $u, _ => (io_tag($r)) }")
+          .parseQuery();
+  ASSERT_EQ(query.body.statements.size(), 2U);
+  const auto &match = std::get<IoMatchStatement>(query.body.statements[1]);
+  EXPECT_EQ(match.subject, "r");
+  ASSERT_EQ(match.arms.size(), 6U);
+  EXPECT_EQ(match.arms[0].tag, IoMatchTag::Complete);
+  EXPECT_EQ(match.arms[0].binders, (std::vector<std::optional<std::string>>{
+                                       std::optional<std::string>{"p"}}));
+  EXPECT_EQ(match.arms[2].binders.size(), 2U);
+  EXPECT_FALSE(match.arms[2].binders[0].has_value()) << "'_' binds nothing";
+  EXPECT_EQ(match.arms[3].tag, IoMatchTag::EndOfStream);
+  EXPECT_FALSE(match.arms[5].tag.has_value()) << "the '_' arm";
+  EXPECT_TRUE(hasIoEffect(query));
+}
+
+TEST(VqlIoMatchGrammarTest, AMatchOnAReadMustNameEveryTagItCanEndWith) {
+  // A read can end with eleven tags; a match that stops at the obvious ones
+  // is the "forgot end_of_stream" bug this refusal exists to end.
+  const auto message =
+      parseFailure(readAs("r") + "match $r { complete($p) => $p, "
+                                 "failed($c, $d) => $c }");
+  EXPECT_NE(message.find(matchCode), std::string::npos) << message;
+  EXPECT_NE(message.find("end_of_stream"), std::string::npos) << message;
+  EXPECT_NE(message.find("rejected"), std::string::npos) << message;
+}
+
+TEST(VqlIoMatchGrammarTest, AWildcardOrEveryTagIsExhaustive) {
+  EXPECT_EQ(parseFailure(readAs("r") + "match $r { complete($p) => $p, "
+                                       "_ => (\"other\") }"),
+            "");
+  // A read's eleven tags, spelled out, with no wildcard.
+  EXPECT_EQ(
+      parseFailure(readAs("r") +
+                   "match $r { rejected(_, _) => (1), complete(_) => (1), "
+                   "end_of_stream => (1), partial(_, _) => (1), "
+                   "failed(_, _) => (1), cancelled(_) => (1), "
+                   "timed_out(_) => (1), overflow => (1), "
+                   "message_too_large => (1), stale => (1), unknown => (1) }"),
+      "");
+}
+
+TEST(VqlIoMatchGrammarTest, ATagTheOperationCannotEndWithIsRefused) {
+  // A write has no end of stream, no overflow and no stale read.
+  const auto write =
+      std::string{"effect { let $s := submit($cap, sync()); match $s { "
+                  "admitted($q) => await($q), refused($e) => $e } } as $w; "};
+  for (const auto *tag : {"end_of_stream", "overflow", "stale"}) {
+    SCOPED_TRACE(tag);
+    const auto message =
+        parseFailure(write + "match $w { " + tag + " => (1), _ => (2) }");
+    EXPECT_NE(message.find(matchCode), std::string::npos) << message;
+    EXPECT_NE(message.find("can end with"), std::string::npos) << message;
+  }
+  // `conflict` is a write's tag and a read's impossibility.
+  EXPECT_EQ(parseFailure(write + "match $w { conflict => (1), _ => (2) }"), "");
+  EXPECT_NE(parseFailure(readAs("r") + "match $r { conflict => (1), _ => (2) }")
+                .find(matchCode),
+            std::string::npos);
+}
+
+TEST(VqlIoMatchGrammarTest, AWriteIsExhaustiveOverItsOwnEightTags) {
+  const auto write =
+      std::string{"effect { let $s := submit($cap, sync()); match $s { "
+                  "admitted($q) => await($q), refused($e) => $e } } as $w; "};
+  EXPECT_EQ(parseFailure(write + "match $w { rejected(_, _) => (1), "
+                                 "complete(_) => (1), partial(_, _) => (1), "
+                                 "failed(_, _) => (1), cancelled(_) => (1), "
+                                 "timed_out(_) => (1), conflict => (1), "
+                                 "unknown => (1) }"),
+            "");
+  const auto message = parseFailure(
+      write + "match $w { complete(_) => (1), failed(_, _) => (1) }");
+  EXPECT_NE(message.find("conflict"), std::string::npos) << message;
+}
+
+TEST(VqlIoMatchGrammarTest, BadPatternsAreRefusedWithTheCode) {
+  const auto source = readAs("r");
+  struct Case {
+    const char *what;
+    std::string text;
+  };
+  const std::vector<Case> cases{
+      {"an unknown tag", "match $r { complet($p) => $p, _ => (1) }"},
+      {"a repeated tag",
+       "match $r { complete($p) => $p, complete($q) => $q, _ => (1) }"},
+      {"an arm after the wildcard",
+       "match $r { _ => (1), complete($p) => $p }"},
+      {"too few binders", "match $r { complete => (1), _ => (2) }"},
+      {"too many binders", "match $r { complete($a, $b) => $a, _ => (2) }"},
+      {"binders on the wildcard", "match $r { _($x) => (2) }"},
+      {"no arms", "match $r { }"},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.what);
+    const auto message = parseFailure(source + test.text);
+    EXPECT_NE(message.find(matchCode), std::string::npos) << message;
+  }
+}
+
+TEST(VqlIoMatchGrammarTest, ANameThatIsNotAnOutcomeIsRefusedWhereItIsKnown) {
+  // A detached read names a request handle, an open a capability, a capture
+  // a receipt: none is an outcome, and each says what to do instead.
+  const auto handle = parseFailure(detachedAs("h") + "match $h { _ => (1) }");
+  EXPECT_NE(handle.find(matchCode), std::string::npos) << handle;
+  EXPECT_NE(handle.find("await"), std::string::npos) << handle;
+  const auto open =
+      parseFailure("effect { open(\"x\") } as $f; match $f { _ => (1) }");
+  EXPECT_NE(open.find(matchCode), std::string::npos) << open;
+  EXPECT_NE(open.find("io_tag"), std::string::npos) << open;
+  const auto capture = parseFailure(readAs("r") +
+                                    "effect { capture($r) } as $c; match $c { "
+                                    "_ => (1) }");
+  EXPECT_NE(capture.find(matchCode), std::string::npos) << capture;
+}
+
+TEST(VqlIoMatchGrammarTest, AwaitOfAHandleKeepsTheOperationOfTheRead) {
+  // `await($h) as $r` is an outcome of the read that made $h, so the match
+  // after it is checked against a read's tags.
+  const auto source = detachedAs("h") + "effect { await($h) } as $r; ";
+  EXPECT_EQ(parseFailure(source + "match $r { complete($p) => $p, _ => (1) }"),
+            "");
+  EXPECT_NE(parseFailure(source + "match $r { conflict => (1), _ => (2) }")
+                .find(matchCode),
+            std::string::npos);
+}
+
+TEST(VqlIoMatchGrammarTest, AnUnknownSubjectNeedsEveryTagOrAWildcard) {
+  // A variable an earlier script bound is not known to be a read or a write,
+  // so only the twelve tags together, or `_`, cover it.
+  const auto message = parseFailure("match $r { complete($p) => $p }");
+  EXPECT_NE(message.find(matchCode), std::string::npos) << message;
+  EXPECT_NE(message.find("conflict"), std::string::npos) << message;
+  EXPECT_EQ(parseFailure("match $r { complete($p) => $p, _ => (0) }"), "");
+}
+
+TEST(VqlIoMatchGrammarTest, ALetThatRebindsTheNameForgetsWhatItWas) {
+  // After `let $r`, $r is no longer the read's outcome, so the match is
+  // checked as an unknown subject (stricter), not as a read.
+  const auto message = parseFailure(readAs("r") + "let $r := 1; match $r { "
+                                                  "complete($p) => $p }");
+  EXPECT_NE(message.find(matchCode), std::string::npos) << message;
+}
+
+TEST(VqlIoMatchGrammarTest, AMatchIsRefusedWhereAnActionIs) {
+  for (const auto *source : {
+           "def f() := { match $r { _ => (1) } }; f()",
+           "watch ##/d.x as $v { match $r { _ => (1) } }",
+           "with perspective(p) { match $r { _ => (1) } }",
+       }) {
+    SCOPED_TRACE(source);
+    EXPECT_NE(parseFailure(source).find("VQL_IO_QUERY_CONTEXT"),
+              std::string::npos);
+  }
+}
+
+TEST(VqlIoMatchGrammarTest, ThePatternTableIsOneStatedFact) {
+  using xanadu::vql::ioMatchArity;
+  using xanadu::vql::ioMatchTagName;
+  using xanadu::vql::ioMatchTagOf;
+  using xanadu::vql::IoOperation;
+  using xanadu::vql::ioTagsOf;
+  for (std::int64_t i = 0;
+       i < static_cast<std::int64_t>(xanadu::vql::ioMatchTagCount); ++i) {
+    const auto tag = static_cast<IoMatchTag>(i);
+    EXPECT_EQ(ioMatchTagOf(ioMatchTagName(tag)), tag);
+    EXPECT_LE(ioMatchArity(tag), 2U);
+  }
+  EXPECT_FALSE(ioMatchTagOf("Complete")) << "spellings are snake_case";
+  // Rejected, the admission refusal, ends every operation.
+  for (const auto operation :
+       {IoOperation::Read, IoOperation::Write, IoOperation::Any}) {
+    EXPECT_NE(ioTagsOf(operation) & xanadu::vql::ioTagBit(IoMatchTag::Rejected),
+              0U);
+  }
+}
+
+// ---- The compiled shape ----------------------------------------------------
+
+TEST(VqlIoMatchCompileTest, AMatchLowersToARelationAndBranchesNotASubmit) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::vortex::VortexVM vm(core);
+  xanadu::vql::VQLCompiler compiler(core, vm);
+  const auto compiled = compiler.compile(
+      readAs("r") + "match $r { complete($p) => $p, _ => (io_tag($r)) }");
+  ASSERT_TRUE(compiled.success) << compiled.errorMessage;
+  // The read is one action; the match is a second site that never waits.
+  ASSERT_EQ(compiled.ioActions.size(), 2U);
+  EXPECT_TRUE(compiled.ioActions[0].awaitOpcode.has_value());
+  EXPECT_FALSE(compiled.ioActions[1].awaitOpcode.has_value());
+  EXPECT_EQ(compiled.ioActions[1].statement, 1U);
+  EXPECT_FALSE(compiled.finalIsIoEffect);
+  EXPECT_NE(compiled.disassembly.find("io_match_tag"), std::string::npos);
+  std::size_t submits = 0;
+  for (const auto &site : compiled.ioActions)
+    if (vm.getOpcodeKind(site.submitOpcode) ==
+        zigzag::vortex::OpcodeKind::Submit)
+      ++submits;
+  EXPECT_EQ(submits, 1U) << "a match adds no Submit";
+}
+
+TEST(VqlIoMatchCompileTest, ASynchronousExecutorRefusesAMatch) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::vortex::VortexVM vm(core);
+  VQLEngine engine(core);
+  QueryExecutor executor(engine, vm);
+  const auto executed = executor.execute("match $r { _ => (1) }");
+  ASSERT_FALSE(executed);
+  EXPECT_NE(executed.error().message.find("VQL_IO_EFFECT_NEEDS_RUNNER"),
+            std::string::npos);
+}
+
+// ---- The runner over the fake backend --------------------------------------
+
+struct ValueWorld {
+  World w;
+  VQLEngine engine{w.core};
+  std::vector<CellRef> specs;
+  std::unique_ptr<ScriptRunner> runner;
+
+  explicit ValueWorld(
+      const std::size_t retained =
+          xanadu::vortex::FileReadHostOptions::defaultBudgetBytes,
+      xanadu::vql::QueryExecutionOptions options = {}) {
+    ScriptIoPorts ports{w.bridge, w.host, w.payloads, w.diagnostics,
+                        [this](CapabilityCell, std::uint64_t, std::uint64_t)
+                            -> std::expected<CellRef, FrontendDiagnostic> {
+                          return specs.emplace_back(w.specification());
+                        }};
+    ports.retainedPayloadBytes = retained;
+    runner = std::make_unique<ScriptRunner>(engine, w.vm, std::move(ports),
+                                            options);
+    engine.setVariable("cap", w.capability.cell);
+  }
+
+  auto run(const std::string &source) -> ScriptRunResult {
+    return runner->run(Parser(source).parseQuery());
+  }
+  void freeOldSpecs() {
+    constexpr std::size_t live = 2;
+    while (specs.size() > live) {
+      const auto spec = specs.front();
+      specs.erase(specs.begin());
+      if (const auto inc = w.arena.incarnationOf(spec))
+        static_cast<void>(w.arena.freeCell(spec, *inc));
+    }
+  }
+  auto wakeAndResume() -> ScriptRunResult {
+    static_cast<void>(w.pump());
+    auto woken = runner->takeWake();
+    EXPECT_TRUE(woken.has_value());
+    if (!woken) return ScriptRunResult::failed({"TEST_NO_WAKE", "no wake", {}});
+    return runner->resume(*std::move(woken));
+  }
+  auto finish(IoOutcome outcome) -> ScriptRunResult {
+    w.complete(w.submissions() - 1, std::move(outcome));
+    return wakeAndResume();
+  }
+  static auto parked(const ScriptRunResult &result) -> bool {
+    return std::holds_alternative<ScriptRunResult::Parked>(result.value);
+  }
+  static auto failure(const ScriptRunResult &result) -> std::string {
+    const auto *failed = std::get_if<ScriptRunResult::Failed>(&result.value);
+    return failed ? failed->diagnostic.code + ": " + failed->diagnostic.message
+                  : std::string{};
+  }
+  static auto code(const ScriptRunResult &result) -> std::string {
+    const auto *failed = std::get_if<ScriptRunResult::Failed>(&result.value);
+    return failed ? failed->diagnostic.code : std::string{};
+  }
+  /// Run @p source, finishing each read it parks on with the next of
+  /// @p outcomes; the rows it ends with.
+  auto drive(const std::string &source, std::vector<IoOutcome> outcomes)
+      -> std::vector<CellRef> {
+    auto result = run(source);
+    for (auto &outcome : outcomes) {
+      if (!parked(result)) break;
+      result = finish(std::move(outcome));
+    }
+    const auto *done = std::get_if<ScriptRunResult::Completed>(&result.value);
+    EXPECT_NE(done, nullptr) << failure(result);
+    return done ? done->value : std::vector<CellRef>{};
+  }
+  auto texts(const std::vector<CellRef> &rows) -> std::vector<std::string> {
+    std::vector<std::string> out;
+    for (const auto row : rows) out.push_back(w.arena.textOf(row));
+    return out;
+  }
+  auto completeWithPayload() -> IoOutcome {
+    return Complete{w.payloadRange(), {}, terminalProgress};
+  }
+};
+
+using Texts = std::vector<std::string>;
+
+constexpr auto describeAll =
+    "match $r { rejected($c, $d) => (\"rejected\"), complete($p) => $p, "
+    "end_of_stream => (\"eof\"), partial($p, $why) => $why, "
+    "failed($c, $d) => $c, cancelled($u) => $u, timed_out($u) => $u, "
+    "overflow => (\"overflow\"), message_too_large => (\"big\"), "
+    "stale => (\"stale\"), unknown => (\"unknown\") }";
+
+TEST(VqlIoMatchRunTest, EveryTerminalTagSelectsItsOwnArmAndBindsItsFields) {
+  struct Case {
+    const char *name;
+    IoOutcome outcome;
+    Texts expected;
+  };
+  ValueWorld probe;
+  const std::vector<Case> cases{
+      {"Complete", Complete{probe.w.payloadRange(), {}, terminalProgress},
+       {"ok"}},
+      {"EndOfStream", EndOfStream{terminalProgress}, {"eof"}},
+      {"Partial",
+       Partial{probe.w.payloadRange(), PartialCause::BackendFailure,
+               terminalProgress},
+       {"BackendFailure"}},
+      {"Failed", Failed{{IoErrorCode::BackendFailure, 3}, {}, terminalProgress},
+       {"BackendFailure"}},
+      {"Cancelled", Cancelled{{}, terminalProgress, true}, {"true"}},
+      {"TimedOut", TimedOut{{}, terminalProgress, false}, {"false"}},
+      {"Unknown", Unknown{terminalProgress}, {"unknown"}},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.name);
+    ValueWorld s;
+    // Complete's payload range belongs to the probe's resolver; use a fresh
+    // one for this world.
+    auto outcome = test.outcome;
+    if (auto *complete = std::get_if<Complete>(&outcome))
+      complete->payload = s.w.payloadRange();
+    if (auto *partial = std::get_if<Partial>(&outcome))
+      partial->payload = s.w.payloadRange();
+    const auto rows =
+        s.drive(readAs("r") + describeAll, {std::move(outcome)});
+    EXPECT_EQ(s.texts(rows), test.expected);
+    EXPECT_EQ(s.w.submissions(), 1U) << "a match submits nothing";
+  }
+}
+
+TEST(VqlIoMatchRunTest, RejectedBindsTheTypedErrorAndItsDetail) {
+  ValueWorld s;
+  s.w.refuseAdmission = true;
+  const auto rows =
+      s.drive(readAs("r") +
+                  "match $r { rejected($c, $d) => $c, _ => (\"other\") }",
+              {});
+  EXPECT_EQ(s.texts(rows), (Texts{"InvalidRequest"}));
+  const auto detail = s.drive(
+      readAs("r") + "match $r { rejected(_, $d) => $d, _ => (\"other\") }", {});
+  EXPECT_EQ(s.texts(detail), (Texts{"9"}));
+}
+
+TEST(VqlIoMatchRunTest, TheWildcardTakesWhateverNoArmNamed) {
+  ValueWorld s;
+  const auto rows =
+      s.drive(readAs("r") +
+                  "match $r { complete($p) => $p, _ => (io_tag($r)) }",
+              {EndOfStream{terminalProgress}});
+  EXPECT_EQ(s.texts(rows), (Texts{"EndOfStream"}));
+}
+
+TEST(VqlIoMatchRunTest, ABinderForAFieldTheOutcomeLacksIsEmptyNotAnError) {
+  // A complete read that retained no bytes: $p is an empty stream, the arm's
+  // row is nothing, and the script still completes.
+  ValueWorld s;
+  const auto rows =
+      s.drive(readAs("r") + "match $r { complete($p) => $p, _ => (1) }",
+              {Complete{{}, {}, terminalProgress}});
+  EXPECT_TRUE(rows.empty());
+}
+
+TEST(VqlIoMatchRunTest, AnArmMayUseTheBinderInAValueExpression) {
+  ValueWorld s;
+  const auto rows = s.drive(
+      readAs("r") + "match $r { complete($p) => (string($p) + \"!\"), "
+                    "_ => (\"no\") }",
+      {s.completeWithPayload()});
+  EXPECT_EQ(s.texts(rows), (Texts{"ok!"}));
+}
+
+TEST(VqlIoMatchRunTest, TheStatementAfterAMatchStillRuns) {
+  ValueWorld s;
+  const auto rows = s.drive(
+      readAs("r") + "match $r { complete($p) => $p, _ => (\"x\") }; "
+                    "return io_tag($r)",
+      {s.completeWithPayload()});
+  EXPECT_EQ(s.texts(rows), (Texts{"Complete"}));
+}
+
+TEST(VqlIoMatchRunTest, ABinderIsScopedToItsArm) {
+  // $p of the complete arm is not visible in the arm after it, so the second
+  // arm reading `$p` reads whatever $p was before (nothing here): the compile
+  // does not leak the binding.
+  ValueWorld s;
+  const auto rows = s.drive(
+      readAs("r") + "match $r { complete($p) => $p, _ => ($p) }",
+      {EndOfStream{terminalProgress}});
+  EXPECT_TRUE(rows.empty());
+  const auto after = s.drive(readAs("r") + "match $r { complete($p) => $p, "
+                                           "_ => (\"y\") }; return $p",
+                             {s.completeWithPayload()});
+  EXPECT_TRUE(after.empty()) << "$p did not outlive the match";
+}
+
+TEST(VqlIoMatchRunTest, MatchBindersExposeThePayloadLikeIoPayloadDoes) {
+  // The exposure set (design §4.7) must see a payload a binder turned into
+  // text, or `-o` would persist uncaptured bytes.
+  ValueWorld s;
+  const auto before = s.runner->persistability();
+  EXPECT_FALSE(before.has_value());
+  const auto rows = s.drive(
+      readAs("r") + "match $r { complete($p) => $p, _ => (\"x\") }",
+      {s.completeWithPayload()});
+  ASSERT_EQ(rows.size(), 1U);
+  const auto after = s.runner->persistability();
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->exposed, 1U);
+  EXPECT_EQ(after->uncovered, 1U);
+}
+
+TEST(VqlIoMatchRunTest, AMatchOnAHandleOrACapabilityIsATypedRefusalAtRunTime) {
+  // $cap is a session variable, so the parser does not know what it is; the
+  // host does, and a capability is no outcome.
+  ValueWorld s;
+  const auto result = s.run("match $cap { _ => (1) }");
+  EXPECT_EQ(ValueWorld::code(result), matchCode) << ValueWorld::failure(result);
+  EXPECT_EQ(s.w.submissions(), 0U);
+}
+
+TEST(VqlIoMatchRunTest, AStaleNameIsTheTypedStaleRefusalNotAnArm) {
+  ValueWorld s;
+  ASSERT_EQ(
+      s.drive(readAs("old") + "return $old", {s.completeWithPayload()}).size(),
+      1U);
+  // The next script's admission retires the finished one's records, so `$old`
+  // names a freed slot from then on, as every other reader of it is told.
+  ASSERT_EQ(s.drive(readAs("g") + "return $g", {s.completeWithPayload()}).size(),
+            1U);
+  const auto next = s.run("match $old { _ => (\"arm\") }");
+  EXPECT_EQ(ValueWorld::code(next), "VQL_IO_STALE_BINDING")
+      << ValueWorld::failure(next);
+}
+
+TEST(VqlIoMatchRunTest, EveryOneOfTwelveTagsDispatchesFromAnOutcomeCell) {
+  // The parser's table has twelve tags; the runner must number each the same.
+  // Detached outcome cells give all twelve, including the four a fake read
+  // backend does not produce.
+  using xanadu::vortex::IoOutcomeTag;
+  const std::vector<std::pair<IoOutcomeTag, std::string>> tags{
+      {IoOutcomeTag::Rejected, "rejected"},
+      {IoOutcomeTag::Complete, "complete"},
+      {IoOutcomeTag::EndOfStream, "end_of_stream"},
+      {IoOutcomeTag::Partial, "partial"},
+      {IoOutcomeTag::Failed, "failed"},
+      {IoOutcomeTag::Cancelled, "cancelled"},
+      {IoOutcomeTag::TimedOut, "timed_out"},
+      {IoOutcomeTag::Overflow, "overflow"},
+      {IoOutcomeTag::MessageTooLarge, "message_too_large"},
+      {IoOutcomeTag::Stale, "stale"},
+      {IoOutcomeTag::Conflict, "conflict"},
+      {IoOutcomeTag::Unknown, "unknown"},
+  };
+  ValueWorld s;
+  const std::string arms =
+      "match $o { rejected(_, _) => (\"rejected\"), complete(_) => "
+      "(\"complete\"), end_of_stream => (\"end_of_stream\"), partial(_, _) => "
+      "(\"partial\"), failed(_, _) => (\"failed\"), cancelled(_) => "
+      "(\"cancelled\"), timed_out(_) => (\"timed_out\"), overflow => "
+      "(\"overflow\"), message_too_large => (\"message_too_large\"), stale => "
+      "(\"stale\"), conflict => (\"conflict\"), unknown => (\"unknown\") }";
+  for (const auto &[tag, name] : tags) {
+    SCOPED_TRACE(name);
+    const auto cell = xanadu::vortex::makeDetachedOutcomeCell(
+        s.w.arena, s.w.bridge.schema(), tag);
+    ASSERT_TRUE(cell);
+    s.engine.setVariable("o", cell->cell);
+    const auto result = s.run(arms);
+    const auto *done  = std::get_if<ScriptRunResult::Completed>(&result.value);
+    ASSERT_NE(done, nullptr) << ValueWorld::failure(result);
+    EXPECT_EQ(s.texts(done->value), (Texts{name}));
+  }
+}
+
+// ---- await($h) as $r: an owned record that leaves $h awaitable -------------
+
+TEST(VqlIoAwaitRecordTest, ANamedAwaitIsAnOwnedRecordAndTheHandleStaysAwaitable) {
+  ValueWorld s;
+  auto result = s.run(detachedAs("h") + "effect { await($h) } as $r; "
+                                        "effect { await($h) } as $again; "
+                                        "return io_tag($r), io_tag($again), "
+                                        "io_payload($r)");
+  ASSERT_TRUE(ValueWorld::parked(result)) << ValueWorld::failure(result);
+  result = s.finish(s.completeWithPayload());
+  const auto *done = std::get_if<ScriptRunResult::Completed>(&result.value);
+  ASSERT_NE(done, nullptr) << ValueWorld::failure(result);
+  EXPECT_EQ(s.texts(done->value), (Texts{"Complete", "Complete", "ok"}));
+  EXPECT_EQ(s.w.submissions(), 1U) << "awaiting again never submits";
+  EXPECT_EQ(s.runner->ownedRecordCount(), 2U)
+      << "each named await is its own record";
+}
+
+TEST(VqlIoAwaitRecordTest, TheRequestIsKeptWhileTheScriptRunsAndRetiredAtItsEnd) {
+  ValueWorld s;
+  auto result = s.run(detachedAs("h") + "effect { await($h) } as $r; "
+                                        "return io_tag($r)");
+  ASSERT_TRUE(ValueWorld::parked(result));
+  result = s.finish(s.completeWithPayload());
+  ASSERT_NE(std::get_if<ScriptRunResult::Completed>(&result.value), nullptr);
+  // Retired at the next admission, with the rest of the finished script.
+  EXPECT_EQ(s.w.service.requestCount(), 1U) << "the handle's request is held";
+  result = s.run(detachedAs("g") + "return io_tag($g)");
+  ASSERT_NE(std::get_if<ScriptRunResult::Completed>(&result.value), nullptr)
+      << ValueWorld::failure(result);
+  EXPECT_EQ(s.w.service.requestCount(), 1U)
+      << "only the new script's own request is left";
+}
+
+TEST(VqlIoAwaitRecordTest, TheRecordHasTheFieldsOfTheOutcomeItCopied) {
+  ValueWorld s;
+  const auto rows = s.drive(detachedAs("h") + "effect { await($h) } as $r; "
+                                              "return $r",
+                            {Failed{{IoErrorCode::BackendFailure, 3}, {},
+                                    terminalProgress}});
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_TRUE(xanadu::vortex::isOwnedOutcome(s.w.arena, s.w.bridge.schema(),
+                                             rows[0]));
+  const auto record = OutcomeCell{rows[0], *s.w.arena.incarnationOf(rows[0])};
+  EXPECT_EQ(s.w.bridge.outcomeField(record, "errorCode"), "BackendFailure");
+}
+
+TEST(VqlIoAwaitRecordTest, ANamedCancelIsARecordToo) {
+  ValueWorld s;
+  auto result = s.run(detachedAs("h") + "effect { cancel($h) } as $c; "
+                                        "effect { await($h) } as $r; "
+                                        "return io_tag($c), io_tag($r)");
+  const auto *done = std::get_if<ScriptRunResult::Completed>(&result.value);
+  if (done == nullptr) {
+    ASSERT_TRUE(ValueWorld::parked(result)) << ValueWorld::failure(result);
+    result = s.finish(Cancelled{{}, terminalProgress, false});
+    done = std::get_if<ScriptRunResult::Completed>(&result.value);
+  }
+  ASSERT_NE(done, nullptr) << ValueWorld::failure(result);
+  ASSERT_EQ(done->value.size(), 2U);
+  EXPECT_EQ(s.w.arena.textOf(done->value[0]), "Cancelled");
+  EXPECT_EQ(s.w.arena.textOf(done->value[1]), "Cancelled");
+}
+
+TEST(VqlIoAwaitRecordTest, AnAwaitOfARefusedHandleIsACopyOfTheRefusal) {
+  ValueWorld s;
+  s.w.refuseAdmission = true;
+  const auto rows = s.drive(detachedAs("h") + "effect { await($h) } as $r; "
+                                              "effect { await($h) } as $r2; "
+                                              "return io_tag($r), io_tag($r2), "
+                                              "io_error($r)",
+                            {});
+  EXPECT_EQ(s.texts(rows), (Texts{"Rejected", "Rejected", "InvalidRequest"}));
+}
+
+TEST(VqlIoAwaitRecordTest, PastTheRetentionBudgetTheNameStaysTheServicesOutcome) {
+  // The two payload bytes pin a whole chunk; a budget below it declines the
+  // copy, and the name then reads the service's own outcome, as a named read
+  // does. The handle is unharmed either way.
+  constexpr std::size_t tooSmall = 1;
+  ValueWorld s(tooSmall);
+  const auto rows = s.drive(detachedAs("h") + "effect { await($h) } as $r; "
+                                              "effect { await($h) } as $a; "
+                                              "return io_tag($r), io_tag($a)",
+                            {s.completeWithPayload()});
+  EXPECT_EQ(s.texts(rows), (Texts{"Complete", "Complete"}));
+  EXPECT_EQ(s.runner->ownedRecordCount(), 0U);
+}
+
+TEST(VqlIoAwaitRecordTest, ManyNamedAwaitRunsLeaveTheArenaAndTheServiceBounded) {
+  ValueWorld s;
+  const auto once = [&] {
+    auto result = s.run(detachedAs("h") + "effect { await($h) } as $r; "
+                                          "effect { await($h) } as $a; "
+                                          "return $r");
+    ASSERT_TRUE(ValueWorld::parked(result));
+    result = s.finish(s.completeWithPayload());
+    ASSERT_NE(std::get_if<ScriptRunResult::Completed>(&result.value), nullptr)
+        << ValueWorld::failure(result);
+    s.freeOldSpecs();
+  };
+  for (std::size_t i = 0; i < 8; ++i) once();
+  const auto warmSlots  = s.w.arena.cellCount();
+  const auto warmLive   = s.w.arena.liveCells();
+  const auto warmLeases = s.w.payloads.liveLeases();
+  constexpr std::size_t runs = 10'000;
+  for (std::size_t i = 0; i < runs; ++i) once();
+  EXPECT_EQ(s.w.arena.cellCount(), warmSlots);
+  EXPECT_EQ(s.w.arena.liveCells(), warmLive);
+  EXPECT_EQ(s.w.payloads.liveLeases(), warmLeases);
+  EXPECT_LE(s.w.service.requestCount(), 1U);
+}
+
+TEST(VqlIoMatchRunTest, ManyMatchRunsLeaveTheArenaAndTheServiceBounded) {
+  ValueWorld s;
+  const auto once = [&] {
+    auto result = s.run(readAs("r") + "match $r { complete($p) => $p, "
+                                      "end_of_stream => (\"eof\"), "
+                                      "_ => (io_tag($r)) }");
+    ASSERT_TRUE(ValueWorld::parked(result));
+    result = s.finish(s.completeWithPayload());
+    const auto *done = std::get_if<ScriptRunResult::Completed>(&result.value);
+    ASSERT_NE(done, nullptr) << ValueWorld::failure(result);
+    // The payload text is a row the caller owns; a test that frees nothing
+    // would count it as growth.
+    for (const auto row : done->value) {
+      if (const auto incarnation = s.w.arena.incarnationOf(row))
+        static_cast<void>(s.w.arena.freeCell(row, *incarnation));
+    }
+    s.freeOldSpecs();
+  };
+  for (std::size_t i = 0; i < 8; ++i) once();
+  const auto warmSlots  = s.w.arena.cellCount();
+  const auto warmLive   = s.w.arena.liveCells();
+  const auto warmLeases = s.w.payloads.liveLeases();
+  constexpr std::size_t runs = 10'000;
+  for (std::size_t i = 0; i < runs; ++i) once();
+  EXPECT_EQ(s.w.arena.cellCount(), warmSlots);
+  EXPECT_EQ(s.w.arena.liveCells(), warmLive);
+  EXPECT_EQ(s.w.payloads.liveLeases(), warmLeases);
+  EXPECT_LE(s.w.service.requestCount(), 1U);
+}
+
+// ---- Real files: a script-local `let` as a source, an offset, a length ----
+
+/// One submit of @p description on $cap, awaited, bound to $name.
+auto act(const std::string &cap, const std::string &description,
+         const std::string &name, const std::string &within = {})
+    -> std::string {
+  return "effect { let $s := submit($" + cap + ", " + description + ")" +
+         (within.empty() ? "" : " within " + within) +
+         "; match $s { admitted($q) => await($q), refused($e) => $e } } as $" +
+         name + "; ";
+}
+
+auto open(const std::string &path, const std::string &mode,
+          const std::string &name) -> std::string {
+  return "effect { open(\"" + path + "\") " + mode + " } as $" + name + "; ";
+}
+
+auto slurp(const fs::path &path) -> std::string {
+  std::ifstream in(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+/// A runner over a real file host whose write grant is `root/` of a fresh
+/// tree.
+struct FileWorld {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core{arena};
+  zigzag::vortex::VortexVM vm{core};
+  VQLEngine engine{core};
+  fs::path base;
+  fs::path root;
+  std::unique_ptr<xanadu::vortex::FileReadHost> host;
+  std::unique_ptr<ScriptRunner> runner;
+
+  explicit FileWorld(xanadu::vql::QueryExecutionOptions options = {},
+                     xanadu::vortex::FileReadHostOptions hostOptions = {}) {
+    static std::uint32_t counter = 0;
+    base = fs::weakly_canonical(fs::temp_directory_path()) /
+           ("vql_io_values_" + std::to_string(::getpid()) + "_" +
+            std::to_string(counter++));
+    root = base / "root";
+    fs::create_directories(root);
+    hostOptions.writeGrant = xanadu::vortex::writeRootGrant({root});
+    host   = std::make_unique<xanadu::vortex::FileReadHost>(vm, arena,
+                                                            hostOptions);
+    runner = std::make_unique<ScriptRunner>(
+        engine, vm, xanadu::vql::fileScriptPorts(*host), options);
+  }
+  ~FileWorld() {
+    runner.reset();
+    host.reset();
+    std::error_code ec;
+    fs::remove_all(base, ec);
+  }
+  auto put(const fs::path &path, const std::string &content) -> fs::path {
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << content;
+    return path;
+  }
+  auto run(const std::string &source)
+      -> std::expected<std::vector<zigzag::CellRef>, FrontendDiagnostic> {
+    return xanadu::vql::driveToCompletion(
+        *runner, runner->run(Parser(source).parseQuery()),
+        [&] { host->pump(16); },
+        [] { std::this_thread::sleep_for(std::chrono::milliseconds(1)); });
+  }
+  auto rows(const std::string &source) -> Texts {
+    const auto result = run(source);
+    EXPECT_TRUE(result.has_value())
+        << (result ? "" : result.error().code + ": " + result.error().message);
+    Texts out;
+    if (result)
+      for (const auto cell : *result) out.push_back(arena.textOf(cell));
+    return out;
+  }
+  auto failure(const std::string &source) -> std::string {
+    const auto result = run(source);
+    return result ? std::string{} : result.error().code;
+  }
+  /// Bind @p count text cells "r0", "r1", ... to the session variable $rows.
+  void bindRows(const std::size_t count) {
+    std::vector<zigzag::CellRef> cells;
+    cells.reserve(count);
+    for (std::size_t i = 0; i < count; ++i)
+      cells.push_back(arena.makeCell("r" + std::to_string(i)));
+    engine.setVariable("rows", cells);
+  }
+};
+
+TEST(VqlIoLetSourceTest, ALetOfTheSameScriptIsAWriteSource) {
+  FileWorld f;
+  const auto path = (f.root / "report.txt").string();
+  const auto rows = f.rows("let $text := \"hello world\"; " +
+                           open(path, "for write create", "o") +
+                           act("o", "write_bytes(0, $text)", "w") +
+                           "return io_tag($w), io_bytes($w)");
+  EXPECT_EQ(rows, (Texts{"Complete", "11"}));
+  EXPECT_EQ(slurp(path), "hello world");
+}
+
+TEST(VqlIoLetSourceTest, ALetIsAnAppendSourceAndAnOffsetAndALength) {
+  FileWorld f;
+  const auto path = f.put(f.root / "grid.txt", "aaaaaaaaaa").string();
+  const auto rows = f.rows("let $patch := \"XY\"; let $at := 3; "
+                           "let $len := 4; " +
+                           open(path, "for write", "o") +
+                           act("o", "write_bytes($at, $patch)", "w") +
+                           act("o", "read_bytes($at, $len)", "r") +
+                           "return io_tag($w), io_payload($r)");
+  EXPECT_EQ(rows, (Texts{"Complete", "XYaa"}));
+  EXPECT_EQ(slurp(path), "aaaXYaaaaa");
+  const auto appended = f.put(f.root / "log.txt", "a;").string();
+  static_cast<void>(f.rows("let $line := \"b;\"; " +
+                           open(appended, "for append", "o") +
+                           act("o", "append_bytes($line)", "w") +
+                           "return io_tag($w)"));
+  EXPECT_EQ(slurp(appended), "a;b;");
+}
+
+TEST(VqlIoLetSourceTest, ALetBoundToAnOutcomeIsAnOutcomeSourceToo) {
+  // The existing rule for a named outcome, reached through a let.
+  FileWorld f;
+  const auto from = f.put(f.root / "from.txt", "bytes\n").string();
+  const auto to   = (f.root / "to.txt").string();
+  static_cast<void>(
+      f.rows(open(from, "", "i") + act("i", "read_bytes(0, 64)", "r") +
+             "let $copy := $r; " + open(to, "for write create", "o") +
+             act("o", "write_bytes(0, $copy)", "w") + "return io_tag($w)"));
+  EXPECT_EQ(slurp(to), "bytes\n");
+}
+
+TEST(VqlIoLetSourceTest, ALetThatHoldsNoValueIsATypedRefusalAndWritesNothing) {
+  FileWorld f;
+  const auto path = (f.root / "never.txt").string();
+  // io_payload of a read that retained none answers no row, so the let holds
+  // an empty stream, which is not the empty file "" a write could mean.
+  const auto code = f.failure(
+      open(path, "for write create", "o") + act("o", "sync()", "d") +
+      "effect { open(\"" + (f.root / "empty.txt").string() +
+      "\") for write create } as $e; " + act("e", "read_bytes(0, 8)", "r") +
+      "let $t := io_payload($r); " + act("o", "write_bytes(0, $t)", "w") +
+      "return 1");
+  EXPECT_EQ(code, "VQL_IO_EFFECT_ARGUMENT");
+  EXPECT_EQ(slurp(path), "") << "nothing was written";
+}
+
+TEST(VqlIoLetSourceTest, ALetOfSeveralValuesIsATypedRefusalNotTheFirstOfThem) {
+  FileWorld f;
+  f.bindRows(3);
+  const auto path = (f.root / "many.txt").string();
+  const auto code = f.failure("let $t := $rows; " +
+                              open(path, "for write create", "o") +
+                              act("o", "write_bytes(0, $t)", "w") + "return 1");
+  EXPECT_EQ(code, "VQL_IO_EFFECT_ARGUMENT");
+  EXPECT_EQ(slurp(path), "");
+}
+
+TEST(VqlIoLetSourceTest, ALetOfANonNumberIsATypedOffsetRefusal) {
+  FileWorld f;
+  const auto path = f.put(f.root / "n.txt", "abcdef").string();
+  const auto code = f.failure("let $at := \"far\"; " +
+                              open(path, "for write", "o") +
+                              act("o", "write_bytes($at, \"x\")", "w") +
+                              "return 1");
+  EXPECT_EQ(code, "VQL_IO_EFFECT_ARGUMENT");
+  EXPECT_EQ(slurp(path), "abcdef");
+}
+
+TEST(VqlIoLetSourceTest, ASessionVariableStillWorksAndAnUnboundNameStillFails) {
+  FileWorld f;
+  f.engine.setVariable("text", f.arena.makeCell("session text"));
+  const auto path = (f.root / "s.txt").string();
+  static_cast<void>(f.rows(open(path, "for write create", "o") +
+                           act("o", "write_bytes(0, $text)", "w") +
+                           "return io_tag($w)"));
+  EXPECT_EQ(slurp(path), "session text");
+  EXPECT_EQ(f.failure(open(path, "for write", "o2") +
+                      act("o2", "write_bytes(0, $nowhere)", "w")),
+            "VQL_IO_EFFECT_ARGUMENT");
+  EXPECT_EQ(slurp(path), "session text") << "never written as its own name";
+}
+
+TEST(VqlIoLetSourceTest, ALetAfterTheActionDoesNotCoverIt) {
+  // The name must be bound before the action reaches it.
+  FileWorld f;
+  const auto path = (f.root / "late.txt").string();
+  EXPECT_EQ(f.failure(open(path, "for write create", "o") +
+                      act("o", "write_bytes(0, $late)", "w") +
+                      "let $late := \"x\"; return 1"),
+            "VQL_IO_EFFECT_ARGUMENT");
+}
+
+// ---- join -------------------------------------------------------------------
+
+struct JoinWorld : ::testing::Test {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core{arena};
+  zigzag::vortex::VortexVM vm{core};
+  VQLEngine engine{core};
+  /// The synchronous executor runs a join: it holds no action, so it needs
+  /// no runner.
+  auto exec(const std::string &source, std::size_t cycles = 100'000)
+      -> std::expected<std::vector<zigzag::CellRef>, QueryExecutionError> {
+    QueryExecutor executor(engine, vm, {.maxCycles = cycles});
+    return executor.execute(source);
+  }
+  auto bind(const std::vector<std::string> &values) {
+    std::vector<zigzag::CellRef> cells;
+    for (const auto &value : values) cells.push_back(arena.makeCell(value));
+    engine.setVariable("rows", cells);
+  }
+  auto one(const std::string &source, std::size_t cycles = 100'000)
+      -> std::string {
+    const auto result = exec(source, cycles);
+    EXPECT_TRUE(result.has_value())
+        << (result ? "" : result.error().message);
+    if (!result || result->size() != 1U) return "<no single row>";
+    return arena.textOf(result->front());
+  }
+};
+
+TEST_F(JoinWorld, JoinsRowsWithTheSeparatorBetweenEachPair) {
+  bind({"a", "b", "c"});
+  EXPECT_EQ(one("join($rows, \", \")"), "a, b, c");
+  EXPECT_EQ(one("join($rows, \"\")"), "abc");
+  EXPECT_EQ(one("join($rows, \"\\n\")"), "a\nb\nc");
+}
+
+TEST_F(JoinWorld, OneRowHasNoSeparatorAndNoRowsIsTheEmptyText) {
+  bind({"solo"});
+  EXPECT_EQ(one("join($rows, \"--\")"), "solo");
+  bind({});
+  EXPECT_EQ(one("join($rows, \"--\")"), "")
+      << "present and empty, like a zero count";
+  EXPECT_EQ(one("join($absent, \"--\")"), "");
+}
+
+TEST_F(JoinWorld, NumbersAreJoinedAsTheirCanonicalText) {
+  const auto cells = std::vector<zigzag::CellRef>{
+      arena.makeScalarCell(std::int64_t{12}), arena.makeCell("x"),
+      arena.makeScalarCell(std::int64_t{7})};
+  engine.setVariable("rows", cells);
+  EXPECT_EQ(one("join($rows, \"+\")"), "12+x+7");
+}
+
+TEST_F(JoinWorld, TextThatLooksLikeANumberStaysText) {
+  bind({"1", "2", "3"});
+  EXPECT_EQ(one("join($rows, \"\")"), "123")
+      << "text, not the integer 6 a numeric add would give";
+  EXPECT_EQ(one("join($rows, \",\")"), "1,2,3");
+}
+
+TEST_F(JoinWorld, TheSeparatorIsExactlyOneValue) {
+  bind({"a", "b"});
+  EXPECT_FALSE(exec("join($rows, $rows)").has_value());
+  EXPECT_FALSE(exec("join($rows, $absent)").has_value());
+}
+
+TEST_F(JoinWorld, ArityAndNamedArgumentsAreCheckedBeforeAnyArgumentRuns) {
+  bind({"a"});
+  EXPECT_FALSE(exec("join($rows)").has_value());
+  EXPECT_FALSE(exec("join($rows, \",\", \"x\")").has_value());
+  EXPECT_FALSE(exec("join(rows: $rows, \",\")").has_value());
+}
+
+TEST_F(JoinWorld, ATenThousandRowJoinEqualsTheFoldOfPlus) {
+  constexpr std::size_t rows = 10'000;
+  std::vector<std::string> values;
+  std::string expected;
+  for (std::size_t i = 0; i < rows; ++i) {
+    values.push_back("row" + std::to_string(i));
+    expected += (i == 0 ? "" : ",") + values.back();
+  }
+  bind(values);
+  // The loop costs a few cycles a row; the default budget is the host's to
+  // raise for a script this size, which is the point of having one.
+  constexpr std::size_t cycles = 1'000'000;
+  EXPECT_EQ(one("join($rows, \",\")", cycles), expected);
+}
+
+TEST_F(JoinWorld, AJoinPastTheBoundIsRefusedByCodeNotTruncated) {
+  constexpr std::size_t bound = 64;
+  std::vector<std::string> values(20, "0123456789");
+  bind(values);
+  QueryExecutor executor(engine, vm, {.maxJoinedTextBytes = bound});
+  const auto result = executor.execute("join($rows, \"\")");
+  ASSERT_FALSE(result);
+  EXPECT_NE(result.error().message.find("VQL_IO_BOUND"), std::string::npos)
+      << result.error().message;
+  // Exactly at the bound is fine; one byte past is not.
+  bind({std::string(bound, 'x')});
+  EXPECT_TRUE(executor.execute("join($rows, \"\")").has_value());
+  bind({std::string(bound, 'x'), "y"});
+  EXPECT_FALSE(executor.execute("join($rows, \"\")").has_value());
+}
+
+TEST_F(JoinWorld, TheDefaultBoundIsTheDefaultWriteBound) {
+  static_assert(xanadu::vql::defaultJoinedTextBytes ==
+                xanadu::vortex::FileReadHostOptions::defaultWriteBytes);
+  EXPECT_EQ(xanadu::vql::QueryExecutionOptions{}.maxJoinedTextBytes,
+            xanadu::vortex::FileReadHostOptions::defaultWriteBytes);
+}
+
+TEST(VqlIoJoinTest, ARunnerWritesTheJoinedRowsOfAQuery) {
+  FileWorld f({.maxCycles = 1'000'000});
+  f.bindRows(1000);
+  const auto path = (f.root / "joined.txt").string();
+  const auto rows = f.rows("let $text := join($rows, \"\\n\"); " +
+                           open(path, "for write create", "o") +
+                           act("o", "write_bytes(0, $text)", "w") +
+                           "return io_tag($w), io_bytes($w)");
+  std::string expected;
+  for (std::size_t i = 0; i < 1000; ++i)
+    expected += (i == 0 ? "" : "\n") + ("r" + std::to_string(i));
+  EXPECT_EQ(rows, (Texts{"Complete", std::to_string(expected.size())}));
+  EXPECT_EQ(slurp(path), expected);
+}
+
+TEST(VqlIoJoinTest, AJoinPastTheWriteBoundIsATypedRefusalInAScript) {
+  constexpr std::size_t bound = 128;
+  FileWorld f({.maxJoinedTextBytes = bound}, {});
+  f.bindRows(200);
+  const auto path = (f.root / "toobig.txt").string();
+  EXPECT_EQ(f.failure("let $text := join($rows, \",\"); " +
+                      open(path, "for write create", "o") +
+                      act("o", "write_bytes(0, $text)", "w") + "return 1"),
+            "VQL_IO_BOUND");
+  EXPECT_EQ(slurp(path), "") << "the file the script opened was not written";
+}
+
+TEST(VqlIoJoinTest, ManyJoinAndWriteRunsLeaveTheArenaAndTheServiceBounded) {
+  FileWorld f;
+  f.bindRows(4);
+  const auto path = (f.root / "bounded.txt").string();
+  static_cast<void>(
+      f.rows(open(path, "for write create", "seed") + "return io_tag($seed)"));
+  const auto once = [&] {
+    auto result = f.run("let $text := join($rows, \";\"); " +
+                        open(path, "for write", "o") +
+                        act("o", "write_bytes(0, $text)", "w") +
+                        "return io_tag($w)");
+    ASSERT_TRUE(result.has_value());
+    for (const auto cell : *result) {
+      if (const auto incarnation = f.arena.incarnationOf(cell))
+        static_cast<void>(f.arena.freeCell(cell, *incarnation));
+    }
+  };
+  constexpr std::size_t warmRuns = 8;
+  constexpr std::size_t runs     = 10'000;
+  for (std::size_t i = 0; i < warmRuns; ++i) once();
+  const auto warmSlots    = f.arena.cellCount();
+  const auto warmLive     = f.arena.liveCells();
+  const auto warmRequests = f.host->service().requestCount();
+  for (std::size_t i = 0; i < runs; ++i) once();
+  EXPECT_EQ(f.arena.cellCount(), warmSlots);
+  EXPECT_EQ(f.arena.liveCells(), warmLive);
+  EXPECT_EQ(f.host->service().requestCount(), warmRequests);
+  EXPECT_EQ(slurp(path), "r0;r1;r2;r3");
+}
+
+} // namespace

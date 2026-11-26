@@ -21,6 +21,7 @@
 // count() as a path step needs the whole incoming walk, so compileSteps hands
 // it to compilePathFunctionWalk ahead of the per-cell emitMap.
 #include "common/xanadu/vql/compiler.hpp"
+#include "common/xanadu/vortex/frontend_diagnostics.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -113,7 +114,8 @@ std::vector<CellRef>
 VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
                                      const std::optional<CellRef> context) {
   if (fn.name != "count" && fn.name != "sort_into" && fn.name != "contains" &&
-      fn.name != "find" && outcomeFunctionRelation(fn.name) == nullptr)
+      fn.name != "find" && fn.name != "join" &&
+      outcomeFunctionRelation(fn.name) == nullptr)
     throw QueryRefusal(QueryErrorCategory::Unsupported,
                        "unknown compiled function: " + fn.name);
 
@@ -131,6 +133,9 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     requirePositional(fn);
   } else if (fn.name == "count") {
     requireArity(fn, 1, "exactly one path argument");
+    requirePositional(fn);
+  } else if (fn.name == "join") {
+    requireArity(fn, 2, "a rows argument and a separator");
     requirePositional(fn);
   } else if (fn.name == "contains") {
     requireArity(fn, 2, "two arguments");
@@ -348,6 +353,64 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     jump(loopTop);
     appendOpcode(loopEnd);
     return {resultStream};
+  }
+
+  if (fn.name == "join") {
+    // join(rows, separator): the rows' scalars as text, one separator between
+    // each pair, as a single text cell. The text is a fold of the text `+`
+    // (VqlAdd), so it is what `a + sep + b + ...` would have been; an empty
+    // walk is the empty text, present, like a zero count. The first row is
+    // taken outside the loop so no separator is pending before it.
+    const auto rows       = compileArgument(fn.args[0], context);
+    const auto separators = compileArgument(fn.args[1], context);
+    const auto zero       = emitConstant(std::int64_t{0});
+    const auto one        = emitConstant(std::int64_t{1});
+    const auto emptyText  = emitConstant(std::string{});
+    const auto asText     = [&](CellRef scalar) {
+      const auto opcode = emitOp(OpcodeKind::VqlString, "#JOIN_TEXT");
+      emitInput(opcode, scalar);
+      const auto text = fresh();
+      emitOutput(opcode, text);
+      return text;
+    };
+    const auto concat = [&](CellRef left, CellRef right, CellRef destination) {
+      const auto opcode = emitOp(OpcodeKind::VqlAdd, "#JOIN_ADD");
+      emitInput(opcode, left);
+      emitInput(opcode, right);
+      emitOutput(opcode, destination);
+    };
+    const auto separator = asText(exactlyOne(
+        separators, "VQL path function 'join' takes exactly one separator"));
+    const auto joined = arithmetic(OpcodeKind::Add, emptyText, emptyText);
+    const auto begin  = emitOp(OpcodeKind::StreamBegin, "#JOIN_BEGIN");
+    for (const auto input : rows) emitInput(begin, input);
+    const auto iterator = fresh();
+    emitOutput(begin, iterator);
+    const auto firstNext = emitOp(OpcodeKind::IteratorNext, "#JOIN_FIRST");
+    emitInput(firstNext, iterator);
+    const auto first        = fresh();
+    const auto firstPresent = fresh();
+    emitOutput(firstNext, first);
+    emitOutput(firstNext, firstPresent);
+    const auto finished = label("#JOIN_END");
+    branchFalse(firstPresent, finished);
+    concat(emptyText, asText(first), joined);
+    emitIteratorLoop(iterator, [&](CellRef item) {
+      const auto piece = fresh();
+      concat(separator, asText(item), piece);
+      concat(joined, piece, joined);
+    });
+    appendOpcode(finished);
+    // One slice past the bound, read once at the end: text beyond the bound
+    // is a refusal, never a truncation. A join this long cannot be a write.
+    const auto bound  = emitConstant(static_cast<std::int64_t>(maxJoinedTextBytes_));
+    const auto beyond = slice(asText(joined), bound, one);
+    assertThat(arithmetic(OpcodeKind::Eq, beyond, emptyText),
+               std::string{vortex::frontend_codes::vqlBound} +
+                   ": a joined text is longer than " +
+                   std::to_string(maxJoinedTextBytes_) + " bytes");
+    static_cast<void>(zero);
+    return box(joined);
   }
 
   if (fn.name == "count") {

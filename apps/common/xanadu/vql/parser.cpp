@@ -178,7 +178,20 @@ Statement Parser::parseStatement() {
                       vortex::frontend_codes::vqlQueryContext),
           current_.loc);
     }
-    return parseIoEffectStatement();
+    auto effect = parseIoEffectStatement();
+    noteIoName(effect);
+    return effect;
+  }
+  if (atIoMatch()) {
+    if (!effectsAllowed_) {
+      throw ParseError(
+          std::format("{}: an I/O script 'match' is allowed only as a "
+                      "top-level script statement, not inside a def, watch, "
+                      "perspective or lambda body",
+                      vortex::frontend_codes::vqlQueryContext),
+          current_.loc);
+    }
+    return parseIoMatchStatement();
   }
   if (check(TokenKind::KwWatch)) {
     return parseWatchStatement();
@@ -1267,6 +1280,7 @@ ForClause Parser::parseForClause() {
     Token varTok =
         consume(TokenKind::Variable, "Expected $variable after 'for'");
     varName = varTok.stringValue;
+    ioNames_.erase(varName);
   }
   consume(TokenKind::KwIn, "Expected 'in' after variable");
   PathExpression path = parsePathExpression();
@@ -1279,6 +1293,7 @@ LetClause Parser::parseLetClause() {
   consume(TokenKind::KwLet, "Expected 'let'");
   Token varTok = consume(TokenKind::Variable, "Expected $variable after 'let'");
   consume(TokenKind::Assign, "Expected ':=' after variable");
+  ioNames_.erase(varTok.stringValue);
 
   std::variant<PathExpression, ValueExpr> target;
   if (check(TokenKind::Home) || check(TokenKind::NamedStore) ||
@@ -1330,48 +1345,47 @@ ReturnClause Parser::parseReturnClause() {
   std::vector<ReturnItem> items;
 
   while (true) {
-    if (check(TokenKind::OpenParen) && !peekToken().is(TokenKind::Slash) &&
-        !peekToken().is(TokenKind::CloseParen)) {
-      consume(TokenKind::OpenParen, "Expected '(' before return value");
-      ValueExpr expression = parseValueOrComparisonExpr();
-      const Token closeParen =
-          consume(TokenKind::CloseParen,
-                  "Expected ')' after parenthesized return value");
-      // Newlines separate statements. On the same line, require an item or
-      // clause boundary so a value suffix cannot become a second path query.
-      if (current_.loc.line == closeParen.loc.line &&
-          !check(TokenKind::Comma) && !check(TokenKind::Semicolon) &&
-          !check(TokenKind::CloseBrace) && !check(TokenKind::KwElse) &&
-          !check(TokenKind::EndOfFile)) {
-        throw ParseError("Continuations after a parenthesized return value "
-                         "require a statement separator",
-                         current_.loc);
-      }
-      items.push_back(
-          ReturnItem{.item = ReturnValue{.expression = std::move(expression)}});
-    } else if (check(TokenKind::Variable) &&
-               peekToken().is(TokenKind::OpenParen)) {
-      ValueExpr expression = parseValueOrComparisonExpr();
-      items.push_back(
-          ReturnItem{.item = ReturnValue{.expression = std::move(expression)}});
-    } else if (check(TokenKind::Slash)) {
-      // FieldWeave: sequence of PathSteps rooted at result cell
-      std::vector<PathStep> steps;
-      while (check(TokenKind::Slash)) {
-        steps.push_back(parsePathStep());
-      }
-      items.push_back(
-          ReturnItem{.item = FieldWeave{.steps = std::move(steps)}});
-    } else {
-      items.push_back(ReturnItem{.item = parsePathExpression()});
-    }
-
+    items.push_back(parseReturnItem());
     if (!match(TokenKind::Comma)) {
       break;
     }
   }
 
   return ReturnClause{.items = std::move(items)};
+}
+
+ReturnItem Parser::parseReturnItem() {
+  if (check(TokenKind::OpenParen) && !peekToken().is(TokenKind::Slash) &&
+      !peekToken().is(TokenKind::CloseParen)) {
+    consume(TokenKind::OpenParen, "Expected '(' before return value");
+    ValueExpr expression = parseValueOrComparisonExpr();
+    const Token closeParen =
+        consume(TokenKind::CloseParen,
+                "Expected ')' after parenthesized return value");
+    // Newlines separate statements. On the same line, require an item or
+    // clause boundary so a value suffix cannot become a second path query.
+    if (current_.loc.line == closeParen.loc.line && !check(TokenKind::Comma) &&
+        !check(TokenKind::Semicolon) && !check(TokenKind::CloseBrace) &&
+        !check(TokenKind::KwElse) && !check(TokenKind::EndOfFile)) {
+      throw ParseError("Continuations after a parenthesized return value "
+                       "require a statement separator",
+                       current_.loc);
+    }
+    return ReturnItem{.item = ReturnValue{.expression = std::move(expression)}};
+  }
+  if (check(TokenKind::Variable) && peekToken().is(TokenKind::OpenParen)) {
+    ValueExpr expression = parseValueOrComparisonExpr();
+    return ReturnItem{.item = ReturnValue{.expression = std::move(expression)}};
+  }
+  if (check(TokenKind::Slash)) {
+    // FieldWeave: sequence of PathSteps rooted at result cell
+    std::vector<PathStep> steps;
+    while (check(TokenKind::Slash)) {
+      steps.push_back(parsePathStep());
+    }
+    return ReturnItem{.item = FieldWeave{.steps = std::move(steps)}};
+  }
+  return ReturnItem{.item = parsePathExpression()};
 }
 
 EffectClause Parser::parseEffectClause() {
@@ -1981,6 +1995,11 @@ bool Parser::isBlockBody() {
     Lexer probe = lexer_;
     if (probe.nextToken().is(TokenKind::OpenBrace)) return true;
   }
+  if (next.is(TokenKind::Identifier) && next.text == "match") {
+    // `{ match $r {` likewise: a script `match`, refused by placement.
+    Lexer probe = lexer_;
+    if (probe.nextToken().is(TokenKind::Variable)) return true;
+  }
   Lexer tempLexer = lexer_;
   Token cur       = next;
   int braceDepth  = 1;
@@ -2487,6 +2506,171 @@ void Parser::parseIoReadAction(IoEffectStatement &effect) {
                      current_.loc);
   }
   consume(TokenKind::CloseBrace, "Expected '}' to close the match");
+}
+
+bool Parser::atIoMatch() {
+  return checkWord("match") && peekToken().is(TokenKind::Variable);
+}
+
+void Parser::noteIoName(const IoEffectStatement &effect) {
+  if (!effect.resultVar) return;
+  using Kind = IoSubject::Kind;
+  const auto operationOf = [](const IoRequestKind request) {
+    return request == IoRequestKind::ReadBytes ? IoOperation::Read
+                                               : IoOperation::Write;
+  };
+  IoSubject subject;
+  switch (effect.kind) {
+  case IoEffectStatement::Kind::Read:
+    subject = {.kind      = effect.detached ? Kind::Handle : Kind::Outcome,
+               .operation = operationOf(effect.request)};
+    break;
+  case IoEffectStatement::Kind::Await:
+  case IoEffectStatement::Kind::Cancel: {
+    // The outcome of a handle is the outcome of the operation that made it.
+    const auto held = ioNames_.find(effect.handleVar);
+    subject = {.kind      = Kind::Outcome,
+               .operation = held != ioNames_.end() ? held->second.operation
+                                                   : IoOperation::Any};
+    break;
+  }
+  case IoEffectStatement::Kind::Open:
+    subject = {.kind = Kind::Capability};
+    break;
+  case IoEffectStatement::Kind::Capture:
+    subject = {.kind = Kind::Receipt};
+    break;
+  }
+  ioNames_.insert_or_assign(*effect.resultVar, subject);
+}
+
+IoMatchStatement Parser::parseIoMatchStatement() {
+  const auto refuse = [](const std::string &message, const SourceLocation &at)
+      -> ParseError {
+    return ParseError(
+        std::format("{}: {}", vortex::frontend_codes::vqlMatch, message), at);
+  };
+  consumeWord("match");
+  const auto subjectToken = consumeVariable("the outcome to match");
+  IoMatchStatement statement{.subject = subjectToken.stringValue};
+  const auto known = ioNames_.find(statement.subject);
+  IoOperation operation = IoOperation::Any;
+  if (known != ioNames_.end()) {
+    using Kind = IoSubject::Kind;
+    switch (known->second.kind) {
+    case Kind::Handle:
+      throw refuse("$" + statement.subject +
+                       " is a request handle, not an outcome; await it first "
+                       "(effect { await($" +
+                       statement.subject + ") } as $r) and match $r",
+                   subjectToken.loc);
+    case Kind::Capability:
+      throw refuse("$" + statement.subject +
+                       " names the capability an open minted (or the open's "
+                       "outcome when it minted none); read the open's tag "
+                       "with io_tag($" +
+                       statement.subject + ")",
+                   subjectToken.loc);
+    case Kind::Receipt:
+      throw refuse("$" + statement.subject +
+                       " is a capture's receipt (or the outcome that ended "
+                       "it); read it with io_tag($" +
+                       statement.subject + ")",
+                   subjectToken.loc);
+    case Kind::Outcome:
+      operation = known->second.operation;
+      break;
+    }
+  }
+  consume(TokenKind::OpenBrace, "Expected '{' to open the match arms");
+  IoTagSet named        = 0;
+  bool sawWildcard      = false;
+  const IoTagSet possible = ioTagsOf(operation);
+  while (!check(TokenKind::CloseBrace)) {
+    const auto armLoc = current_.loc;
+    if (sawWildcard) {
+      throw refuse("an arm after '_' can never be reached", armLoc);
+    }
+    if (!check(TokenKind::Identifier)) {
+      throw refuse("a match arm names an outcome tag or '_'", armLoc);
+    }
+    IoMatchArm arm;
+    const std::string word(current_.text);
+    advance();
+    if (word == "_") {
+      sawWildcard = true;
+    } else {
+      const auto tag = ioMatchTagOf(word);
+      if (!tag) {
+        throw refuse("'" + word + "' is not an outcome tag (the tags are " +
+                         [] {
+                           std::string names;
+                           for (std::size_t i = 0; i < ioMatchTagCount; ++i) {
+                             if (i != 0) names += ", ";
+                             names += ioMatchTagName(
+                                 static_cast<IoMatchTag>(i));
+                           }
+                           return names;
+                         }() +
+                         ")",
+                     armLoc);
+      }
+      if ((ioTagBit(*tag) & possible) == 0) {
+        throw refuse("'" + word + "' is not a tag " +
+                         (operation == IoOperation::Read ? "a read"
+                                                         : "a write") +
+                         " can end with, so no arm for it can ever run",
+                     armLoc);
+      }
+      if ((ioTagBit(*tag) & named) != 0) {
+        throw refuse("the tag '" + word + "' is matched twice", armLoc);
+      }
+      named = static_cast<IoTagSet>(named | ioTagBit(*tag));
+      arm.tag = tag;
+    }
+    if (match(TokenKind::OpenParen)) {
+      while (!check(TokenKind::CloseParen)) {
+        if (check(TokenKind::Variable)) {
+          arm.binders.emplace_back(advance().stringValue);
+        } else if (checkWord("_")) {
+          advance();
+          arm.binders.emplace_back(std::nullopt);
+        } else {
+          throw refuse("a pattern binds $names or '_'", current_.loc);
+        }
+        if (!match(TokenKind::Comma)) break;
+      }
+      consume(TokenKind::CloseParen, "Expected ')' after the pattern");
+    }
+    const std::size_t arity = arm.tag ? ioMatchArity(*arm.tag) : 0;
+    if (arm.binders.size() != arity) {
+      throw refuse(
+          arm.tag ? "'" + word + "' binds " + std::to_string(arity) +
+                        " field(s) and the pattern names " +
+                        std::to_string(arm.binders.size())
+                  : std::string{"'_' binds nothing"},
+          armLoc);
+    }
+    consume(TokenKind::Arrow, "Expected '=>' after the pattern");
+    arm.body = parseReturnItem();
+    statement.arms.push_back(std::move(arm));
+    match(TokenKind::Comma);
+  }
+  const auto closeLoc = current_.loc;
+  consume(TokenKind::CloseBrace, "Expected '}' to close the match");
+  if (!sawWildcard && (possible & ~named) != 0) {
+    std::string missing;
+    for (std::size_t i = 0; i < ioMatchTagCount; ++i) {
+      const auto tag = static_cast<IoMatchTag>(i);
+      if ((ioTagBit(tag) & possible & ~named) == 0) continue;
+      if (!missing.empty()) missing += ", ";
+      missing += ioMatchTagName(tag);
+    }
+    throw refuse("this match does not name " + missing +
+                     "; name each or add a '_' arm",
+                 closeLoc);
+  }
+  return statement;
 }
 
 } // namespace xanadu::vql

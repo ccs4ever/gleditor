@@ -52,6 +52,11 @@ constexpr std::array builtins{
             "a capture action ran on a host with no capture stack"},
     Builtin{FrontendId::Vql, frontend_codes::vqlCaptureSource,
             "capture was handed a value that is not an outcome"},
+    Builtin{FrontendId::Vql, frontend_codes::vqlMatch,
+            "a match on an outcome misses a tag, names one its operation "
+            "cannot end with, or is aimed at a value that is not an outcome"},
+    Builtin{FrontendId::Vql, frontend_codes::vqlBound,
+            "a value a script builds passed its byte bound"},
     Builtin{FrontendId::Vql, frontend_codes::vqlEffectNeedsRunner,
             "script I/O action can park and runs only through a runner"},
     Builtin{FrontendId::Vql, frontend_codes::vqlPersistNeedsCapture,

@@ -630,9 +630,50 @@ struct IoEffectStatement {
   std::optional<std::string> resultVar;
 };
 
+/// The terminal outcome tags a `match` arm can name. The numbering is the
+/// value the compiled `io_match_tag` relation answers, so it is part of the
+/// contract between the compiler and the runner (as `IoOpenMode` is); it is
+/// the order of the shared outcome tags, and the runner maps by name, not by
+/// trusting the two enums to agree.
+enum class IoMatchTag : std::int64_t {
+  Rejected,
+  Complete,
+  EndOfStream,
+  Partial,
+  Failed,
+  Cancelled,
+  TimedOut,
+  Overflow,
+  MessageTooLarge,
+  Stale,
+  Conflict,
+  Unknown,
+};
+
+/// One arm of a script `match`: `complete($p) => $p`. No tag is the `_` arm.
+/// A binder that is absent (`_`) is not bound; one that is present is bound
+/// to the tag's field in order (see `io_match.hpp`), as a stream that is empty
+/// when the outcome carries no such field, as the path functions answer.
+struct IoMatchArm {
+  std::optional<IoMatchTag> tag;
+  std::vector<std::optional<std::string>> binders;
+  ReturnItem body;
+};
+
+/// `match $r { complete($p) => ..., end_of_stream => ..., _ => ... }` over an
+/// outcome a script holds. A pure top-level statement: its arms are row
+/// expressions, it submits nothing and cannot park, and it is reached once
+/// per script run like an action.
+struct IoMatchStatement {
+  /// The variable that names the outcome.
+  std::string subject;
+  std::vector<IoMatchArm> arms;
+};
+
 struct Statement
     : std::variant<ExecutionBlock, WatchStatement, WeaveStatement,
-                   PerspectiveBlock, PathExpression, IoEffectStatement> {
+                   PerspectiveBlock, PathExpression, IoEffectStatement,
+                   IoMatchStatement> {
   using variant::variant;
 };
 

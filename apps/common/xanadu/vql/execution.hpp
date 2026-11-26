@@ -17,6 +17,7 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ast.hpp"
 #include "common/xanadu/vql/contracts.hpp"
+#include "common/xanadu/vql/limits.hpp"
 #include "common/xanadu/vql/query_error.hpp"
 
 namespace xanadu {
@@ -35,6 +36,9 @@ using QueryExecutionError = QueryError;
 struct QueryExecutionOptions {
   QueryExecutionMode mode{QueryExecutionMode::Vortex};
   std::size_t maxCycles{100'000};
+  /// The longest text a `join` builds, forwarded to the compiler; a host
+  /// whose writes may be larger than the default raises it with them.
+  std::size_t maxJoinedTextBytes{defaultJoinedTextBytes};
 };
 
 class ProgramRun;

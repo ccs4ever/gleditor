@@ -454,6 +454,7 @@ QueryExecutor::beginVortex(const QueryExpression &query,
     VQLCompiler compiler(coordinator_, vm_);
     CompilationOptions compilation;
     compilation.contextCells = contextCells;
+    compilation.limits.maxJoinedTextBytes = options_.maxJoinedTextBytes;
     compilation.initialBindings =
         bindingSource_ ? bindingSource_->get() : bindings_;
     if (session_) {

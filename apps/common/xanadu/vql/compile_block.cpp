@@ -64,6 +64,7 @@ VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
     }
 
     functorBindings_.erase(let.varName);
+    letNames_.insert(let.varName);
     std::vector<CellRef> values;
     if (functorPath) {
       compilePathExpression(*functorPath, core_.home());

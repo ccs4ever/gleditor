@@ -73,6 +73,15 @@ inline constexpr std::string_view vqlCaptureUnavailable =
     "VQL_IO_CAPTURE_UNAVAILABLE";
 /// `capture` was handed a value that is not an outcome.
 inline constexpr std::string_view vqlCaptureSource = "VQL_IO_CAPTURE_SOURCE";
+/// A `match` on an outcome that names a tag its operation cannot end with,
+/// misses one it can, repeats one, or is aimed at a value that is not an
+/// outcome. Refused before anything runs, so a forgotten `end_of_stream` is
+/// a diagnostic and not an empty result.
+inline constexpr std::string_view vqlMatch = "VQL_IO_MATCH";
+/// A value a script builds (a `join` of rows) passed its bound. The bound is a
+/// refusal, never a silent truncation, so the text a write sends is the text
+/// the script described.
+inline constexpr std::string_view vqlBound = "VQL_IO_BOUND";
 /// A synchronous executor was asked to run a script holding an I/O action. The
 /// action compiles to bytecode but can park, and there is no blocking
 /// fallback, so such a script runs only through begin/resume (the runner).

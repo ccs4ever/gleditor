@@ -353,8 +353,22 @@ private:
   [[nodiscard]] auto staleMarker() const -> zigzag::CellRef;
   /// `io_own_outcome`: copy the finished outcome a named read yielded into a
   /// script-owned record and retire its request (§12.1).
-  [[nodiscard]] auto ownOutcome(const zigzag::vortex::RelationQuery &query)
+  /// With @p retireRequest the request leaves the service at once (a named
+  /// read); without it the request stays admitted and awaitable
+  /// (`await($h) as $r`) and the script's end retires it.
+  [[nodiscard]] auto ownOutcome(const zigzag::vortex::RelationQuery &query,
+                                bool retireRequest)
       -> zigzag::vortex::RelationResult;
+  /// `io_match_tag`: the `IoMatchTag` ordinal of the outcome a `match` is
+  /// aimed at; a value that is not an outcome is `VQL_IO_MATCH`.
+  [[nodiscard]] auto matchTag(const zigzag::vortex::RelationQuery &query)
+      -> zigzag::vortex::RelationResult;
+  /// The diagnostic for a VM failure whose message begins with a registered
+  /// `VQL_IO_*` code (the compiled program states a refusal it can only make
+  /// at run time that way); `VQL_SCRIPT_FAILED` otherwise.
+  [[nodiscard]] auto failureOf(std::string_view message,
+                               std::optional<std::size_t> position) const
+      -> vortex::FrontendDiagnostic;
   /// `capture($r[, off, len])` as three relations the compiled loop calls
   /// (design §6.2): begin makes the capture and requests its append, arm says
   /// whether the program awaits a request or holds the value, step takes the

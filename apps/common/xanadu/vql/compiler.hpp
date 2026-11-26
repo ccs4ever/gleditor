@@ -35,6 +35,8 @@
 #include "common/xanadu/vql/ast.hpp"
 #include "common/xanadu/vql/dynamic_view_registry.hpp"
 #include "common/xanadu/vql/frame_eligibility.hpp"
+#include "common/xanadu/vql/io_match.hpp"
+#include "common/xanadu/vql/limits.hpp"
 #include "common/xanadu/vql/query_error.hpp"
 #include "common/xanadu/vql/static_functor_program.hpp"
 
@@ -54,6 +56,8 @@ inline constexpr const char *outcomeBytesRelation     = "io_outcome_bytes";
 inline constexpr const char *outcomeErrorRelation     = "io_outcome_error";
 inline constexpr const char *outcomeDetailRelation    = "io_outcome_detail";
 inline constexpr const char *outcomeUncertainRelation = "io_outcome_uncertain";
+/// Why a Partial outcome stopped (`io_cause`): the typed terminal cause.
+inline constexpr const char *outcomeCauseRelation = "io_outcome_cause";
 /// Which arm an action's handle is: 0 a request still to await, 1 an outcome
 /// (a refusal or a finished request) that is already the value.
 inline constexpr const char *handleArmRelation = "io_handle_arm";
@@ -68,6 +72,15 @@ inline constexpr const char *openCapabilityRelation = "io_open_capability";
 /// request, so a named outcome does not hold a service slot (M7-VQL-c §12.1).
 /// Answers the record, or nothing when the host keeps the service's outcome.
 inline constexpr const char *ownOutcomeRelation = "io_own_outcome";
+
+/// Copy a finished outcome into a script-owned record and leave its request
+/// admitted (`await($h) as $r`: the handle stays awaitable). Answers the
+/// record, or nothing when the host keeps the service's outcome.
+inline constexpr const char *ownCopyRelation = "io_own_copy";
+/// The ordinal of the tag of the outcome a `match` is aimed at (the numbering
+/// of `IoMatchTag`); a value that is not an outcome is the host's typed
+/// refusal, never an arm.
+inline constexpr const char *matchTagRelation = "io_match_tag";
 
 /// A capture as three relations over one loop (design §6.2): begin prepares
 /// the capture and requests its append (the second form carries an offset and
@@ -93,6 +106,7 @@ outcomeFunctionRelation(const std::string_view name) noexcept {
   if (name == "io_error") return outcomeErrorRelation;
   if (name == "io_detail") return outcomeDetailRelation;
   if (name == "io_uncertain") return outcomeUncertainRelation;
+  if (name == "io_cause") return outcomeCauseRelation;
   if (name == "io_captured") return outcomeCapturedRelation;
   return nullptr;
 }
@@ -113,6 +127,9 @@ struct CompilationOptions {
     // Post-scope-analysis dependency expansion: callsites and callee/capture
     // name bytes. Initial AST/scope walks have their own traversal limits.
     std::size_t maxClosureCaptureWork{1'000'000};
+    /// The longest text a `join` may build (see limits.hpp); a join past it
+    /// is `VQL_IO_BOUND`.
+    std::size_t maxJoinedTextBytes{defaultJoinedTextBytes};
   };
 
   /// A dimension a session has mounted: a walk along it that finds nothing
@@ -492,6 +509,27 @@ private:
   /// a branch on the arm, and Await; the result is the outcome cell.
   std::optional<zigzag::CellRef>
   compileIoEffect(const IoEffectStatement &effect, std::size_t statement);
+  /// Lowers a script `match` over an outcome: one relation answers the tag
+  /// ordinal, a branch per arm selects, each arm's binders are the field
+  /// relations of its tag, and the arm's row expression is the statement's
+  /// value. Pure: no Submit, no Await.
+  std::optional<zigzag::CellRef> compileIoMatch(const IoMatchStatement &match,
+                                                std::size_t statement);
+  /// One RelationNext call of the I/O script host: the single answer per
+  /// argument is the host's value.
+  struct IoRelated {
+    zigzag::CellRef opcode;
+    zigzag::CellRef found;
+    std::vector<zigzag::CellRef> answers;
+  };
+  IoRelated ioRelate(const char *relation,
+                     const std::vector<zigzag::CellRef> &arguments);
+  /// The cell a script action's `$name` operand or source names. A name the
+  /// compile has no binding for becomes a text cell naming it (inspectable
+  /// in `vqueryc`, refused by every Submit). A name this script's own `let`
+  /// bound is a stream, so it is narrowed to exactly one value or the script
+  /// stops with `VQL_IO_EFFECT_ARGUMENT`.
+  zigzag::CellRef ioBoundCell(const std::string &name);
   void compileMountDeclarations(const QueryExpression &query);
   /// Q5, compile_dynamic_view.cpp.
   void compileDynamicShapeProjection(const ShapeLiteral &shape);
@@ -641,6 +679,7 @@ private:
   std::size_t maxNamedFrameVariants_{};
   std::size_t remainingClosedFunctorTemplateWork_{};
   std::size_t remainingClosureCaptureWork_{};
+  std::size_t maxJoinedTextBytes_{};
   std::size_t nextFunctorVariantOrdinal_{};
   std::size_t nextClosureLambdaId_{};
   std::size_t remainingGeneratedOpcodes_{};
@@ -694,6 +733,9 @@ private:
   std::vector<CompilationResult::IoActionSite> ioActions_;
   std::optional<std::size_t> failingStatement_;
   bool finalIsIoEffect_{false};
+  /// The names a `let` of this program bound, so a script action that reads
+  /// one as a source, offset or length narrows it to one value.
+  std::unordered_set<std::string> letNames_;
 
   std::unordered_map<std::string, std::optional<zigzag::CellRef>> varBindings_;
   std::unordered_map<std::string, std::vector<PathStep>> functorBindings_;

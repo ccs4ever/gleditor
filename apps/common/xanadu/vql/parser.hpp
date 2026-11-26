@@ -6,12 +6,14 @@
 #ifndef COMMON_XANADU_VQL_PARSER_HPP
 #define COMMON_XANADU_VQL_PARSER_HPP
 
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "common/xanadu/vql/ast.hpp"
+#include "common/xanadu/vql/io_match.hpp"
 #include "common/xanadu/vql/lexer.hpp"
 
 namespace xanadu::vql {
@@ -58,6 +60,9 @@ public:
   /// Parses a script I/O action: `effect { ... }` (top-level script only).
   IoEffectStatement parseIoEffectStatement();
 
+  /// Parses a script `match` over an outcome (top-level script only).
+  IoMatchStatement parseIoMatchStatement();
+
   /// Parses a store anchor.
   StoreAnchor parseStoreAnchor();
 
@@ -84,6 +89,7 @@ private:
   WhereClause parseWhereClause();
   ActionClause parseActionClause();
   ReturnClause parseReturnClause();
+  ReturnItem parseReturnItem();
   EffectClause parseEffectClause();
   ConditionalClause parseConditionalClause();
 
@@ -113,6 +119,16 @@ private:
   PathLambda parsePathLambda();
   bool isBlockBody();
   [[nodiscard]] bool atIoEffect();
+  [[nodiscard]] bool atIoMatch();
+  /// What a name bound by an earlier top-level action is, so a `match` on it
+  /// can be checked against the operation that made it.
+  struct IoSubject {
+    enum class Kind : std::uint8_t { Outcome, Handle, Capability, Receipt };
+    Kind kind{Kind::Outcome};
+    IoOperation operation{IoOperation::Any};
+  };
+  void noteIoName(const IoEffectStatement &effect);
+
   [[nodiscard]] bool checkWord(std::string_view word) const;
   void consumeWord(std::string_view word);
   Token consumeVariable(std::string_view what);
@@ -139,6 +155,10 @@ private:
   /// actions: the top-level body, not a def, watch, perspective or lambda.
   bool nextBodyIsScript_{false};
   bool effectsAllowed_{false};
+  /// The names top-level actions bound with `as`, in script order; a `let`
+  /// or `for` that rebinds one forgets it, which only makes a later `match`
+  /// on it stricter (an unknown operation must name every tag or use `_`).
+  std::map<std::string, IoSubject> ioNames_;
   bool hasLookahead_{false};
   Token lookahead_;
 };

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <gleditor/logging.hpp>
@@ -12,6 +13,8 @@
 #include <string>
 #include <utility>
 
+#include "common/xanadu/vql/io_match.hpp"
+#include "common/xanadu/vql/limits.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
 
@@ -111,8 +114,72 @@ struct HostCells {
   HostCells &operator=(const HostCells &) = delete;
 };
 
+/// The name of a Partial's cause from the number the cell store wrote; a
+/// number this build does not know is answered as it is, never invented.
+auto partialCauseName(const std::string &number) -> std::string {
+  unsigned value = 0;
+  const auto *end = number.data() + number.size();
+  const auto parsed = std::from_chars(number.data(), end, value);
+  if (parsed.ec != std::errc{} || parsed.ptr != end) return number;
+  using C = vortex::PartialCause;
+  switch (static_cast<C>(value)) {
+  case C::EndOfStream:
+    return "EndOfStream";
+  case C::Cancelled:
+    return "Cancelled";
+  case C::TimedOut:
+    return "TimedOut";
+  case C::Overflow:
+    return "Overflow";
+  case C::BackendFailure:
+    return "BackendFailure";
+  }
+  return number;
+}
+
+/// The tag a `match` arm names for a service outcome tag. A switch, not a
+/// cast: the language's numbering is its own contract with the compiler and
+/// must not silently follow a reordering of the service's enum.
+auto matchTagOf(const vortex::IoOutcomeTag tag) -> IoMatchTag {
+  using S = vortex::IoOutcomeTag;
+  switch (tag) {
+  case S::Rejected:
+    return IoMatchTag::Rejected;
+  case S::Complete:
+    return IoMatchTag::Complete;
+  case S::EndOfStream:
+    return IoMatchTag::EndOfStream;
+  case S::Partial:
+    return IoMatchTag::Partial;
+  case S::Failed:
+    return IoMatchTag::Failed;
+  case S::Cancelled:
+    return IoMatchTag::Cancelled;
+  case S::TimedOut:
+    return IoMatchTag::TimedOut;
+  case S::Overflow:
+    return IoMatchTag::Overflow;
+  case S::MessageTooLarge:
+    return IoMatchTag::MessageTooLarge;
+  case S::Stale:
+    return IoMatchTag::Stale;
+  case S::Conflict:
+    return IoMatchTag::Conflict;
+  case S::Unknown:
+    return IoMatchTag::Unknown;
+  }
+  return IoMatchTag::Unknown;
+}
+
+static_assert(defaultJoinedTextBytes ==
+                  vortex::FileReadHostOptions::defaultWriteBytes,
+              "a joined text must fit one default write (limits.hpp)");
+
+/// An action or a `match`: either needs the runner, since a match reads an
+/// outcome only the runner's relations can answer.
 auto isAction(const Statement &statement) -> bool {
-  return std::holds_alternative<IoEffectStatement>(statement);
+  return std::holds_alternative<IoEffectStatement>(statement) ||
+         std::holds_alternative<IoMatchStatement>(statement);
 }
 
 } // namespace
@@ -686,6 +753,18 @@ void ScriptRunner::installProviders() {
                               : std::nullopt);
             });
   }
+  // Why a Partial stopped: the cell store keeps the cause as its enumerator's
+  // number, which no script should have to know, so the name answers.
+  install(outcomeCauseRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            if (isCaptureReceipt(query)) return answerOnce(query, {});
+            const auto outcome = liveOutcome(query, "io_cause");
+            if (!outcome) return std::unexpected(outcome.error());
+            const auto number = ports_.bridge.outcomeField(*outcome, "cause");
+            if (!number) return answerOnce(query, {});
+            return answerOnce(query,
+                              query.arena.makeCell(partialCauseName(*number)));
+          });
   // The byte count is what the outcome retained, read through the same gate as
   // the payload; an outcome that retained none answers the bytes its progress
   // record counted (zero for a backend that reports no progress).
@@ -733,7 +812,15 @@ void ScriptRunner::installProviders() {
           });
   install(ownOutcomeRelation,
           [this](const RelationQuery &query) -> RelationResult {
-            return ownOutcome(query);
+            return ownOutcome(query, true);
+          });
+  install(ownCopyRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            return ownOutcome(query, false);
+          });
+  install(matchTagRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            return matchTag(query);
           });
   install(captureBeginRelation,
           [this](const RelationQuery &query) -> RelationResult {
@@ -1067,11 +1154,36 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
   // Every name an earlier action of this script binds: such a name is a value
   // the run makes, not one to check beforehand.
   std::set<std::string> named;
+  // Every name an earlier `let` of this script binds (before any `for`, whose
+  // lets end with the loop). Like an action's name it is a value the run
+  // makes: the compiled program narrows it to one value and the Submit hook
+  // checks that value, so there is nothing to check beforehand.
+  std::set<std::string> lets;
   for (std::size_t index = 0; index < statements.size(); ++index) {
+    if (const auto *block = std::get_if<ExecutionBlock>(&statements[index])) {
+      for (const auto &binding : block->bindings) {
+        const auto *let = std::get_if<LetClause>(&binding);
+        if (let == nullptr) break;
+        lets.insert(let->varName);
+        named.erase(let->varName);
+      }
+      continue;
+    }
     const auto *action = std::get_if<IoEffectStatement>(&statements[index]);
     if (action == nullptr) continue;
+    // A name an earlier action bound now wins over an earlier `let`.
+    const auto checked = [&](const IoOperand &value)
+        -> std::expected<std::uint64_t, FrontendDiagnostic> {
+      if (const auto *name = std::get_if<std::string>(&value);
+          name != nullptr && lets.contains(*name))
+        return std::uint64_t{0};
+      return operand(value, index);
+    };
     const auto remember = [&] {
-      if (action->resultVar) named.insert(*action->resultVar);
+      if (action->resultVar) {
+        named.insert(*action->resultVar);
+        lets.erase(*action->resultVar);
+      }
     };
     if (action->kind == IoEffectStatement::Kind::Open) {
       if (action->resultVar) opensLater.insert(*action->resultVar);
@@ -1104,9 +1216,9 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
                        index));
       }
       if (action->captureRanged) {
-        if (const auto offset = operand(action->offset, index); !offset)
+        if (const auto offset = checked(action->offset); !offset)
           return ScriptRunResult::failed(offset.error());
-        if (const auto length = operand(action->maxBytes, index); !length)
+        if (const auto length = checked(action->maxBytes); !length)
           return ScriptRunResult::failed(length.error());
       }
       remember();
@@ -1123,17 +1235,18 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
     const bool positional = action->request == IoRequestKind::ReadBytes ||
                             action->request == IoRequestKind::WriteBytes;
     if (positional) {
-      if (const auto offset = operand(action->offset, index); !offset)
+      if (const auto offset = checked(action->offset); !offset)
         return ScriptRunResult::failed(offset.error());
     }
     if (action->request == IoRequestKind::ReadBytes) {
-      if (const auto length = operand(action->maxBytes, index); !length)
+      if (const auto length = checked(action->maxBytes); !length)
         return ScriptRunResult::failed(length.error());
     }
     const bool sends = action->request == IoRequestKind::WriteBytes ||
                        action->request == IoRequestKind::AppendBytes;
     if (sends && action->source.isVariable &&
-        !named.contains(action->source.text)) {
+        !named.contains(action->source.text) &&
+        !lets.contains(action->source.text)) {
       // An unbound name would compile to a text cell holding its own name,
       // and a write would put that in the file.
       if (const auto stale = staleName(action->source.text, index))
@@ -1144,14 +1257,13 @@ auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
         return ScriptRunResult::failed(
             diagnose(vortex::frontend_codes::vqlEffectArgument,
                      "$" + action->source.text +
-                         " is not bound to exactly one cell to write (a "
-                         "name bound by a 'let' of this script is not "
-                         "visible to its actions; bind it in an earlier "
-                         "script or name an outcome with 'as')",
+                         " is not bound to exactly one cell to write (bind "
+                         "it with a 'let' or name an outcome with 'as' "
+                         "before this action)",
                      index));
     }
     if (action->within) {
-      if (const auto bound = operand(action->within->amount, index); !bound)
+      if (const auto bound = checked(action->within->amount); !bound)
         return ScriptRunResult::failed(bound.error());
     }
     remember();
@@ -1253,7 +1365,8 @@ auto ScriptRunner::gated(const vortex::OutcomeCell outcome) const
   return gate;
 }
 
-auto ScriptRunner::ownOutcome(const RelationQuery &query) -> RelationResult {
+auto ScriptRunner::ownOutcome(const RelationQuery &query,
+                              const bool retireRequest) -> RelationResult {
   const auto keep = std::optional<RelationAnswer>{std::nullopt};
   if (query.position != 0 || query.arguments.size() != 1 || current_ == nullptr)
     return keep;
@@ -1332,6 +1445,9 @@ auto ScriptRunner::ownOutcome(const RelationQuery &query) -> RelationResult {
   current_->ownedCells.push_back(cell);
   // Nothing reads the service's outcome again: the record has every field it
   // had, so the request leaves the budget now rather than at the script's end.
+  // A handle the script may still await keeps its request: the second await
+  // must find it, and the script's end retires it with the rest.
+  if (!retireRequest) return answerOnce(query, cell);
   const auto retired = *entry;
   const bool refused = !retired.request.has_value();
   if (retire(retired)) {
@@ -1342,6 +1458,28 @@ auto ScriptRunner::ownOutcome(const RelationQuery &query) -> RelationResult {
     if (refused) vortex::OwnedOutcome::freeOutcomeGraph(arena, schema, outcome);
   }
   return answerOnce(query, cell);
+}
+
+auto ScriptRunner::matchTag(const RelationQuery &query) -> RelationResult {
+  const auto cell = liveCell(query, "match");
+  if (!cell) return std::unexpected(cell.error());
+  const auto outcome =
+      vortex::OutcomeCell{cell->first, cell->second};
+  const auto tag = vortex::ioOutcomeTag(query.arena, outcome);
+  if (!tag) {
+    const auto kind = vortex::ioCellTag(query.arena, cell->first, cell->second);
+    stageFailure_   = diagnose(
+        vortex::frontend_codes::vqlMatch,
+        std::string{"a match is aimed at "} +
+            (kind && *kind == vortex::IoCellTag::Request
+                 ? "a request handle; await it first"
+                 : kind && *kind == vortex::IoCellTag::Capability
+                       ? "a capability, not an outcome"
+                       : "a value that is not an outcome"));
+    return std::unexpected(stageFailure_->message);
+  }
+  return answerOnce(query, query.arena.makeScalarCell(static_cast<std::int64_t>(
+                               matchTagOf(*tag))));
 }
 
 void ScriptRunner::releaseRecords(Activation &activation,
@@ -1577,6 +1715,24 @@ auto ScriptRunner::failedOpen(const Activation &activation,
                   statement);
 }
 
+auto ScriptRunner::failureOf(const std::string_view message,
+                             const std::optional<std::size_t> position) const
+    -> FrontendDiagnostic {
+  // A refusal the compiled program can only make while it runs (a `let` that
+  // is not one value, a `join` past its bound) is an Assert whose text leads
+  // with its registered code; only the codes of this frontend are honoured, so
+  // no user text can pose as another language's diagnostic.
+  const auto colon = message.find(": ");
+  if (colon != std::string_view::npos) {
+    const auto code = message.substr(0, colon);
+    if (code.starts_with("VQL_IO_") && ports_.diagnostics.find(code)) {
+      return diagnose(code, std::string{message.substr(colon + 2)}, position);
+    }
+  }
+  return diagnose(vortex::frontend_codes::vqlScriptFailed,
+                  std::string{message}, position);
+}
+
 auto ScriptRunner::settle(const std::shared_ptr<Activation> &activation,
                           std::expected<ProgramStep, QueryExecutionError> step)
     -> ScriptRunResult {
@@ -1586,8 +1742,7 @@ auto ScriptRunner::settle(const std::shared_ptr<Activation> &activation,
     }
     auto diagnostic =
         stageFailure_ ? std::exchange(stageFailure_, std::nullopt).value()
-                      : diagnose(vortex::frontend_codes::vqlScriptFailed,
-                                 step.error().message, step.error().statement);
+                      : failureOf(step.error().message, step.error().statement);
     if (!diagnostic.position) diagnostic.position = step.error().statement;
     endActivation(*activation);
     return ScriptRunResult::failed(std::move(diagnostic));
