@@ -695,6 +695,20 @@ public:
   [[nodiscard]] std::optional<AllocationIncarnation>
   incarnationOf(CellRef ref) const noexcept;
 
+  /// The newest incarnation this arena has handed out. Incarnations only grow,
+  /// so a caller that records this before and after a stretch of work can ask
+  /// which live cells that work allocated (liveCellsAllocatedAfter()).
+  [[nodiscard]] AllocationIncarnation newestIncarnation() const noexcept {
+    return newestIncarnation_;
+  }
+
+  /// The live cells of this arena allocated after @p after and no later than
+  /// @p upTo, in slot order. Freed slots and shadows of base cells are not
+  /// listed. O(cells this arena holds).
+  [[nodiscard]] std::vector<CellRef>
+  liveCellsAllocatedAfter(AllocationIncarnation after,
+                          AllocationIncarnation upTo) const;
+
   /// Whether @p ref still names the allocation observed earlier.
   [[nodiscard]] bool matches(CellRef ref,
                              AllocationIncarnation incarnation) const noexcept;

@@ -6,9 +6,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <gleditor/logging.hpp>
 #include <iterator>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -194,6 +196,8 @@ public:
   ProgramRun(const ProgramRun &)            = delete;
   ProgramRun &operator=(const ProgramRun &) = delete;
 
+  using Incarnation = zigzag::ArenaManifold::AllocationIncarnation;
+
   void onClose(std::function<void()> undo) { undo_.push_back(std::move(undo)); }
   void close() noexcept {
     if (closed_) return;
@@ -209,7 +213,36 @@ public:
       } catch (const std::exception &) {
       }
     }
+    reclaim();
   }
+
+  /// A stretch of the program's own execution (compile to park, resume to
+  /// park or end). Cells another party allocated between stretches, such as
+  /// the outcome the I/O service minted, are never in one.
+  void beginWindow(const Incarnation after) {
+    windows_.push_back({after, vm_.core().arena().newestIncarnation()});
+    windowOpen_ = true;
+  }
+  void endWindow() noexcept {
+    if (!windowOpen_) return;
+    windowOpen_          = false;
+    windows_.back().upTo = vm_.core().arena().newestIncarnation();
+  }
+  /// Cells a host hook allocated inside a window (the request graph a Submit
+  /// admitted). They belong to the I/O service, which reaps them itself.
+  void excludeHostCells(const Incarnation after, const Incarnation upTo) {
+    hostWindows_.push_back({after, upTo});
+  }
+  /// Free the program's cells when the run closes: the compile cells, the
+  /// spec and cursor cells and the VM's working cells. @p keep are the cells
+  /// the caller still holds (the rows), and what they reach inside the
+  /// program's own region.
+  void reclaimOnClose(std::vector<zigzag::CellRef> keep = {}) {
+    reclaimable_ = true;
+    keep_        = std::move(keep);
+  }
+  void keepCompiledProgram() noexcept { reclaimable_ = false; }
+
   [[nodiscard]] zigzag::CellRef cursor() const { return *compiled_.cursor; }
 
   zigzag::vortex::VortexVM &vm_;
@@ -222,9 +255,84 @@ public:
   std::size_t preCompileViewCount{};
 
 private:
+  struct Window {
+    Incarnation after;
+    Incarnation upTo;
+  };
+
+  [[nodiscard]] static bool within(const std::span<const Window> windows,
+                                   const Incarnation incarnation) noexcept {
+    return std::ranges::any_of(windows, [incarnation](const Window &window) {
+      return incarnation > window.after && incarnation <= window.upTo;
+    });
+  }
+
+  /// Detach every cell this run allocated and free it (P7, Repair: a rank the
+  /// program shares with cells outside it stays walkable). Never a cell the
+  /// I/O service owns, a row, or anything a row reaches within the region.
+  void reclaim() noexcept {
+    if (!reclaimable_) return;
+    reclaimable_ = false;
+    try {
+      auto &arena = vm_.core().arena();
+      std::vector<zigzag::CellRef> owned;
+      for (const auto &window : windows_) {
+        std::ranges::copy_if(
+            arena.liveCellsAllocatedAfter(window.after, window.upTo),
+            std::back_inserter(owned), [&](const zigzag::CellRef cell) {
+              return !within(hostWindows_, *arena.incarnationOf(cell));
+            });
+      }
+      std::unordered_set<zigzag::CellRef> region(owned.begin(), owned.end());
+      std::vector<zigzag::CellRef> reach;
+      std::unordered_set<zigzag::CellRef> kept;
+      for (const auto root : keep_) {
+        if (region.contains(root) && kept.insert(root).second)
+          reach.push_back(root);
+      }
+      while (!reach.empty()) {
+        const auto cell = reach.back();
+        reach.pop_back();
+        for (const auto &link : arena.dimensionsOf(cell)) {
+          for (const auto next : {link.neighbor(zigzag::DimVector::POS),
+                                  link.neighbor(zigzag::DimVector::NEG)}) {
+            if (next && region.contains(*next) && kept.insert(*next).second)
+              reach.push_back(*next);
+          }
+        }
+      }
+      std::size_t freed = 0;
+      for (const auto cell : owned) {
+        if (kept.contains(cell)) continue;
+        if (arena
+                .deleteCell(cell, *arena.incarnationOf(cell),
+                            zigzag::DeletionMode::Repair)
+                .has_value())
+          ++freed;
+      }
+      vm_.pruneAssemblyState();
+      GLEDITOR_LOG_DEBUG("vql.exec", "program reclaim freed {} of {} cells",
+                         freed, owned.size());
+    } catch (const std::exception &error) {
+      GLEDITOR_LOG_WARN("vql.exec", "program reclaim stopped: {}",
+                        error.what());
+    }
+  }
+
   std::vector<std::function<void()>> undo_;
+  std::vector<Window> windows_;
+  std::vector<Window> hostWindows_;
+  std::vector<zigzag::CellRef> keep_;
+  bool windowOpen_{false};
+  bool reclaimable_{false};
   bool closed_{false};
 };
+
+void QueryExecutor::excludeHostAllocations(
+    const zigzag::ArenaManifold::AllocationIncarnation after,
+    const zigzag::ArenaManifold::AllocationIncarnation upTo) {
+  if (active_ != nullptr) active_->excludeHostCells(after, upTo);
+}
 
 std::expected<std::vector<zigzag::CellRef>, QueryExecutionError>
 QueryExecutor::executeVortex(const QueryExpression &query,
@@ -255,6 +363,7 @@ QueryExecutor::resume(ParkedProgram &parked) {
         .category = QueryExecutionError::Category::Runtime,
         .message  = "the parked program is already finished"});
   auto run = std::move(parked.run);
+  run->beginWindow(coordinator_.core().arena().newestIncarnation());
   return advance(std::move(run));
 }
 
@@ -371,6 +480,11 @@ QueryExecutor::beginVortex(const QueryExpression &query,
     run->preCompileViewCount = preCompileViewCount;
     run->preRunTrailSize     = coordinator_.core().arena().trailSize();
     run->preRunCellCount     = coordinator_.core().arena().cellCount();
+    // An I/O script's program is reclaimed when it ends, fails or is
+    // abandoned (M7-VQL gate r1, vortex M3): the parked mark is cut, so
+    // nothing else would ever free it.
+    if (!run->compiled_.ioActions.empty()) run->reclaimOnClose();
+    run->beginWindow(preCompileMark.newestIncarnation);
     for (auto &action : undo) run->onClose(std::move(action));
     undo.clear();
     return advance(std::move(run));
@@ -398,6 +512,17 @@ std::expected<ProgramStep, QueryExecutionError>
 QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
   auto &arena       = coordinator_.core().arena();
   const auto cursor = run->cursor();
+  // The host hooks that run while the VM steps tell this executor which cells
+  // they allocated; the window closes on every way out.
+  struct Stepping {
+    QueryExecutor &executor;
+    ProgramRun &run;
+    ~Stepping() {
+      run.endWindow();
+      executor.active_ = nullptr;
+    }
+  } stepping{*this, *run};
+  active_ = run.get();
   // A mark still held here is the pre-compile one; once the run has parked it
   // was cut (see below) and the remaining paths have nothing to release.
   const auto settleMark = [&](const bool keep) {
@@ -503,8 +628,18 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
           });
       settleMark(!(noMutations && noNewResultCells));
     }
+    // Published bindings and dynamic views name cells of the program, so a
+    // script that published any keeps its compiled program; the rows and what
+    // they reach in the program's region survive either way.
+    const bool published = session_ && !run->compiled_.sessionBindings.empty();
+    if (run->compiled_.ioActions.empty() || published) {
+      run->keepCompiledProgram();
+    } else {
+      run->reclaimOnClose(cells);
+    }
     ProgramResult done{.rows            = std::move(cells),
                        .finalIsIoEffect = run->compiled_.finalIsIoEffect};
+    run->endWindow();
     run->close();
     return ProgramStep{std::move(done)};
   } catch (const TypeContractError &error) {

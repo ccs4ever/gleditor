@@ -84,6 +84,12 @@ public:
   /// delivered its outcome. Consumes @p parked.
   [[nodiscard]] std::expected<ProgramStep, QueryExecutionError>
   resume(ParkedProgram &parked);
+  /// A host hook that ran while this executor stepped a program (the Submit
+  /// admission) allocated the cells in (@p after, @p upTo]. They belong to the
+  /// host, so the program's reclamation never frees them.
+  void
+  excludeHostAllocations(zigzag::ArenaManifold::AllocationIncarnation after,
+                         zigzag::ArenaManifold::AllocationIncarnation upTo);
   [[nodiscard]] std::string_view disassembly() const noexcept {
     return disassembly_;
   }
@@ -107,6 +113,7 @@ private:
   zigzag::vortex::VortexVM &vm_;
   QueryExecutionOptions options_;
   std::string disassembly_;
+  ProgramRun *active_{nullptr};
 };
 
 } // namespace xanadu::vql

@@ -296,6 +296,19 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
   // only place that knows the request is a bounded read.
   auto &arena      = session_.coordinator().core().arena();
   const auto &dims = session_.coordinator().core().dims();
+  // Everything this admission allocates (the staged spec, the request graph,
+  // the submission sum) is the I/O service's, reaped by it, and is not part
+  // of the script's compiled program.
+  const struct HostCells {
+    QueryExecutor *executor;
+    zigzag::ArenaManifold &arena;
+    zigzag::ArenaManifold::AllocationIncarnation first;
+    ~HostCells() {
+      if (executor != nullptr)
+        executor->excludeHostAllocations(first, arena.newestIncarnation());
+    }
+  } hostCells{current_ != nullptr ? current_->executor.get() : nullptr, arena,
+              arena.newestIncarnation()};
   const zigzag::Vlog vlog{.m     = arena,
                           .clone = dims.clone,
                           .grab  = dims.grab,

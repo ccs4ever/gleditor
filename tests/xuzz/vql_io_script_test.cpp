@@ -250,6 +250,9 @@ struct ScriptWorld {
   World w;
   VQLEngine engine{w.core};
   std::vector<std::pair<std::uint64_t, std::uint64_t>> staged;
+  /// The harness stages a fresh spec cell per read and nothing here owns it
+  /// (the file host does in production), so a long test frees the old ones.
+  std::vector<CellRef> specs;
   ScriptRunner runner;
 
   ScriptWorld()
@@ -259,13 +262,23 @@ struct ScriptWorld {
                                     const std::uint64_t length)
                                  -> std::expected<CellRef, FrontendDiagnostic> {
                                staged.emplace_back(offset, length);
-                               return w.specification();
+                               return specs.emplace_back(w.specification());
                              }}) {
     engine.setVariable("cap", w.capability.cell);
   }
 
   auto run(const std::string &source) -> ScriptRunResult {
     return runner.run(Parser(source).parseQuery());
+  }
+  /// Free every staged spec but the newest two, whose requests may be live.
+  void freeOldSpecs() {
+    constexpr std::size_t live = 2;
+    while (specs.size() > live) {
+      const auto spec = specs.front();
+      specs.erase(specs.begin());
+      if (const auto inc = w.arena.incarnationOf(spec))
+        static_cast<void>(w.arena.freeCell(spec, *inc));
+    }
   }
   /// Pump the host and resume whatever it woke.
   auto wakeAndResume() -> ScriptRunResult {
@@ -685,27 +698,64 @@ TEST(VqlIoScriptTest, AnAbandonedActivationRetiresItsRequest) {
       << "the abandoned script's terminal request was retired";
 }
 
-TEST(VqlIoScriptTest, AnEffectScriptRunRetainsAPricedConstantNumberOfCells) {
-  // M7-VQL gate r1, vortex M3 (CONFIRMED, reclamation deferred as proposal
-  // P7). A parked script cuts its pre-compile mark, so its compiled program
-  // stays in the arena: measured 37-40 cells per run. Freeing it needs the
-  // arena to say which ranks a cell sits in, which is a core change. This
-  // pins the price so it cannot grow unnoticed; it is not a bound.
+TEST(VqlIoScriptTest, ManyEffectScriptRunsLeaveTheArenaBounded) {
+  // M7-VQL gate r1, vortex M3: a parked script cuts its pre-compile mark, so
+  // its compiled program (37-40 cells per run) used to stay for the life of
+  // the arena. The run now detaches and frees its own cells with the P7
+  // deletion when it ends, so a long session's arena is bounded by what is
+  // live, not by how many scripts ran.
   ScriptWorld s;
-  const auto measure = [&](const std::size_t runs) {
-    for (std::size_t i = 0; i < runs; ++i) {
-      const auto begun = s.run(readOnCap);
-      ASSERT_NE(parkedToken(begun), nullptr);
-      s.w.complete(s.w.submissions() - 1, EndOfStream{{}});
-      ASSERT_NE(completedRows(s.wakeAndResume()), nullptr);
-    }
+  const auto once = [&] {
+    const auto begun = s.run(readOnCap);
+    ASSERT_NE(parkedToken(begun), nullptr);
+    s.w.complete(s.w.submissions() - 1, EndOfStream{{}});
+    ASSERT_NE(completedRows(s.wakeAndResume()), nullptr);
+    s.freeOldSpecs();
   };
-  measure(8);
-  const auto warm                         = s.w.arena.cellCount();
-  constexpr std::size_t n                 = 2000;
-  constexpr std::size_t pricedCellsPerRun = 40;
-  measure(n);
-  EXPECT_LE(s.w.arena.cellCount() - warm, n * pricedCellsPerRun);
+  for (std::size_t i = 0; i < 8; ++i) once();
+  const auto warmSlots       = s.w.arena.cellCount();
+  const auto warmLive        = s.w.arena.liveCells();
+  constexpr std::size_t runs = 10'000;
+  for (std::size_t i = 0; i < runs; ++i) once();
+  EXPECT_EQ(s.w.arena.cellCount(), warmSlots)
+      << "the slot high-water mark did not move";
+  EXPECT_EQ(s.w.arena.liveCells(), warmLive);
+}
+
+TEST(VqlIoScriptTest, AnAbandonedScriptFreesItsProgramToo) {
+  ScriptWorld s;
+  const auto abandonOnce = [&] {
+    const auto begun = s.run(readOnCap);
+    ASSERT_NE(parkedToken(begun), nullptr);
+    s.w.complete(s.w.submissions() - 1, EndOfStream{{}});
+    static_cast<void>(s.w.pump());
+    auto woken = s.runner.takeWake();
+    ASSERT_TRUE(woken);
+    woken->why = FrontendWake::Abandoned;
+    EXPECT_NE(failedDiagnostic(s.runner.resume(*std::move(woken))), nullptr);
+    s.freeOldSpecs();
+  };
+  for (std::size_t i = 0; i < 8; ++i) abandonOnce();
+  const auto warmSlots = s.w.arena.cellCount();
+  for (std::size_t i = 0; i < 500; ++i) abandonOnce();
+  EXPECT_EQ(s.w.arena.cellCount(), warmSlots);
+}
+
+TEST(VqlIoScriptTest, AFinishedScriptsRowsAndOutcomeSurviveItsProgram) {
+  ScriptWorld s;
+  const auto begun  = s.run(readOnCap);
+  const auto *token = parkedToken(begun);
+  ASSERT_NE(token, nullptr);
+  const auto request = token->request;
+  s.w.complete(s.w.submissions() - 1, EndOfStream{{}});
+  const auto resumed = s.wakeAndResume();
+  const auto *done   = completedRows(resumed);
+  ASSERT_NE(done, nullptr);
+  ASSERT_FALSE(done->empty());
+  for (const auto row : *done) EXPECT_TRUE(s.w.arena.contains(row));
+  const auto polled = s.w.service.poll(request).outcome;
+  ASSERT_TRUE(polled);
+  EXPECT_EQ(done->front(), polled->cell);
 }
 
 TEST(VqlIoScriptTest, DestroyingARunnerRetiresItsTerminalRequestOnly) {

@@ -54,6 +54,23 @@ ArenaManifold::incarnationOf(const CellRef ref) const noexcept {
   return incarnations_[*dense];
 }
 
+std::vector<CellRef>
+ArenaManifold::liveCellsAllocatedAfter(const AllocationIncarnation after,
+                                       const AllocationIncarnation upTo) const {
+  std::vector<CellRef> found;
+  for (std::uint32_t dense = 0; dense < incarnations_.size(); ++dense) {
+    const auto incarnation = incarnations_[dense];
+    const auto ref         = refOf(dense);
+    // A shadow of a base cell keeps the base cell's name in birthOp.
+    if (incarnation > after && incarnation <= upTo &&
+        0 == (slots_[dense].flags & freedSlotFlag) &&
+        slots_[dense].birthOp == ref) {
+      found.push_back(ref);
+    }
+  }
+  return found;
+}
+
 bool ArenaManifold::matches(
     const CellRef ref, const AllocationIncarnation incarnation) const noexcept {
   const auto current = incarnationOf(ref);
