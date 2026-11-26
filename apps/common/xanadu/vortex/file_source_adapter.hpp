@@ -140,21 +140,50 @@ using StageKey = OwnerCell;
 
 /// Rights bits for file endpoint `OpenSpec::requestedRights` /
 /// `OpenGrant::rights` (adapter-defined per plan §3.3): bit 0 read, bit 1
-/// write. An open always carries read; write additionally requires the
-/// bit and opens the descriptor O_RDWR.
-inline constexpr std::uint64_t fileRightRead  = 1ULL << 0;
-inline constexpr std::uint64_t fileRightWrite = 1ULL << 1;
+/// positional write, bit 2 append, bit 3 create. An open always carries
+/// read. Write opens the descriptor O_RDWR; append opens it O_RDWR|O_APPEND
+/// (the kernel, not the request, then decides where bytes land, so a
+/// positional write on it is refused rather than silently relocated);
+/// create adds O_CREAT|O_EXCL and needs write or append beside it. Write and
+/// append are exclusive: one capability has one write discipline.
+/// (design/vortex-io-m7-vql-c.md §4.1-§4.3.)
+inline constexpr std::uint64_t fileRightRead   = 1ULL << 0;
+inline constexpr std::uint64_t fileRightWrite  = 1ULL << 1;
+inline constexpr std::uint64_t fileRightAppend = 1ULL << 2;
+inline constexpr std::uint64_t fileRightCreate = 1ULL << 3;
+
+/// Every right that lets a capability change the file; what a host's write
+/// grant has to approve (a read right never needs one).
+inline constexpr std::uint64_t fileRightsMutating =
+    fileRightWrite | fileRightAppend | fileRightCreate;
+
+/// `IoErrorInfo::detail` for the typed refusals a write path raises, so a
+/// script can tell them apart without parsing text (design note §7).
+inline constexpr std::uint32_t fileDetailNoWriteGrant = 1;
+inline constexpr std::uint32_t fileDetailWrongMode    = 2;
 
 /// A bounded file operation for `stageAt`: the same frozen arguments
 /// `stageRead`/`stageWrite`/`stageStableRead` take, under a caller-chosen
 /// key (the minted spec cell's ref) for callers crossing an `IoCellStore`.
 struct FileOpSpec {
-  enum class Kind : std::uint8_t { Read, Write, StableRead } kind{Kind::Read};
+  /// `Append` writes at the end through an O_APPEND descriptor (no offset);
+  /// `Sync` is `fdatasync`, a request of its own because a write is not
+  /// durable until one says so (plan §7.1). New kinds go last: a stage key's
+  /// meaning must not shift under a rebuilt test.
+  enum class Kind : std::uint8_t {
+    Read,
+    Write,
+    StableRead,
+    Append,
+    Sync
+  } kind{Kind::Read};
   /// Read/StableRead: the checked 64-bit source range. Write: `offset` is
   /// the write offset (`length` is ignored; the byte count comes from
-  /// `writeBytes`).
+  /// `writeBytes`). Append and Sync ignore it.
   MediaRange range{};
-  /// Write only: the frozen bytes to pwrite.
+  /// Write/Append only: the frozen bytes. They sit in the staging table only
+  /// until `prepare`, which moves them into the prepared command so the
+  /// service charges them to its command budget.
   std::vector<std::byte> writeBytes;
   /// Expected generation id at staging time (see `currentGeneration`);
   /// nullopt performs no check.
@@ -193,7 +222,11 @@ public:
   /// (`FileSourceIdentity::OpenedInode`). A negative @p fd behaves like a
   /// failed open: `probeCapabilities` reports nullopt and `prepare` refuses
   /// `Unsupported`.
-  FileSourceAdapter(int fd, std::string path, bool writable);
+  /// @p append says the descriptor was opened O_APPEND: `Append` ops are then
+  /// the only writes it accepts and `Write` is refused, because `pwrite` to
+  /// an O_APPEND descriptor ignores its offset on Linux.
+  FileSourceAdapter(int fd, std::string path, bool writable,
+                    bool append = false);
   ~FileSourceAdapter() override;
   FileSourceAdapter(const FileSourceAdapter &)                     = delete;
   auto operator=(const FileSourceAdapter &) -> FileSourceAdapter & = delete;
@@ -302,6 +335,7 @@ private:
   int fd_{-1};
   std::string path_;
   bool writable_{false};
+  bool append_{false};
 
   mutable std::mutex mutex_;
   std::unordered_map<StageKey, StagedFileOp> staged_;

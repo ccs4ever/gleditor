@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -1006,8 +1007,11 @@ TEST_F(FileSourceAdapterTest, CancelDuringWriteReportsUncertainPartial) {
   ASSERT_TRUE(prepared);
   CapturingSink sink{&payloads};
 
-  std::thread worker(
-      [&] { adapter.execute(BackendCommand{{1}, *prepared}, context, sink); });
+  // The prepared command now carries the 64 MiB of write bytes, so copying it
+  // into a BackendCommand inside the worker would eat the 1 ms stop window
+  // before execute even started; build it first.
+  const BackendCommand command{{1}, *prepared};
+  std::thread worker([&] { adapter.execute(command, context, sink); });
   // The first pwrite moves fileLimit bytes (~5-15 ms); stopping at 1 ms
   // lands inside it on any realistic host, so iteration two observes the
   // stop. Even a stop that beats the worker to the first check still
@@ -1035,6 +1039,211 @@ TEST_F(FileSourceAdapterTest, CancelDuringWriteReportsUncertainPartial) {
   struct stat st{};
   ASSERT_EQ(::stat(path_.c_str(), &st), 0);
   EXPECT_LE(static_cast<std::uint64_t>(st.st_size), fileLimit);
+}
+
+// ---- M7-VQL-c C1: append, sync, and write bytes carried in the command ----
+
+/// Run one prepared op to its terminal result on the calling thread.
+BackendResult runOp(FileSourceAdapter &adapter, PayloadResolver &payloads,
+                    const std::optional<StageKey> &key) {
+  OwnerContext owner;
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  EXPECT_TRUE(prepared.has_value());
+  if (!prepared) return {};
+  auto context = makeContext(payloads);
+  CapturingSink sink{&payloads};
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  EXPECT_TRUE(sink.candidate.has_value());
+  return sink.candidate.value_or(BackendResult{});
+}
+
+TEST_F(FileSourceAdapterTest, PreparedWriteCommandCarriesTheBytesItWrites) {
+  writeFile("0123456789");
+  FileSourceAdapter adapter(path_, /*writable=*/true);
+  OwnerContext owner;
+
+  // The service charges `prepared.bytes.size()` to its command budget, so a
+  // write's bytes must travel in it: a command of only the key charged a
+  // 1 MiB write as 8 bytes.
+  const auto key      = adapter.stageWrite(2, bytesOf("XYZ"), std::nullopt);
+  const auto prepared = adapter.prepare(requestFor(key), owner);
+  ASSERT_TRUE(prepared.has_value());
+  EXPECT_EQ(prepared->bytes.size(), sizeof(StageKey) + 3U);
+
+  // A read's command is still just the key.
+  const auto readKey = adapter.stageRead(MediaRange{0, 4}, std::nullopt);
+  const auto read    = adapter.prepare(requestFor(readKey), owner);
+  ASSERT_TRUE(read.has_value());
+  EXPECT_EQ(read->bytes.size(), sizeof(StageKey));
+}
+
+TEST_F(FileSourceAdapterTest, PreparingAWriteTwiceIsRefusedNotAnEmptyWrite) {
+  writeFile("0123456789");
+  FileSourceAdapter adapter(path_, /*writable=*/true);
+  OwnerContext owner;
+
+  const auto key = adapter.stageWrite(0, bytesOf("XYZ"), std::nullopt);
+  ASSERT_TRUE(adapter.prepare(requestFor(key), owner).has_value());
+  // The bytes left the staging table with the first prepare; a second would
+  // otherwise report Complete for a write of nothing.
+  const auto second = adapter.prepare(requestFor(key), owner);
+  ASSERT_FALSE(second.has_value());
+  EXPECT_EQ(second.error().code, IoErrorCode::InvalidRequest);
+}
+
+TEST_F(FileSourceAdapterTest, PreparedWriteBytesLeaveTheStagedByteLedger) {
+  writeFile("x");
+  FileSourceAdapter adapter(path_, /*writable=*/true);
+  OwnerContext owner;
+
+  // The ledger bounds bytes the table holds; bytes already moved into a
+  // command are charged by the service instead, so they must not count twice.
+  const auto chunk = std::vector<std::byte>(8U * 1024U * 1024U);
+  std::vector<StageKey> keys;
+  for (int i = 0; i < 4096; ++i) {
+    const auto key = adapter.stageWrite(0, chunk, std::nullopt);
+    if (!key) break;
+    keys.push_back(*key);
+  }
+  ASSERT_FALSE(keys.empty());
+  EXPECT_FALSE(adapter.stageWrite(0, chunk, std::nullopt).has_value());
+  ASSERT_TRUE(adapter.prepare(requestFor(keys.front()), owner).has_value());
+  EXPECT_TRUE(adapter.stageWrite(0, chunk, std::nullopt).has_value());
+}
+
+TEST_F(FileSourceAdapterTest, ZeroByteWriteCompletesWithNothingTransferred) {
+  writeFile("keep");
+  FileSourceAdapter adapter(path_, /*writable=*/true);
+  PayloadResolver payloads;
+
+  const auto result =
+      runOp(adapter, payloads, adapter.stageWrite(0, {}, std::nullopt));
+  const auto *complete = std::get_if<Complete>(&result.outcome);
+  ASSERT_NE(complete, nullptr);
+  EXPECT_EQ(complete->progress.transferredBytes, 0U);
+}
+
+TEST_F(FileSourceAdapterTest, AppendWritesAtTheEndThroughAnAppendDescriptor) {
+  writeFile("head:");
+  const int fd = ::open(path_.c_str(), O_RDWR | O_APPEND);
+  ASSERT_GE(fd, 0);
+  FileSourceAdapter adapter(fd, path_, /*writable=*/true, /*append=*/true);
+  PayloadResolver payloads;
+
+  for (const char *piece : {"one,", "two,"}) {
+    const auto staged =
+        adapter.stageAt(3, FileOpSpec{.kind       = FileOpSpec::Kind::Append,
+                                      .writeBytes = bytesOf(piece)});
+    ASSERT_TRUE(staged.has_value());
+    const auto result = runOp(adapter, payloads, *staged);
+    const auto *done  = std::get_if<Complete>(&result.outcome);
+    ASSERT_NE(done, nullptr);
+    EXPECT_EQ(done->progress.transferredBytes, 4U);
+    adapter.abandon(*staged);
+  }
+  std::ifstream in(path_, std::ios::binary);
+  std::string content((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+  EXPECT_EQ(content, "head:one,two,");
+}
+
+TEST_F(FileSourceAdapterTest, AppendIgnoresAnOffsetTheCallerSupplied) {
+  writeFile("0123456789");
+  const int fd = ::open(path_.c_str(), O_RDWR | O_APPEND);
+  ASSERT_GE(fd, 0);
+  FileSourceAdapter adapter(fd, path_, true, true);
+  PayloadResolver payloads;
+
+  // The offset of an append is not the request's to give: the kernel places
+  // the bytes, so a stale `range` can never relocate them.
+  const auto staged =
+      adapter.stageAt(1, FileOpSpec{.kind       = FileOpSpec::Kind::Append,
+                                    .range      = MediaRange{0, 0},
+                                    .writeBytes = bytesOf("TAIL")});
+  ASSERT_TRUE(staged.has_value());
+  const auto result = runOp(adapter, payloads, *staged);
+  ASSERT_NE(std::get_if<Complete>(&result.outcome), nullptr);
+  std::ifstream in(path_, std::ios::binary);
+  std::string content((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+  EXPECT_EQ(content, "0123456789TAIL");
+}
+
+TEST_F(FileSourceAdapterTest, ModeMismatchIsRefusedWithTheWrongModeDetail) {
+  writeFile("0123456789");
+  OwnerContext owner;
+  const auto expectWrongMode = [&](FileSourceAdapter &adapter,
+                                   const std::optional<StageKey> &key) {
+    const auto prepared = adapter.prepare(requestFor(key), owner);
+    ASSERT_FALSE(prepared.has_value());
+    EXPECT_EQ(prepared.error().code, IoErrorCode::Unsupported);
+    EXPECT_EQ(prepared.error().stableDetail, fileDetailWrongMode);
+  };
+
+  // Positional write on an append descriptor: Linux would ignore the offset.
+  const int appendFd = ::open(path_.c_str(), O_RDWR | O_APPEND);
+  ASSERT_GE(appendFd, 0);
+  FileSourceAdapter appendOnly(appendFd, path_, true, true);
+  expectWrongMode(appendOnly, appendOnly.stageWrite(0, bytesOf("x"), {}));
+
+  // Append on a positional descriptor, and either write on a read-only one.
+  FileSourceAdapter positional(path_, /*writable=*/true);
+  const auto appendKey =
+      positional.stageAt(1, FileOpSpec{.kind       = FileOpSpec::Kind::Append,
+                                       .writeBytes = bytesOf("x")});
+  ASSERT_TRUE(appendKey.has_value());
+  expectWrongMode(positional, *appendKey);
+
+  FileSourceAdapter readOnly(path_, /*writable=*/false);
+  expectWrongMode(readOnly, readOnly.stageWrite(0, bytesOf("x"), {}));
+  const auto syncKey =
+      readOnly.stageAt(2, FileOpSpec{.kind = FileOpSpec::Kind::Sync});
+  ASSERT_TRUE(syncKey.has_value());
+  expectWrongMode(readOnly, *syncKey);
+}
+
+TEST_F(FileSourceAdapterTest, SyncCompletesOnAWritableFileAndCarriesNoBytes) {
+  writeFile("data");
+  FileSourceAdapter adapter(path_, /*writable=*/true);
+  PayloadResolver payloads;
+  OwnerContext owner;
+
+  EXPECT_FALSE(adapter
+                   .stageAt(1, FileOpSpec{.kind       = FileOpSpec::Kind::Sync,
+                                          .writeBytes = bytesOf("no")})
+                   .has_value());
+  const auto staged =
+      adapter.stageAt(2, FileOpSpec{.kind = FileOpSpec::Kind::Sync});
+  ASSERT_TRUE(staged.has_value());
+  const auto prepared = adapter.prepare(requestFor(*staged), owner);
+  ASSERT_TRUE(prepared.has_value());
+  EXPECT_EQ(prepared->bytes.size(), sizeof(StageKey));
+  auto context = makeContext(payloads);
+  CapturingSink sink{&payloads};
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  ASSERT_TRUE(sink.candidate.has_value());
+  EXPECT_NE(std::get_if<Complete>(&sink.candidate->outcome), nullptr);
+}
+
+TEST_F(FileSourceAdapterTest, SyncStoppedBeforeItStartsIsCancelledNotComplete) {
+  writeFile("data");
+  FileSourceAdapter adapter(path_, /*writable=*/true);
+  PayloadResolver payloads;
+  OwnerContext owner;
+  std::stop_source stop;
+  stop.request_stop();
+
+  const auto staged =
+      adapter.stageAt(2, FileOpSpec{.kind = FileOpSpec::Kind::Sync});
+  const auto prepared = adapter.prepare(requestFor(*staged), owner);
+  ASSERT_TRUE(prepared.has_value());
+  auto context = makeContext(payloads, stop.get_token());
+  CapturingSink sink{&payloads};
+  adapter.execute(BackendCommand{{1}, *prepared}, context, sink);
+  ASSERT_TRUE(sink.candidate.has_value());
+  const auto *cancelled = std::get_if<Cancelled>(&sink.candidate->outcome);
+  ASSERT_NE(cancelled, nullptr);
+  EXPECT_FALSE(cancelled->uncertain);
 }
 
 } // namespace

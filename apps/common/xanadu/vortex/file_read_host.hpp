@@ -20,10 +20,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common/xanadu/vortex/arena_io_cell_store.hpp"
 #include "common/xanadu/vortex/file_endpoint_adapter.hpp"
@@ -34,6 +37,23 @@
 #include "common/xanadu/vortex/io_service.hpp"
 
 namespace xanadu::vortex {
+
+/// The host's write policy: given the CANONICAL locator of an open that asks
+/// to change a file (symlinks and `..` already resolved by the host, so the
+/// policy sees the path the kernel would), the subset of
+/// `fileRightsMutating` it may be opened with. Empty (the default) and a zero
+/// return both deny. Authority to write belongs to the invoking human's
+/// program, never to a script (design/vortex-io-m7-vql-c.md §4.1).
+using WriteGrant = std::function<std::uint64_t(std::string_view)>;
+
+/// A `WriteGrant` that allows @p rights to any file strictly beneath one of
+/// @p roots and nothing elsewhere. Roots are canonicalised once, here, so a
+/// symlinked root names its target; a root that cannot be canonicalised
+/// grants nothing. Containment is by path component, so `/data/out` does not
+/// admit `/data/outside`.
+[[nodiscard]] auto
+writeRootGrant(const std::vector<std::filesystem::path> &roots,
+               std::uint64_t rights = fileRightsMutating) -> WriteGrant;
 
 /// Defaults for an embedded file-read stack. They are the bounds the M5
 /// adapter tests run under: a handful of in-flight requests, a few MiB of
@@ -47,6 +67,10 @@ struct FileReadHostOptions {
   static constexpr std::size_t defaultEndpointRequests = 8;
   /// What one read may retain; also the bound a read's byte count must meet.
   static constexpr std::size_t defaultPayloadBytes = 1U << 20;
+  /// What one write may carry: the same bound as a read's payload, so a
+  /// range read can be written back whole. The bytes are charged to the
+  /// service's command budget at admission, not just to this bound.
+  static constexpr std::size_t defaultWriteBytes = defaultPayloadBytes;
   static constexpr std::chrono::milliseconds defaultOpenDeadline{5000};
 
   std::size_t workers{defaultWorkers};
@@ -55,16 +79,22 @@ struct FileReadHostOptions {
   std::size_t budgetBytes{defaultBudgetBytes};
   std::size_t endpointRequests{defaultEndpointRequests};
   std::size_t payloadBytes{defaultPayloadBytes};
+  std::size_t writeBytes{defaultWriteBytes};
   std::chrono::milliseconds openDeadline{defaultOpenDeadline};
+  /// Empty denies every open that asks to write, append or create: the safe
+  /// default, so a host with no flag set can change no file.
+  WriteGrant writeGrant;
   /// The clock request deadlines are read against; empty is the steady clock.
   /// A test injects one so a deadline expires on demand.
   IoClock clock;
 };
 
-/// Why a read could not be staged. Nothing was submitted in any of them.
+/// Why a read, write, append or sync could not be staged. Nothing was
+/// submitted in any of them.
 enum class StageReadError : std::uint8_t {
   NotAFileCapability, ///< the capability's endpoint is not an open file
   OutOfBounds,        ///< offset + length overflows, or exceeds the bound
+                      ///< (a read's payload bound, a write's `writeBytes`)
   Refused,            ///< the adapter refused the staged operation
 };
 
@@ -84,12 +114,18 @@ public:
   /// Admit an asynchronous open of @p path for reading. The open runs on a
   /// worker; poll `openedCapability` while pumping. Refused (a malformed or
   /// unauthorised open) is a diagnostic: nothing was started.
-  [[nodiscard]] auto beginOpen(std::string_view path)
+  [[nodiscard]] auto beginOpen(std::string_view path,
+                               std::uint64_t rights = fileRightRead)
       -> std::expected<RequestCell, FrontendDiagnostic>;
   /// The open request of @p path as a specification, with this host's
   /// default open deadline on its clock. A language that wants the open as
   /// its own managed submission value admits it through `bridge()`.
-  [[nodiscard]] auto openSpec(std::string_view path) const -> OpenSpec;
+  /// @p rights beyond read are requests the host's `writeGrant` still has to
+  /// approve at admission; for them the locator is the canonical path, so
+  /// the worker opens exactly the path the grant judged.
+  [[nodiscard]] auto openSpec(std::string_view path,
+                              std::uint64_t rights = fileRightRead) const
+      -> OpenSpec;
   /// The capability an open outcome minted, when it completed with one.
   [[nodiscard]] auto capabilityOf(OutcomeCell open) const
       -> std::optional<CapabilityCell>;
@@ -108,6 +144,21 @@ public:
   /// specification cell a submit takes. Owner thread; starts no I/O.
   [[nodiscard]] auto stageRead(CapabilityCell capability, std::uint64_t offset,
                                std::uint64_t length)
+      -> std::expected<zigzag::CellRef, StageReadError>;
+
+  /// Stage a positional write of @p bytes at @p offset. The bytes are frozen
+  /// here, so later changes to the caller's buffer cannot reach the file.
+  /// Owner thread; starts no I/O. Refused `OutOfBounds` past `writeBytes`.
+  [[nodiscard]] auto stageWrite(CapabilityCell capability, std::uint64_t offset,
+                                std::vector<std::byte> bytes)
+      -> std::expected<zigzag::CellRef, StageReadError>;
+  /// Stage an append of @p bytes (the capability must be an append open).
+  [[nodiscard]] auto stageAppend(CapabilityCell capability,
+                                 std::vector<std::byte> bytes)
+      -> std::expected<zigzag::CellRef, StageReadError>;
+  /// Stage a durable sync (`fdatasync`) of the capability's file; the write
+  /// lane runs it after every earlier write on the endpoint.
+  [[nodiscard]] auto stageSync(CapabilityCell capability)
       -> std::expected<zigzag::CellRef, StageReadError>;
 
   /// Publish completions and deliver wakes; never blocks.
@@ -136,6 +187,12 @@ private:
   IoHost host_;
   FrontendDiagnosticRegistry diagnostics_;
   FrontendBridge bridge_;
+
+  /// Mint the spec cell tagged @p tag and stage @p op under it on the file
+  /// @p capability names; shared by every stage* above.
+  [[nodiscard]] auto stageOp(CapabilityCell capability, std::string_view tag,
+                             FileOpSpec op)
+      -> std::expected<zigzag::CellRef, StageReadError>;
 };
 
 } // namespace xanadu::vortex

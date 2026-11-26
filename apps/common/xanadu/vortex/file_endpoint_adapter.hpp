@@ -100,6 +100,8 @@ struct FileEndpointOp {
 inline constexpr std::string_view fileReadSpecTag   = "io.file.read";
 inline constexpr std::string_view fileWriteSpecTag  = "io.file.write";
 inline constexpr std::string_view fileStableSpecTag = "io.file.stable";
+inline constexpr std::string_view fileAppendSpecTag = "io.file.append";
+inline constexpr std::string_view fileSyncSpecTag   = "io.file.sync";
 
 class FileEndpointAdapter final : public IoAdapter {
 public:
@@ -208,9 +210,11 @@ makeFileCloseDecoder(const FileEndpointAdapter &adapter);
 /// Build the `RequestDecoder` an `ArenaIoCellStore` needs for file
 /// endpoints opened through `FileEndpointAdapter` registered at @p
 /// dataKey (`fileDataAdapterKey`). The spec cell's text selects the
-/// operation -- `fileReadSpecTag`/`fileWriteSpecTag`/`fileStableSpecTag` --
+/// operation -- `fileReadSpecTag`/`fileWriteSpecTag`/`fileAppendSpecTag`/
+/// `fileSyncSpecTag`/`fileStableSpecTag` --
 /// while the staged op itself lives in `FileEndpointAdapter::stageAt`.
-/// Reads may retain up to @p payloadBoundBytes; writes declare none.
+/// Reads may retain up to @p payloadBoundBytes; writes, appends and syncs
+/// declare none.
 [[nodiscard]] std::function<
     std::expected<CellRequest, IoErrorInfo>(CapabilityCell, OwnerCell)>
 makeFileRequestDecoder(zigzag::ArenaManifold &arena, AdapterKey dataKey,

@@ -17,9 +17,18 @@
 namespace xanadu::vortex {
 namespace {
 
-/// Open command encoding: [flags:1][locator bytes]. flags bit0 is writable,
-/// taken from `OpenSpec::requestedRights & fileRightWrite` at prepare time.
+/// Open command encoding: [flags:1][locator bytes]. The flags are taken from
+/// `OpenSpec::requestedRights` at prepare time: bit0 positional write, bit1
+/// append (O_APPEND), bit2 create (O_CREAT|O_EXCL).
 constexpr std::uint8_t openFlagWritable = 1;
+constexpr std::uint8_t openFlagAppend   = 2;
+constexpr std::uint8_t openFlagCreate   = 4;
+
+/// Permission bits of a file this adapter creates, before the umask. A file
+/// a script made is the author's own report or log, not a shared artefact,
+/// so it starts private; widening it is a separate decision the author makes
+/// with their own tools.
+constexpr mode_t createdFileMode = 0600;
 
 /// Spdlog category for this adapter's diagnostics.
 constexpr const char *fileLogCategory = "vortex.io.file";
@@ -128,9 +137,18 @@ auto FileEndpointAdapter::prepare(const CellRequest &request,
     if (spec.consistency != 0 && (spec.consistency & ioConsistencyLive) == 0)
       return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
     const bool writable = (spec.requestedRights & fileRightWrite) != 0;
+    const bool append   = (spec.requestedRights & fileRightAppend) != 0;
+    const bool create   = (spec.requestedRights & fileRightCreate) != 0;
+    // One capability has one write discipline, and creation alone would
+    // make a file nobody asked to write: both are refused, not guessed at.
+    if ((writable && append) || (create && !writable && !append))
+      return std::unexpected(
+          IoErrorInfo{IoErrorCode::Unsupported, fileDetailWrongMode});
     std::vector<std::byte> bytes;
     bytes.reserve(spec.locator.size() + 1);
-    bytes.push_back(static_cast<std::byte>(writable ? openFlagWritable : 0));
+    bytes.push_back(static_cast<std::byte>((writable ? openFlagWritable : 0) |
+                                           (append ? openFlagAppend : 0) |
+                                           (create ? openFlagCreate : 0)));
     bytes.insert(bytes.end(), spec.locator.begin(), spec.locator.end());
     return PreparedOperation{request.key, std::move(bytes)};
   }
@@ -172,8 +190,10 @@ void FileEndpointAdapter::execute(const BackendCommand &command,
           Failed{{IoErrorCode::InvalidRequest, 0}, {}, terminalProgress()});
       return;
     }
-    const bool writable =
-        (static_cast<std::uint8_t>(bytes.front()) & openFlagWritable) != 0;
+    const auto flags    = static_cast<std::uint8_t>(bytes.front());
+    const bool append   = (flags & openFlagAppend) != 0;
+    const bool writable = (flags & openFlagWritable) != 0 || append;
+    const bool create   = (flags & openFlagCreate) != 0;
     const std::string locator(reinterpret_cast<const char *>(bytes.data() + 1),
                               bytes.size() - 1);
     // The open itself runs here, on the scheduler worker -- never the
@@ -182,8 +202,15 @@ void FileEndpointAdapter::execute(const BackendCommand &command,
     // O_NONBLOCK keeps a FIFO or device locator from parking this worker in
     // open() with no way to cancel it; O_CLOEXEC keeps the descriptor from
     // leaking into a child process. Only a regular file is a file endpoint.
-    const int fd = ::open(locator.c_str(), (writable ? O_RDWR : O_RDONLY) |
-                                               O_CLOEXEC | O_NONBLOCK);
+    // A write mode adds O_NOFOLLOW so a symlink swapped in after the host's
+    // path check cannot redirect the write (the check cannot promise more
+    // than the path it saw); create adds O_EXCL so it fails rather than
+    // clobber, which also makes it refuse a symlink at the final component.
+    int openFlags = (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NONBLOCK;
+    if (append) openFlags |= O_APPEND;
+    if (writable) openFlags |= O_NOFOLLOW;
+    if (create) openFlags |= O_CREAT | O_EXCL;
+    const int fd = ::open(locator.c_str(), openFlags, createdFileMode);
     if (fd >= 0) {
       struct stat st{};
       if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
@@ -206,7 +233,8 @@ void FileEndpointAdapter::execute(const BackendCommand &command,
     // Everything that can throw sits in this try: execute is noexcept.
     std::shared_ptr<FileSourceAdapter> opened;
     try {
-      opened = std::make_shared<FileSourceAdapter>(fd, locator, writable);
+      opened =
+          std::make_shared<FileSourceAdapter>(fd, locator, writable, append);
       const std::lock_guard lock(mutex_);
       files_.emplace(nextOpenId_, OpenFile{locator, opened});
       pendingOpens_.emplace(command.token.value, nextOpenId_);
@@ -370,7 +398,10 @@ auto makeFileRequestDecoder(zigzag::ArenaManifold &arena, AdapterKey dataKey,
              -> std::expected<CellRequest, IoErrorInfo> {
     const auto text                  = arena.textOf(specification);
     CellRequest::Direction direction = CellRequest::Direction::Read;
-    if (text == fileWriteSpecTag) {
+    // Sync rides the write lane: the lane rule then runs it after every
+    // earlier admitted write on the endpoint, which is what "durable" needs.
+    if (text == fileWriteSpecTag || text == fileAppendSpecTag ||
+        text == fileSyncSpecTag) {
       direction = CellRequest::Direction::Write;
     } else if (text != fileReadSpecTag && text != fileStableSpecTag) {
       return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
@@ -378,8 +409,8 @@ auto makeFileRequestDecoder(zigzag::ArenaManifold &arena, AdapterKey dataKey,
     return CellRequest{
         .key        = dataKey,
         .capability = capability,
-        // Reads may retain up to payloadBoundBytes; writes produce no
-        // payload, so they declare none (completionBoundBytes still covers
+        // Reads may retain up to payloadBoundBytes; writes and syncs produce
+        // no payload, so they declare none (completionBoundBytes still covers
         // diagnostics -- at least one bound must be nonzero).
         .completionBoundBytes = fileCompletionBoundBytes,
         .payloadBoundBytes =

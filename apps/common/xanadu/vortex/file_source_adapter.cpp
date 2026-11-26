@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
+#include <span>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -60,14 +61,107 @@ FileGeneration generationFromStat(const struct stat &st) noexcept {
       .mtimeNanoseconds = static_cast<std::int64_t>(st.st_mtim.tv_nsec)};
 }
 
+/// Hand a write's byte count to the service. The service publishes the
+/// progress it was sent through `progress()`, not the one inside the terminal
+/// result, so without this every write would read back as zero bytes moved and
+/// a script could not tell a short write from a full one.
+void reportWriteProgress(CompletionSink &sink, const PrivateRequestToken token,
+                         const BackendResult &result) noexcept {
+  std::visit(
+      [&](const auto &outcome) {
+        if constexpr (requires { outcome.progress; })
+          sink.progress(token, outcome.progress);
+      },
+      result.outcome);
+}
+
+/// One write path for positional and append ops over the bytes the prepared
+/// command carried. Positional ops pwrite at the checked offset; append ops
+/// use ::write on the O_APPEND descriptor (Linux ignores the pwrite offset
+/// there, so relying on it would be a documented defect).
+BackendResult writeBytes(const int fd, const bool append,
+                         const MediaRange &range,
+                         const std::span<const std::byte> data,
+                         BackendContext &context) {
+  if (data.size() != range.length)
+    return failedResult({IoErrorCode::InvalidRequest, 0});
+  if (context.stop.stop_requested())
+    return BackendResult{
+        Cancelled{{}, IoProgress{.phase = IoPhase::Terminal}, false}, {}};
+  // No `context.budget.maxBytes` check here, unlike a read: for a request the
+  // service sizes that bound from its completion and payload envelopes, which
+  // a write declares as 256 diagnostic bytes. A write's own bytes were charged
+  // to the command budget at admission, which is the bound that applies.
+  const auto offset = static_cast<off_t>(range.offset);
+  if (!append &&
+      (offset < 0 || static_cast<std::uint64_t>(offset) != range.offset ||
+       data.size() > maxOffT ||
+       static_cast<std::uint64_t>(offset) > maxOffT - data.size()))
+    return failedResult({IoErrorCode::InvalidRequest, 0});
+  std::size_t written{};
+  bool stopped = false;
+  while (written < data.size()) {
+    if (context.stop.stop_requested()) {
+      stopped = true;
+      break;
+    }
+    const auto rc =
+        append ? ::write(fd, data.data() + written, data.size() - written)
+               : ::pwrite(fd, data.data() + written, data.size() - written,
+                          offset + static_cast<off_t>(written));
+    if (rc < 0) {
+      if (errno == EINTR) continue;
+      break;
+    }
+    if (rc == 0) {
+      errno = EIO;
+      break;
+    }
+    written += static_cast<std::size_t>(rc);
+  }
+  if (stopped) {
+    // A partial write may have landed bytes; report the transfer as
+    // uncertain rather than claiming completion.
+    return BackendResult{Cancelled{{},
+                                   IoProgress{.transferredBytes = written,
+                                              .phase = IoPhase::Terminal},
+                                   true},
+                         {}};
+  }
+  if (written != data.size())
+    return failedResult(
+        {IoErrorCode::BackendFailure, static_cast<std::uint32_t>(errno)},
+        terminalProgress(written));
+  return BackendResult{
+      Complete{{}, std::monostate{}, terminalProgress(written)}, {}};
+}
+
+/// fdatasync: data and the metadata needed to read it back, without the
+/// timestamp traffic fsync adds. A filesystem that cannot (some FUSE mounts)
+/// reports its errno as a typed failure instead of pretending.
+BackendResult syncFile(const int fd, BackendContext &context) {
+  if (context.stop.stop_requested())
+    return BackendResult{
+        Cancelled{{}, IoProgress{.phase = IoPhase::Terminal}, false}, {}};
+  while (::fdatasync(fd) != 0) {
+    if (errno == EINTR) continue;
+    return failedResult(
+        {IoErrorCode::BackendFailure, static_cast<std::uint32_t>(errno)},
+        terminalProgress(0));
+  }
+  return BackendResult{Complete{{}, std::monostate{}, terminalProgress(0)}, {}};
+}
+
 } // namespace
 
 FileSourceAdapter::FileSourceAdapter(std::string path, bool writable)
     : FileSourceAdapter(::open(path.c_str(), writable ? O_RDWR : O_RDONLY),
                         std::move(path), writable) {}
 
-FileSourceAdapter::FileSourceAdapter(int fd, std::string path, bool writable)
-    : fd_(fd), path_(std::move(path)), writable_(writable) {}
+FileSourceAdapter::FileSourceAdapter(int fd, std::string path, bool writable,
+                                     bool append)
+    : fd_(fd), path_(std::move(path)), writable_(writable || append),
+      append_(append) {}
 
 FileSourceAdapter::~FileSourceAdapter() {
   if (fd_ >= 0) ::close(fd_);
@@ -200,6 +294,18 @@ FileSourceAdapter::stageAt(const StageKey key, FileOpSpec spec) {
                           MediaRange{spec.range.offset, byteCount},
                           std::move(spec.writeBytes), spec.expectedGeneration});
   }
+  case FileOpSpec::Kind::Append: {
+    const auto byteCount = static_cast<std::uint64_t>(spec.writeBytes.size());
+    return stageLocked(
+        key, StagedFileOp{StagedFileOp::Kind::Append, MediaRange{0, byteCount},
+                          std::move(spec.writeBytes), spec.expectedGeneration});
+  }
+  case FileOpSpec::Kind::Sync:
+    if (!spec.writeBytes.empty())
+      return std::unexpected("sync spec carries write bytes");
+    return stageLocked(
+        key, StagedFileOp{
+                 StagedFileOp::Kind::Sync, {}, {}, spec.expectedGeneration});
   }
   return std::unexpected("unknown file op kind");
 }
@@ -229,7 +335,8 @@ auto FileSourceAdapter::prepare(const CellRequest &request, OwnerContext &)
   if (fd_ < 0) return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
 
   const StageKey key = request.specification;
-  StagedFileOp op;
+  StagedFileOp::Kind kind{};
+  std::optional<std::uint64_t> expectedGeneration;
   {
     const std::lock_guard lock(mutex_);
     const auto it = staged_.find(key);
@@ -238,20 +345,43 @@ auto FileSourceAdapter::prepare(const CellRequest &request, OwnerContext &)
                          "prepare refused: no staged op under key {}", key);
       return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
     }
-    op = it->second;
+    kind               = it->second.kind;
+    expectedGeneration = it->second.expectedGeneration;
   }
 
   // Plan §7.2: "A strict snapshot/CAS request is refused if backend cannot
   // meet it." A plain POSIX regular file never proves atomicity via `stat`
   // or watches, so every stable-read request is refused here, before
   // admission, regardless of content.
-  if (op.kind == StagedFileOp::Kind::StableRead)
+  if (kind == StagedFileOp::Kind::StableRead)
     return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
 
-  if (op.kind == StagedFileOp::Kind::Write && !writable_)
-    return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
+  // The descriptor's open mode decides what it may do, not the request: a
+  // positional write on an O_APPEND descriptor would land at the end on
+  // Linux whatever its offset says, so it is refused instead of relocated.
+  const bool modeFits = [&] {
+    switch (kind) {
+    case StagedFileOp::Kind::Write:
+      return writable_ && !append_;
+    case StagedFileOp::Kind::Append:
+      return append_;
+    case StagedFileOp::Kind::Sync:
+      return writable_;
+    case StagedFileOp::Kind::Read:
+    case StagedFileOp::Kind::StableRead:
+      return true;
+    }
+    return false;
+  }();
+  if (!modeFits) {
+    GLEDITOR_LOG_DEBUG(fileLogCategory,
+                       "prepare refused: op kind {} does not fit the open mode",
+                       static_cast<unsigned>(kind));
+    return std::unexpected(
+        IoErrorInfo{IoErrorCode::Unsupported, fileDetailWrongMode});
+  }
 
-  if (op.expectedGeneration) {
+  if (expectedGeneration) {
     const auto current = observeGeneration();
     if (!current) {
       // fstat failed, so no generation can be verified; refuse rather than
@@ -260,16 +390,39 @@ auto FileSourceAdapter::prepare(const CellRequest &request, OwnerContext &)
                         "prepare refused: fstat failed (errno {})", errno);
       return std::unexpected(IoErrorInfo{IoErrorCode::Unsupported});
     }
-    if (*op.expectedGeneration != *current) {
+    if (*expectedGeneration != *current) {
       GLEDITOR_LOG_DEBUG(fileLogCategory,
                          "prepare refused: generation {} expected, {} current",
-                         *op.expectedGeneration, *current);
+                         *expectedGeneration, *current);
       return std::unexpected(IoErrorInfo{IoErrorCode::Stale});
     }
   }
 
+  // The command is [stage key][write bytes]. Carrying the bytes here, and
+  // not leaving them in the staging table, is what makes the service charge
+  // them to its command budget; a command holding only the key charged a
+  // 1 MiB write as 8 bytes (design note §2 finding 1).
   std::vector<std::byte> bytes(sizeof(key));
   std::memcpy(bytes.data(), &key, sizeof(key));
+  const std::lock_guard lock(mutex_);
+  const auto it = staged_.find(key);
+  if (it == staged_.end())
+    return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+  auto &op = it->second;
+  if (op.kind == StagedFileOp::Kind::Write ||
+      op.kind == StagedFileOp::Kind::Append) {
+    // stageAt records the byte count in range.length, so a vector that no
+    // longer matches it was already carried off by an earlier prepare;
+    // preparing twice would silently write nothing.
+    if (op.writeBytes.size() != op.range.length)
+      return std::unexpected(IoErrorInfo{IoErrorCode::InvalidRequest});
+    // Copy first so a failed allocation leaves the staged op and the byte
+    // ledger exactly as they were.
+    bytes.reserve(bytes.size() + op.writeBytes.size());
+    bytes.insert(bytes.end(), op.writeBytes.begin(), op.writeBytes.end());
+    stagedWriteBytes_ -= op.writeBytes.size();
+    std::vector<std::byte>().swap(op.writeBytes);
+  }
   return PreparedOperation{request.key, std::move(bytes)};
 }
 
@@ -322,64 +475,19 @@ void FileSourceAdapter::execute(const BackendCommand &command,
                                {}};
       } else {
         result = BackendResult{};
-        if (op->kind == StagedFileOp::Kind::Write) {
-          if (context.stop.stop_requested()) {
-            result = BackendResult{
-                Cancelled{{}, IoProgress{.phase = IoPhase::Terminal}, false},
-                {}};
-          } else if (context.budget.maxBytes &&
-                     op->writeBytes.size() > *context.budget.maxBytes) {
-            result = failedResult({IoErrorCode::BudgetExceeded, 0},
-                                  terminalProgress(0));
-          } else {
-            const auto offset = static_cast<off_t>(op->range.offset);
-            if (offset < 0 ||
-                static_cast<std::uint64_t>(offset) != op->range.offset ||
-                op->writeBytes.size() > maxOffT ||
-                static_cast<std::uint64_t>(offset) >
-                    maxOffT - op->writeBytes.size()) {
-              result = failedResult({IoErrorCode::InvalidRequest, 0});
-            } else {
-              std::size_t written{};
-              bool stopped = false;
-              while (written < op->writeBytes.size()) {
-                if (context.stop.stop_requested()) {
-                  stopped = true;
-                  break;
-                }
-                const auto rc = ::pwrite(fd_, op->writeBytes.data() + written,
-                                         op->writeBytes.size() - written,
-                                         offset + static_cast<off_t>(written));
-                if (rc < 0) {
-                  if (errno == EINTR) continue;
-                  break;
-                }
-                if (rc == 0) {
-                  errno = EIO;
-                  break;
-                }
-                written += static_cast<std::size_t>(rc);
-              }
-              if (stopped) {
-                // A partial pwrite may have landed bytes; report the
-                // transfer as uncertain rather than claiming completion.
-                result = BackendResult{
-                    Cancelled{{},
-                              IoProgress{.transferredBytes = written,
-                                         .phase            = IoPhase::Terminal},
-                              true},
-                    {}};
-              } else if (written != op->writeBytes.size()) {
-                result = failedResult({IoErrorCode::BackendFailure,
-                                       static_cast<std::uint32_t>(errno)},
-                                      terminalProgress(written));
-              } else {
-                result = BackendResult{
-                    Complete{{}, std::monostate{}, terminalProgress(written)},
-                    {}};
-              }
-            }
-          }
+        if (op->kind == StagedFileOp::Kind::Write ||
+            op->kind == StagedFileOp::Kind::Append) {
+          const std::span<const std::byte> data =
+              command.operation.bytes.size() > sizeof(key)
+                  ? std::span<const std::byte>(command.operation.bytes)
+                        .subspan(sizeof(key))
+                  : std::span<const std::byte>{};
+          result = writeBytes(fd_, op->kind == StagedFileOp::Kind::Append,
+                              op->range, data, context);
+          reportWriteProgress(sink, command.token, result);
+        } else if (op->kind == StagedFileOp::Kind::Sync) {
+          result = syncFile(fd_, context);
+          reportWriteProgress(sink, command.token, result);
         } else if (context.stop.stop_requested()) {
           result = BackendResult{
               Cancelled{{}, IoProgress{.phase = IoPhase::Terminal}, false}, {}};

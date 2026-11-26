@@ -1,7 +1,9 @@
 #include "common/xanadu/vortex/file_read_host.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
+#include <system_error>
 #include <utility>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -45,6 +47,58 @@ auto openedEndpointOf(const zigzag::ArenaManifold &arena,
                         CapabilityCell{*capability, *capabilityInc}};
 }
 
+/// The canonical form of @p locator: symlinks and `..` in whatever part of
+/// the path exists are resolved, the rest is lexically normalised. nullopt
+/// for a locator that cannot be judged: one with an embedded NUL (the OS
+/// would open only the prefix before it, a different path from the one the
+/// grant saw) or one the filesystem refuses to resolve.
+auto canonicalLocator(const std::string_view locator)
+    -> std::optional<std::filesystem::path> {
+  if (locator.empty() || locator.find('\0') != std::string_view::npos)
+    return std::nullopt;
+  std::error_code ec;
+  auto canonical = std::filesystem::weakly_canonical(
+      std::filesystem::path{std::string{locator}}, ec);
+  if (ec) return std::nullopt;
+  return canonical;
+}
+
+/// True when @p path has @p root as a proper prefix by whole components.
+auto strictlyBeneath(const std::filesystem::path &path,
+                     const std::filesystem::path &root) -> bool {
+  const auto mismatch =
+      std::mismatch(root.begin(), root.end(), path.begin(), path.end());
+  return mismatch.first == root.end() && mismatch.second != path.end();
+}
+
+/// The open grant of a file host: read always, plus whatever of the
+/// mutating rights the request asked for and @p writeGrant approves for the
+/// canonical locator. The refusal is a typed value (`Unsupported`, detail
+/// `fileDetailNoWriteGrant`) the language sees as a `Rejected` outcome.
+auto makeOpenGrant(WriteGrant writeGrant) -> ArenaIoCellStore::OpenAuthorizer {
+  return [grant = std::move(writeGrant)](const OpenSpec &spec)
+             -> std::expected<ArenaIoCellStore::OpenGrant, IoErrorInfo> {
+    const auto wanted = spec.requestedRights & fileRightsMutating;
+    auto rights       = fileRightRead;
+    if (wanted != 0) {
+      const auto denied = std::unexpected{
+          IoErrorInfo{IoErrorCode::Unsupported, fileDetailNoWriteGrant}};
+      if (!grant) return denied;
+      const auto canonical = canonicalLocator(
+          std::string_view{reinterpret_cast<const char *>(spec.locator.data()),
+                           spec.locator.size()});
+      if (!canonical) return denied;
+      const auto allowed = grant(canonical->string());
+      if ((wanted & ~allowed) != 0) return denied;
+      // Narrowed to what was asked, never widened to what the policy would
+      // have allowed.
+      rights |= wanted;
+    }
+    return ArenaIoCellStore::OpenGrant{.rights      = rights,
+                                       .consistency = ioConsistencyLive};
+  };
+}
+
 auto makeService(const FileReadHostOptions &options, PayloadResolver &payloads,
                  IoCellStore &cells) -> std::unique_ptr<IoService> {
   auto service = std::make_unique<IoService>(
@@ -60,6 +114,25 @@ auto makeService(const FileReadHostOptions &options, PayloadResolver &payloads,
 }
 
 } // namespace
+
+auto writeRootGrant(const std::vector<std::filesystem::path> &roots,
+                    const std::uint64_t rights) -> WriteGrant {
+  std::vector<std::filesystem::path> canonicalRoots;
+  for (const auto &root : roots) {
+    if (const auto canonical = canonicalLocator(root.string()))
+      canonicalRoots.push_back(*canonical);
+  }
+  return [canonicalRoots = std::move(canonicalRoots),
+          rights](const std::string_view locator) -> std::uint64_t {
+    const auto canonical = canonicalLocator(locator);
+    if (!canonical) return 0;
+    const bool inside =
+        std::ranges::any_of(canonicalRoots, [&](const auto &root) {
+          return strictlyBeneath(*canonical, root);
+        });
+    return inside ? rights : 0;
+  };
+}
 
 std::string_view toString(const StageReadError error) noexcept {
   switch (error) {
@@ -81,14 +154,7 @@ FileReadHost::FileReadHost(zigzag::vortex::VortexVM &vm,
       cells_(arena, schema_, payloads_,
              makeFileRequestDecoder(arena, fileDataAdapterKey,
                                     options.payloadBytes),
-             makeFileCloseDecoder(adapter_),
-             [](const OpenSpec &)
-                 -> std::expected<ArenaIoCellStore::OpenGrant, IoErrorInfo> {
-               // A read-only host: whatever a program asks to open it may only
-               // read, so no capability it hands a language can write.
-               return ArenaIoCellStore::OpenGrant{
-                   .rights = fileRightRead, .consistency = ioConsistencyLive};
-             }),
+             makeFileCloseDecoder(adapter_), makeOpenGrant(options.writeGrant)),
       service_(makeService(options, payloads_, cells_)),
       host_(*service_, arena, vm),
       diagnostics_(FrontendDiagnosticRegistry::withBuiltins()),
@@ -105,10 +171,18 @@ FileReadHost::~FileReadHost() {
   }
 }
 
-auto FileReadHost::openSpec(const std::string_view path) const -> OpenSpec {
+auto FileReadHost::openSpec(const std::string_view path,
+                            const std::uint64_t rights) const -> OpenSpec {
+  // A write-mode open names the canonical path the grant will judge, so the
+  // worker opens that path and not a spelling that resolved differently.
+  std::string locator{path};
+  if ((rights & fileRightsMutating) != 0) {
+    if (const auto canonical = canonicalLocator(path))
+      locator = canonical->string();
+  }
   return OpenSpec{.adapterKey      = fileOpenAdapterKey,
-                  .locator         = bytesOf(path),
-                  .requestedRights = fileRightRead,
+                  .locator         = bytesOf(locator),
+                  .requestedRights = fileRightRead | rights,
                   .consistency     = ioConsistencyLive,
                   .deadline        = service_->now() + options_.openDeadline};
 }
@@ -134,9 +208,10 @@ auto FileReadHost::closeCapability(const CapabilityCell capability)
   return bridge_.wrap(host_.closeEndpoint(*endpoint, CloseMode::Graceful));
 }
 
-auto FileReadHost::beginOpen(const std::string_view path)
+auto FileReadHost::beginOpen(const std::string_view path,
+                             const std::uint64_t rights)
     -> std::expected<RequestCell, FrontendDiagnostic> {
-  const auto submitted = host_.admitOpen(openSpec(path));
+  const auto submitted = host_.admitOpen(openSpec(path, rights));
   if (const auto *admitted = std::get_if<Admitted>(&submitted.value)) {
     return admitted->request;
   }
@@ -167,24 +242,16 @@ auto FileReadHost::openedCapability(const RequestCell open)
       {}}};
 }
 
-auto FileReadHost::stageRead(const CapabilityCell capability,
-                             const std::uint64_t offset,
-                             const std::uint64_t length)
+auto FileReadHost::stageOp(const CapabilityCell capability,
+                           const std::string_view tag, FileOpSpec op)
     -> std::expected<CellRef, StageReadError> {
   const auto endpoint = capabilityEndpoint(arena_, schema_, capability);
   if (!endpoint) return std::unexpected{StageReadError::NotAFileCapability};
   const auto open = adapter_.openIdOf(*endpoint);
   if (!open) return std::unexpected{StageReadError::NotAFileCapability};
-  if (length > options_.payloadBytes ||
-      offset > std::numeric_limits<std::uint64_t>::max() - length) {
-    return std::unexpected{StageReadError::OutOfBounds};
-  }
-  const auto spec   = arena_.makeCell(fileReadSpecTag);
+  const auto spec   = arena_.makeCell(tag);
   const auto staged = adapter_.stageAt(
-      spec,
-      FileEndpointOp{.open = *open,
-                     .op   = FileOpSpec{.kind  = FileOpSpec::Kind::Read,
-                                        .range = MediaRange{offset, length}}});
+      spec, FileEndpointOp{.open = *open, .op = std::move(op)});
   if (!staged) {
     if (const auto incarnation = arena_.incarnationOf(spec)) {
       static_cast<void>(arena_.freeCell(spec, *incarnation));
@@ -192,6 +259,49 @@ auto FileReadHost::stageRead(const CapabilityCell capability,
     return std::unexpected{StageReadError::Refused};
   }
   return spec;
+}
+
+auto FileReadHost::stageRead(const CapabilityCell capability,
+                             const std::uint64_t offset,
+                             const std::uint64_t length)
+    -> std::expected<CellRef, StageReadError> {
+  if (length > options_.payloadBytes ||
+      offset > std::numeric_limits<std::uint64_t>::max() - length) {
+    return std::unexpected{StageReadError::OutOfBounds};
+  }
+  return stageOp(capability, fileReadSpecTag,
+                 FileOpSpec{.kind  = FileOpSpec::Kind::Read,
+                            .range = MediaRange{offset, length}});
+}
+
+auto FileReadHost::stageWrite(const CapabilityCell capability,
+                              const std::uint64_t offset,
+                              std::vector<std::byte> bytes)
+    -> std::expected<CellRef, StageReadError> {
+  if (bytes.size() > options_.writeBytes ||
+      offset > std::numeric_limits<std::uint64_t>::max() - bytes.size()) {
+    return std::unexpected{StageReadError::OutOfBounds};
+  }
+  return stageOp(capability, fileWriteSpecTag,
+                 FileOpSpec{.kind       = FileOpSpec::Kind::Write,
+                            .range      = MediaRange{offset, 0},
+                            .writeBytes = std::move(bytes)});
+}
+
+auto FileReadHost::stageAppend(const CapabilityCell capability,
+                               std::vector<std::byte> bytes)
+    -> std::expected<CellRef, StageReadError> {
+  if (bytes.size() > options_.writeBytes)
+    return std::unexpected{StageReadError::OutOfBounds};
+  return stageOp(capability, fileAppendSpecTag,
+                 FileOpSpec{.kind       = FileOpSpec::Kind::Append,
+                            .writeBytes = std::move(bytes)});
+}
+
+auto FileReadHost::stageSync(const CapabilityCell capability)
+    -> std::expected<CellRef, StageReadError> {
+  return stageOp(capability, fileSyncSpecTag,
+                 FileOpSpec{.kind = FileOpSpec::Kind::Sync});
 }
 
 } // namespace xanadu::vortex

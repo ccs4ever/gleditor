@@ -1,10 +1,11 @@
 # M7-VQL-c: VQL write and capture
 
-Status: design note, nothing built. It specifies the third M7-VQL slice of the
-[Vortex I/O implementation plan](vortex-io-implementation-plan.md): script **write effects** to a
-file endpoint, and **capture**, the explicit act that makes a script's input durable so results
-built from it may be persisted. It extends [`vql-query-language.md`](vql-query-language.md) §4.13
-and changes no on-disk format and no core file (§14 lists the proposals considered and refused).
+Status: design note; stage C1 (adapter and host, §18) is built, the rest is not. It specifies the
+third M7-VQL slice of the [Vortex I/O implementation plan](vortex-io-implementation-plan.md): script
+**write effects** to a file endpoint, and **capture**, the explicit act that makes a script's input
+durable so results built from it may be persisted. It extends
+[`vql-query-language.md`](vql-query-language.md) §4.13 and changes no on-disk format and no core
+file (§14 lists the proposals considered and refused).
 
 Where it lives. The plan's milestone table has rows for `M7-VQL` and no row for the `-b` or `-c`
 slices; slices are recorded as "implementation notes and deliberate deferrals" under the M7-VQL
@@ -813,6 +814,55 @@ no loaded store (`QuotedSpans::store` is a `const Store *`; a captured cell need
 permascroll as the quoting scroll, which `Store(permascroll)` already names), a vquery-local change
 if it does not; (b) that the lane rule orders two writes on one capability FIFO as read at
 `io_service.cpp:290-345`.
+
+### 18.1 Stage C1 as built
+
+C1 is the adapter and host half only: no grammar, runner or `vquery` change. What landed, with the
+places it differs from the text above:
+
+- **Write bytes in the command.** `FileSourceAdapter::prepare` moves a `Write` or `Append` op's
+  bytes out of the staging table into the prepared command (`[stage key][bytes]`), so the service's
+  `commandBytes` charge, the per-request `maxCommandBytes` refusal and the aggregate reservation all
+  see them. The bytes leave the staged-byte ledger at that moment (they are charged once, by the
+  service). A second `prepare` of the same key is `InvalidRequest`, never an empty write.
+- **Rights.** `fileRightAppend` (bit 2) and `fileRightCreate` (bit 3) beside read and write. Append
+  opens `O_RDWR|O_APPEND`; create adds `O_CREAT|O_EXCL` with mode `0600`; any write mode adds
+  `O_NOFOLLOW`. Write plus append, and create without either, are `Rejected(Unsupported, 2)` at open
+  prepare.
+- **Kinds.** `FileOpSpec::Kind::Append` (`::write`, no offset) and `Kind::Sync` (`fdatasync`, rides
+  the write lane so it runs after earlier writes). A mode mismatch (positional write on an append
+  capability, append on a positional one, any write or sync on a read-only one) is
+  `Rejected(Unsupported, 2)` at request prepare (`fileDetailWrongMode`); this changes the detail of
+  the existing read-only-write refusal from 0 to 2.
+- **Host.** `FileReadHostOptions::writeGrant` (a `WriteGrant`, empty means deny) and `writeBytes`
+  (default 1 MiB); `writeRootGrant(roots, rights)` is the root-containment policy `vquery` will
+  build from `--io-write-root`. `FileReadHost::openSpec/beginOpen` take rights; `stageWrite`,
+  `stageAppend`, `stageSync` stage the request. The grant sees the canonical locator
+  (`weakly_canonical`, so `..` and symlinked directories resolve first; an embedded NUL is never
+  granted) and a denied open is `Rejected(Unsupported, 1)` (`fileDetailNoWriteGrant`). For a write
+  open the host also puts the canonical path in the `OpenSpec`, so the worker opens the path the
+  grant judged.
+
+Deviations and findings, recorded because the code disagreed with the note:
+
+1. **The backend byte bound is not a write bound.** The scheduler sizes `BackendBudget::maxBytes`
+   from the request's completion and payload envelopes, which a write declares as 256 diagnostic
+   bytes, so the existing `maxBytes` check in the write path failed every write over 256 bytes
+   (`BudgetExceeded`). The check is removed for writes; the command budget is the bound that
+   applies. Latent before C1 because no caller wrote more than a few bytes.
+1. **Writes reported zero bytes moved.** The service publishes the progress it receives through
+   `CompletionSink::progress`, not the one inside the terminal result, so `transferredBytes` of a
+   write outcome was always 0. The adapter now sends the write's progress before the terminal
+   candidate, which is what `io_bytes($w)` (§4.2) reads. Reads are unchanged.
+1. **Four 1 MiB writes do not fit 4 MiB.** Each command is `1 MiB + 8` bytes (the stage key rides
+   with the bytes), so the fifth-write example in §10 is the fourth in practice; the criterion is "a
+   write the budget cannot hold is `Rejected(BudgetExceeded)`", which the tests pin at a 64 KiB
+   budget.
+1. **Check (b) holds.** Two writes admitted back to back on one capability run in admission order
+   and a `sync` admitted after them finishes after both
+   (`SyncCompletesAfterTheWritesAdmittedBeforeIt`).
+1. **A symlinked parent swapped in after the grant** is still outside what a path check can promise;
+   `O_NOFOLLOW` covers the final component only. Stated, not closed.
 
 ## 19. Deferrals
 

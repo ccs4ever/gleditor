@@ -58,7 +58,7 @@ struct FileEndpointFixture {
               [](const OpenSpec &)
                   -> std::expected<ArenaIoCellStore::OpenGrant, IoErrorInfo> {
                 return ArenaIoCellStore::OpenGrant{
-                    .rights      = fileRightRead | fileRightWrite,
+                    .rights      = fileRightRead | fileRightsMutating,
                     .consistency = ioConsistencyLive};
               }) {
     scheduler = std::make_unique<BoundedIoScheduler>(
@@ -677,6 +677,133 @@ TEST_F(FileEndpointAdapterTest, CloseWithAnOpInFlightKeepsTheFileUntilItEnds) {
   EXPECT_TRUE(inFlight->probeCapabilities().has_value());
   inFlight.reset();
   EXPECT_EQ(openFdCount(), baseline);
+}
+
+// ---- M7-VQL-c C1: open modes ---------------------------------------------
+
+/// Admit an open and return its terminal outcome even when it ended without
+/// minting an endpoint (openAndAwait collapses that to nullopt).
+std::optional<OutcomeCell> openOutcome(FileEndpointFixture &fixture,
+                                       const std::string &path,
+                                       std::uint64_t rights) {
+  OpenSpec spec{.adapterKey      = fileOpenAdapterKey,
+                .locator         = bytesOf(path),
+                .requestedRights = rights,
+                .consistency     = ioConsistencyLive,
+                .deadline =
+                    std::chrono::steady_clock::now() + std::chrono::seconds(5)};
+  const auto submitted = fixture.service->admitOpen(spec);
+  if (const auto *refused = std::get_if<Refused>(&submitted.value))
+    return refused->outcome;
+  return awaitOutcome(*fixture.service,
+                      std::get<Admitted>(submitted.value).request);
+}
+
+TEST_F(FileEndpointAdapterTest, WriteOpenRefusesASymlinkAtTheFinalComponent) {
+  const auto target = makeFile("target");
+  const auto link   = (dir_ / "link.bin").string();
+  std::filesystem::create_symlink(target, link);
+  FileEndpointFixture fixture;
+
+  // The host checks a path before the worker opens it; O_NOFOLLOW is what
+  // stops a link swapped in between from redirecting the write.
+  for (const auto rights :
+       {fileRightWrite, fileRightAppend, fileRightWrite | fileRightCreate}) {
+    const auto outcome = openOutcome(fixture, link, rights);
+    ASSERT_TRUE(outcome.has_value());
+    EXPECT_EQ(ioOutcomeTag(fixture.arena, *outcome), IoOutcomeTag::Failed);
+  }
+  EXPECT_EQ(fixture.adapter.openedCount(), 0U);
+  std::ifstream in(target, std::ios::binary);
+  std::string content((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+  EXPECT_EQ(content, "target");
+
+  // A read open follows it, as a read always has.
+  const auto read =
+      openAndAwait(fixture, link, fileRightRead, ioConsistencyLive);
+  EXPECT_TRUE(read.has_value());
+}
+
+TEST_F(FileEndpointAdapterTest, CreateOpenMakesAPrivateFileAndNeverClobbers) {
+  const auto path = (dir_ / "created.bin").string();
+  FileEndpointFixture fixture;
+
+  const auto first = openAndAwait(
+      fixture, path, fileRightWrite | fileRightCreate, ioConsistencyLive);
+  ASSERT_TRUE(first.has_value());
+  struct stat st{};
+  ASSERT_EQ(::stat(path.c_str(), &st), 0);
+  EXPECT_EQ(st.st_mode & 0777U, 0600U);
+  const auto wrote = submitAndAwait(
+      fixture, first->initialCapability,
+      stageSpec(fixture, fileWriteSpecTag, openOf(fixture, first),
+                FileOpSpec{.kind       = FileOpSpec::Kind::Write,
+                           .writeBytes = bytesOf("kept")}));
+  ASSERT_TRUE(wrote.has_value());
+  EXPECT_EQ(ioOutcomeTag(fixture.arena, *wrote), IoOutcomeTag::Complete);
+
+  const auto second =
+      openOutcome(fixture, path, fileRightWrite | fileRightCreate);
+  ASSERT_TRUE(second.has_value());
+  EXPECT_EQ(ioOutcomeTag(fixture.arena, *second), IoOutcomeTag::Failed);
+  std::ifstream in(path, std::ios::binary);
+  std::string content((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+  EXPECT_EQ(content, "kept");
+}
+
+TEST_F(FileEndpointAdapterTest, AppendOpenWritesAtTheEndAndRefusesPositional) {
+  const auto path = makeFile("one,");
+  FileEndpointFixture fixture;
+  const auto opened =
+      openAndAwait(fixture, path, fileRightAppend, ioConsistencyLive);
+  ASSERT_TRUE(opened.has_value());
+
+  const auto added = submitAndAwait(
+      fixture, opened->initialCapability,
+      stageSpec(fixture, fileAppendSpecTag, openOf(fixture, opened),
+                FileOpSpec{.kind       = FileOpSpec::Kind::Append,
+                           .writeBytes = bytesOf("two,")}));
+  ASSERT_TRUE(added.has_value());
+  EXPECT_EQ(ioOutcomeTag(fixture.arena, *added), IoOutcomeTag::Complete);
+  const auto positional = submitAndAwait(
+      fixture, opened->initialCapability,
+      stageSpec(fixture, fileWriteSpecTag, openOf(fixture, opened),
+                FileOpSpec{.kind       = FileOpSpec::Kind::Write,
+                           .writeBytes = bytesOf("X")}));
+  ASSERT_TRUE(positional.has_value());
+  EXPECT_EQ(ioOutcomeTag(fixture.arena, *positional), IoOutcomeTag::Rejected);
+
+  // An append capability can still be read back through the same endpoint.
+  const auto read = submitAndAwait(
+      fixture, opened->initialCapability,
+      stageSpec(fixture, fileReadSpecTag, openOf(fixture, opened),
+                FileOpSpec{.kind  = FileOpSpec::Kind::Read,
+                           .range = MediaRange{0, 16}}));
+  ASSERT_TRUE(read.has_value());
+  const auto bytes = readOutcomePayload(fixture, *read);
+  ASSERT_TRUE(bytes.has_value());
+  EXPECT_EQ(textOf(*bytes), "one,two,");
+}
+
+TEST_F(FileEndpointAdapterTest, WriteCommandBytesAreChargedToTheCommandBudget) {
+  const auto path = makeFile("");
+  FileEndpointFixture fixture;
+  const auto opened =
+      openAndAwait(fixture, path, fileRightWrite, ioConsistencyLive);
+  ASSERT_TRUE(opened.has_value());
+
+  // The fixture's service allows 4 MiB of command bytes; a 5 MiB write must be
+  // refused at admission and leave the file untouched.
+  const auto spec =
+      stageSpec(fixture, fileWriteSpecTag, openOf(fixture, opened),
+                FileOpSpec{.kind       = FileOpSpec::Kind::Write,
+                           .writeBytes = std::vector<std::byte>(5U << 20)});
+  const auto outcome = submitAndAwait(fixture, opened->initialCapability, spec);
+  ASSERT_TRUE(outcome.has_value());
+  EXPECT_EQ(ioOutcomeTag(fixture.arena, *outcome), IoOutcomeTag::Rejected);
+  EXPECT_EQ(std::filesystem::file_size(path), 0U);
 }
 
 } // namespace
