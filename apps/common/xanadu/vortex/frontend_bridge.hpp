@@ -15,6 +15,7 @@
  * owner-thread state, and mints cells through the arena.
  */
 
+#include <chrono>
 #include <cstddef>
 #include <expected>
 #include <memory>
@@ -69,8 +70,9 @@ public:
                  const FrontendDiagnosticRegistry &diagnostics);
 
   /// `submit` as a language sees it: always a managed sum cell.
-  [[nodiscard]] auto submit(CapabilityCell capability,
-                            zigzag::CellRef requestSpec)
+  [[nodiscard]] auto
+  submit(CapabilityCell capability, zigzag::CellRef requestSpec,
+         std::optional<std::chrono::milliseconds> within = std::nullopt)
       -> std::expected<SubmissionCell, FrontendDiagnostic>;
   [[nodiscard]] auto admitOpen(OpenSpec spec)
       -> std::expected<SubmissionCell, FrontendDiagnostic>;
@@ -123,6 +125,16 @@ public:
   /// tag does not carry bytes (or carried none).
   [[nodiscard]] auto payloadOf(OutcomeCell outcome) const
       -> std::expected<PayloadRange, FrontendDiagnostic>;
+
+  /// A named scalar field of a terminal outcome, as the text the cell store
+  /// wrote: the outcome's own details (`errorCode`, `stableDetail`, `cause`,
+  /// `uncertain`, ...) first, then its progress record (`acceptedBytes`,
+  /// `transferredBytes`, `consumedBytes`, `sourceSequence`, `phase`). Absent
+  /// when the outcome has no such field. Never exposes payload bytes: those
+  /// stay behind `gate`/`payloadOf`.
+  [[nodiscard]] auto outcomeField(OutcomeCell outcome,
+                                  std::string_view name) const
+      -> std::optional<std::string>;
 
   [[nodiscard]] auto schema() const noexcept -> const IoCellSchema & {
     return schema_;

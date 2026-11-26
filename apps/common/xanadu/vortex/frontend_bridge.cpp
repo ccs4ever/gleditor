@@ -79,15 +79,45 @@ auto FrontendBridge::wrap(const SubmitResult &result)
   return *cell;
 }
 
-auto FrontendBridge::submit(const CapabilityCell capability,
-                            const CellRef requestSpec)
+auto FrontendBridge::submit(
+    const CapabilityCell capability, const CellRef requestSpec,
+    const std::optional<std::chrono::milliseconds> within)
     -> std::expected<SubmissionCell, FrontendDiagnostic> {
-  return wrap(host_.submitCell(capability, requestSpec));
+  return wrap(host_.submitCell(capability, requestSpec, within));
 }
 
 auto FrontendBridge::admitOpen(OpenSpec spec)
     -> std::expected<SubmissionCell, FrontendDiagnostic> {
   return wrap(host_.admitOpen(std::move(spec)));
+}
+
+auto FrontendBridge::outcomeField(const OutcomeCell outcome,
+                                  const std::string_view name) const
+    -> std::optional<std::string> {
+  if (!arena_.matches(outcome.cell, outcome.incarnation)) return std::nullopt;
+  const auto occurrence = schema_.dim(IoDimension::Occurrence);
+  const auto state      = schema_.dim(IoDimension::State);
+  // A record's fields are a rank chain along d.io.occurrence, each field cell
+  // labelled and linked to its content along d.io.state.
+  const auto search = [&](const CellRef record) -> std::optional<std::string> {
+    auto at = record;
+    for (std::size_t visited = 0; visited <= arena_.traversalBound();
+         ++visited) {
+      const auto next = arena_.linked(at, occurrence, DimVector::POS);
+      if (!next) return std::nullopt;
+      at = *next;
+      if (arena_.textOf(at) != name) continue;
+      if (const auto content = arena_.linked(at, state, DimVector::POS))
+        return arena_.textOf(*content);
+    }
+    return std::nullopt;
+  };
+  if (auto found = search(outcome.cell)) return found;
+  const auto progressDim = schema_.dim(IoDimension::Progress);
+  const auto holder = arena_.linked(outcome.cell, progressDim, DimVector::POS);
+  if (!holder) return std::nullopt;
+  const auto progress = arena_.linked(*holder, progressDim, DimVector::POS);
+  return progress ? search(*progress) : std::nullopt;
 }
 
 auto FrontendBridge::match(const SubmissionCell submission) const

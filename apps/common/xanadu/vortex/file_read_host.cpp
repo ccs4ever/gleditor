@@ -93,6 +93,7 @@ FileReadHost::FileReadHost(zigzag::vortex::VortexVM &vm,
       host_(*service_, arena, vm),
       diagnostics_(FrontendDiagnosticRegistry::withBuiltins()),
       bridge_(host_, arena, schema_, diagnostics_) {
+  if (options_.clock) service_->setClock(options_.clock);
   service_->registerAdapter(fileOpenAdapterKey, adapter_);
   service_->registerAdapter(fileDataAdapterKey, adapter_);
   service_->registerAdapter(fileCloseAdapterKey, adapter_);
@@ -104,15 +105,38 @@ FileReadHost::~FileReadHost() {
   }
 }
 
+auto FileReadHost::openSpec(const std::string_view path) const -> OpenSpec {
+  return OpenSpec{.adapterKey      = fileOpenAdapterKey,
+                  .locator         = bytesOf(path),
+                  .requestedRights = fileRightRead,
+                  .consistency     = ioConsistencyLive,
+                  .deadline        = service_->now() + options_.openDeadline};
+}
+
+auto FileReadHost::capabilityOf(const OutcomeCell open) const
+    -> std::optional<CapabilityCell> {
+  const auto tag = ioOutcomeTag(arena_, open);
+  if (!tag || *tag != IoOutcomeTag::Complete) return std::nullopt;
+  if (const auto opened = openedEndpointOf(arena_, schema_, open))
+    return opened->initialCapability;
+  return std::nullopt;
+}
+
+auto FileReadHost::closeCapability(const CapabilityCell capability)
+    -> std::expected<SubmissionCell, FrontendDiagnostic> {
+  const auto endpoint = capabilityEndpoint(arena_, schema_, capability);
+  if (!endpoint) {
+    return std::unexpected{
+        FrontendDiagnostic{std::string{frontend_codes::cellRefused},
+                           "the capability names no endpoint to close",
+                           {}}};
+  }
+  return bridge_.wrap(host_.closeEndpoint(*endpoint, CloseMode::Graceful));
+}
+
 auto FileReadHost::beginOpen(const std::string_view path)
     -> std::expected<RequestCell, FrontendDiagnostic> {
-  OpenSpec spec{.adapterKey      = fileOpenAdapterKey,
-                .locator         = bytesOf(path),
-                .requestedRights = fileRightRead,
-                .consistency     = ioConsistencyLive,
-                .deadline =
-                    std::chrono::steady_clock::now() + options_.openDeadline};
-  const auto submitted = host_.admitOpen(std::move(spec));
+  const auto submitted = host_.admitOpen(openSpec(path));
   if (const auto *admitted = std::get_if<Admitted>(&submitted.value)) {
     return admitted->request;
   }

@@ -1,10 +1,12 @@
 #ifndef XANADU_VORTEX_IO_SERVICE_HPP
 #define XANADU_VORTEX_IO_SERVICE_HPP
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <expected>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -71,6 +73,10 @@ public:
   virtual ~IoCellStore() = default;
 };
 
+/// The clock the service reads deadlines against. Production uses the steady
+/// clock; a test injects its own so expiry is deterministic.
+using IoClock = std::function<std::chrono::steady_clock::time_point()>;
+
 class IoService final : private CompletionSink {
 public:
   IoService(IoBudgetSnapshot, std::unique_ptr<IoScheduler>, PayloadResolver &,
@@ -80,8 +86,17 @@ public:
   auto operator=(const IoService &) -> IoService & = delete;
 
   void registerAdapter(AdapterKey, IoAdapter &);
+  /// Replace the deadline clock; an empty function restores the steady clock.
+  auto setClock(IoClock clock) -> IoService *;
+  [[nodiscard]] auto now() const -> std::chrono::steady_clock::time_point;
   [[nodiscard]] auto admitOpen(OpenSpec) -> SubmitResult;
-  [[nodiscard]] auto submit(CapabilityCell, OwnerCell requestSpec)
+  /// @p within, when present, is the request's deadline measured from this
+  /// call on the service's clock: `pump` ends the request as `TimedOut` (a
+  /// stop request to its backend, then the outcome) once it passes. A request
+  /// that finished first keeps its own outcome.
+  [[nodiscard]] auto
+  submit(CapabilityCell, OwnerCell requestSpec,
+         std::optional<std::chrono::milliseconds> within = std::nullopt)
       -> SubmitResult;
   [[nodiscard]] auto poll(RequestCell) -> PollResult;
   [[nodiscard]] auto await(RequestCell, OwnerWaiterRegistration) -> AwaitResult;
@@ -156,6 +171,10 @@ private:
     bool terminalQueued{};
     bool retireAfterTerminal{};
     bool orphaned{};
+    std::optional<std::chrono::steady_clock::time_point> deadline;
+    /// The stop request came from the deadline, so a `Cancelled` terminal is
+    /// reported as the `TimedOut` it is.
+    bool expired{};
     std::vector<std::pair<WaiterCell, OwnerWaiterRegistration>> waiters;
   };
   struct SinkState {
@@ -180,7 +199,15 @@ private:
     std::unordered_map<std::uint64_t, Event> events;
     std::deque<std::uint64_t> ready;
   };
-  auto admit(CellRequest, OpenSpec *) -> SubmitResult;
+  auto admit(CellRequest, OpenSpec *,
+             std::optional<std::chrono::steady_clock::time_point> deadline)
+      -> SubmitResult;
+  /// Ask the request's backend to stop; the shared body of cancelRequest and
+  /// deadline expiry. @p expired makes a `Cancelled` terminal a `TimedOut`.
+  auto stopRequest(RequestState &, std::uint64_t key, bool expired)
+      -> RequestCancelState;
+  /// End every request whose deadline has passed.
+  void expireDue();
   void progress(PrivateRequestToken, IoProgress) noexcept override;
   void terminalCandidate(PrivateRequestToken, BackendResult,
                          std::optional<PayloadLease>) noexcept override;
@@ -204,6 +231,7 @@ private:
       -> std::optional<OutcomeCell>;
 
   IoBudgetSnapshot budget_;
+  IoClock clock_;
   std::unique_ptr<IoScheduler> scheduler_;
   PayloadResolver &payloads_;
   IoCellStore &cells_;

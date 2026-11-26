@@ -77,7 +77,10 @@ inline constexpr std::string_view vqlPersistNeedsCapture =
     "VQL_IO_PERSIST_NEEDS_CAPTURE";
 /// A query segment of a script failed (the QueryError category and message
 /// ride in the diagnostic's message).
-inline constexpr std::string_view vqlScriptFailed  = "VQL_SCRIPT_FAILED";
+inline constexpr std::string_view vqlScriptFailed = "VQL_SCRIPT_FAILED";
+/// A parked script outlived its overall deadline. The host abandoned it; the
+/// request it awaited was asked to stop, and no row is produced.
+inline constexpr std::string_view vqlScriptTimeout = "VQL_SCRIPT_TIMEOUT";
 inline constexpr std::string_view vplShapeMismatch = "VPL_IO_SHAPE_MISMATCH";
 inline constexpr std::string_view prologEffectContext =
     "PROLOG_IO_EFFECT_CONTEXT";

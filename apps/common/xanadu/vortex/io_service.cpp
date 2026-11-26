@@ -118,6 +118,15 @@ IoService::~IoService() {
   sinkState_.reset();
 }
 
+auto IoService::setClock(IoClock clock) -> IoService * {
+  clock_ = std::move(clock);
+  return this;
+}
+
+auto IoService::now() const -> std::chrono::steady_clock::time_point {
+  return clock_ ? clock_() : std::chrono::steady_clock::now();
+}
+
 void IoService::registerAdapter(const AdapterKey key, IoAdapter &adapter) {
   if (shuttingDown_ || !adapters_.emplace(key, &adapter).second) {
     throw std::invalid_argument(
@@ -148,11 +157,14 @@ auto IoService::admitOpen(OpenSpec spec) -> SubmitResult {
                       .payloadBoundBytes    = 256,
                       .open                 = true,
                       .openSpec             = spec};
-  return admit(std::move(request), &spec);
+  const auto deadline = spec.deadline;
+  return admit(std::move(request), &spec, deadline);
 }
 
 auto IoService::submit(const CapabilityCell capability,
-                       const OwnerCell requestSpec) -> SubmitResult {
+                       const OwnerCell requestSpec,
+                       const std::optional<std::chrono::milliseconds> within)
+    -> SubmitResult {
   if (shuttingDown_) {
     return {
         Refused{cells_.mintRefusal({IoErrorCode::SchedulerUnavailable, 0})}};
@@ -171,10 +183,15 @@ auto IoService::submit(const CapabilityCell capability,
     }
     return {Refused{cells_.mintRefusal({IoErrorCode::Conflict, 0})}};
   }
-  return admit(std::move(*frozen), nullptr);
+  std::optional<std::chrono::steady_clock::time_point> deadline;
+  if (within) deadline = now() + *within;
+  return admit(std::move(*frozen), nullptr, deadline);
 }
 
-auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
+auto IoService::admit(
+    CellRequest request, OpenSpec *open,
+    const std::optional<std::chrono::steady_clock::time_point> deadline)
+    -> SubmitResult {
   if (shuttingDown_) {
     // Reachable only if shutdown raced between submit()/admitOpen()'s own
     // check and this call; the staged spec still gets consumed so the
@@ -262,6 +279,7 @@ auto IoService::admit(CellRequest request, OpenSpec *open) -> SubmitResult {
                      .prepared      = std::move(*prepared),
                      .specification = request.specification};
   state.closingEndpoint = request.closeOperation;
+  state.deadline        = deadline;
   if (open) state.open = std::move(*open);
   if (request.endpoint) {
     state.lane = LaneKey{request.endpoint->cell, request.endpoint->incarnation,
@@ -543,37 +561,55 @@ auto IoService::cancelRequest(const RequestCell request)
     return {RequestCancelState::Refused, request,
             cells_.mintRefusal({IoErrorCode::Stale, 0})};
   }
-  if (state->second.outcome)
-    return {RequestCancelState::AlreadyTerminal, request, {}};
-  if (!state->second.cancelRequested) {
-    if (!state->second.enqueued) {
-      state->second.cancelRequested = true;
-      state->second.phase           = IoPhase::Cancelling;
-      if (state->second.lane) {
-        const auto queue = laneQueues_.find(*state->second.lane);
-        if (queue != laneQueues_.end()) {
-          std::erase(queue->second, found->second);
-        }
-      }
-      // A terminal outcome must not carry a non-Terminal progress phase;
-      // copy the last reported counters but force the phase.
-      auto terminalProgress  = state->second.progress;
-      terminalProgress.phase = IoPhase::Terminal;
-      state->second.candidate =
-          BackendResult{Cancelled{{}, terminalProgress, false}, {}};
-      state->second.released  = true;
-      state->second.synthetic = true;
-      queueTerminal(state->second);
-    } else {
-      const auto result = scheduler_->cancel(state->second.token);
-      if (result == CancelQueuedResult::AlreadyTerminal) {
-        return {RequestCancelState::AlreadyTerminal, request, {}};
-      }
-      state->second.cancelRequested = true;
-      state->second.phase           = IoPhase::Cancelling;
+  return {stopRequest(state->second, found->second, false), request, {}};
+}
+
+auto IoService::stopRequest(RequestState &state, const std::uint64_t key,
+                            const bool expired) -> RequestCancelState {
+  if (state.outcome) return RequestCancelState::AlreadyTerminal;
+  if (state.cancelRequested) return RequestCancelState::Accepted;
+  if (!state.enqueued) {
+    state.cancelRequested = true;
+    state.expired         = expired;
+    state.phase           = IoPhase::Cancelling;
+    if (state.lane) {
+      const auto queue = laneQueues_.find(*state.lane);
+      if (queue != laneQueues_.end()) std::erase(queue->second, key);
     }
+    // A terminal outcome must not carry a non-Terminal progress phase;
+    // copy the last reported counters but force the phase.
+    auto terminalProgress  = state.progress;
+    terminalProgress.phase = IoPhase::Terminal;
+    state.candidate = BackendResult{Cancelled{{}, terminalProgress, false}, {}};
+    state.released  = true;
+    state.synthetic = true;
+    queueTerminal(state);
+    return RequestCancelState::Accepted;
   }
-  return {RequestCancelState::Accepted, request, {}};
+  const auto result = scheduler_->cancel(state.token);
+  if (result == CancelQueuedResult::AlreadyTerminal) {
+    return RequestCancelState::AlreadyTerminal;
+  }
+  state.cancelRequested = true;
+  state.expired         = expired;
+  state.phase           = IoPhase::Cancelling;
+  return RequestCancelState::Accepted;
+}
+
+void IoService::expireDue() {
+  std::optional<std::chrono::steady_clock::time_point> current;
+  for (auto &[key, state] : requests_) {
+    // A backend result already in hand wins the race: the request finished
+    // before its deadline was noticed, and that is the outcome it keeps.
+    if (!state.deadline || state.outcome || state.terminalRecord ||
+        state.candidate || state.cancelRequested) {
+      continue;
+    }
+    if (!current) current = now();
+    if (*current < *state.deadline) continue;
+    GLEDITOR_LOG_DEBUG("vortex.io", "request deadline expired");
+    static_cast<void>(stopRequest(state, key, true));
+  }
 }
 
 void IoService::retireRequest(const RequestCell request) {
@@ -658,7 +694,7 @@ auto IoService::closeEndpoint(const EndpointCell endpoint, const CloseMode mode)
   frozen->endpoint       = endpoint;
   frozen->direction      = CellRequest::Direction::Control;
   frozen->closeOperation = true;
-  auto result            = admit(std::move(*frozen), nullptr);
+  auto result            = admit(std::move(*frozen), nullptr, std::nullopt);
   if (std::holds_alternative<Admitted>(result.value)) {
     closingEndpoints_[endpointKey] = {++closingSequence_, false};
     closingOrder_.emplace_back(endpointKey, closingSequence_);
@@ -697,6 +733,7 @@ auto IoService::closeEndpoint(const EndpointCell endpoint, const CloseMode mode)
 }
 
 auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
+  expireDue();
   auto delivered = scheduler_->pump(completionBudget);
   auto remaining =
       completionBudget > delivered ? completionBudget - delivered : 0;
@@ -798,6 +835,15 @@ auto IoService::pump(const std::size_t completionBudget) -> std::size_t {
         }
         openReported = true; // the hook is noexcept: it runs exactly once
         state.adapter->openSettled(state.token, minted);
+      }
+      // The stop came from the deadline: the backend reports it as Cancelled,
+      // and the owner names it for what it was. An outcome the backend
+      // finished before honouring the stop (Complete, Failed, ...) stays.
+      if (state.expired) {
+        if (const auto *stopped = std::get_if<Cancelled>(&outcome)) {
+          outcome =
+              TimedOut{stopped->payload, stopped->progress, stopped->uncertain};
+        }
       }
       // A payload lease may only ride an outcome variant that has a
       // payload field; attaching one to EndOfStream/Overflow/... would

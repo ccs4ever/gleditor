@@ -56,6 +56,9 @@ struct FileReadHostOptions {
   std::size_t endpointRequests{defaultEndpointRequests};
   std::size_t payloadBytes{defaultPayloadBytes};
   std::chrono::milliseconds openDeadline{defaultOpenDeadline};
+  /// The clock request deadlines are read against; empty is the steady clock.
+  /// A test injects one so a deadline expires on demand.
+  IoClock clock;
 };
 
 /// Why a read could not be staged. Nothing was submitted in any of them.
@@ -83,6 +86,18 @@ public:
   /// unauthorised open) is a diagnostic: nothing was started.
   [[nodiscard]] auto beginOpen(std::string_view path)
       -> std::expected<RequestCell, FrontendDiagnostic>;
+  /// The open request of @p path as a specification, with this host's
+  /// default open deadline on its clock. A language that wants the open as
+  /// its own managed submission value admits it through `bridge()`.
+  [[nodiscard]] auto openSpec(std::string_view path) const -> OpenSpec;
+  /// The capability an open outcome minted, when it completed with one.
+  [[nodiscard]] auto capabilityOf(OutcomeCell open) const
+      -> std::optional<CapabilityCell>;
+  /// Close the endpoint behind @p capability through the file close path; the
+  /// close is its own admitted request, never run on the caller's thread. A
+  /// capability that names no open file is refused as a diagnostic.
+  [[nodiscard]] auto closeCapability(CapabilityCell capability)
+      -> std::expected<SubmissionCell, FrontendDiagnostic>;
   /// The capability the open minted: nullopt while the open is in flight, a
   /// diagnostic when it ended in any non-Complete outcome (the file is
   /// missing, not a regular file, ...), and the capability when it opened.

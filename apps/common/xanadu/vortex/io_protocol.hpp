@@ -199,7 +199,9 @@ struct OpenSpec {
   std::optional<CapabilityCell> authCapability;
   std::uint64_t requestedRights{};
   std::uint64_t consistency{};
-  std::chrono::steady_clock::time_point deadline;
+  /// Absolute deadline on the service's clock; the service ends the open as
+  /// `TimedOut` once it passes. Absent: the open has no deadline.
+  std::optional<std::chrono::steady_clock::time_point> deadline;
 };
 struct CellRequest {
   AdapterKey key;

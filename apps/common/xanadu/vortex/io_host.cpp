@@ -47,12 +47,33 @@ void IoHost::abandon(ParkedAwait &parked) noexcept {
 auto IoHost::profile() const noexcept -> IoExecutionProfile { return profile_; }
 
 auto IoHost::submitCell(const CapabilityCell capability,
-                        const zigzag::CellRef requestSpec) -> SubmitResult {
+                        const zigzag::CellRef requestSpec,
+                        const std::optional<std::chrono::milliseconds> within)
+    -> SubmitResult {
   requireOwner();
   if (!policyFor(profile_).allowDirectSubmit) {
     return {Refused{service_.refuse(profileRefusal())}};
   }
-  return service_.submit(capability, requestSpec);
+  return service_.submit(capability, requestSpec, within);
+}
+
+auto IoHost::cancelRequest(const RequestCell request) -> RequestCancelResult {
+  requireOwner();
+  return service_.cancelRequest(request);
+}
+
+auto IoHost::closeEndpoint(const EndpointCell endpoint, const CloseMode mode)
+    -> SubmitResult {
+  requireOwner();
+  if (!policyFor(profile_).allowDirectSubmit) {
+    return {Refused{service_.refuse(profileRefusal())}};
+  }
+  return service_.closeEndpoint(endpoint, mode);
+}
+
+auto IoHost::isTerminal(const RequestCell request) -> bool {
+  requireOwner();
+  return service_.poll(request).outcome.has_value();
 }
 
 auto IoHost::admitOpen(OpenSpec spec) -> SubmitResult {

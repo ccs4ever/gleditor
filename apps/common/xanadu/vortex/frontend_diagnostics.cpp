@@ -52,6 +52,8 @@ constexpr std::array builtins{
             "explicit capture"},
     Builtin{FrontendId::Vql, frontend_codes::vqlScriptFailed,
             "a query segment of a script failed"},
+    Builtin{FrontendId::Vql, frontend_codes::vqlScriptTimeout,
+            "a parked script outlived its overall deadline and was abandoned"},
     Builtin{FrontendId::Vpl, frontend_codes::vplShapeMismatch,
             "unequal shapes given to a vectorized submit"},
     Builtin{FrontendId::Vprolog, frontend_codes::prologEffectContext,

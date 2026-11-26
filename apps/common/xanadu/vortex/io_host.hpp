@@ -1,6 +1,7 @@
 #ifndef XANADU_VORTEX_IO_HOST_HPP
 #define XANADU_VORTEX_IO_HOST_HPP
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -62,9 +63,24 @@ public:
   /// host's profile forbids it (an actor turn) is refused before the
   /// request ever reaches `IoService`. Core/VM never see this check; it
   /// runs only here, ahead of the service boundary.
-  [[nodiscard]] auto submitCell(CapabilityCell capability,
-                                zigzag::CellRef requestSpec) -> SubmitResult;
+  /// @p within, when present, ends the request as `TimedOut` that long after
+  /// admission, on the service's clock (see IoService::submit).
+  [[nodiscard]] auto
+  submitCell(CapabilityCell capability, zigzag::CellRef requestSpec,
+             std::optional<std::chrono::milliseconds> within = std::nullopt)
+      -> SubmitResult;
   [[nodiscard]] auto admitOpen(OpenSpec spec) -> SubmitResult;
+  /// Ask a request's backend to stop. The request's outcome is `Cancelled`
+  /// (or whatever the backend had already finished); a terminal request is
+  /// `AlreadyTerminal`, a value and not an error. It never retires the
+  /// request.
+  [[nodiscard]] auto cancelRequest(RequestCell request) -> RequestCancelResult;
+  /// Close an endpoint through the same gate as any other admission; the
+  /// close is its own admitted request.
+  [[nodiscard]] auto closeEndpoint(EndpointCell endpoint, CloseMode mode)
+      -> SubmitResult;
+  /// Whether @p request already has its terminal outcome.
+  [[nodiscard]] auto isTerminal(RequestCell request) -> bool;
 
   enum class WakeRouteError : std::uint8_t {
     NotParked,     ///< no parked await matches the token's request, waiter

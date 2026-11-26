@@ -1565,4 +1565,214 @@ TEST(IoServiceTest, AwaitAfterRetireResolvesThePublishedOutcome) {
   EXPECT_EQ(ready->outcome, *outcome);
 }
 
+// ---- Deadlines (M7-VQL-b) -------------------------------------------------
+
+/// A service clock a test moves by hand.
+struct FakeClock {
+  std::chrono::steady_clock::time_point now{};
+  void advance(const std::chrono::milliseconds by) { now += by; }
+  [[nodiscard]] IoClock clock() {
+    return [this] { return now; };
+  }
+};
+
+TEST(IoServiceDeadlineTest, AnExpiredRequestEndsTimedOutAsAValue) {
+  Harness harness;
+  FakeClock clock;
+  harness.service.setClock(clock.clock());
+  auto result        = harness.service.submit(testCapability, testSpec,
+                                              std::chrono::milliseconds{100});
+  const auto request = std::get<Admitted>(result.value).request;
+  clock.advance(std::chrono::milliseconds{99});
+  static_cast<void>(harness.service.pump(8));
+  EXPECT_FALSE(harness.service.poll(request).outcome.has_value())
+      << "before its deadline a request is left alone";
+  EXPECT_EQ(harness.scheduler->cancelCalls, 0U);
+
+  clock.advance(std::chrono::milliseconds{1});
+  static_cast<void>(harness.service.pump(8));
+  EXPECT_EQ(harness.scheduler->cancelCalls, 1U)
+      << "the backend is asked to stop";
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_TRUE(harness.service.poll(request).outcome.has_value());
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<TimedOut>(harness.cells.outcomes.front()))
+      << "expiry is TimedOut, never Cancelled";
+}
+
+TEST(IoServiceDeadlineTest, ARunningRequestKeepsTheBackendsUncertainty) {
+  Harness harness;
+  FakeClock clock;
+  harness.service.setClock(clock.clock());
+  const auto request =
+      std::get<Admitted>(
+          harness.service
+              .submit(testCapability, testSpec, std::chrono::milliseconds{10})
+              .value)
+          .request;
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->runningTokens.push_back(token.value);
+  clock.advance(std::chrono::milliseconds{10});
+  static_cast<void>(harness.service.pump(8));
+  EXPECT_FALSE(harness.service.poll(request).outcome.has_value())
+      << "a running request ends when the backend says so";
+  const IoProgress progress{.transferredBytes = 4,
+                            .phase            = IoPhase::Cancelling};
+  harness.scheduler->candidate(token, Cancelled{{}, progress, true});
+  harness.scheduler->acknowledge(token);
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  const auto *timedOut = std::get_if<TimedOut>(&harness.cells.outcomes.front());
+  ASSERT_NE(timedOut, nullptr);
+  EXPECT_TRUE(timedOut->uncertain);
+  EXPECT_EQ(timedOut->progress.transferredBytes, 4U);
+}
+
+TEST(IoServiceDeadlineTest, ARequestTheBackendFinishedFirstKeepsItsOutcome) {
+  Harness harness;
+  FakeClock clock;
+  harness.service.setClock(clock.clock());
+  const auto request =
+      std::get<Admitted>(
+          harness.service
+              .submit(testCapability, testSpec, std::chrono::milliseconds{10})
+              .value)
+          .request;
+  const auto token = tokenOf(*harness.scheduler);
+  harness.scheduler->runningTokens.push_back(token.value);
+  harness.scheduler->candidate(token, Complete{{}, {}, {}});
+  harness.scheduler->acknowledge(token);
+  clock.advance(std::chrono::seconds{1});
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_TRUE(harness.service.poll(request).outcome.has_value());
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<Complete>(harness.cells.outcomes.front()))
+      << "a completion in hand wins the race against the deadline";
+}
+
+TEST(IoServiceDeadlineTest, ARequestWithoutADeadlineNeverExpires) {
+  Harness harness;
+  FakeClock clock;
+  harness.service.setClock(clock.clock());
+  const auto request = harness.submit();
+  clock.advance(std::chrono::hours{24 * 365});
+  static_cast<void>(harness.service.pump(8));
+  EXPECT_FALSE(harness.service.poll(request).outcome.has_value());
+  EXPECT_EQ(harness.scheduler->cancelCalls, 0U);
+}
+
+TEST(IoServiceDeadlineTest, ACancelBeforeTheDeadlineIsCancelledNotTimedOut) {
+  Harness harness;
+  FakeClock clock;
+  harness.service.setClock(clock.clock());
+  const auto request =
+      std::get<Admitted>(
+          harness.service
+              .submit(testCapability, testSpec, std::chrono::milliseconds{10})
+              .value)
+          .request;
+  EXPECT_EQ(harness.service.cancelRequest(request).state,
+            RequestCancelState::Accepted);
+  clock.advance(std::chrono::seconds{1});
+  static_cast<void>(harness.service.pump(8));
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  EXPECT_TRUE(
+      std::holds_alternative<Cancelled>(harness.cells.outcomes.front()));
+}
+
+TEST(IoServiceDeadlineTest, AnOpenPastItsDeadlineTimesOutAndBindsNothing) {
+  Harness harness;
+  FakeClock clock;
+  harness.service.setClock(clock.clock());
+  OpenSpec spec{.adapterKey      = testKey,
+                .locator         = {std::byte{0x2f}},
+                .requestedRights = 1,
+                .consistency     = 0,
+                .deadline        = clock.now + std::chrono::seconds(5)};
+  const auto submitted = harness.service.admitOpen(spec);
+  const auto request   = std::get<Admitted>(submitted.value).request;
+  clock.advance(std::chrono::seconds{5});
+  static_cast<void>(harness.service.pump(8));
+  static_cast<void>(harness.service.pump(8));
+  ASSERT_TRUE(harness.service.poll(request).outcome.has_value());
+  ASSERT_EQ(harness.cells.outcomes.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<TimedOut>(harness.cells.outcomes.front()));
+  EXPECT_EQ(harness.cells.mintedEndpoints, 0U);
+  EXPECT_EQ(harness.adapter.openSettledCalls, 1U);
+  EXPECT_EQ(harness.adapter.openSettledBound, 0U);
+}
+
+TEST(IoServiceDeadlineTest, AnOpenWithoutADeadlineIsLeftAlone) {
+  Harness harness;
+  FakeClock clock;
+  harness.service.setClock(clock.clock());
+  OpenSpec spec{.adapterKey      = testKey,
+                .locator         = {std::byte{0x2f}},
+                .requestedRights = 1};
+  const auto request =
+      std::get<Admitted>(harness.service.admitOpen(spec).value).request;
+  clock.advance(std::chrono::hours{1});
+  static_cast<void>(harness.service.pump(8));
+  EXPECT_FALSE(harness.service.poll(request).outcome.has_value());
+}
+
+TEST(IoServiceDeadlineTest, AnEmptyClockRestoresTheSteadyClock) {
+  Harness harness;
+  harness.service.setClock(IoClock{});
+  const auto before = std::chrono::steady_clock::now();
+  const auto stamp  = harness.service.now();
+  EXPECT_GE(stamp, before);
+}
+
+/// An adapter whose read waits for the stop request, as a blocked file read
+/// does once the scheduler tells it to give up.
+class StopAwareAdapter final : public FakeAdapter {
+public:
+  void execute(const BackendCommand &command, BackendContext &context,
+               CompletionSink &sink) noexcept override {
+    started.store(true);
+    while (!context.stop.stop_requested())
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    sink.terminalCandidate(
+        command.token,
+        BackendResult{
+            Cancelled{{}, IoProgress{.phase = IoPhase::Terminal}, false}, {}},
+        {});
+  }
+  std::atomic<bool> started{};
+};
+
+TEST(IoServiceDeadlineTest, TheRealSchedulerStopsAWaitingWorkerOnExpiry) {
+  PayloadResolver payloads;
+  FakeCells cells;
+  StopAwareAdapter adapter;
+  IoService service({8, 1024, 1024, 1024, 8},
+                    std::make_unique<BoundedIoScheduler>(
+                        BoundedIoSchedulerOptions{1, 4, 4096, 1024}, payloads),
+                    payloads, cells);
+  service.registerAdapter(testKey, adapter);
+  FakeClock clock;
+  service.setClock(clock.clock());
+  const auto request =
+      std::get<Admitted>(
+          service
+              .submit(testCapability, testSpec, std::chrono::milliseconds{50})
+              .value)
+          .request;
+  const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+  while (!adapter.started.load() && std::chrono::steady_clock::now() < limit)
+    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+  ASSERT_TRUE(adapter.started.load());
+  clock.advance(std::chrono::milliseconds{50});
+  while (!service.poll(request).outcome &&
+         std::chrono::steady_clock::now() < limit) {
+    static_cast<void>(service.pump(8));
+    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+  }
+  ASSERT_TRUE(service.poll(request).outcome.has_value());
+  ASSERT_EQ(cells.outcomes.size(), 1U);
+  EXPECT_TRUE(std::holds_alternative<TimedOut>(cells.outcomes.front()));
+}
+
 } // namespace
