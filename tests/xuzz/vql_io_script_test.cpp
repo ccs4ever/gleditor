@@ -197,7 +197,7 @@ TEST(VqlIoCompileTest, AnActionLowersToSubmitABranchAndAnAwait) {
   using zigzag::vortex::OpcodeKind;
   EXPECT_EQ(vm.getOpcodeKind(compiled.ioActions.front().submitOpcode),
             OpcodeKind::Submit);
-  EXPECT_EQ(vm.getOpcodeKind(compiled.ioActions.front().awaitOpcode),
+  EXPECT_EQ(vm.getOpcodeKind(*compiled.ioActions.front().awaitOpcode),
             OpcodeKind::Await);
 }
 
@@ -1005,6 +1005,443 @@ TEST(VqlIoScriptTest, DestroyingARunnerRetiresItsTerminalRequestOnly) {
       << "an unfinished request is never cancelled by the runner";
 }
 
+// ---- M7-VQL-b: outcome fields, handles, cancel, deadlines ------------------
+
+constexpr auto startOnCap =
+    "effect { let $s := submit($cap, read_bytes(0, 16)); "
+    "match $s { admitted($q) => $q, refused($e) => $e } }";
+
+/// Park a read on the fake backend whose outcome the test then decides.
+auto finishWith(ScriptWorld &s, const std::string &source, IoOutcome outcome)
+    -> std::vector<CellRef> {
+  const auto begun = s.run(source);
+  EXPECT_NE(parkedToken(begun), nullptr);
+  s.w.complete(s.w.submissions() - 1, std::move(outcome));
+  const auto done  = s.wakeAndResume();
+  const auto *rows = completedRows(done);
+  EXPECT_NE(rows, nullptr) << (failedDiagnostic(done) != nullptr
+                                   ? failedDiagnostic(done)->message
+                                   : "");
+  return rows ? *rows : std::vector<CellRef>{};
+}
+
+TEST(VqlIoFieldsTest, ACompleteOutcomeAnswersItsBytesAndPayloadAsValues) {
+  ScriptWorld s;
+  const IoProgress progress{.transferredBytes = 2, .phase = IoPhase::Terminal};
+  const auto rows = finishWith(
+      s,
+      std::string{readOnCap} +
+          " as $r; return io_bytes($r); return io_payload($r)",
+      Partial{s.w.payloadRange(), PartialCause::BackendFailure, progress});
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(s.w.arena.textOf(rows.front()), "ok");
+
+  ScriptWorld t;
+  const auto bytes = finishWith(
+      t, std::string{readOnCap} + " as $r; return io_bytes($r)",
+      Partial{t.w.payloadRange(), PartialCause::BackendFailure, progress});
+  ASSERT_EQ(bytes.size(), 1U);
+  EXPECT_EQ(t.w.arena.textOf(bytes.front()), "2");
+}
+
+TEST(VqlIoFieldsTest, AFailedOutcomeAnswersItsErrorCodeAndDetail) {
+  const IoProgress progress{.transferredBytes = 7, .phase = IoPhase::Terminal};
+  {
+    ScriptWorld s;
+    const auto rows =
+        finishWith(s, std::string{readOnCap} + " as $r; return io_error($r)",
+                   Failed{{IoErrorCode::BackendFailure, 3}, {}, progress});
+    ASSERT_EQ(rows.size(), 1U);
+    EXPECT_EQ(s.w.arena.textOf(rows.front()), "BackendFailure");
+  }
+  {
+    ScriptWorld s;
+    const auto rows =
+        finishWith(s, std::string{readOnCap} + " as $r; return io_detail($r)",
+                   Failed{{IoErrorCode::BackendFailure, 3}, {}, progress});
+    ASSERT_EQ(rows.size(), 1U);
+    EXPECT_EQ(s.w.arena.textOf(rows.front()), "3");
+  }
+}
+
+TEST(VqlIoFieldsTest, ARefusalAnswersItsErrorAndHasNoPayloadOrBytes) {
+  ScriptWorld s;
+  s.w.refuseAdmission = true;
+  const auto begun =
+      s.run(std::string{readOnCap} + " as $r; return io_error($r)");
+  const auto *rows = completedRows(begun);
+  ASSERT_NE(rows, nullptr);
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(s.w.arena.textOf(rows->front()), "InvalidRequest");
+  const auto none =
+      s.run(std::string{readOnCap} + " as $r; return io_payload($r)");
+  ASSERT_NE(completedRows(none), nullptr);
+  EXPECT_TRUE(completedRows(none)->empty());
+}
+
+TEST(VqlIoFieldsTest, ThePayloadIsGatedByTheTerminalStatus) {
+  // EndOfStream carries no payload whatever the cell graph holds; the field
+  // answers nothing and is not an error.
+  ScriptWorld s;
+  const auto rows =
+      finishWith(s, std::string{readOnCap} + " as $r; return io_payload($r)",
+                 EndOfStream{{}});
+  EXPECT_TRUE(rows.empty());
+}
+
+TEST(VqlIoFieldsTest, AFieldOfANonOutcomeFailsTheScriptByValue) {
+  ScriptWorld s;
+  s.engine.setVariable("plain", s.w.arena.makeCell("x"));
+  for (const auto *fn : {"io_payload", "io_bytes", "io_error", "io_detail"}) {
+    SCOPED_TRACE(fn);
+    const auto result = s.run(std::string{"return "} + fn + "($plain)");
+    EXPECT_NE(failedDiagnostic(result), nullptr);
+  }
+}
+
+TEST(VqlIoGrammarTest, TheFieldFunctionsTakeExactlyOneArgument) {
+  ScriptWorld s;
+  const auto result = s.run("return io_bytes()");
+  EXPECT_NE(failedDiagnostic(result), nullptr);
+}
+
+// -- Grammar of the new actions --------------------------------------------
+
+TEST(VqlIoGrammarTest, WithinTakesALiteralOrAVariableAndAUnit) {
+  const auto ms = Parser("effect { let $s := submit($c, read_bytes(0, 1)) "
+                         "within 250 ms; match $s { admitted($q) => await($q), "
+                         "refused($e) => $e } }")
+                      .parseQuery();
+  const auto &a = std::get<IoEffectStatement>(ms.body.statements[0]);
+  ASSERT_TRUE(a.within);
+  EXPECT_EQ(std::get<std::int64_t>(a.within->amount), 250);
+  EXPECT_EQ(a.within->unitMillis, 1);
+  const auto sec = Parser("effect { let $s := submit($c, read_bytes(0, 1)) "
+                          "within $t s; match $s { admitted($q) => await($q), "
+                          "refused($e) => $e } }")
+                       .parseQuery();
+  const auto &b = std::get<IoEffectStatement>(sec.body.statements[0]);
+  EXPECT_EQ(std::get<std::string>(b.within->amount), "t");
+  EXPECT_EQ(b.within->unitMillis, 1000);
+}
+
+TEST(VqlIoGrammarTest, ADetachedReadYieldsTheHandleAndNamesIt) {
+  const auto query = Parser(std::string{startOnCap} + " as $h").parseQuery();
+  const auto &a    = std::get<IoEffectStatement>(query.body.statements[0]);
+  EXPECT_TRUE(a.detached);
+  EXPECT_EQ(a.resultVar, std::optional<std::string>{"h"});
+}
+
+TEST(VqlIoGrammarTest, AwaitCancelAndOpenAreScriptActions) {
+  const auto query =
+      Parser("effect { await($h) } as $r; effect { cancel($h) } as $c; "
+             "effect { open(\"a b.txt\") } as $f; effect { open($p) }")
+          .parseQuery();
+  ASSERT_EQ(query.body.statements.size(), 4U);
+  using Kind         = IoEffectStatement::Kind;
+  const auto &await  = std::get<IoEffectStatement>(query.body.statements[0]);
+  const auto &cancel = std::get<IoEffectStatement>(query.body.statements[1]);
+  const auto &open   = std::get<IoEffectStatement>(query.body.statements[2]);
+  const auto &openV  = std::get<IoEffectStatement>(query.body.statements[3]);
+  EXPECT_EQ(await.kind, Kind::Await);
+  EXPECT_EQ(await.handleVar, "h");
+  EXPECT_EQ(cancel.kind, Kind::Cancel);
+  EXPECT_EQ(open.kind, Kind::Open);
+  EXPECT_EQ(open.openPath.text, "a b.txt");
+  EXPECT_FALSE(open.openPath.isVariable);
+  EXPECT_TRUE(openV.openPath.isVariable);
+  EXPECT_EQ(open.resultVar, std::optional<std::string>{"f"});
+}
+
+TEST(VqlIoGrammarTest, TheNewActionsAreRefusedInRowAndNestedPositions) {
+  for (const auto *action : {"effect { await($h) }", "effect { cancel($h) }",
+                             "effect { open(\"x\") }"}) {
+    for (const auto &source : {
+             std::string{"for $x in ## "} + action,
+             std::string{"let $x := ## "} + action,
+             std::string{"def f() := { "} + action + " }; f()",
+             std::string{"watch ##/d.x as $v { "} + action + " }",
+         }) {
+      SCOPED_TRACE(source);
+      EXPECT_NE(parseFailure(source).find(contextCode), std::string::npos);
+    }
+  }
+}
+
+TEST(VqlIoGrammarTest, AMalformedNewActionIsAParseError) {
+  for (const auto *source : {
+           "effect { let $s := submit($c, read_bytes(0, 1)) within 5; match $s "
+           "{ admitted($q) => await($q), refused($e) => $e } }",
+           "effect { let $s := submit($c, read_bytes(0, 1)) within 5 days; "
+           "match $s { admitted($q) => await($q), refused($e) => $e } }",
+           "effect { let $s := submit($c, read_bytes(0, 1)); match $s { "
+           "admitted($q) => $z, refused($e) => $e } }",
+           "effect { await(7) }",
+           "effect { cancel() }",
+           "effect { open(7) }",
+           "effect { open() }",
+           "effect { await($h) as $r }",
+       }) {
+    SCOPED_TRACE(source);
+    const auto message = parseFailure(source);
+    EXPECT_FALSE(message.empty());
+    EXPECT_EQ(message.find(contextCode), std::string::npos) << message;
+  }
+}
+
+// -- Detached reads, await and cancel --------------------------------------
+
+TEST(VqlIoHandleTest, ADetachedReadStartsAndDoesNotWait) {
+  ScriptWorld s;
+  const auto result = s.run(std::string{startOnCap} + " as $h");
+  const auto *rows  = completedRows(result);
+  ASSERT_NE(rows, nullptr) << "a started read does not park the script";
+  EXPECT_EQ(s.w.submissions(), 1U);
+  ASSERT_EQ(rows->size(), 1U);
+  const auto incarnation = s.w.arena.incarnationOf(rows->front());
+  ASSERT_TRUE(incarnation);
+  EXPECT_EQ(ioCellTag(s.w.arena, rows->front(), *incarnation),
+            IoCellTag::Request);
+}
+
+TEST(VqlIoHandleTest, AwaitTakesTheSameRequestAndNeverSubmitsAgain) {
+  ScriptWorld s;
+  const auto begun =
+      s.run(std::string{startOnCap} + " as $h; effect { await($h) } as $r; "
+                                      "return io_tag($r)");
+  const auto *token = parkedToken(begun);
+  ASSERT_NE(token, nullptr);
+  EXPECT_EQ(token->position, 1U) << "parked at the await action";
+  EXPECT_EQ(s.w.submissions(), 1U);
+  s.w.complete(0, EndOfStream{{}});
+  const auto done  = s.wakeAndResume();
+  const auto *rows = completedRows(done);
+  ASSERT_NE(rows, nullptr);
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(s.w.arena.textOf(rows->front()), "EndOfStream");
+  EXPECT_EQ(s.w.submissions(), 1U);
+}
+
+TEST(VqlIoHandleTest, AwaitOfARefusalIsTheRefusalAsAValue) {
+  ScriptWorld s;
+  s.w.refuseAdmission = true;
+  const auto done =
+      s.run(std::string{startOnCap} + " as $h; effect { await($h) } as $r; "
+                                      "return io_tag($r)");
+  const auto *rows = completedRows(done);
+  ASSERT_NE(rows, nullptr) << "awaiting a refusal is not an error";
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(s.w.arena.textOf(rows->front()), "Rejected");
+  EXPECT_EQ(s.w.submissions(), 0U);
+}
+
+TEST(VqlIoHandleTest, CancelMakesTheOutcomeCancelledAsAValue) {
+  ScriptWorld s;
+  const auto begun =
+      s.run(std::string{startOnCap} +
+            " as $h; effect { cancel($h) } as $c; return io_tag($c)");
+  const auto *token = parkedToken(begun);
+  ASSERT_NE(token, nullptr) << "the cancel waits for the backend to stop";
+  EXPECT_EQ(token->position, 1U);
+  // The backend honours the stop request.
+  s.w.complete(0, Cancelled{{}, {.phase = IoPhase::Terminal}, false});
+  const auto done  = s.wakeAndResume();
+  const auto *rows = completedRows(done);
+  ASSERT_NE(rows, nullptr);
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(s.w.arena.textOf(rows->front()), "Cancelled");
+  EXPECT_EQ(s.w.submissions(), 1U);
+}
+
+TEST(VqlIoHandleTest, ACancelThatLosesTheRaceKeepsTheCompletionsOutcome) {
+  ScriptWorld s;
+  const auto begun =
+      s.run(std::string{startOnCap} +
+            " as $h; effect { cancel($h) } as $c; return io_tag($c)");
+  ASSERT_NE(parkedToken(begun), nullptr);
+  // The read finished before the backend saw the stop.
+  s.w.complete(0, EndOfStream{{}});
+  const auto done  = s.wakeAndResume();
+  const auto *rows = completedRows(done);
+  ASSERT_NE(rows, nullptr);
+  EXPECT_EQ(s.w.arena.textOf(rows->front()), "EndOfStream");
+}
+
+TEST(VqlIoHandleTest, CancellingATerminalRequestIsATypedNoOpValue) {
+  ScriptWorld t;
+  const auto first = t.run(std::string{startOnCap} +
+                           " as $h; effect { await($h) } as $w; "
+                           "effect { cancel($h) } as $c; return io_tag($c)");
+  ASSERT_NE(parkedToken(first), nullptr);
+  t.w.complete(0, EndOfStream{{}});
+  const auto done  = t.wakeAndResume();
+  const auto *rows = completedRows(done);
+  EXPECT_EQ(t.w.scheduler->entries.size(), 1U);
+  ASSERT_NE(rows, nullptr) << (failedDiagnostic(done) != nullptr
+                                   ? failedDiagnostic(done)->message
+                                   : "");
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(t.w.arena.textOf(rows->front()), "EndOfStream")
+      << "the request's own terminal outcome is the value";
+}
+
+TEST(VqlIoHandleTest, CancellingARefusalIsTheRefusalAsAValue) {
+  ScriptWorld s;
+  s.w.refuseAdmission = true;
+  const auto done =
+      s.run(std::string{startOnCap} + " as $h; effect { cancel($h) } as $c; "
+                                      "return io_tag($c)");
+  const auto *rows = completedRows(done);
+  ASSERT_NE(rows, nullptr);
+  EXPECT_EQ(s.w.arena.textOf(rows->front()), "Rejected");
+}
+
+TEST(VqlIoHandleTest, AHandleThatIsNeitherRequestNorOutcomeFailsByValue) {
+  ScriptWorld s;
+  s.engine.setVariable("plain", s.w.arena.makeCell("x"));
+  for (const auto *action :
+       {"effect { await($plain) }", "effect { cancel($plain) }"}) {
+    SCOPED_TRACE(action);
+    const auto result  = s.run(action);
+    const auto *failed = failedDiagnostic(result);
+    ASSERT_NE(failed, nullptr);
+    EXPECT_EQ(failed->code, "VQL_IO_EFFECT_ARGUMENT");
+  }
+}
+
+TEST(VqlIoHandleTest, ADetachedReadNobodyAwaitsIsRetiredOnceItEnds) {
+  ScriptWorld s;
+  const auto first = s.run(std::string{startOnCap} + " as $h");
+  ASSERT_NE(completedRows(first), nullptr);
+  const auto before = s.w.submissions();
+  s.w.complete(0, EndOfStream{{}});
+  static_cast<void>(s.w.pump());
+  // The next script's admission retires the finished one, running or not.
+  const auto second = s.run(std::string{startOnCap} + " as $h");
+  ASSERT_NE(completedRows(second), nullptr);
+  EXPECT_EQ(s.w.submissions(), before + 1U);
+}
+
+// -- Deadlines --------------------------------------------------------------
+
+TEST(VqlIoDeadlineTest, WithinTimesOutAsAValueOnAFakeClock) {
+  ScriptWorld s;
+  auto now = std::chrono::steady_clock::time_point{};
+  s.w.service.setClock([&now] { return now; });
+  const auto begun = s.run(
+      "effect { let $s := submit($cap, read_bytes(0, 16)) within 250 ms; "
+      "match $s { admitted($q) => await($q), refused($e) => $e } } as $r; "
+      "return io_tag($r)");
+  ASSERT_NE(parkedToken(begun), nullptr);
+  now += std::chrono::milliseconds{249};
+  static_cast<void>(s.w.pump());
+  EXPECT_FALSE(s.runner.takeWake()) << "before the deadline nothing happens";
+  now += std::chrono::milliseconds{1};
+  // The fake backend honours the stop the service asked for.
+  static_cast<void>(s.w.pump());
+  s.w.complete(0, Cancelled{{}, {.phase = IoPhase::Terminal}, false});
+  const auto done  = s.wakeAndResume();
+  const auto *rows = completedRows(done);
+  ASSERT_NE(rows, nullptr);
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(s.w.arena.textOf(rows->front()), "TimedOut")
+      << "a deadline is a value, never a QueryError or empty rows";
+}
+
+TEST(VqlIoDeadlineTest, ARequestThatFinishesFirstKeepsItsOutcome) {
+  ScriptWorld s;
+  auto now = std::chrono::steady_clock::time_point{};
+  s.w.service.setClock([&now] { return now; });
+  const auto begun = s.run(
+      "effect { let $s := submit($cap, read_bytes(0, 16)) within 2 s; "
+      "match $s { admitted($q) => await($q), refused($e) => $e } } as $r; "
+      "return io_tag($r)");
+  ASSERT_NE(parkedToken(begun), nullptr);
+  s.w.complete(0, EndOfStream{{}});
+  now += std::chrono::seconds{5};
+  const auto done  = s.wakeAndResume();
+  const auto *rows = completedRows(done);
+  ASSERT_NE(rows, nullptr);
+  EXPECT_EQ(s.w.arena.textOf(rows->front()), "EndOfStream");
+}
+
+TEST(VqlIoDeadlineTest, AVariableBoundWithinIsReadAtTheAction) {
+  ScriptWorld s;
+  auto now = std::chrono::steady_clock::time_point{};
+  s.w.service.setClock([&now] { return now; });
+  s.engine.setVariable("t", s.w.arena.makeScalarCell(std::int64_t{3}));
+  const auto begun =
+      s.run("effect { let $s := submit($cap, read_bytes(0, 16)) within $t s; "
+            "match $s { admitted($q) => await($q), refused($e) => $e } }");
+  ASSERT_NE(parkedToken(begun), nullptr);
+  now += std::chrono::milliseconds{2999};
+  static_cast<void>(s.w.pump());
+  s.w.complete(0, EndOfStream{{}});
+  EXPECT_NE(completedRows(s.wakeAndResume()), nullptr);
+}
+
+TEST(VqlIoDeadlineTest, ANegativeOrNonNumericWithinFailsBeforeAnythingRuns) {
+  ScriptWorld s;
+  s.engine.setVariable("neg", s.w.arena.makeScalarCell(std::int64_t{-1}));
+  s.engine.setVariable("word", s.w.arena.makeCell("soon"));
+  for (const auto *bound : {"$neg", "$word"}) {
+    SCOPED_TRACE(bound);
+    const auto result =
+        s.run(std::string{"effect { let $s := submit($cap, read_bytes(0, 16)) "
+                          "within "} +
+              bound +
+              " ms; match $s { admitted($q) => await($q), refused($e) => $e } "
+              "}");
+    const auto *failed = failedDiagnostic(result);
+    ASSERT_NE(failed, nullptr);
+    EXPECT_EQ(failed->code, "VQL_IO_EFFECT_ARGUMENT");
+  }
+  EXPECT_EQ(s.w.submissions(), 0U);
+}
+
+TEST(VqlIoDeadlineTest, AScriptPastItsOverallDeadlineIsAbandonedStably) {
+  ScriptWorld s;
+  auto now = std::chrono::steady_clock::time_point{};
+  s.runner.setClock([&now] { return now; })
+      ->setScriptTimeout(std::chrono::milliseconds{500});
+  const auto begun  = s.run(readOnCap);
+  const auto *token = parkedToken(begun);
+  ASSERT_NE(token, nullptr);
+  const auto parkedToken0 = *token;
+  now += std::chrono::milliseconds{499};
+  EXPECT_FALSE(s.runner.expireIfDue(parkedToken0)) << "inside the deadline";
+  now += std::chrono::milliseconds{1};
+  const auto expired = s.runner.expireIfDue(parkedToken0);
+  ASSERT_TRUE(expired);
+  EXPECT_EQ(expired->code, "VQL_SCRIPT_TIMEOUT");
+  EXPECT_EQ(expired->position, 0U);
+  EXPECT_EQ(s.runner.parkedCount(), 0U);
+  EXPECT_FALSE(s.runner.expireIfDue(parkedToken0))
+      << "an abandoned script is not abandoned twice";
+}
+
+TEST(VqlIoDeadlineTest, AScriptWithoutADeadlineWaitsAsLongAsItLikes) {
+  ScriptWorld s;
+  auto now = std::chrono::steady_clock::time_point{};
+  s.runner.setClock([&now] { return now; });
+  const auto begun = s.run(readOnCap);
+  ASSERT_NE(parkedToken(begun), nullptr);
+  now += std::chrono::hours{24};
+  EXPECT_FALSE(s.runner.expireIfDue(*parkedToken(begun)));
+}
+
+TEST(VqlIoDeadlineTest, TheDriverReportsTheTimeoutAndLeavesNoBudgetBehind) {
+  ScriptWorld s;
+  auto now = std::chrono::steady_clock::time_point{};
+  s.runner.setClock([&now] { return now; })
+      ->setScriptTimeout(std::chrono::milliseconds{10});
+  const auto rows = xanadu::vql::driveToCompletion(
+      s.runner, s.run(readOnCap), [&] { static_cast<void>(s.w.pump()); },
+      [&] { now += std::chrono::milliseconds{4}; });
+  ASSERT_FALSE(rows);
+  EXPECT_EQ(rows.error().code, "VQL_SCRIPT_TIMEOUT");
+}
+
 // ---- The shared conformance harness ---------------------------------------
 
 /// The VQL driver: its program is the script action itself, run through the
@@ -1203,6 +1640,224 @@ TEST(VqlIoFileTest, TwoActionsReadTwoFilesInOneScript) {
   ASSERT_TRUE(rows) << rows.error().message;
   ASSERT_EQ(rows->size(), 2U);
   EXPECT_EQ(f.text((*rows)[1]), "beta") << "the final action decides the rows";
+}
+
+// ---- M7-VQL-b over real files: script-level open, close, handles ------------
+
+/// Pump until @p done or a generous limit; every wait is a pump, never a block.
+template <typename Done> bool pumpUntil(FileScriptWorld &f, const Done &done) {
+  const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+  while (!done() && std::chrono::steady_clock::now() < limit) {
+    f.host.pump(16);
+    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+  }
+  return done();
+}
+
+auto openAction(const std::filesystem::path &path, const char *name) {
+  return std::string{"effect { open(\""} + path.string() + "\") } as $" + name;
+}
+
+constexpr auto readFrom = [](const char *cap, int offset, int bound) {
+  return std::string{"effect { let $s := submit($"} + cap + ", read_bytes(" +
+         std::to_string(offset) + ", " + std::to_string(bound) +
+         ")); match $s { admitted($q) => await($q), refused($e) => $e } }";
+};
+
+TEST(VqlIoOpenTest, AScriptOpensReadsAndClosesItsOwnFile) {
+  FileScriptWorld f;
+  const auto path = f.write("a.txt", "hello world");
+  const auto rows = f.run(openAction(path, "f") + "; " + readFrom("f", 6, 5));
+  ASSERT_TRUE(rows) << rows.error().message;
+  ASSERT_EQ(rows->size(), 2U);
+  EXPECT_EQ(f.tag((*rows)[0]), IoOutcomeTag::Complete);
+  EXPECT_EQ(f.text((*rows)[1]), "world");
+  EXPECT_TRUE(pumpUntil(f, [&] {
+    static_cast<void>(f.runner.takeWake());
+    return f.host.adapter().openedCount() == 0;
+  })) << "the capability's lifetime is the script's: the file is closed";
+}
+
+TEST(VqlIoOpenTest, TheOpenOutcomeIsTheRowAndTheNameIsTheCapability) {
+  FileScriptWorld f;
+  const auto path = f.write("a.txt", "abc");
+  const auto rows = f.run(openAction(path, "f") + "; return io_tag($f)");
+  ASSERT_TRUE(rows) << rows.error().message;
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(f.text(rows->front()), "Capability")
+      << "the name is the capability the open minted";
+  const auto statement = f.run(openAction(path, "g"));
+  ASSERT_TRUE(statement) << statement.error().message;
+  ASSERT_EQ(statement->size(), 1U);
+  EXPECT_EQ(f.tag(statement->front()), IoOutcomeTag::Complete);
+}
+
+TEST(VqlIoOpenTest, ACapabilityDoesNotOutliveItsScript) {
+  FileScriptWorld f;
+  const auto path = f.write("a.txt", "hello world");
+  const auto kept = f.run(openAction(path, "f") + "; return $f");
+  ASSERT_TRUE(kept) << kept.error().message;
+  ASSERT_EQ(kept->size(), 1U);
+  f.engine.setVariable("old", kept->front());
+  ASSERT_TRUE(pumpUntil(f, [&] {
+    static_cast<void>(f.runner.takeWake());
+    return f.host.adapter().openedCount() == 0;
+  }));
+  const auto later = f.run(readFrom("old", 0, 5));
+  // Closed means refused: a typed script failure or a non-Complete outcome,
+  // never the file's bytes.
+  if (later) {
+    ASSERT_FALSE(later->empty());
+    EXPECT_NE(f.tag(later->front()), IoOutcomeTag::Complete);
+  } else {
+    EXPECT_FALSE(later.error().message.empty());
+  }
+}
+
+TEST(VqlIoOpenTest, AMissingFileIsAnOutcomeValueNotAScriptFailure) {
+  FileScriptWorld f;
+  const auto rows =
+      f.run(openAction(f.dir / "missing.txt", "f") + "; return io_tag($f)");
+  ASSERT_TRUE(rows) << rows.error().message;
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(f.text(rows->front()), "Failed");
+  EXPECT_EQ(f.host.adapter().openedCount(), 0U);
+}
+
+TEST(VqlIoOpenTest, ReadingThroughAFailedOpenFailsTheScriptWithItsStatement) {
+  FileScriptWorld f;
+  const auto rows = f.run(openAction(f.dir / "missing.txt", "f") + "; " +
+                          readFrom("f", 0, 5));
+  ASSERT_FALSE(rows);
+  EXPECT_EQ(rows.error().position, 1U);
+}
+
+TEST(VqlIoOpenTest, ThePathMayBeAVariableAndTwoFilesBothClose) {
+  FileScriptWorld f;
+  const auto a = f.write("a.txt", "alpha");
+  const auto b = f.write("b.txt", "beta");
+  f.engine.setVariable("where", f.arena.makeCell(b.string()));
+  const auto rows =
+      f.run(openAction(a, "x") + "; effect { open($where) } as $y; " +
+            readFrom("x", 0, 5) + "; " + readFrom("y", 0, 4));
+  ASSERT_TRUE(rows) << rows.error().message;
+  ASSERT_EQ(rows->size(), 2U);
+  EXPECT_EQ(f.text((*rows)[1]), "beta");
+  EXPECT_TRUE(pumpUntil(f, [&] {
+    static_cast<void>(f.runner.takeWake());
+    return f.host.adapter().openedCount() == 0;
+  }));
+}
+
+TEST(VqlIoOpenTest, AFailingScriptStillClosesWhatItOpened) {
+  FileScriptWorld f;
+  const auto path = f.write("a.txt", "abc");
+  const auto rows = f.run(openAction(path, "f") + "; " + readFrom("f", 0, 5) +
+                          "; return io_tag($nothing)");
+  ASSERT_FALSE(rows);
+  EXPECT_TRUE(pumpUntil(f, [&] {
+    static_cast<void>(f.runner.takeWake());
+    return f.host.adapter().openedCount() == 0;
+  }));
+}
+
+TEST(VqlIoOpenTest, AnEmptyPathIsRefusedBeforeAnythingOpens) {
+  FileScriptWorld f;
+  const auto empty = f.run("effect { open(\"\") }");
+  ASSERT_FALSE(empty);
+  EXPECT_EQ(empty.error().code, "VQL_IO_EFFECT_ARGUMENT");
+}
+
+TEST(VqlIoOpenTest, AHostThatCannotOpenFilesRefusesTheAction) {
+  ScriptWorld s;
+  const auto result  = s.run("effect { open(\"/nowhere\") }");
+  const auto *failed = failedDiagnostic(result);
+  ASSERT_NE(failed, nullptr);
+  EXPECT_EQ(failed->code, "VQL_IO_EFFECT_ARGUMENT");
+}
+
+TEST(VqlIoOpenTest, ARealFileOpenPastItsDeadlineDoesNotLoseItsCapability) {
+  // The injected clock jumps past the open deadline before the first pump.
+  // A completion already in hand wins the race, so the open is Complete.
+  auto now = std::chrono::steady_clock::time_point{};
+  xanadu::vortex::FileReadHostOptions options;
+  options.clock = [&now] { return now; };
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core{arena};
+  zigzag::vortex::VortexVM vm{core};
+  xanadu::vortex::FileReadHost host{vm, arena, options};
+  const auto path = std::filesystem::temp_directory_path() /
+                    ("vql_io_deadline_" + std::to_string(::getpid()) + ".txt");
+  std::ofstream(path) << "abc";
+  const auto open = host.beginOpen(path.string());
+  ASSERT_TRUE(open);
+  now += std::chrono::hours{1};
+  std::optional<std::expected<CapabilityCell, FrontendDiagnostic>> result;
+  for (int spin = 0; spin < 2000 && !result; ++spin) {
+    result = host.openedCapability(*open);
+    if (!result) {
+      host.pump(16);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  std::error_code ec;
+  std::filesystem::remove(path, ec);
+  ASSERT_TRUE(result.has_value());
+  // Either the worker's completion beat the stop request (a capability) or
+  // the deadline won (a typed diagnostic naming TimedOut): never a hang.
+  if (!*result)
+    EXPECT_NE(result->error().message.find("TimedOut"), std::string::npos);
+}
+
+TEST(VqlIoHandleFileTest, ADetachedReadIsAwaitedAsTheSameRequest) {
+  FileScriptWorld f;
+  ASSERT_TRUE(f.open("src", f.write("a.txt", "hello world")));
+  const auto rows =
+      f.run("effect { let $s := submit($src, read_bytes(0, 5)); match $s { "
+            "admitted($q) => $q, refused($e) => $e } } as $h; "
+            "effect { await($h) } as $r; return io_payload($r)");
+  ASSERT_TRUE(rows) << rows.error().message;
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(f.text(rows->front()), "hello");
+}
+
+TEST(VqlIoHandleFileTest, CancelOfARealReadIsCancelledOrItsOwnCompletion) {
+  // A small read may finish before the stop request lands; both are values,
+  // and the script never fails.
+  FileScriptWorld f;
+  ASSERT_TRUE(f.open("src", f.write("a.txt", "hello world")));
+  const auto rows =
+      f.run("effect { let $s := submit($src, read_bytes(0, 5)); match $s { "
+            "admitted($q) => $q, refused($e) => $e } } as $h; "
+            "effect { cancel($h) } as $c; return io_tag($c)");
+  ASSERT_TRUE(rows) << rows.error().message;
+  ASSERT_EQ(rows->size(), 1U);
+  const auto tag = f.text(rows->front());
+  EXPECT_TRUE(tag == "Cancelled" || tag == "Complete") << tag;
+}
+
+TEST(VqlIoHandleFileTest, WithinThatIsNotReachedLeavesTheReadComplete) {
+  FileScriptWorld f;
+  ASSERT_TRUE(f.open("src", f.write("a.txt", "hello world")));
+  const auto rows = f.run(
+      "effect { let $s := submit($src, read_bytes(6, 5)) within 30 s; "
+      "match $s { admitted($q) => await($q), refused($e) => $e } } as $r; "
+      "return io_bytes($r)");
+  ASSERT_TRUE(rows) << rows.error().message;
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(f.text(rows->front()), "5");
+}
+
+TEST(VqlIoHandleFileTest, TheFieldFunctionsReadARealOutcome) {
+  FileScriptWorld f;
+  ASSERT_TRUE(f.open("src", f.write("a.txt", "hello world")));
+  const auto rows =
+      f.run("effect { let $s := submit($src, read_bytes(0, 5)); match $s { "
+            "admitted($q) => await($q), refused($e) => $e } } as $r; "
+            "return io_tag($r); return io_payload($r)");
+  ASSERT_TRUE(rows) << rows.error().message;
+  ASSERT_EQ(rows->size(), 1U);
+  EXPECT_EQ(f.text(rows->front()), "hello");
 }
 
 } // namespace

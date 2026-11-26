@@ -515,3 +515,129 @@ TEST_F(VQueryE2ETest, TheCompilerCliLowersAScriptActionToSubmitAndAwait) {
   EXPECT_NE(out.find("AWAIT"), std::string::npos) << out;
   EXPECT_EQ(out.find("NOT_COMPILABLE"), std::string::npos) << out;
 }
+
+// M7-VQL-b: a script that opens its own file, names a request and cancels it,
+// bounds a read with `within`, and the session's overall script timeout.
+namespace {
+
+constexpr auto readFromF =
+    "effect { let $s := submit($f, read_bytes(6, 5)); "
+    "match $s { admitted($q) => await($q), refused($e) => $e } }";
+
+} // namespace
+
+TEST_F(VQueryE2ETest, ScriptOpensItsOwnFileReadsItAndClosesIt) {
+  const auto source = writeSource(testDir, "hello world");
+  const auto result = runVQuery("-e 'effect { open(\"" + source.string() +
+                                "\") } as $f; " + readFromF + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "Complete\nworld\n");
+}
+
+TEST_F(VQueryE2ETest, ScriptOpenOfAMissingFileIsAnOutcomeRow) {
+  const auto result =
+      runVQuery("-e 'effect { open(\"" + (testDir / "gone.txt").string() +
+                "\") } as $f; return io_tag($f)'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "Failed\n");
+}
+
+TEST_F(VQueryE2ETest, ScriptStartsACancelsAndNamesItsRequest) {
+  const auto source = writeSource(testDir, "hello world");
+  const auto result = runVQuery(
+      "--io-file src=" + source.string() +
+      " -e 'effect { let $s := submit($src, read_bytes(0, 5)); match $s { "
+      "admitted($q) => $q, refused($e) => $e } } as $h; "
+      "effect { cancel($h) } as $c; return io_tag($c)'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  // A five-byte read can finish before the stop request lands; both are
+  // values and the script never fails.
+  EXPECT_TRUE(result.output == "Cancelled\n" || result.output == "Complete\n")
+      << result.output;
+}
+
+TEST_F(VQueryE2ETest, ScriptReadsAnOutcomesFieldsAsValues) {
+  const auto source = writeSource(testDir, "hello world");
+  const auto result = runVQuery(
+      "--io-file src=" + source.string() +
+      " -e 'effect { let $s := submit($src, read_bytes(6, 5)) within 30 s; "
+      "match $s { admitted($q) => await($q), refused($e) => $e } } as $r; "
+      "return io_bytes($r); return io_payload($r)'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_EQ(result.output, "world\n");
+}
+
+TEST_F(VQueryE2ETest, ScriptTimeoutFlagTakesMillisecondsOrOff) {
+  const auto source = writeSource(testDir, "hello world");
+  for (const auto *value : {"5000", "off"}) {
+    SCOPED_TRACE(value);
+    const auto result = runVQuery(std::string{"--script-timeout "} + value +
+                                  " --io-file src=" + source.string() +
+                                  " -e '" + readAction + "'");
+    ASSERT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_EQ(result.output, "Complete\nworld\n");
+  }
+  for (const auto *bad : {"0", "-5", "soon", "1.5"}) {
+    SCOPED_TRACE(bad);
+    const auto result =
+        runVQuery(std::string{"--script-timeout "} + bad + " -e 'return 1'");
+    EXPECT_EQ(result.exitCode, 1) << result.output;
+    EXPECT_NE(result.output.find("--script-timeout"), std::string::npos)
+        << result.output;
+  }
+}
+
+TEST_F(VQueryE2ETest, ReplShowsAndSetsTheScriptTimeout) {
+  const auto input = testDir / "timeout.vql";
+  {
+    std::ofstream script(input);
+    script << ":timeout\n:timeout 250\n:timeout\n:timeout off\n:timeout\n"
+           << ":timeout nope\n:quit\n";
+  }
+  const auto result = runVQuery("< '" + input.string() + "'");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  const auto &out = result.output;
+  EXPECT_NE(out.find("Script timeout: 30000 ms"), std::string::npos) << out;
+  EXPECT_NE(out.find("Script timeout: 250 ms"), std::string::npos) << out;
+  EXPECT_NE(out.find("Script timeout: off"), std::string::npos) << out;
+  EXPECT_NE(out.find("Usage: :timeout [MS|off]"), std::string::npos) << out;
+}
+
+// The rows of a script that failed after it admitted something are not the
+// last results: the admission retired the rows before, and a stale list would
+// name cells that no longer exist.
+TEST_F(VQueryE2ETest, AScriptThatFailsAfterAdmissionLeavesNoStaleResults) {
+  const auto source = writeSource(testDir, "hello world");
+  const auto input  = testDir / "stale.vql";
+  const auto saved  = testDir / "stale.store";
+  {
+    std::ofstream script(input);
+    script << ":open src " << source.string() << "\n"
+           << readAction << "\n"
+           << std::string{readAction} + "; return io_payload($src)" << "\n"
+           << ":save " << saved.string() << "\n:quit\n";
+  }
+  const auto result = runVQuery("< '" + input.string() + "'");
+  EXPECT_NE(result.output.find("Query failed"), std::string::npos)
+      << result.output;
+  EXPECT_NE(result.output.find("Run a query before saving results."),
+            std::string::npos)
+      << result.output;
+  EXPECT_FALSE(fs::exists(saved)) << "nothing stale was saved";
+}
+
+TEST_F(VQueryE2ETest, TheCompilerCliLowersTheNewActionsToHostOpcodes) {
+  const auto script = testDir / "handles.vql";
+  std::ofstream(script) << "effect { await($h) } as $r; effect { cancel($h) }; "
+                           "effect { open(\"/x\") } as $f\n";
+  const auto cmd = "./build/vqueryc --dump-asm '" + script.string() + "' 2>&1";
+  FILE *pipe     = popen(cmd.c_str(), "r");
+  ASSERT_NE(pipe, nullptr);
+  std::string out;
+  char buffer[256];
+  while (fgets(buffer, sizeof(buffer), pipe) != nullptr) out += buffer;
+  const auto status = pclose(pipe);
+  EXPECT_EQ(WEXITSTATUS(status), 0) << out;
+  EXPECT_NE(out.find("AWAIT"), std::string::npos) << out;
+  EXPECT_NE(out.find("RELATIONNEXT"), std::string::npos) << out;
+}
