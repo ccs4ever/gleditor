@@ -1264,6 +1264,25 @@ TEST(VqlIoJoinTest, ManyJoinAndWriteRunsLeaveTheArenaAndTheServiceBounded) {
   EXPECT_EQ(slurp(path), "r0;r1;r2;r3");
 }
 
+TEST(VqlIoJoinTest, AParkedScriptKeepsItsJoinWhenAnotherScriptRunsAndEnds) {
+  ValueWorld s;
+  std::vector<CellRef> rows;
+  for (const auto *text : {"a", "b", "c"})
+    rows.push_back(s.w.arena.makeCell(text));
+  s.engine.setVariable("rows", rows);
+  auto parked = s.run(readAs("r") + "return join($rows, \",\")");
+  ASSERT_TRUE(ValueWorld::parked(parked)) << ValueWorld::failure(parked);
+  const auto other  = s.run("return join($rows, \";\")");
+  const auto *ended = std::get_if<ScriptRunResult::Completed>(&other.value);
+  ASSERT_NE(ended, nullptr) << ValueWorld::failure(other);
+  EXPECT_EQ(s.texts(ended->value), (Texts{"a;b;c"}));
+  const auto resumed = s.finish(s.completeWithPayload());
+  const auto *done   = std::get_if<ScriptRunResult::Completed>(&resumed.value);
+  ASSERT_NE(done, nullptr) << ValueWorld::failure(resumed)
+                           << " (the other script's end took the join away)";
+  EXPECT_EQ(s.texts(done->value), (Texts{"a,b,c"}));
+}
+
 // ---- Freeing a replaced let -------------------------------------------------
 
 TEST(VqlIoLetFreeTest, AClosureKeepsTheCellItCaptured) {

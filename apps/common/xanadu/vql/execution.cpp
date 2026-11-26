@@ -453,13 +453,13 @@ QueryExecutor::beginVortex(const QueryExpression &query,
               }};
         });
 
-    // JOIN REGISTRATION SITE: the walk is per execution, so a refusal undoes
-    // both providers with the rest.
+    // JOIN REGISTRATION SITE: the relations belong to the VM, which several
+    // parked scripts share, so no run's end may take them away from another
+    // (an undo would null them under a script still to run its join). Each
+    // begin registers again: a walk is reset at its first step and taken by
+    // its end, and no park falls inside one, so whichever registration is
+    // current serves every script.
     const auto walk = std::make_shared<JoinWalk>();
-    undo.push_back([this] {
-      vm_.setRelationProvider(std::string{joinStepRelation}, nullptr);
-      vm_.setRelationProvider(std::string{joinEndRelation}, nullptr);
-    });
     vm_.setRelationProvider(std::string{joinStepRelation},
                             joinStepProvider(vm_, walk));
     vm_.setRelationProvider(std::string{joinEndRelation},
