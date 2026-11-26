@@ -803,8 +803,12 @@ int main(int argc, char *argv[]) {
     if (!ioRunner) {
       auto ports              = xanadu::vql::fileScriptPorts(host);
       ports.ensureCaptureHost = ensureCapture;
-      ioRunner = std::make_unique<xanadu::vql::ScriptRunner>(engine, vm,
-                                                             std::move(ports));
+      // A join feeds a write, so the text a script may join is as long as the
+      // text it may write.
+      xanadu::vql::QueryExecutionOptions scriptOptions;
+      scriptOptions.maxJoinedTextBytes = ioOptions.writeBytes;
+      ioRunner = std::make_unique<xanadu::vql::ScriptRunner>(
+          engine, vm, std::move(ports), scriptOptions);
     }
     auto &runner = *ioRunner;
     runner.setScriptTimeout(scriptTimeout);

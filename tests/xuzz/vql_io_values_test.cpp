@@ -191,6 +191,13 @@ TEST(VqlIoMatchGrammarTest, BadPatternsAreRefusedWithTheCode) {
   }
 }
 
+TEST(VqlIoMatchGrammarTest,
+     ABindingTagWrittenBareIsToldTheFormThatBindsNothing) {
+  const auto message = parseFailure(
+      readAs("r") + "match $r { complete => (1), partial => (2), _ => (3) }");
+  EXPECT_NE(message.find("complete(_)"), std::string::npos) << message;
+}
+
 TEST(VqlIoMatchGrammarTest, ANameThatIsNotAnOutcomeIsRefusedWhereItIsKnown) {
   // A detached read names a request handle, an open a capability, a capture
   // a receipt: none is an outcome, and each says what to do instead.
@@ -455,6 +462,14 @@ TEST(VqlIoMatchRunTest, ATagNoArmNamedIsATypedRefusalNotAnEmptyResult) {
   ASSERT_TRUE(ValueWorld::parked(result));
   result = s.finish(EndOfStream{terminalProgress});
   EXPECT_EQ(ValueWorld::code(result), matchCode) << ValueWorld::failure(result);
+}
+
+TEST(VqlIoMatchRunTest, AnUnboundNameIsToldItIsUnboundNotWrongTyped) {
+  ValueWorld s;
+  const auto result = s.run("match $never { _ => (1) }");
+  EXPECT_EQ(ValueWorld::code(result), matchCode) << ValueWorld::failure(result);
+  const auto text = ValueWorld::failure(result);
+  EXPECT_NE(text.find("$never is not bound"), std::string::npos) << text;
 }
 
 TEST(VqlIoMatchRunTest, RejectedBindsTheTypedErrorAndItsDetail) {
@@ -1269,6 +1284,24 @@ TEST(VqlIoSummaryTest, ASummaryKeepsTheTagTheErrorAndTheUncertainFlag) {
       << "no Progress rank";
   EXPECT_FALSE(summary->payload.has_value());
   EXPECT_FALSE(summary->observation.has_value());
+  summary->freeCells(s.w.arena, s.w.bridge.schema());
+}
+
+TEST(VqlIoSummaryTest, ASummaryOfAPartialKeepsItsCause) {
+  ValueWorld s;
+  const auto rows =
+      s.drive(readAs("r") + "return $r",
+              {Partial{s.w.payloadRange(), PartialCause::BackendFailure,
+                       terminalProgress}});
+  ASSERT_EQ(rows.size(), 1U);
+  const auto source = OutcomeCell{rows[0], *s.w.arena.incarnationOf(rows[0])};
+  auto summary      = xanadu::vortex::OwnedOutcome::summary(
+      s.w.arena, s.w.bridge.schema(), source);
+  ASSERT_TRUE(summary);
+  EXPECT_EQ(s.w.bridge.outcomeField(summary->cell, "cause"),
+            s.w.bridge.outcomeField(source, "cause"))
+      << "a summarised partial still says why it stopped";
+  EXPECT_TRUE(s.w.bridge.outcomeField(summary->cell, "cause").has_value());
   summary->freeCells(s.w.arena, s.w.bridge.schema());
 }
 

@@ -1358,10 +1358,9 @@ ReturnItem Parser::parseReturnItem() {
   if (check(TokenKind::OpenParen) && !peekToken().is(TokenKind::Slash) &&
       !peekToken().is(TokenKind::CloseParen)) {
     consume(TokenKind::OpenParen, "Expected '(' before return value");
-    ValueExpr expression = parseValueOrComparisonExpr();
-    const Token closeParen =
-        consume(TokenKind::CloseParen,
-                "Expected ')' after parenthesized return value");
+    ValueExpr expression   = parseValueOrComparisonExpr();
+    const Token closeParen = consume(
+        TokenKind::CloseParen, "Expected ')' after parenthesized return value");
     // Newlines separate statements. On the same line, require an item or
     // clause boundary so a value suffix cannot become a second path query.
     if (current_.loc.line == closeParen.loc.line && !check(TokenKind::Comma) &&
@@ -2514,7 +2513,7 @@ bool Parser::atIoMatch() {
 
 void Parser::noteIoName(const IoEffectStatement &effect) {
   if (!effect.resultVar) return;
-  using Kind = IoSubject::Kind;
+  using Kind             = IoSubject::Kind;
   const auto operationOf = [](const IoRequestKind request) {
     return request == IoRequestKind::ReadBytes ? IoOperation::Read
                                                : IoOperation::Write;
@@ -2529,9 +2528,9 @@ void Parser::noteIoName(const IoEffectStatement &effect) {
   case IoEffectStatement::Kind::Cancel: {
     // The outcome of a handle is the outcome of the operation that made it.
     const auto held = ioNames_.find(effect.handleVar);
-    subject = {.kind      = Kind::Outcome,
-               .operation = held != ioNames_.end() ? held->second.operation
-                                                   : IoOperation::Any};
+    subject         = {.kind      = Kind::Outcome,
+                       .operation = held != ioNames_.end() ? held->second.operation
+                                                           : IoOperation::Any};
     break;
   }
   case IoEffectStatement::Kind::Open:
@@ -2545,15 +2544,15 @@ void Parser::noteIoName(const IoEffectStatement &effect) {
 }
 
 IoMatchStatement Parser::parseIoMatchStatement() {
-  const auto refuse = [](const std::string &message, const SourceLocation &at)
-      -> ParseError {
+  const auto refuse = [](const std::string &message,
+                         const SourceLocation &at) -> ParseError {
     return ParseError(
         std::format("{}: {}", vortex::frontend_codes::vqlMatch, message), at);
   };
   consumeWord("match");
   const auto subjectToken = consumeVariable("the outcome to match");
   IoMatchStatement statement{.subject = subjectToken.stringValue};
-  const auto known = ioNames_.find(statement.subject);
+  const auto known      = ioNames_.find(statement.subject);
   IoOperation operation = IoOperation::Any;
   if (known != ioNames_.end()) {
     using Kind = IoSubject::Kind;
@@ -2583,8 +2582,8 @@ IoMatchStatement Parser::parseIoMatchStatement() {
     }
   }
   consume(TokenKind::OpenBrace, "Expected '{' to open the match arms");
-  IoTagSet named        = 0;
-  bool sawWildcard      = false;
+  IoTagSet named          = 0;
+  bool sawWildcard        = false;
   const IoTagSet possible = ioTagsOf(operation);
   while (!check(TokenKind::CloseBrace)) {
     const auto armLoc = current_.loc;
@@ -2602,30 +2601,30 @@ IoMatchStatement Parser::parseIoMatchStatement() {
     } else {
       const auto tag = ioMatchTagOf(word);
       if (!tag) {
-        throw refuse("'" + word + "' is not an outcome tag (the tags are " +
-                         [] {
-                           std::string names;
-                           for (std::size_t i = 0; i < ioMatchTagCount; ++i) {
-                             if (i != 0) names += ", ";
-                             names += ioMatchTagName(
-                                 static_cast<IoMatchTag>(i));
-                           }
-                           return names;
-                         }() +
-                         ")",
-                     armLoc);
+        throw refuse(
+            "'" + word + "' is not an outcome tag (the tags are " +
+                [] {
+                  std::string names;
+                  for (std::size_t i = 0; i < ioMatchTagCount; ++i) {
+                    if (i != 0) names += ", ";
+                    names += ioMatchTagName(static_cast<IoMatchTag>(i));
+                  }
+                  return names;
+                }() +
+                ")",
+            armLoc);
       }
       if ((ioTagBit(*tag) & possible) == 0) {
-        throw refuse("'" + word + "' is not a tag " +
-                         (operation == IoOperation::Read ? "a read"
-                                                         : "a write") +
-                         " can end with, so no arm for it can ever run",
-                     armLoc);
+        throw refuse(
+            "'" + word + "' is not a tag " +
+                (operation == IoOperation::Read ? "a read" : "a write") +
+                " can end with, so no arm for it can ever run",
+            armLoc);
       }
       if ((ioTagBit(*tag) & named) != 0) {
         throw refuse("the tag '" + word + "' is matched twice", armLoc);
       }
-      named = static_cast<IoTagSet>(named | ioTagBit(*tag));
+      named   = static_cast<IoTagSet>(named | ioTagBit(*tag));
       arm.tag = tag;
     }
     if (match(TokenKind::OpenParen)) {
@@ -2644,12 +2643,17 @@ IoMatchStatement Parser::parseIoMatchStatement() {
     }
     const std::size_t arity = arm.tag ? ioMatchArity(*arm.tag) : 0;
     if (arm.binders.size() != arity) {
-      throw refuse(
-          arm.tag ? "'" + word + "' binds " + std::to_string(arity) +
-                        " field(s) and the pattern names " +
-                        std::to_string(arm.binders.size())
-                  : std::string{"'_' binds nothing"},
-          armLoc);
+      throw refuse(arm.tag
+                       ? "'" + word + "' binds " + std::to_string(arity) +
+                             " field(s) and the pattern names " +
+                             std::to_string(arm.binders.size()) +
+                             (arity != 0 && arm.binders.empty()
+                                  ? "; write '" + word + "(" +
+                                        std::string(arity == 2 ? "_, _" : "_") +
+                                        ")' to bind nothing"
+                                  : std::string{})
+                       : std::string{"'_' binds nothing"},
+                   armLoc);
     }
     consume(TokenKind::Arrow, "Expected '=>' after the pattern");
     arm.body = parseReturnItem();

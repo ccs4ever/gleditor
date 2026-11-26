@@ -1487,6 +1487,15 @@ auto ScriptRunner::matchTag(const RelationQuery &query) -> RelationResult {
   const auto tag     = vortex::ioOutcomeTag(query.arena, outcome);
   if (!tag) {
     const auto kind = vortex::ioCellTag(query.arena, cell->first, cell->second);
+    // The compiler aims an unbound name at a text cell spelling the name
+    // (`$q`), so a name nothing bound is told apart from a wrong kind of value.
+    const auto spelled = query.arena.textOf(cell->first);
+    if (!kind && spelled.starts_with('$')) {
+      stageFailure_ = diagnose(
+          vortex::frontend_codes::vqlMatch,
+          spelled + " is not bound to an outcome; name one with `as` first");
+      return std::unexpected(stageFailure_->message);
+    }
     stageFailure_ =
         diagnose(vortex::frontend_codes::vqlMatch,
                  std::string{"a match is aimed at "} +
@@ -1497,6 +1506,8 @@ auto ScriptRunner::matchTag(const RelationQuery &query) -> RelationResult {
                           : "a value that is not an outcome"));
     return std::unexpected(stageFailure_->message);
   }
+  // The ordinal cell is minted inside the running program's region, which the
+  // executor's mark releases when the script ends, so a match leaves nothing.
   return answerOnce(query, query.arena.makeScalarCell(
                                static_cast<std::int64_t>(matchTagOf(*tag))));
 }

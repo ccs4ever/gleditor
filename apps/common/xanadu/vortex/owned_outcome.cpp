@@ -120,7 +120,7 @@ auto OwnedOutcome::summary(ArenaManifold &arena, const IoCellSchema &schema,
   const auto tag = ioOutcomeTag(arena, source);
   if (!tag) return std::unexpected{tag.error()};
   // The fields a script branches on, by the names the cell store wrote.
-  constexpr std::array kept{"errorCode", "stableDetail", "uncertain"};
+  constexpr std::array kept{"errorCode", "stableDetail", "uncertain", "cause"};
   const auto fields = fieldsOf(arena, schema, source.cell);
   const auto mark   = arena.mark();
   try {

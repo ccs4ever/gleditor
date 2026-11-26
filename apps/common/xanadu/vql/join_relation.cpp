@@ -22,10 +22,13 @@ using zigzag::vortex::RelationResult;
 
 using Spans = std::vector<PrimediaSpan>;
 
-/// A row's contribution, and whether it is the cell's own quoted content.
+/// A row's contribution to the run, and whether the row quotes text, so that a
+/// lone row can be handed back as it is. A foreign row quotes text but cannot
+/// contribute its spans: they are addressed in its own store's scrolls, and an
+/// arena cell's run has one namespace, so it joins as copied text.
 struct Piece {
   Spans spans;
-  bool quoted{false};
+  bool quotes{false};
 };
 
 [[nodiscard]] std::uint64_t bytesOf(const Spans &spans) noexcept {
@@ -49,15 +52,14 @@ spansOf(zigzag::vortex::VortexVM &vm, zigzag::ArenaManifold &arena,
             : std::string{"join input cell is unreadable"});
   }
   if (const auto *text = std::get_if<std::string>(&*scalar)) {
-    // A foreign cell's bytes live in another manifold, so only a cell of this
-    // arena can hand its spans on; the rest is copied as text.
     const auto master =
         arena.cloneMaster(cell, core.dims().clone).value_or(cell);
-    const auto spans = arena.contentOf(master);
-    if (!arena.foreignOf(master) && !spans.empty())
+    const auto spans  = arena.contentOf(master);
+    const bool quotes = !spans.empty();
+    if (quotes && !arena.foreignOf(master))
       return Piece{Spans(spans.begin(), spans.end()), true};
     if (text->empty()) return Piece{};
-    return Piece{Spans{arena.intern(*text)}, false};
+    return Piece{Spans{arena.intern(*text)}, quotes};
   }
   // The string alternative returned above, so what is left is a number or a
   // flag.
@@ -108,7 +110,7 @@ joinStepProvider(zigzag::vortex::VortexVM &vm, std::shared_ptr<JoinWalk> walk) {
     ++walk->rows;
     // A lone row is returned itself, so its quotation, and what links to it,
     // is not lost to a copy.
-    walk->only = walk->rows == 1 && row->quoted
+    walk->only = walk->rows == 1 && row->quotes
                      ? std::optional{query.arguments[0]}
                      : std::nullopt;
     return std::optional<RelationAnswer>{
