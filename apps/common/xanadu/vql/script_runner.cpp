@@ -1411,13 +1411,22 @@ auto ScriptRunner::ownOutcome(const RelationQuery &query,
   // this script's own admissions; awaiting it here must still name an owned
   // record, or the name would be the service's outcome, freed when the next
   // admission retires its request.
+  // The same for one a script still parked admitted: its own list holds it,
+  // and neither this script's nor the finished list does.
   auto *entries = &current_->admitted;
   auto entry    = std::ranges::find_if(*entries, holds);
   if (entry == entries->end()) {
     entries = &finished_;
     entry   = std::ranges::find_if(*entries, holds);
-    if (entry == entries->end()) return keep;
   }
+  for (auto it = live_.begin(); entry == entries->end() && it != live_.end();
+       ++it) {
+    const auto parked = it->lock();
+    if (!parked || parked.get() == current_) continue;
+    entries = &parked->admitted;
+    entry   = std::ranges::find_if(*entries, holds);
+  }
+  if (entry == entries->end()) return keep;
 
   const auto gate = ports_.bridge.gate(outcome);
   if (!gate) return keep;
