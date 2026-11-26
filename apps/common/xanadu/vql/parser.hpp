@@ -117,6 +117,8 @@ private:
   void consumeWord(std::string_view word);
   Token consumeVariable(std::string_view what);
   IoOperand parseIoOperand();
+  IoDuration parseIoDuration();
+  void parseIoReadAction(IoEffectStatement &effect);
   /// Refuse a script I/O name in a row or query expression.
   void refuseIoCall(const Token &name) const;
 

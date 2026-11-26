@@ -1,10 +1,13 @@
 #include "common/xanadu/vql/script_runner.hpp"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <gleditor/logging.hpp>
 #include <limits>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -25,6 +28,15 @@ constexpr const char *logCategory = "vql.script.io";
 
 /// The functor the compiler gives a bounded read's request description.
 constexpr const char *readBytesFunctor = "read_bytes";
+
+/// The longest `within` a script may ask for. The deadline is `now() + within`
+/// on a steady clock whose tick count is a signed 64-bit integer, so a quarter
+/// of that range leaves headroom for the sum; it is a representability limit,
+/// not a policy ceiling (a session's own timeout is `--script-timeout`, and
+/// the defaults move to system://settings with M8).
+constexpr std::chrono::milliseconds maxWithinMillis =
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::duration::max() / 4);
 
 /// Whether @p text is well-formed UTF-8 (no overlongs, surrogates or values
 /// past U+10FFFF).
@@ -102,6 +114,10 @@ struct ScriptRunner::Activation final : vortex::FrontendActivation {
   std::optional<ParkedProgram> parked;
   /// This script's admitted actions, oldest first.
   std::vector<Admitted> admitted;
+  /// Capabilities this script opened; closed when it ends.
+  std::vector<vortex::CapabilityCell> opened;
+  /// The overall deadline of the script, when it has one.
+  std::optional<std::chrono::steady_clock::time_point> deadline;
 };
 
 ScriptRunner::ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
@@ -120,32 +136,11 @@ ScriptRunner::ScriptRunner(VQLEngine &session, zigzag::vortex::VortexVM &vm,
       [this](const zigzag::vortex::VmSubmission &abandoned) {
         rolledBack(abandoned);
       });
-  vm_.setRelationProvider(
-      outcomeTagRelation,
-      [](const zigzag::vortex::RelationQuery &query)
-          -> zigzag::vortex::RelationResult {
-        if (query.arguments.size() != 1)
-          return std::unexpected("io_tag expects one outcome argument");
-        if (query.position != 0)
-          return std::optional<zigzag::vortex::RelationAnswer>{std::nullopt};
-        const auto incarnation = query.arena.incarnationOf(query.arguments[0]);
-        if (!incarnation)
-          return std::unexpected("io_tag: the argument is not a live cell");
-        const auto tag = vortex::ioOutcomeTag(
-            query.arena, vortex::OutcomeCell{query.arguments[0], *incarnation});
-        if (!tag)
-          return std::unexpected("io_tag: the argument is not an outcome");
-        return std::optional<zigzag::vortex::RelationAnswer>{
-            zigzag::vortex::RelationAnswer{
-                .nextPosition = 1,
-                .limit        = 1,
-                .answers      = {query.arena.makeCell(
-                    std::string{vortex::toString(*tag)})}}};
-      });
+  installProviders();
 }
 
 ScriptRunner::~ScriptRunner() {
-  vm_.setRelationProvider(outcomeTagRelation, nullptr);
+  for (const auto &name : providers_) vm_.setRelationProvider(name, nullptr);
   vm_.setSubmitHandler({});
   vm_.setSubmitRollbackHandler({});
   for (const auto &[continuation, held] : parked_) {
@@ -158,11 +153,16 @@ ScriptRunner::~ScriptRunner() {
   static_cast<void>(ports_.host.unrouteRunner(*this));
   // Nothing reads an outcome once the runner is gone, so each terminal
   // request leaves the service's index and the arena with it; a running one
-  // is never cancelled.
+  // is never cancelled, only forgotten at its own end. The files a script
+  // opened are closed first.
+  for (const auto &weak : live_) {
+    if (const auto activation = weak.lock()) closeOpened(*activation);
+  }
   retireAll(finished_);
   for (const auto &weak : live_) {
     if (const auto activation = weak.lock()) retireAll(activation->admitted);
   }
+  reapClosing();
 }
 
 auto ScriptRunner::diagnose(const std::string_view code, std::string message,
@@ -181,6 +181,7 @@ void ScriptRunner::wake(FrontendToken token, const FrontendWake why) {
 }
 
 auto ScriptRunner::takeWake() -> std::optional<ScriptWake> {
+  reapClosing();
   if (woken_.empty()) return std::nullopt;
   auto next = std::move(woken_.front());
   woken_.pop_front();
@@ -214,21 +215,75 @@ void ScriptRunner::orphan(const vortex::RequestCell request) noexcept {
   }
 }
 
-void ScriptRunner::retire(const Admitted &entry) noexcept {
+bool ScriptRunner::retire(const Admitted &entry, const bool force) noexcept {
   const auto &arena = session_.coordinator().arena();
   if (entry.request &&
       !arena.matches(entry.request->cell, entry.request->incarnation)) {
     // The cells were rolled back under a request that may still be running.
     orphan(*entry.request);
+  } else if (entry.request && !ports_.host.isTerminal(*entry.request)) {
+    // A request still running (a detached read nobody awaited) keeps its
+    // entry until it ends, unless the runner itself is going away.
+    if (!force) return false;
+    ports_.bridge.release(entry.submission);
+    orphan(*entry.request);
   } else {
     ports_.bridge.retire(entry.submission);
   }
   if (latest_ && *latest_ == entry.submission) latest_.reset();
+  return true;
 }
 
-void ScriptRunner::retireAll(std::vector<Admitted> &entries) noexcept {
-  for (const auto &entry : entries) retire(entry);
+void ScriptRunner::retireAll(std::vector<Admitted> &entries,
+                             const bool force) noexcept {
+  std::erase_if(entries,
+                [&](const Admitted &entry) { return retire(entry, force); });
+}
+
+void ScriptRunner::abandonAll(std::vector<Admitted> &entries) noexcept {
+  const auto &arena = session_.coordinator().arena();
+  for (const auto &entry : entries) {
+    if (entry.request &&
+        arena.matches(entry.request->cell, entry.request->incarnation)) {
+      // The view goes first so the retired request's graph is freed with it;
+      // retireRequest asks a running request to stop and retires it once its
+      // terminal lands.
+      ports_.bridge.release(entry.submission);
+      ports_.host.retireRequest(*entry.request);
+      ports_.host.reapRetiredRequest(*entry.request);
+    } else {
+      static_cast<void>(retire(entry, true));
+    }
+    if (latest_ && *latest_ == entry.submission) latest_.reset();
+  }
   entries.clear();
+}
+
+void ScriptRunner::closeOpened(Activation &activation) noexcept {
+  const auto opened = std::exchange(activation.opened, {});
+  if (!ports_.closeCapability) return;
+  for (const auto capability : opened) {
+    try {
+      const auto closing = ports_.closeCapability(capability);
+      if (!closing) {
+        GLEDITOR_LOG_WARN(logCategory, "closing an opened file failed: {}",
+                          closing.error().message);
+        continue;
+      }
+      Admitted entry{.submission = *closing, .request = std::nullopt};
+      if (const auto matched = ports_.bridge.match(*closing))
+        if (const auto *accepted = std::get_if<vortex::Admitted>(&*matched))
+          entry.request = accepted->request;
+      closing_.push_back(entry);
+    } catch (const std::exception &error) {
+      GLEDITOR_LOG_WARN(logCategory, "closing an opened file threw: {}",
+                        error.what());
+    }
+  }
+}
+
+void ScriptRunner::reapClosing(const bool force) noexcept {
+  retireAll(closing_, force);
 }
 
 void ScriptRunner::rolledBack(
@@ -268,24 +323,258 @@ void ScriptRunner::rolledBack(
   owner->erase(at);
 }
 
+namespace {
+
+using zigzag::vortex::RelationAnswer;
+using zigzag::vortex::RelationQuery;
+using zigzag::vortex::RelationResult;
+
+/// One answer at scan position 0, or nothing: how a host exposes one value
+/// through a relation. Anything past position 0 is exhausted.
+auto answerOnce(const RelationQuery &query, const std::optional<CellRef> cell)
+    -> RelationResult {
+  if (query.position != 0 || !cell)
+    return std::optional<RelationAnswer>{std::nullopt};
+  return std::optional<RelationAnswer>{
+      RelationAnswer{.nextPosition = 1, .limit = 1, .answers = {*cell}}};
+}
+
+auto liveCell(const RelationQuery &query, const std::string &who)
+    -> std::expected<
+        std::pair<CellRef, zigzag::ArenaManifold::AllocationIncarnation>,
+        std::string> {
+  if (query.arguments.size() != 1)
+    return std::unexpected(who + " expects one argument");
+  const auto incarnation = query.arena.incarnationOf(query.arguments[0]);
+  if (!incarnation)
+    return std::unexpected(who + ": the argument is not a live cell");
+  return std::pair{query.arguments[0], *incarnation};
+}
+
+auto liveOutcome(const RelationQuery &query, const std::string &who)
+    -> std::expected<vortex::OutcomeCell, std::string> {
+  const auto cell = liveCell(query, who);
+  if (!cell) return std::unexpected(cell.error());
+  const vortex::OutcomeCell outcome{cell->first, cell->second};
+  if (!vortex::ioOutcomeTag(query.arena, outcome))
+    return std::unexpected(who + ": the argument is not an outcome");
+  return outcome;
+}
+
+/// An outcome field a path function reads, by the name the cell store wrote.
+struct FieldRelation {
+  const char *relation;
+  const char *function;
+  const char *field;
+};
+constexpr std::array<FieldRelation, 2> fieldRelations{{
+    {outcomeErrorRelation, "io_error", "errorCode"},
+    {outcomeDetailRelation, "io_detail", "stableDetail"},
+}};
+
+} // namespace
+
+void ScriptRunner::installProviders() {
+  const auto install = [&](const char *name,
+                           zigzag::vortex::RelationProvider provider) {
+    vm_.setRelationProvider(name, std::move(provider));
+    providers_.emplace_back(name);
+  };
+  // Outcome fields. Each answers one cell or nothing; the VM and the compiler
+  // name no I/O schema, only these relations.
+  // io_tag names an outcome's tag. A script also holds the other two things
+  // an action yields, so it tells them apart by name: a capability an open
+  // minted answers `Capability`, a request a detached read started `Request`.
+  install(outcomeTagRelation, [](const RelationQuery &query) -> RelationResult {
+    const auto cell = liveCell(query, "io_tag");
+    if (!cell) return std::unexpected(cell.error());
+    const auto kind = vortex::ioCellTag(query.arena, cell->first, cell->second);
+    if (kind && *kind == vortex::IoCellTag::Capability)
+      return answerOnce(query, query.arena.makeCell(std::string{"Capability"}));
+    if (kind && *kind == vortex::IoCellTag::Request)
+      return answerOnce(query, query.arena.makeCell(std::string{"Request"}));
+    const auto outcome = liveOutcome(query, "io_tag");
+    if (!outcome) return std::unexpected(outcome.error());
+    const auto tag = vortex::ioOutcomeTag(query.arena, *outcome);
+    return answerOnce(
+        query, query.arena.makeCell(std::string{vortex::toString(*tag)}));
+  });
+  for (const auto &entry : fieldRelations) {
+    install(entry.relation,
+            [this, entry](const RelationQuery &query) -> RelationResult {
+              const auto outcome = liveOutcome(query, entry.function);
+              if (!outcome) return std::unexpected(outcome.error());
+              const auto text =
+                  ports_.bridge.outcomeField(*outcome, entry.field);
+              return answerOnce(
+                  query, text ? std::optional{query.arena.makeCell(*text)}
+                              : std::nullopt);
+            });
+  }
+  // The byte count is what the outcome retained, read through the same gate as
+  // the payload; an outcome that retained none answers the bytes its progress
+  // record counted (zero for a backend that reports no progress).
+  install(outcomeBytesRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            const auto outcome = liveOutcome(query, "io_bytes");
+            if (!outcome) return std::unexpected(outcome.error());
+            const auto gated = ports_.bridge.gate(*outcome);
+            if (!gated) return std::unexpected(gated.error().message);
+            const auto counted =
+                gated->payload
+                    ? std::optional{std::to_string(gated->payload->length)}
+                    : ports_.bridge.outcomeField(*outcome, "transferredBytes");
+            return answerOnce(
+                query, counted ? std::optional{query.arena.makeCell(*counted)}
+                               : std::nullopt);
+          });
+  // The payload text goes through the shared terminal-status gate: an outcome
+  // whose tag exposes no payload (or retained none) answers nothing.
+  install(outcomePayloadRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            const auto outcome = liveOutcome(query, "io_payload");
+            if (!outcome) return std::unexpected(outcome.error());
+            if (query.position != 0)
+              return std::optional<RelationAnswer>{std::nullopt};
+            const auto text = payloadText(*outcome);
+            if (!text) return std::unexpected(text.error().message);
+            return answerOnce(
+                query, *text ? std::optional{query.arena.makeCell(**text)}
+                             : std::nullopt);
+          });
+  install(handleArmRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            return handleArm(query, false);
+          });
+  install(handleCancelRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            return handleArm(query, true);
+          });
+  install(openRelation, [this](const RelationQuery &query) -> RelationResult {
+    return openPath(query);
+  });
+  install(openCapabilityRelation,
+          [this](const RelationQuery &query) -> RelationResult {
+            return openCapability(query);
+          });
+}
+
+auto ScriptRunner::handleArm(const RelationQuery &query, const bool cancel)
+    -> RelationResult {
+  const char *who = cancel ? "cancel" : "await";
+  const auto cell = liveCell(query, who);
+  if (!cell) return std::unexpected(cell.error());
+  const auto tag = vortex::ioCellTag(query.arena, cell->first, cell->second);
+  if (!tag || (*tag != vortex::IoCellTag::Request &&
+               *tag != vortex::IoCellTag::Outcome)) {
+    stageFailure_ = diagnose(vortex::frontend_codes::vqlEffectArgument,
+                             std::string{"the handle of '"} + who +
+                                 "' is neither a request nor an outcome");
+    return std::unexpected(stageFailure_->message);
+  }
+  const bool isRequest = *tag == vortex::IoCellTag::Request;
+  if (cancel && isRequest) {
+    // A request that already ended answers AlreadyTerminal, which is itself
+    // the value: the statement then yields the outcome it had. Stale is the
+    // same, and the await that follows reports it as a refusal outcome.
+    static_cast<void>(ports_.host.cancelRequest(
+        vortex::RequestCell{cell->first, cell->second}));
+  }
+  constexpr std::int64_t requestArm = 0;
+  constexpr std::int64_t outcomeArm = 1;
+  return answerOnce(
+      query, query.arena.makeScalarCell(isRequest ? requestArm : outcomeArm));
+}
+
+auto ScriptRunner::openPath(const RelationQuery &query) -> RelationResult {
+  const auto refuse = [&](std::string message) -> RelationResult {
+    stageFailure_ =
+        diagnose(vortex::frontend_codes::vqlEffectArgument, std::move(message));
+    return std::unexpected(stageFailure_->message);
+  };
+  if (query.arguments.size() != 1) return refuse("open expects one path");
+  if (!ports_.openFile) return refuse("this program cannot open files");
+  if (current_ == nullptr)
+    return refuse("an open ran outside any script activation");
+  const auto path = query.arena.textOf(query.arguments[0]);
+  if (path.empty()) return refuse("open names an empty path");
+  // The request graph and submission sum are the I/O service's, as in admit().
+  const struct HostCells {
+    QueryExecutor *executor;
+    zigzag::ArenaManifold &arena;
+    zigzag::ArenaManifold::AllocationIncarnation first;
+    ~HostCells() {
+      if (executor != nullptr)
+        executor->excludeHostAllocations(first, arena.newestIncarnation());
+    }
+  } hostCells{current_->executor.get(), query.arena,
+              query.arena.newestIncarnation()};
+  const auto submission = ports_.openFile(path);
+  if (!submission) return refuse(submission.error().message);
+  const auto matched = ports_.bridge.match(*submission);
+  if (!matched) {
+    ports_.bridge.retire(*submission);
+    return refuse(matched.error().message);
+  }
+  retireAll(finished_);
+  Admitted entry{.submission = *submission, .request = std::nullopt};
+  CellRef handle{};
+  if (const auto *accepted = std::get_if<vortex::Admitted>(&*matched)) {
+    entry.request = accepted->request;
+    handle        = accepted->request.cell;
+  } else {
+    handle = std::get<vortex::Refused>(*matched).outcome.cell;
+  }
+  current_->admitted.push_back(entry);
+  return answerOnce(query, handle);
+}
+
+auto ScriptRunner::openCapability(const RelationQuery &query)
+    -> RelationResult {
+  const auto outcome = liveOutcome(query, "open");
+  if (!outcome) return std::unexpected(outcome.error());
+  if (query.position != 0 || !ports_.capabilityOf)
+    return std::optional<RelationAnswer>{std::nullopt};
+  const auto capability = ports_.capabilityOf(*outcome);
+  if (!capability) return std::optional<RelationAnswer>{std::nullopt};
+  if (current_ != nullptr) current_->opened.push_back(*capability);
+  return answerOnce(query, capability->cell);
+}
+
 auto ScriptRunner::run(QueryExpression query) -> ScriptRunResult {
+  reapClosing();
   // Everything that can be wrong with an action's own values is wrong before
   // anything is compiled, staged or submitted.
   const auto &statements = query.body.statements;
+  // A capability an earlier `open ... as $name` of this script will mint is
+  // not yet a value to check: it is checked when its read submits.
+  std::set<std::string> opensLater;
   for (std::size_t index = 0; index < statements.size(); ++index) {
     const auto *action = std::get_if<IoEffectStatement>(&statements[index]);
     if (action == nullptr) continue;
-    if (const auto cap = capability(action->capabilityVar, index); !cap)
-      return ScriptRunResult::failed(cap.error());
+    if (action->kind == IoEffectStatement::Kind::Open) {
+      if (action->resultVar) opensLater.insert(*action->resultVar);
+      continue;
+    }
+    if (action->kind != IoEffectStatement::Kind::Read) continue;
+    if (!opensLater.contains(action->capabilityVar)) {
+      if (const auto cap = capability(action->capabilityVar, index); !cap)
+        return ScriptRunResult::failed(cap.error());
+    }
     if (const auto offset = operand(action->offset, index); !offset)
       return ScriptRunResult::failed(offset.error());
     if (const auto length = operand(action->maxBytes, index); !length)
       return ScriptRunResult::failed(length.error());
+    if (action->within) {
+      if (const auto bound = operand(action->within->amount, index); !bound)
+        return ScriptRunResult::failed(bound.error());
+    }
   }
   auto activation   = std::make_shared<Activation>();
   activation->query = std::move(query);
   activation->executor =
       std::make_unique<QueryExecutor>(session_, vm_, options_);
+  if (scriptTimeout_) activation->deadline = now() + *scriptTimeout_;
   std::erase_if(live_, [](const auto &weak) { return weak.expired(); });
   live_.push_back(activation);
   const Stepping stepping(*this, *activation);
@@ -389,17 +678,34 @@ auto ScriptRunner::admit(const vortex::CapabilityCell capability,
     stageFailure_ = diagnostic;
     throw std::runtime_error(diagnostic.message);
   };
-  const auto arguments = vlog.argumentsOf(description);
-  if (arena.textOf(description) != readBytesFunctor || arguments.size() != 2)
+  const auto arguments                   = vlog.argumentsOf(description);
+  constexpr std::size_t plainArguments   = 2;
+  constexpr std::size_t boundedArguments = 4; // offset, max, amount, unit
+  if (arena.textOf(description) != readBytesFunctor ||
+      (arguments.size() != plainArguments &&
+       arguments.size() != boundedArguments))
     fail(diagnose(vortex::frontend_codes::vqlEffectArgument,
                   "the request description is not read_bytes(offset, max)"));
   const auto offset = number(arguments[0], "the offset", std::nullopt);
   if (!offset) fail(offset.error());
   const auto length = number(arguments[1], "the bound", std::nullopt);
   if (!length) fail(length.error());
+  std::optional<std::chrono::milliseconds> within;
+  if (arguments.size() == boundedArguments) {
+    const auto amount =
+        number(arguments[2], "the 'within' bound", std::nullopt);
+    if (!amount) fail(amount.error());
+    const auto unit = number(arguments[3], "the 'within' unit", std::nullopt);
+    if (!unit) fail(unit.error());
+    if (*unit == 0 || *amount > maxWithinMillis.count() / *unit)
+      fail(diagnose(vortex::frontend_codes::vqlEffectArgument,
+                    "the 'within' bound is larger than a deadline can be"));
+    within = std::chrono::milliseconds{
+        static_cast<std::chrono::milliseconds::rep>(*amount * *unit)};
+  }
   const auto spec = ports_.stageRead(capability, *offset, *length);
   if (!spec) fail(spec.error());
-  const auto submission = ports_.bridge.submit(capability, *spec);
+  const auto submission = ports_.bridge.submit(capability, *spec, within);
   if (!submission) fail(submission.error());
   const auto matched = ports_.bridge.match(*submission);
   if (!matched) {
@@ -437,30 +743,33 @@ auto ScriptRunner::settle(const std::shared_ptr<Activation> &activation,
                       : diagnose(vortex::frontend_codes::vqlScriptFailed,
                                  step.error().message, step.error().statement);
     if (!diagnostic.position) diagnostic.position = step.error().statement;
-    retireAll(activation->admitted);
+    endActivation(*activation);
     return ScriptRunResult::failed(std::move(diagnostic));
   }
   if (auto *done = std::get_if<ProgramResult>(&*step)) {
     return finish(activation, *done);
   }
   auto &parked = std::get<ParkedProgram>(*step);
-  const auto matched =
-      !activation->admitted.empty()
-          ? ports_.bridge.match(activation->admitted.back().submission)
-          : std::expected<vortex::IoSubmissionValue, FrontendDiagnostic>{
-                std::unexpected{
-                    diagnose(vortex::frontend_codes::tokenStale,
-                             "a parked script holds no submission")}};
-  const auto *admitted =
-      matched ? std::get_if<vortex::Admitted>(&*matched) : nullptr;
-  if (admitted == nullptr) {
+  // The request the program awaits is the cell its Await reads, so a script
+  // that waits on a handle it bound earlier parks on that request.
+  const auto &arena = session_.coordinator().arena();
+  std::optional<vortex::RequestCell> awaited;
+  if (parked.request) {
+    if (const auto incarnation = arena.incarnationOf(*parked.request)) {
+      const auto tag = vortex::ioCellTag(arena, *parked.request, *incarnation);
+      if (tag && *tag == vortex::IoCellTag::Request)
+        awaited = vortex::RequestCell{*parked.request, *incarnation};
+    }
+  }
+  if (!awaited) {
+    endActivation(*activation);
     return ScriptRunResult::failed(
         diagnose(vortex::frontend_codes::tokenStale,
-                 "a parked script's request is not an admitted submission",
+                 "a parked script's request is not an admitted request",
                  parked.statement));
   }
   FrontendToken token{.activation   = activation,
-                      .request      = admitted->request,
+                      .request      = *awaited,
                       .waiter       = parked.pending.waiter,
                       .continuation = parked.pending.continuation,
                       .position     = parked.statement};
@@ -475,10 +784,50 @@ auto ScriptRunner::settle(const std::shared_ptr<Activation> &activation,
   return ScriptRunResult::parked(std::move(token));
 }
 
+void ScriptRunner::endActivation(Activation &activation) noexcept {
+  closeOpened(activation);
+  retireAll(activation.admitted);
+  // A request still running (a detached read nobody awaited) is retired
+  // later, when a next admission finds it terminal.
+  finished_.insert(finished_.end(), activation.admitted.begin(),
+                   activation.admitted.end());
+  activation.admitted.clear();
+}
+
+auto ScriptRunner::payloadText(const vortex::OutcomeCell outcome) const
+    -> std::expected<std::optional<std::string>, FrontendDiagnostic> {
+  const auto gated = ports_.bridge.gate(outcome);
+  if (!gated) return std::unexpected{gated.error()};
+  if (!gated->payload) return std::optional<std::string>{};
+  // The outcome row alone would read as "no payload"; a payload the tag
+  // exposed but the host cannot read is a typed failure instead.
+  const auto unreadable = [&](const std::string &why) {
+    return std::unexpected{
+        diagnose(vortex::frontend_codes::vqlScriptFailed,
+                 "the action's payload could not be read: " + why)};
+  };
+  auto lease = ports_.payloads.retain(*gated->payload);
+  if (!lease) return unreadable("it was not retained");
+  const auto bytes = ports_.payloads.read(
+      *lease, 0, static_cast<std::size_t>(lease->range.length));
+  ports_.payloads.release(lease->lease);
+  if (!bytes) return unreadable("the read was refused");
+  // A text cell holds text: bytes that are not valid UTF-8 are a typed
+  // refusal, never a cell that renders as something else.
+  std::string text(bytes->size(), '\0');
+  std::ranges::transform(*bytes, text.begin(), [](const std::byte b) {
+    return static_cast<char>(b);
+  });
+  if (!validUtf8(text)) return unreadable("the bytes are not valid UTF-8 text");
+  return std::optional<std::string>{std::move(text)};
+}
+
 auto ScriptRunner::finish(const std::shared_ptr<Activation> &activation,
                           const ProgramResult &done) -> ScriptRunResult {
   // However it ends, the script's actions move to the finished list: their
-  // rows stay readable until the next admission, then they are retired.
+  // rows stay readable until the next admission, then they are retired. The
+  // files it opened are closed: their lifetime is the script's.
+  closeOpened(*activation);
   finished_.insert(finished_.end(), activation->admitted.begin(),
                    activation->admitted.end());
   activation->admitted.clear();
@@ -495,38 +844,38 @@ auto ScriptRunner::finish(const std::shared_ptr<Activation> &activation,
           diagnose(vortex::frontend_codes::vqlScriptFailed,
                    "the action's outcome is not a live cell"));
     }
-    const vortex::OutcomeCell handle{outcome, *incarnation};
-    const auto gated = ports_.bridge.gate(handle);
-    if (!gated) return ScriptRunResult::failed(gated.error());
-    if (gated->payload) {
-      // The outcome row alone would read as "no payload"; a payload the tag
-      // exposed but the host cannot read is a typed failure instead.
-      const auto unreadable = [&](const std::string &why) {
-        return ScriptRunResult::failed(
-            diagnose(vortex::frontend_codes::vqlScriptFailed,
-                     "the action's payload could not be read: " + why));
-      };
-      auto lease = ports_.payloads.retain(*gated->payload);
-      if (!lease) return unreadable("it was not retained");
-      const auto bytes = ports_.payloads.read(
-          *lease, 0, static_cast<std::size_t>(lease->range.length));
-      ports_.payloads.release(lease->lease);
-      if (!bytes) return unreadable("the read was refused");
-      // A text cell holds text: bytes that are not valid UTF-8 are a typed
-      // refusal, never a cell that renders as something else.
-      std::string text(bytes->size(), '\0');
-      std::ranges::transform(*bytes, text.begin(), [](const std::byte b) {
-        return static_cast<char>(b);
-      });
-      if (!validUtf8(text))
-        return unreadable("the bytes are not valid UTF-8 text");
-      rows.push_back(session_.coordinator().arena().makeCell(text));
-    }
+    const auto text = payloadText(vortex::OutcomeCell{outcome, *incarnation});
+    if (!text) return ScriptRunResult::failed(text.error());
+    if (*text) rows.push_back(session_.coordinator().arena().makeCell(**text));
   }
   return ScriptRunResult::completed(std::move(rows));
 }
 
+auto ScriptRunner::expireIfDue(const FrontendToken &token)
+    -> std::optional<FrontendDiagnostic> {
+  const auto activation =
+      std::dynamic_pointer_cast<Activation>(token.activation);
+  if (!activation || !activation->parked || !activation->deadline ||
+      now() < *activation->deadline) {
+    return std::nullopt;
+  }
+  GLEDITOR_LOG_DEBUG(logCategory, "a parked script passed its deadline");
+  // The script gave up: the request it waits on is asked to stop, its waiter
+  // and route go, and its requests are released. Nothing resumes it.
+  static_cast<void>(ports_.host.cancelWaiter(token.waiter));
+  static_cast<void>(ports_.host.unrouteWake(token.continuation));
+  parked_.erase(token.continuation);
+  activation->parked.reset();
+  closeOpened(*activation);
+  abandonAll(activation->admitted);
+  return diagnose(vortex::frontend_codes::vqlScriptTimeout,
+                  "the script did not finish within its overall deadline; the "
+                  "request it awaited was asked to stop",
+                  token.position);
+}
+
 auto ScriptRunner::resume(ScriptWake wake) -> ScriptRunResult {
+  reapClosing();
   auto activation =
       std::dynamic_pointer_cast<Activation>(wake.token.activation);
   if (!activation || !activation->parked) {
@@ -536,7 +885,7 @@ auto ScriptRunner::resume(ScriptWake wake) -> ScriptRunResult {
   }
   if (wake.why == FrontendWake::Abandoned) {
     activation->parked.reset();
-    retireAll(activation->admitted);
+    endActivation(*activation);
     return ScriptRunResult::failed(diagnose(
         vortex::frontend_codes::tokenStale,
         "the parked request or cursor went stale", wake.token.position));
@@ -551,7 +900,10 @@ auto ScriptRunner::resume(ScriptWake wake) -> ScriptRunResult {
 
 auto fileScriptPorts(vortex::FileReadHost &host) -> ScriptIoPorts {
   return ScriptIoPorts{
-      host.bridge(), host.host(), host.payloads(), host.diagnostics(),
+      host.bridge(),
+      host.host(),
+      host.payloads(),
+      host.diagnostics(),
       [&host](const vortex::CapabilityCell capability,
               const std::uint64_t offset, const std::uint64_t length)
           -> std::expected<CellRef, FrontendDiagnostic> {
@@ -562,6 +914,16 @@ auto fileScriptPorts(vortex::FileReadHost &host) -> ScriptIoPorts {
             "the read was not staged: " +
                 std::string{vortex::toString(staged.error())},
             {}}};
+      },
+      [&host](const std::string_view path)
+          -> std::expected<vortex::SubmissionCell, FrontendDiagnostic> {
+        return host.bridge().admitOpen(host.openSpec(path));
+      },
+      [&host](const vortex::CapabilityCell capability) {
+        return host.closeCapability(capability);
+      },
+      [&host](const vortex::OutcomeCell open) {
+        return host.capabilityOf(open);
       }};
 }
 
@@ -577,11 +939,20 @@ auto driveToCompletion(ScriptRunner &runner, ScriptRunResult first,
     if (auto *failed = std::get_if<ScriptRunResult::Failed>(&result.value)) {
       return std::unexpected{std::move(failed->diagnostic)};
     }
-    auto woken = runner.takeWake();
+    const auto *parked = std::get_if<ScriptRunResult::Parked>(&result.value);
+    auto waiting       = parked != nullptr ? std::optional{parked->token}
+                                           : std::optional<FrontendToken>{};
+    auto woken         = runner.takeWake();
     while (!woken) {
       pumpOnce();
       woken = runner.takeWake();
-      if (!woken) idle();
+      if (woken) break;
+      // A script past its overall deadline is abandoned with a stable code.
+      if (waiting) {
+        if (auto expired = runner.expireIfDue(*waiting))
+          return std::unexpected{std::move(*expired)};
+      }
+      idle();
     }
     result = runner.resume(*std::move(woken));
   }

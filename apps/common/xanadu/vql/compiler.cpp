@@ -107,7 +107,7 @@ bool VQLCompiler::isSemanticQuantifierBuiltin(const std::string_view name) {
 
 bool VQLCompiler::isPathFunction(const std::string_view name) {
   return name == "sort_into" || name == "find" || name == "contains" ||
-         name == "count" || name == "io_tag";
+         name == "count" || outcomeFunctionRelation(name) != nullptr;
 }
 
 bool VQLCompiler::isLensFunction(const std::string_view name) {
@@ -681,8 +681,10 @@ std::optional<CellRef> VQLCompiler::compileQuery(const QueryExpression &query) {
             ExecutionBlock{.action = ActionClause{.clause = weave->effect}});
       } else if (const auto *effect =
                      std::get_if<IoEffectStatement>(&statement)) {
-        result           = compileIoEffect(*effect, index);
-        finalIsIoEffect_ = true;
+        result = compileIoEffect(*effect, index);
+        // A detached read yields its request handle, not an outcome.
+        finalIsIoEffect_ = !(effect->kind == IoEffectStatement::Kind::Read &&
+                             effect->detached);
       } else {
         result = compileWatchOrPerspectiveStatement(statement);
       }

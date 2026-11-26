@@ -113,7 +113,7 @@ std::vector<CellRef>
 VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
                                      const std::optional<CellRef> context) {
   if (fn.name != "count" && fn.name != "sort_into" && fn.name != "contains" &&
-      fn.name != "find" && fn.name != "io_tag")
+      fn.name != "find" && outcomeFunctionRelation(fn.name) == nullptr)
     throw QueryRefusal(QueryErrorCategory::Unsupported,
                        "unknown compiled function: " + fn.name);
 
@@ -123,7 +123,7 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
   // or a non-contiguous section, which the insertion sort cannot detect at run
   // time (the oracle refuses those), so it refuses here, before any effect.
   std::optional<DimRef> sortDimension;
-  if (fn.name == "io_tag") {
+  if (outcomeFunctionRelation(fn.name) != nullptr) {
     requireArity(fn, 1, "one outcome argument");
     requirePositional(fn);
   } else if (fn.name == "find") {
@@ -306,19 +306,20 @@ VQLCompiler::compilePathFunctionCall(const FunctionInvocation &fn,
     return std::vector<CellRef>{boxed};
   };
 
-  if (fn.name == "find" || fn.name == "io_tag") {
+  if (fn.name == "find" || outcomeFunctionRelation(fn.name) != nullptr) {
     const auto needleCells = compileArgument(fn.args.front(), context);
     if (needleCells.empty()) {
       refusePathFunction(fn, "needle argument evaluated to empty");
     }
     const auto needle = emitFirstCell(needleCells.front());
-    // io_tag($outcome) asks the host that runs I/O scripts (ScriptRunner) for
-    // the outcome's tag as text; the VM names no I/O schema.
-    const auto relationCell = emitConstant(
-        std::string(fn.name == "io_tag" ? outcomeTagRelation : "prose_hits"));
-    const auto pos   = fresh();
-    const auto limit = fresh();
-    const auto zero  = emitConstant(std::int64_t{0});
+    // io_tag($outcome) and its siblings ask the host that runs I/O scripts
+    // (ScriptRunner) for one field of the outcome; the VM names no I/O schema.
+    const auto *outcomeRelation = outcomeFunctionRelation(fn.name);
+    const auto relationCell     = emitConstant(std::string(
+        outcomeRelation != nullptr ? outcomeRelation : "prose_hits"));
+    const auto pos              = fresh();
+    const auto limit            = fresh();
+    const auto zero             = emitConstant(std::int64_t{0});
     arithmetic(OpcodeKind::Add, zero, zero, pos);
     arithmetic(OpcodeKind::Add, zero, zero, limit);
     const auto resultStream = emitStreamClear();

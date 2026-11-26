@@ -2285,6 +2285,59 @@ IoEffectStatement Parser::parseIoEffectStatement() {
   consumeWord("effect");
   consume(TokenKind::OpenBrace, "Expected '{' after 'effect'");
   IoEffectStatement effect;
+  const auto simple = [&](const IoEffectStatement::Kind kind,
+                          const std::string_view word) {
+    effect.kind = kind;
+    consumeWord(word);
+    consume(TokenKind::OpenParen, "Expected '(' after the action name");
+  };
+  if (checkWord("await") && peekToken().is(TokenKind::OpenParen)) {
+    simple(IoEffectStatement::Kind::Await, "await");
+    effect.handleVar = consumeVariable("a request handle").stringValue;
+    consume(TokenKind::CloseParen, "Expected ')' after the handle");
+  } else if (checkWord("cancel") && peekToken().is(TokenKind::OpenParen)) {
+    simple(IoEffectStatement::Kind::Cancel, "cancel");
+    effect.handleVar = consumeVariable("a request handle").stringValue;
+    consume(TokenKind::CloseParen, "Expected ')' after the handle");
+  } else if (checkWord("open") && peekToken().is(TokenKind::OpenParen)) {
+    simple(IoEffectStatement::Kind::Open, "open");
+    if (check(TokenKind::StringLiteral)) {
+      effect.openPath = {.text = advance().stringValue, .isVariable = false};
+    } else if (check(TokenKind::Variable)) {
+      effect.openPath = {.text = advance().stringValue, .isVariable = true};
+    } else {
+      throw ParseError("An open action names its path as a string literal or "
+                       "a $variable",
+                       current_.loc);
+    }
+    consume(TokenKind::CloseParen, "Expected ')' after the path");
+  } else {
+    parseIoReadAction(effect);
+  }
+  match(TokenKind::Semicolon);
+  consume(TokenKind::CloseBrace, "Expected '}' to close 'effect'");
+  if (match(TokenKind::KwAs)) {
+    effect.resultVar = consumeVariable("an outcome variable").stringValue;
+  }
+  return effect;
+}
+
+IoDuration Parser::parseIoDuration() {
+  IoDuration duration;
+  duration.amount = parseIoOperand();
+  if (checkWord("ms")) {
+    duration.unitMillis = 1;
+  } else if (checkWord("s")) {
+    duration.unitMillis = 1000;
+  } else {
+    throw ParseError("A 'within' bound is a count followed by 'ms' or 's'",
+                     current_.loc);
+  }
+  advance();
+  return duration;
+}
+
+void Parser::parseIoReadAction(IoEffectStatement &effect) {
   consume(TokenKind::KwLet, "Expected 'let' to bind the submission");
   effect.submissionVar = consumeVariable("a submission variable").stringValue;
   consume(TokenKind::Assign, "Expected ':=' after the submission variable");
@@ -2299,6 +2352,10 @@ IoEffectStatement Parser::parseIoEffectStatement() {
   effect.maxBytes = parseIoOperand();
   consume(TokenKind::CloseParen, "Expected ')' after read_bytes arguments");
   consume(TokenKind::CloseParen, "Expected ')' after submit arguments");
+  if (checkWord("within")) {
+    advance();
+    effect.within = parseIoDuration();
+  }
   match(TokenKind::Semicolon);
 
   consumeWord("match");
@@ -2321,14 +2378,24 @@ IoEffectStatement Parser::parseIoEffectStatement() {
       effect.requestVar = consumeVariable("a request variable").stringValue;
       consume(TokenKind::CloseParen, "Expected ')' after the request variable");
       consume(TokenKind::Arrow, "Expected '=>' after the admitted pattern");
-      consumeWord("await");
-      consume(TokenKind::OpenParen, "Expected '(' after 'await'");
-      const auto awaited = consumeVariable("the admitted request");
-      if (awaited.stringValue != effect.requestVar) {
-        throw ParseError("'await' takes the request the arm bound",
-                         awaited.loc);
+      if (check(TokenKind::Variable)) {
+        // `admitted($q) => $q`: the read starts and the handle is the value.
+        const auto kept = advance();
+        if (kept.stringValue != effect.requestVar) {
+          throw ParseError("The 'admitted' arm keeps the request it bound",
+                           kept.loc);
+        }
+        effect.detached = true;
+      } else {
+        consumeWord("await");
+        consume(TokenKind::OpenParen, "Expected '(' after 'await'");
+        const auto awaited = consumeVariable("the admitted request");
+        if (awaited.stringValue != effect.requestVar) {
+          throw ParseError("'await' takes the request the arm bound",
+                           awaited.loc);
+        }
+        consume(TokenKind::CloseParen, "Expected ')' after 'await' argument");
       }
-      consume(TokenKind::CloseParen, "Expected ')' after 'await' argument");
     } else if (checkWord("refused")) {
       if (sawRefused) {
         throw ParseError("Duplicate 'refused' arm", current_.loc);
@@ -2356,12 +2423,6 @@ IoEffectStatement Parser::parseIoEffectStatement() {
                      current_.loc);
   }
   consume(TokenKind::CloseBrace, "Expected '}' to close the match");
-  match(TokenKind::Semicolon);
-  consume(TokenKind::CloseBrace, "Expected '}' to close 'effect'");
-  if (match(TokenKind::KwAs)) {
-    effect.resultVar = consumeVariable("an outcome variable").stringValue;
-  }
-  return effect;
 }
 
 } // namespace xanadu::vql

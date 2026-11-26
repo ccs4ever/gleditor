@@ -44,9 +44,36 @@ class MultiStoreCoordinator;
 
 namespace xanadu::vql {
 
-/// The relation `io_tag($outcome)` compiles to; the I/O script host answers it
-/// (ScriptRunner), since the VM and the compiler name no I/O schema.
-inline constexpr const char *outcomeTagRelation = "io_outcome_tag";
+/// The relations the outcome path functions compile to; the I/O script host
+/// answers them (ScriptRunner), since the VM and the compiler name no I/O
+/// schema. An outcome's payload is answered only where the shared terminal
+/// status gate exposes one.
+inline constexpr const char *outcomeTagRelation     = "io_outcome_tag";
+inline constexpr const char *outcomePayloadRelation = "io_outcome_payload";
+inline constexpr const char *outcomeBytesRelation   = "io_outcome_bytes";
+inline constexpr const char *outcomeErrorRelation   = "io_outcome_error";
+inline constexpr const char *outcomeDetailRelation  = "io_outcome_detail";
+/// Which arm an action's handle is: 0 a request still to await, 1 an outcome
+/// (a refusal or a finished request) that is already the value.
+inline constexpr const char *handleArmRelation = "io_handle_arm";
+/// The same, after asking the handle's request to stop.
+inline constexpr const char *handleCancelRelation = "io_handle_cancel";
+/// Admit an open of a path: answers the request, or the Rejected outcome.
+inline constexpr const char *openRelation = "io_open";
+/// The capability an Complete open outcome minted, when it minted one.
+inline constexpr const char *openCapabilityRelation = "io_open_capability";
+
+/// The relation an outcome path function (`io_tag`, `io_payload`, `io_bytes`,
+/// `io_error`, `io_detail`) compiles to; nullptr for any other name.
+[[nodiscard]] constexpr const char *
+outcomeFunctionRelation(const std::string_view name) noexcept {
+  if (name == "io_tag") return outcomeTagRelation;
+  if (name == "io_payload") return outcomePayloadRelation;
+  if (name == "io_bytes") return outcomeBytesRelation;
+  if (name == "io_error") return outcomeErrorRelation;
+  if (name == "io_detail") return outcomeDetailRelation;
+  return nullptr;
+}
 
 inline constexpr std::size_t maxCompiledShapePredicateRules  = 4096;
 inline constexpr std::size_t maxCompiledShapeProjectionRules = 4096;
@@ -118,8 +145,13 @@ struct CompilationResult {
   /// One lowered script I/O action: its Submit and the Await a parked cursor
   /// stops at, and the index of the statement that action is.
   struct IoActionSite {
+    /// The action's first host-facing opcode (a Submit, or the RelationNext
+    /// of a handle action), so a failure there names the statement.
     zigzag::CellRef submitOpcode{};
-    zigzag::CellRef awaitOpcode{};
+    /// Absent for a detached read, which never waits.
+    std::optional<zigzag::CellRef> awaitOpcode;
+    /// The slot the Await reads its request from.
+    std::optional<zigzag::CellRef> requestSlot;
     std::size_t statement{};
   };
   std::vector<IoActionSite> ioActions;

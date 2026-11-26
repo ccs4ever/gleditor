@@ -51,6 +51,24 @@ namespace {
 constexpr std::chrono::milliseconds ioIdleSleep{1};
 /// Work one pump may do: completions published plus waiters checked.
 constexpr std::size_t ioPumpBudget = 16;
+/// How long a script may stay parked before the driver abandons it. A parked
+/// read is normally over in milliseconds; thirty seconds is long enough for a
+/// slow network filesystem and short enough that a script stuck on a dead
+/// source ends on its own. A user-visible policy, so it moves to
+/// system://settings with M8; `--script-timeout` and `:timeout` override it.
+constexpr std::chrono::milliseconds defaultScriptTimeout{30'000};
+
+/// `off` (no deadline) or a positive number of milliseconds.
+std::optional<std::optional<std::chrono::milliseconds>>
+parseScriptTimeout(const std::string &text) {
+  if (text == "off") return std::optional<std::chrono::milliseconds>{};
+  if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
+    return std::nullopt;
+  const auto count = std::stoll(text);
+  if (count <= 0) return std::nullopt;
+  return std::optional<std::chrono::milliseconds>{
+      std::chrono::milliseconds{count}};
+}
 
 std::string extractStoreLabel(const std::string &path) {
   std::filesystem::path p(path);
@@ -133,6 +151,8 @@ void printHelpREPL() {
       << "  :open <name> <path>   Open a file read-only; bind its capability "
          "to "
          "$name for `effect { ... }` script I/O\n"
+      << "  :timeout [MS|off]     Show or set how long a parked script may "
+         "wait before it is abandoned\n"
       << "  :stores               List currently loaded stores\n"
       << "  :save <path>          Save the last query rows as a result slice\n"
       << zigzag::LensRepl::helpText
@@ -186,12 +206,20 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
   std::vector<std::string> positionals;
   options.emplace_back(argv[0]);
 
-  const std::vector<std::string> valueOptions = {
-      "-e",         "--eval",   "-f",
-      "--file",     "-o",       "--output-store",
-      "--engine",   "--format", "--permascroll",
-      "--io-file",  "-d",       "--dims",
-      "--view-dims"};
+  const std::vector<std::string> valueOptions = {"-e",
+                                                 "--eval",
+                                                 "-f",
+                                                 "--file",
+                                                 "-o",
+                                                 "--output-store",
+                                                 "--engine",
+                                                 "--format",
+                                                 "--permascroll",
+                                                 "--io-file",
+                                                 "-d",
+                                                 "--dims",
+                                                 "--view-dims",
+                                                 "--script-timeout"};
 
   bool pastDoubleDash = false;
   for (int i = 1; i < argc; ++i) {
@@ -318,6 +346,12 @@ int main(int argc, char *argv[]) {
             "asynchronously; read it with an `effect { ... }` script action")
       .append()
       .default_value(std::vector<std::string>{});
+
+  program.add_argument("--script-timeout")
+      .help("How long a script waiting on I/O may stay parked before it is "
+            "abandoned with VQL_SCRIPT_TIMEOUT: a number of milliseconds, or "
+            "'off' (default 30000)")
+      .default_value(std::string("30000"));
 
   program.add_argument("--dump-ast")
       .help("Print formatted AST before execution")
@@ -485,6 +519,16 @@ int main(int argc, char *argv[]) {
                      (std::istreambuf_iterator<char>()));
   }
 
+  auto scriptTimeout =
+      std::optional<std::chrono::milliseconds>{defaultScriptTimeout};
+  if (const auto parsed =
+          parseScriptTimeout(program.get<std::string>("--script-timeout"))) {
+    scriptTimeout = *parsed;
+  } else {
+    std::cerr << "Error: --script-timeout expects a positive number of "
+                 "milliseconds or 'off'\n";
+    return 1;
+  }
   // What the last query found: what -o and :save write.
   std::vector<zigzag::CellRef> lastResults;
   xanadu::vql::VQLEngine engine(coordinator);
@@ -549,6 +593,7 @@ int main(int argc, char *argv[]) {
           engine, vm, xanadu::vql::fileScriptPorts(host));
     }
     auto &runner = *ioRunner;
+    runner.setScriptTimeout(scriptTimeout);
     return xanadu::vql::driveToCompletion(
         runner, runner.run(std::move(ast)), [&] { host.pump(ioPumpBudget); },
         [] { std::this_thread::sleep_for(ioIdleSleep); });
@@ -589,7 +634,14 @@ int main(int argc, char *argv[]) {
             ast.body.statements.back());
     std::vector<zigzag::CellRef> results;
     if (xanadu::vql::hasIoEffect(ast)) {
-      auto rows = runIoScript(std::move(ast));
+      // The first action this script admits retires the rows the last one
+      // returned, so nothing from before may be named afterwards, whether
+      // the script ends or fails: -o, --in-place and :save of a failed
+      // script find no results rather than cells that no longer exist.
+      lastResults.clear();
+      hasResults        = false;
+      resultsFromAction = false;
+      auto rows         = runIoScript(std::move(ast));
       if (!rows) {
         std::cerr << "Query failed: " << rows.error().code << ": "
                   << rows.error().message << "\n";
@@ -811,6 +863,24 @@ int main(int argc, char *argv[]) {
       }
     } else if (zigzag::LensRepl::handles(line)) {
       lensRepl.run(line, std::cout, lensMeta);
+    } else if (line == ":timeout" || line.starts_with(":timeout ")) {
+      const auto argument =
+          line.size() > 8
+              ? line.substr(line.find_first_not_of(' ', 8) == std::string::npos
+                                ? line.size()
+                                : line.find_first_not_of(' ', 8))
+              : std::string{};
+      if (argument.empty()) {
+        if (scriptTimeout)
+          std::cout << "Script timeout: " << scriptTimeout->count() << " ms\n";
+        else
+          std::cout << "Script timeout: off\n";
+      } else if (const auto parsed = parseScriptTimeout(argument)) {
+        scriptTimeout = *parsed;
+        std::cout << "Script timeout set\n";
+      } else {
+        std::cout << "Usage: :timeout [MS|off]\n";
+      }
     } else if (line.starts_with(":open ")) {
       std::istringstream iss(line);
       std::string cmd, name, path;

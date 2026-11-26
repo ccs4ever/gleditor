@@ -595,7 +595,15 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
           .run = run, .cursor = cursor, .pending = *execution.pending};
       const auto at = vm_.getCursorOpcode(cursor);
       for (const auto &site : run->compiled_.ioActions)
-        if (at && site.awaitOpcode == *at) parked.statement = site.statement;
+        if (at && site.awaitOpcode == *at) {
+          parked.statement = site.statement;
+          if (site.requestSlot) {
+            const auto held = vm_.resultCells(*site.requestSlot);
+            // A slot the host bound itself (a session variable) holds no
+            // reference; the cell is then the slot.
+            parked.request = held.empty() ? *site.requestSlot : held.front();
+          }
+        }
       return ProgramStep{std::move(parked)};
     }
     if (!execution.success) {
@@ -616,7 +624,7 @@ QueryExecutor::advance(std::shared_ptr<ProgramRun> run) {
       for (const auto &site : run->compiled_.ioActions)
         if (execution.failingClause &&
             (site.submitOpcode == *execution.failingClause ||
-             site.awaitOpcode == *execution.failingClause))
+             site.awaitOpcode == execution.failingClause))
           statement = site.statement;
       return std::unexpected(QueryExecutionError{
           .category  = category,

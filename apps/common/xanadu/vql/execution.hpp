@@ -54,6 +54,8 @@ struct ParkedProgram {
   zigzag::vortex::PendingAwait pending;
   /// Index of the script statement the Await belongs to.
   std::optional<std::size_t> statement;
+  /// The request cell the Await reads, as the program holds it now.
+  std::optional<zigzag::CellRef> request;
 };
 
 using ProgramStep = std::variant<ProgramResult, ParkedProgram>;

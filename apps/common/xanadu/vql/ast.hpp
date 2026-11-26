@@ -528,21 +528,56 @@ struct WeaveStatement {
 /// name of a session variable bound to a numeric cell.
 using IoOperand = std::variant<std::int64_t, std::string>;
 
-/// `effect { let $s := submit($cap, read_bytes(off, max));
-///           match $s { admitted($q) => await($q), refused($e) => $e } }`
+/// A script action's time bound: an integer literal or a `$variable` bound to
+/// a numeric cell, in @p unitMillis milliseconds each (1 for `ms`, 1000 for
+/// `s`).
+struct IoDuration {
+  IoOperand amount{std::int64_t{0}};
+  std::int64_t unitMillis{1};
+};
+
+/// The path an `open` action names: a string literal or a `$variable` bound
+/// to a text cell.
+struct IoOpenPath {
+  std::string text;
+  bool isVariable{false};
+};
+
 /// A script action (plan §10, M7-VQL): it exists only as a top-level script
-/// statement, so it is reached once per script run, never per row. The match
-/// is fixed in shape -- both arms, each yielding the outcome -- because a
-/// refusal is a value the script keeps, not a failure.
+/// statement, so it is reached once per script run, never per row. Four
+/// shapes, all written `effect { ... } [as $name]`:
+///
+///   Read:   `let $s := submit($cap, read_bytes(off, max)) [within N ms|s];
+///            match $s { admitted($q) => await($q) | $q, refused($e) => $e }`
+///           The match is fixed in shape -- both arms -- because a refusal is
+///           a value the script keeps, not a failure. `=> $q` starts the read
+///           and yields the request handle without waiting (a detached read).
+///   Await:  `await($h)` waits for a handle's outcome.
+///   Cancel: `cancel($h)` asks the backend to stop the handle's request and
+///           yields its outcome (Cancelled, or the terminal it had reached).
+///   Open:   `open("path")` or `open($path)` opens a file read-only and yields
+///           the open outcome; `as $name` binds the capability it minted.
 struct IoEffectStatement {
+  enum class Kind : std::uint8_t { Read, Await, Cancel, Open };
+  Kind kind{Kind::Read};
+
   std::string submissionVar;
   std::string capabilityVar;
   IoOperand offset{std::int64_t{0}};
   IoOperand maxBytes{std::int64_t{0}};
   std::string requestVar;
   std::string refusalVar;
-  /// `effect { ... } as $r`: the outcome cell, named for the statements that
-  /// follow so they can read its tag with io_tag($r) and keep it.
+  /// `within N ms|s` on a Read: the request ends as TimedOut after that long.
+  std::optional<IoDuration> within;
+  /// A Read whose admitted arm is `=> $q`: yields the handle, does not wait.
+  bool detached{false};
+  /// Await and Cancel: the handle variable (a request, or a refusal outcome).
+  std::string handleVar;
+  /// Open: the path.
+  IoOpenPath openPath;
+  /// `effect { ... } as $r`: the outcome cell (for Open, the capability the
+  /// open minted, or the outcome itself when it minted none), named for the
+  /// statements that follow so they can read it with io_tag($r) and friends.
   std::optional<std::string> resultVar;
 };
 

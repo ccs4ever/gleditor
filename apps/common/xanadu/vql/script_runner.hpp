@@ -23,6 +23,7 @@
  * those with VQL_IO_QUERY_CONTEXT.
  */
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -31,6 +32,8 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -71,6 +74,19 @@ using StageReadFn =
     std::function<std::expected<zigzag::CellRef, vortex::FrontendDiagnostic>(
         vortex::CapabilityCell, std::uint64_t offset, std::uint64_t length)>;
 
+/// Admit an open of a path as a managed submission (`effect { open(...) }`).
+/// Optional: a host that cannot open files leaves it empty and the action is
+/// refused as `VQL_IO_EFFECT_ARGUMENT`.
+using OpenFileFn = std::function<std::expected<
+    vortex::SubmissionCell, vortex::FrontendDiagnostic>(std::string_view path)>;
+/// Admit the close of the endpoint behind a capability the script opened.
+using CloseCapabilityFn = std::function<
+    std::expected<vortex::SubmissionCell, vortex::FrontendDiagnostic>(
+        vortex::CapabilityCell)>;
+/// The capability a completed open outcome minted.
+using CapabilityOfFn =
+    std::function<std::optional<vortex::CapabilityCell>(vortex::OutcomeCell)>;
+
 /// What a script action needs from its embedding program; the runner owns
 /// none of it and every reference must outlive the runner.
 struct ScriptIoPorts {
@@ -79,6 +95,9 @@ struct ScriptIoPorts {
   vortex::PayloadResolver &payloads;
   const vortex::FrontendDiagnosticRegistry &diagnostics;
   StageReadFn stageRead;
+  OpenFileFn openFile;
+  CloseCapabilityFn closeCapability;
+  CapabilityOfFn capabilityOf;
 };
 
 /// The ports over a `FileReadHost`: reads are staged on the file endpoint
@@ -118,6 +137,29 @@ public:
   /// the same request, then keep going. Never submits the parked action again.
   [[nodiscard]] auto resume(ScriptWake wake) -> ScriptRunResult;
 
+  /// The overall deadline a script gets from `run` on: when it passes while
+  /// the script is parked, `expireIfDue` abandons it. Absent: no deadline.
+  /// Applies to scripts started after the call.
+  auto setScriptTimeout(std::optional<std::chrono::milliseconds> timeout)
+      -> ScriptRunner * {
+    scriptTimeout_ = timeout;
+    return this;
+  }
+  /// The clock the script deadline is read on; empty restores the steady
+  /// clock. A test injects one so a deadline passes on demand.
+  auto setClock(std::function<std::chrono::steady_clock::time_point()> clock)
+      -> ScriptRunner * {
+    clock_ = std::move(clock);
+    return this;
+  }
+  /// If @p token's script is parked past its overall deadline, abandon it and
+  /// say so: the awaited request is asked to stop, the waiter and route are
+  /// dropped, the script's requests are released, and the diagnostic is
+  /// `VQL_SCRIPT_TIMEOUT`. A script still inside its deadline (or without
+  /// one) is left alone, so a driver calls this on every idle turn.
+  [[nodiscard]] auto expireIfDue(const vortex::FrontendToken &token)
+      -> std::optional<vortex::FrontendDiagnostic>;
+
   /// The next wake `IoHost::pumpIo` delivered, oldest first.
   [[nodiscard]] auto takeWake() -> std::optional<ScriptWake>;
   /// Live activations that are parked on a request.
@@ -142,6 +184,21 @@ private:
   [[nodiscard]] auto admit(vortex::CapabilityCell capability,
                            zigzag::CellRef description)
       -> zigzag::vortex::VmSubmission;
+  void installProviders();
+  /// The relation providers a script's host-facing opcodes call.
+  [[nodiscard]] auto handleArm(const zigzag::vortex::RelationQuery &query,
+                               bool cancel) -> zigzag::vortex::RelationResult;
+  [[nodiscard]] auto openPath(const zigzag::vortex::RelationQuery &query)
+      -> zigzag::vortex::RelationResult;
+  [[nodiscard]] auto openCapability(const zigzag::vortex::RelationQuery &query)
+      -> zigzag::vortex::RelationResult;
+  /// The payload of a terminal outcome as text, only where the shared status
+  /// gate exposes one; nullopt for an outcome that retained none.
+  [[nodiscard]] auto payloadText(vortex::OutcomeCell outcome) const
+      -> std::expected<std::optional<std::string>, vortex::FrontendDiagnostic>;
+  [[nodiscard]] auto now() const -> std::chrono::steady_clock::time_point {
+    return clock_ ? clock_() : std::chrono::steady_clock::now();
+  }
   [[nodiscard]] auto
   settle(const std::shared_ptr<Activation> &activation,
          std::expected<ProgramStep, QueryExecutionError> step)
@@ -169,8 +226,21 @@ private:
   /// Release an action's sum and retire its request when terminal. A request
   /// whose cells the arena rolled back (a failed run, a backtracked Submit) is
   /// orphaned in the service instead: never cancelled, forgotten at its end.
-  void retire(const Admitted &entry) noexcept;
-  void retireAll(std::vector<Admitted> &entries) noexcept;
+  /// Retiring an action's request leaves a still-running one in place unless
+  /// @p force: the next call finds it terminal. Forced, the sum is released
+  /// and the service forgets the request at its end. True when done with it.
+  [[nodiscard]] bool retire(const Admitted &entry, bool force = false) noexcept;
+  void retireAll(std::vector<Admitted> &entries, bool force = false) noexcept;
+  /// Release every request of @p entries now: a running one is asked to stop
+  /// and retired once its terminal lands. For a script the host gave up on.
+  void abandonAll(std::vector<Admitted> &entries) noexcept;
+  /// Admit the close of every capability @p activation opened; the closes are
+  /// reaped as they finish (`reapClosing`).
+  void closeOpened(Activation &activation) noexcept;
+  /// An activation that failed or was abandoned: close what it opened and
+  /// retire what it admitted.
+  void endActivation(Activation &activation) noexcept;
+  void reapClosing(bool force = false) noexcept;
   /// Orphan @p request in the service, first dropping the route of any parked
   /// script that still waits on it.
   void orphan(vortex::RequestCell request) noexcept;
@@ -192,6 +262,11 @@ private:
   /// own typed failure message cannot carry.
   std::optional<vortex::FrontendDiagnostic> stageFailure_;
   std::deque<ScriptWake> woken_;
+  std::optional<std::chrono::milliseconds> scriptTimeout_;
+  std::function<std::chrono::steady_clock::time_point()> clock_;
+  /// The closes of capabilities scripts opened, until each is terminal.
+  std::vector<Admitted> closing_;
+  std::vector<std::string> providers_;
   /// The whole token, so a waiter dropped with its request's cells can still
   /// tell its caller (an Abandoned wake) that the script is dead.
   std::map<vortex::ContinuationId, vortex::FrontendToken> parked_;
