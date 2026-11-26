@@ -726,8 +726,9 @@ auto IoService::closeEndpoint(const EndpointCell endpoint, const CloseMode mode)
     // Conflict; bound the set so endpoint churn cannot grow it forever.
     // Eviction only weakens the pre-check -- the adapter still fails typed
     // on the closed endpoint -- and takes the oldest *settled* entry, never
-    // a close still in flight. When every entry is in flight the set is as
-    // large as the closes the admission budget allows at once.
+    // a close still in flight. When every entry is in flight the set is
+    // bounded by the open endpoints, since closes are exempt from the
+    // admission count.
     const auto stale = [this](const auto &entry) {
       const auto found = closingEndpoints_.find(entry.first);
       return found == closingEndpoints_.end() ||
