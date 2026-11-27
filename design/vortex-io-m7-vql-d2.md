@@ -264,9 +264,41 @@ three "as before" tests pass. Run with `promote()` reading `quotedContent()` aga
 unnameable-run refusal test fails (the run was written raw). The remaining arena tests cover API
 that did not exist.
 
+### Gate round 1 fixes
+
+Findings in
+[`r1-disposition.md`](projects/vortex-io-implementation-review/m7-vql-d2/r1-disposition.md).
+
+- **Disagreeing join types every non-free piece.** The fallback in `join_end` interned text only for
+  pieces that had a store; a store-less foreign or external-scroll piece kept raw spans that the
+  arena then read in its own namespace. It now types every piece that names a byte and is not *free*
+  (store-less, not foreign, all local), whether or not the piece has a store. Scratch-only pieces
+  (separators, numbers) stay as they are.
+- **The precondition of a free piece.** A store-less all-local piece agrees with any anchor on the
+  trust that its local spans are on the permascroll the anchor reads. A span carries no permascroll
+  identity, so this cannot be checked at the join; it holds because every store-less local cell a
+  query meets is a capture of the author's one permascroll. `join_relation.cpp` says so beside
+  `namespaceOf`.
+- **A diagnostic.** A join that falls back to text logs one `vql.join` debug line with the row count
+  (`SPDLOG_LEVEL=debug`).
+- **The capture fallback accepts scratch.** `quotedSpansOf` (`result_slice.{hpp,cpp}`, shared by
+  `vquery`'s `resultRows`) quotes a store-less cell's non-scratch spans against the capture store
+  and rebases its scratch separators into `QuotedSpans::scratch`, so a join of captured cells keeps
+  the captures transcluded. A cell holding only scratch quotes nothing.
+- **`quotedRun` also answers for a plain mixed cell.** A non-quote cell of an arena that has its own
+  store, holding local plus scratch spans, used to give `quotedContent` nothing (any scratch
+  refused). Now `quotedRun` returns the arena's store for it, so `promote()` applies `canCarry` to
+  its local spans and refuses (`UnnameableContent`) where it once wrote them raw, and `vquery` saves
+  it as a transclusion plus typed scratch. Arguably the fix of a latent raw write; pinned by
+  `APlainMixedCellIsCarriedLikeAQuoteByItsOwnStore`.
+- **Two stores from the command line.** Not reachable: with two stores loaded `##/+d.dims` answers
+  the composite's own typed dimension cells and no VQL path yields both stores' content cells in one
+  rowset. The two-store case stays at `JoinHarness`; the command line has a one-store join test.
+
 ## 11. Change history
 
 | version | date       | change                           |
 | ------- | ---------- | -------------------------------- |
 | 0.1     | 2026-11-26 | Design for M7-VQL-d2 (P11), gate |
 | 0.2     | 2026-11-26 | As built; gate pending           |
+| 0.3     | 2026-11-26 | Gate round 1 fixes               |

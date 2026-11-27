@@ -4,8 +4,9 @@ Target 5f973a10 (diff 7ac9ed6f..5f973a10). Tally: 0 BLOCKING, 1 MAJOR, 3 MINOR.
 
 ## Verified clean (empirical, headless, scratch copies of the fixtures)
 
-- Transclusion identity: `vquery --permascroll=<copy> xanadu_a -e 'let $r := ##/+d.dims; return join($r, ", ")' -o out`
-  and `xudu-dump --section=ops --permascroll=...` show `make cell [1083,1089)` then splices
+- Transclusion identity:
+  `vquery --permascroll=<copy> xanadu_a -e 'let $r := ##/+d.dims; return join($r, ", ")' -o out` and
+  `xudu-dump --section=ops --permascroll=...` show `make cell [1083,1089)` then splices
   `[11067,11069)` ", ", `[1089,1099)`, `[11069,11071)` ", ", `[1099,1111)`: the rows' original
   fixture spans, only separators new. `--in-place` with "|": permascroll 11037 -> 11039 bytes (two
   separators, nothing else), ops 128-132 are the original spans plus `[11037,11038)` and
@@ -33,10 +34,11 @@ None.
 
 - **Problem**: `namespaceOf` makes `shared=false` for a foreign piece with no store (comment at
   join_relation.cpp:100-108 says such rows "are joined as text"). The fallback loop converts only
-  `piece.store != nullptr` (join_relation.cpp, end provider `if (!shared.shared && piece.store != nullptr)`).
-  A foreign (or external-scroll, store-less) piece has `store == nullptr` (`quotedRun` returns
-  nullopt when the space's `store` is null, arena_manifold.cpp:2240-2250), so its foreign spans are
-  copied raw into a plain arena cell, in the arena's own namespace.
+  `piece.store != nullptr` (join_relation.cpp, end provider
+  `if (!shared.shared && piece.store != nullptr)`). A foreign (or external-scroll, store-less) piece
+  has `store == nullptr` (`quotedRun` returns nullopt when the space's `store` is null,
+  arena_manifold.cpp:2240-2250), so its foreign spans are copied raw into a plain arena cell, in the
+  arena's own namespace.
 - **Failure scenario**: a space attached with `store = nullptr` (the `Space` type allows it,
   overlay.cpp:402-406 passes `target.store` unchecked) whose cells carry an external-scroll span,
   joined with a normal store row. Slice d interned every foreign row as text; now `textOf` of the
@@ -54,9 +56,9 @@ None.
 1. **A store-less all-local join loses capture identity at the CLI.** Joining captured cells
    (`makeCell(span)`, no store) gives a plain cell of local spans plus scratch separators; with no
    store `quotedRun` is nullopt, and `resultRows`' capture fallback refuses any run containing
-   scratch (apps/vquery/main.cpp:165-178), so it is saved typed. Read from code, not run. Either
-   let the capture fallback type only the scratch spans (as `QuotedSpans::scratch` now allows) or
-   record the limit.
+   scratch (apps/vquery/main.cpp:165-178), so it is saved typed. Read from code, not run. Either let
+   the capture fallback type only the scratch spans (as `QuotedSpans::scratch` now allows) or record
+   the limit.
 1. **"Free" pieces are trusted to share the anchor's permascroll** (join_relation.cpp:106-108): at
    library level a store-less local span from permascroll P1 joined with a store over P2 is quoted
    in P2's namespace. The CLI has one permascroll, so unreachable there; state the precondition.
