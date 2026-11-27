@@ -1,0 +1,214 @@
+# M7-VQL-d2 (P11): a quote that admits scratch spans, and the multi-row join over it
+
+Status: design, written before the code. Slice d2 of the [roadmap](vortex-io-m7-vql-roadmap.md)
+§6.1b; core proposal P11, approved by the owner on 2026-11-26 as its own small slice. It changes one
+core file, `apps/common/xanadu/zigzag/arena_manifold.{hpp,cpp}`, and nothing else in the core
+(`store.hpp`, `ops.hpp`, `compact_op.hpp`, `store_tables.hpp`, `segmented_ops_spool`, `manifold`,
+`vortex_core` and `vortex_vm` are untouched, and so is every on-disk format and fixture).
+
+## 1. The problem
+
+`join($rows, sep)` assembles one cell from the spans of its rows with a separator between each pair
+(`join_relation.cpp`). A row that quotes text contributes its own spans, so the result stays a
+transclusion. A row that is **another store's cell** cannot: its spans are addressed in that store's
+scrolls, and the code says so where it gives up (`apps/common/xanadu/vql/join_relation.cpp:24-30`,
+`:51-56`): such a row is interned as text, a copy in the arena's scratch buffer, and `promote()`
+later spools the copy into the permascroll as new bytes. Every row `vquery` prints from a loaded
+store is such a row (a proxy of an attached space, `ArenaManifold::contentOf` answers the foreign
+manifold's run, `arena_manifold.cpp:1863-1885`). So `vquery -e 'return join($rows, ",")' -o out` and
+`--in-place` lose the rows' transclusion identity exactly where a join is most useful: the saved
+cell is a retyped copy, not a quotation of the original spans (`m7-vql-d.md` §8).
+
+Why the arena cannot just hold the foreign spans today:
+
+- A cell's content run is a bare `std::span<const PrimediaSpan>` over `content_`
+  (`arena_manifold.hpp:884-886`); a span's `scroll` is meaningful only in one store's scroll table
+  (`publication.hpp:490-507`, `canCarry`/`carrySpan`: a local span is the same bytes under every
+  store sharing a permascroll, an external scroll id is relative to its own store).
+- The namespace of a run is a property of the **cell**, not of each span: `quoteSpace_` maps a cell
+  to one space (`arena_manifold.hpp:1239-1241`), `makeQuote(space, spans)` takes one space
+  (`:547-548`), and `textOf` and `promote()` read the whole run through that one space
+  (`arena_manifold.cpp:2012-2019`, `:3239-3250`, `:3329-3338`).
+- `quotedContent()` answers nothing for a run that has any scratch span
+  (`arena_manifold.cpp:2239-2243`), because a scratch span has no address outside the arena. A join
+  of quotes needs exactly that: the rows' spans with a scratch separator between them. So a quote
+  with a separator is "not a quote" to every reader that matters: `promote()` then writes its spans
+  uncarried (the namespace of the destination is assumed, not checked), and `vquery`'s result rows
+  see no quote and type the text.
+
+## 2. The chosen representation
+
+Two options were named in the approval: "a mixed-namespace content run, or a quote that admits a
+scratch separator span, whichever is smaller and sounder."
+
+**Chosen: a quote may hold scratch spans between its quoted spans, and its quoted spans share one
+namespace.** A scratch span is already namespace-free: it names bytes this arena holds
+(`scratchTextOf`, `arena_manifold.cpp:1981`), and every reader already handles one inside a run
+(`textOf` `:2024`, `boundedTextOf` `:2081`, `promote()`'s splice branch `:3388`). The only defects
+are the two places that treat "has a scratch span" as "not a quote". Fixing that is a reader change,
+not a new data shape:
+
+- `CellSlot`, `content_`, the `Mark`, `PrefixSnapshot` and its codec are unchanged (the snapshot
+  already carries `quoteSpaceCount` and the scratch buffer, `arena_manifold.cpp:2653`, `:4033`).
+- `quoteSpace_` stays one entry per quote cell.
+
+**A new reader, `quotedRun(ref)`**, answers the store and the *whole* run, scratch spans included.
+`quotedContent()` is kept for the callers that want only addressable bytes (`prose_hits`,
+`compile_semantic_shape.cpp:185`, `apps/vquery/main.cpp:143`, `apps/vpl/main.cpp:165`, tests): it is
+now `quotedRun()` filtered to runs with no scratch span, with identical answers. `promote()` and
+`vquery`'s result rows use `quotedRun()`.
+
+**Several stores in one join.** A join of rows of several stores is a quote only when the rows'
+spans can share one namespace by `canCarry`'s own rule: every row whose spans include an external
+scroll names the same store (the run's *anchor*), and every other row's spans are all local and its
+store reads the same permascroll as the anchor. That is the usual `vquery` case (several stores over
+one `--permascroll`, all primedia local). Rows that disagree (two stores each with external scrolls,
+a store with a different permascroll, a foreign row with no store) are joined as interned text,
+which is exactly what slice d does today. The refusal is in the join (it decides what it mints), not
+in the arena.
+
+### Refused alternatives
+
+1. **A per-span namespace in the run** (a parallel `space` array beside `content_`, or a wider
+   `PrimediaSpan`). It is the literal "mixed-namespace content run". Refused: `PrimediaSpan` is the
+   wire and on-disk span (a wider one touches `CompactOpNode` users), a parallel array touches
+   `CellSlot` accounting, `setContentAt`, `mark()`/`release()`, `compact()` and the prefix codec
+   (each of which copies or truncates `content_`), and `promote()` would carry each span by its own
+   space, so the soundness proof grows with every one of those. It buys one thing the chosen shape
+   cannot: external scrolls of two stores in one cell. The price of not having it is a text copy in
+   that one case, which is today's behaviour, not a regression, and a cell is a quote of one
+   document by design (`d.stores` composes cells, not spans).
+1. **Rewrite the foreign spans into the destination's namespace at join time.** Refused: the arena
+   does not know its destination; carrying registers scrolls in a store (`carrySpan` mutates
+   `into`), which an arena, by R8, must never do. `promote()` is the one road and does it.
+1. **Make the separator a cell of the quoted store** (a typed separator minted by the join into the
+   source store). Refused: that mints operations from a query (R8).
+1. **Let `quotedContent()` answer scratch-bearing runs.** Refused: its four callers read the answer
+   as "all addressable", and `compile_semantic_shape` rebuilds a quote from `quote->spans`; a
+   scratch span there would dangle across a mark and be read as a store span. A second name keeps
+   the old contract exact and makes each new use explicit.
+1. **`vquery` types the text and the separators together**, as now. It is the defect.
+
+## 3. API diff (`arena_manifold.hpp`)
+
+```cpp
+// new, beside QuotedContent (arena_manifold.hpp:550-554)
+/**
+ * @brief @p ref's whole quoted run: the store its non-scratch spans are
+ *        addressed in, and every span in order, scratch spans included.
+ *
+ * quotedContent() without the refusal of scratch: a join of quotes holds a
+ * scratch separator between its quoted spans. Nothing when the run has no
+ * non-scratch span (constructed text), no spans, or no store to name.
+ */
+[[nodiscard]] std::optional<QuotedContent> quotedRun(CellRef ref) const;
+
+// doc change only
+CellRef makeQuote(std::uint32_t space, std::span<const xanadu::PrimediaSpan> content);
+//   @p content may hold scratch spans of this arena (a separator between quoted
+//   spans). A scratch span past the arena's scratch buffer throws
+//   std::out_of_range; every other span is read in @p space's scrolls.
+
+// behaviour, same signature
+[[nodiscard]] std::optional<QuotedContent> quotedContent(CellRef ref) const;
+//   unchanged answers: nullopt for a run with a scratch span.
+```
+
+`promote()` and `promoteOrRefuse()` keep their signatures and their refusals.
+
+## 4. How `promote()` maps each kind of span
+
+Per cell (`arena_manifold.cpp:3233-3250`, `:3322-3340`), unchanged in shape:
+
+- **Check before writing** (`UnnameableContent`): for a quote whose store is not the destination,
+  every *non-scratch* span must satisfy `canCarry(*quote->store, destination, span)`. A scratch span
+  is skipped (it is carried by being typed). Today a run with any scratch span skips the check
+  altogether; that is the hazard this closes.
+- **Carry**: each non-scratch span becomes `carrySpan(*store, destination, span)`, i.e. a
+  transclusion of the same bytes in the destination's coordinates (a local span as is; an external
+  scroll registered in the destination by `addScroll`). Foreign spans are therefore **transclusions
+  of their own store's permascroll addresses**, never copies.
+- **Spool the separator**: the first span makes the cell (`store.makeCell(version, span)` for a
+  quoted first span, `makeCell(version, text)` for a scratch first span), and each later span is a
+  splice (`spliceCellSpan` for a quoted span, `spliceCell(version, cell, at, 0, text)` for a scratch
+  one). The scratch bytes reach the author's permascroll through that call and nowhere else, so a
+  saved join grows the permascroll by exactly its separators and constructed numbers.
+- **Refusals that stay**: runtime-only state, unnameable foreign op handles, dangling handles, the
+  budget, and `CrossStore` for shadowed diffs; a scratch span still reaches a store only through
+  `promote()`.
+- The ref mapping (`real`, `ephemeralBit`) is not touched: `promote()` still maps every ref and
+  trusts none.
+
+## 5. How a mixed run is read
+
+- `textOf`/`boundedTextOf`: a quote cell reads its non-scratch spans through its space's reader and
+  its scratch spans from the arena buffer (`arena_manifold.cpp:2012-2031`, `:2056-2092`), already
+  true; no change.
+- `quotedRun`: the store comes from the same place as `quotedContent` today (`foreignOf` space, then
+  `quoteSpace_` space, then the arena's own or its base store), and the spans are `contentOf(ref)`.
+- `mark()`/`release()`: `makeQuote` already records the cell in `quoteSpaceOrder_`
+  (`arena_manifold.cpp:2216-2217`, `:2730-2733`), and the scratch buffer is truncated by release as
+  for any scratch, so a failed branch leaves neither the cell nor its separator.
+
+## 6. `join`, `vquery`, and the saved cell
+
+`join_relation.cpp` keeps each row's spans, the store they are addressed in (`quotedRun`) and
+whether they are all local, takes the separator the same way, and decides **at the end** whether the
+rows share a namespace (section 2). Shared: one `makeQuote(space, run)` with the separator spans in
+place (or a plain cell when the namespace is the arena's own, as today). Not shared: every row that
+names a store becomes interned text, as in slice d. A lone row is still returned itself.
+
+`vquery` (`resultRows`, `writeResultSlice`): `ResultRow::quote` (`QuotedSpans`) gains `scratch`, the
+bytes of the run's scratch spans (each scratch span's `start` rebased into that string).
+`writeResultSlice` writes a scratch span as typed text and each other span as a carried transclusion
+(`result_slice.cpp:21-36`, `:48-65`). `--in-place` needs no change beyond the arena: the joined cell
+is a quote cell and `promote()` writes it as in section 4.
+
+## 7. Price
+
+- One accessor, a two-line change in `promote()`'s two loops, one range check in `makeQuote`, a
+  `scratch` string on `QuotedSpans`. No layout change, no snapshot change, no format change.
+- A join over several stores that disagree on external scrolls stays text. Measured as before:
+  copies bounded by `maxJoinedTextBytes`.
+- The join holds per-row pieces until its end (one small record per row beside the run it already
+  held), which is bounded by the same byte bound and cleared at the end; no new leak (tested at 10^4
+  rows).
+- Hardening, not a regression: `promote()` now carries the non-scratch spans of a mixed run whose
+  store is not the destination, and refuses (`UnnameableContent`) one it cannot carry. Before, such
+  a run was written raw.
+
+## 8. Acceptance criteria
+
+1. A multi-row join over a loaded store's rows returns a quote cell whose spans are the rows' spans
+   with scratch separators; `textOf` equals the joined text.
+1. `vquery -e ... -o OUT` and `--in-place` save that cell as the original spans plus separator
+   splices: `xudu-dump --section=ops` shows the rows' permascroll spans and the permascroll grows by
+   exactly the separator bytes.
+1. Mixed foreign + local + scratch (number) rows work; rows of stores that disagree on external
+   scrolls join as text; an empty join, a one-row join and a lone foreign row are unchanged.
+1. `promote()` still refuses what it refused (runtime-only state, unnameable quotes, cross-store),
+   now also a mixed run it cannot carry; scratch bytes reach a store only through it.
+1. Every existing `ArenaManifold`, join and `vquery` test passes; `CompactOpNode` and the fixtures
+   are untouched; a 10^4-row join adds no live cell after its result is dropped beyond what slice d
+   already measures.
+
+## 9. Test plan
+
+- `tests/zigzag` (arena): `quotedRun` answers store and the whole run for a quote with a separator
+  and `quotedContent` still answers nothing for it; `makeQuote` rejects a scratch span past the
+  buffer; `textOf` of a quote with separator; `release()` drops the cell and the separator;
+  `promote()` of a quote with a separator from another store writes carried spans and spools only
+  the separator, and refuses (`UnnameableContent`) one whose external scroll the destination cannot
+  name; a scratch-first run.
+- `tests/xuzz` (join, `vquery`): multi-row join over a `core_hypertext` store's rows through a
+  `MultiStoreCoordinator`; `-o` and `--in-place` keep each row's transclusion (ops dump, permascroll
+  growth); foreign + local + number; two stores with disjoint external scrolls fall back to text;
+  empty and one-row cases; a bounded run.
+- **Fail-before**: each new test is run on the pre-change tree (the join returns interned text, the
+  saved cell is a typed copy) and its failure recorded.
+
+## 10. Change history
+
+| version | date       | change                           |
+| ------- | ---------- | -------------------------------- |
+| 0.1     | 2026-11-26 | Design for M7-VQL-d2 (P11), gate |
