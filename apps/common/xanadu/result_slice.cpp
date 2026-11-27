@@ -22,10 +22,14 @@ std::optional<QuotedSpans> quotedSpansOf(const zigzag::ArenaManifold &arena,
     // A captured cell's content is a span of the author's permascroll but it
     // names no store; the capture store is a Store over that permascroll.
     const auto content = arena.contentOf(master);
-    const bool names =
-        std::ranges::any_of(content, [](const PrimediaSpan &span) {
-          return scratchScroll != span.scroll;
-        });
+    // Only local spans are the capture store's to name: an external-scroll
+    // span quoted against it would address another permascroll's bytes.
+    bool names = false;
+    for (const auto &span : content) {
+      if (scratchScroll == span.scroll) continue;
+      if (!span.isLocal()) return std::nullopt;
+      names = true;
+    }
     if (!names) return std::nullopt;
     run.store = captureStore;
     run.spans.assign(content.begin(), content.end());

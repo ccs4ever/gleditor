@@ -240,6 +240,27 @@ TEST_F(JoinHarness, AStoreLessForeignRowIsTypedNotCopiedAsRawSpans) {
   }
 }
 
+// quotedSpansOf's capture fallback names the capture store only for local
+// spans: an external-scroll span is another permascroll's scroll id, and
+// quoted against the capture store it would address the wrong bytes.
+TEST_F(JoinHarness, AStoreLessCellWithAnExternalSpanIsNotQuotedAgainstCapture) {
+  const auto perma   = freshPermascroll("capext");
+  auto ext           = makeExternalSource(perma, "capext-author", "ext-bytes");
+  auto capture       = makeSource(perma, {"local"});
+  const auto bare    = arena.attach(zigzag::Space{.manifold = &ext.manifold,
+                                                  .store    = nullptr,
+                                                  .reader   = ext.store.get(),
+                                                  .label    = "bare"});
+  const auto foreign = arena.proxyFor(bare, ext.cells[0]);
+  ASSERT_FALSE(arena.quotedRun(foreign).has_value());
+  const auto content = arena.contentOf(foreign);
+  ASSERT_FALSE(content.empty());
+  ASSERT_FALSE(content.front().isLocal())
+      << "fixture must carry an external span";
+  EXPECT_FALSE(xanadu::quotedSpansOf(arena, foreign, capture.store.get()))
+      << "an external-scroll span must not be quoted against the capture store";
+}
+
 TEST_F(JoinHarness,
        AMixedDisagreeingJoinTypesEveryForeignRowAndKeepsLocalOnes) {
   const auto perma = freshPermascroll("mixeddis");
