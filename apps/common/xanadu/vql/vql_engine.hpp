@@ -104,42 +104,9 @@ public:
   void publishMount(const std::string &dimName, SessionMount mount);
   /// Removes both spellings of @p dimName.
   void publishUnmount(const std::string &dimName);
-  /// A cell a script's own program minted for a `let`, with the incarnation
-  /// that proves the slot still holds that cell.
-  struct OwnedCell {
-    zigzag::CellRef cell;
-    zigzag::ArenaManifold::AllocationIncarnation incarnation;
-  };
-  using OwnedBindings = std::unordered_map<std::string, std::vector<OwnedCell>>;
-  /// A closure value and the cells its environment captured, by cell: the
-  /// arena records no such reference, so whoever made the value reports it.
-  struct ClosureEnvironment {
-    zigzag::CellRef root;
-    zigzag::ArenaManifold::AllocationIncarnation incarnation;
-    std::vector<zigzag::CellRef> captured;
-  };
-  /// Publish a script's `let`s. @p owned names the cells each binding's
-  /// program minted (a store row or an earlier script's cell is no one's to
-  /// free), which are freed when the name is rebound or erased, unless the new
-  /// binding, another name or @p keep (the rows the caller holds) still names
-  /// them: a script that rebinds a name every run would otherwise leave a cell
-  /// a run, up to a joined text's size. A cell is freed only when nothing can
-  /// reach it: no binding, row, mount or registry entry names it, it has no
-  /// links (a `%` run or a path-built structure is the user's, linked into the
-  /// space), and no closure value reachable from a binding or row captured it.
-  /// @p closures lists the closure values among the bindings and rows, with
-  /// their captured cells (a closure captured through a lambda parameter holds
-  /// the cell a name held, whatever the closure's own names are).
   void publishCompilerBindings(
       ContractBindings bindings,
-      std::unordered_map<std::string, std::vector<PathStep>> functors,
-      OwnedBindings owned = {}, std::span<const zigzag::CellRef> keep = {},
-      std::span<const ClosureEnvironment> closures = {});
-  /// Whether any closure value is bound, so a caller can skip looking for
-  /// them in a session that has none.
-  [[nodiscard]] bool holdsClosures() const noexcept {
-    return !closureEnvs_.empty();
-  }
+      std::unordered_map<std::string, std::vector<PathStep>> functors);
   [[nodiscard]] const std::unordered_map<std::string, DefDeclaration> &
   userDefs() const noexcept {
     return userDefs_;
@@ -373,24 +340,6 @@ private:
   std::unordered_map<std::string, std::uint32_t> historicalSpaces_;
 
   std::unordered_map<std::string, std::vector<zigzag::CellRef>> env_;
-  /// What each `let` name's program minted; see publishCompilerBindings.
-  OwnedBindings ownedLets_;
-  /// The closure values the session's bindings reach and what each captured;
-  /// pruned to the reachable on every publish and free.
-  std::unordered_map<zigzag::CellRef, ClosureEnvironment> closureEnvs_;
-  /// Every cell a closure reachable from a binding or @p seeds holds, and the
-  /// prune of the table to the closures that are reachable.
-  [[nodiscard]] std::unordered_set<zigzag::CellRef>
-  heldByClosures(std::span<const zigzag::CellRef> seeds);
-  /// Whether a replaced let cell may be deleted: it is the binding's alone,
-  /// still the cell it was, unlinked and in no closure.
-  [[nodiscard]] bool
-  freeable(const OwnedCell &held,
-           const std::unordered_set<zigzag::CellRef> &named) const;
-  /// Free the cells @p name's last binding minted, but not those @p keep or
-  /// another binding still names.
-  void releaseOwned(const std::string &name,
-                    std::span<const zigzag::CellRef> keep);
   /// Names bound to functors rather than cells; a name is in one or the other.
   std::unordered_map<std::string, FunctorSteps> functors_;
   std::string activePerspective_{};

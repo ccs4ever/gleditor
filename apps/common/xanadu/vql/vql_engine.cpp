@@ -21,7 +21,6 @@
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include <gleditor/cpp26_concat.hpp>
-#include <gleditor/logging.hpp>
 
 namespace xanadu::vql {
 using zigzag::DimVector;
@@ -127,7 +126,13 @@ void VQLEngine::eraseVariable(const std::string_view name) {
   // keyed by a let-bound name and cannot be named by a session variable a
   // payload cell reaches, so :forget has nothing to release there.
   env_.erase(std::string{name});
-  releaseOwned(std::string{name}, {});
+}
+
+void VQLEngine::clearVariables() noexcept {
+  env_.clear();
+  functors_.clear();
+  putGetLenses_.clear();
+  dynamicViews_.clear();
 }
 
 std::unordered_map<std::string, std::vector<PathStep>>
@@ -153,80 +158,17 @@ void VQLEngine::publishUnmount(const std::string &dimName) {
   sessionMounts_.erase(canonical.substr(2));
 }
 
-namespace {
-
-/// Cells other session state names besides a variable: the dynamic-view
-/// registry's handles and the mounts' roots. A `let` cell among them is no
-/// longer the binding's alone, so replacing the binding must not free it.
-void namedBySession(
-    const DynamicViewRegistry &views,
-    const std::unordered_map<std::string, VQLEngine::SessionMount> &mounts,
-    std::unordered_set<zigzag::CellRef> &named) {
-  for (const auto &[cell, record] : views.viewCells) {
-    named.insert(cell);
-    named.insert(record.source);
-    if (record.view) {
-      for (const auto &[from, to] : record.view->handles) {
-        named.insert(from);
-        named.insert(to);
-      }
-    }
-  }
-  for (const auto &[owner, view] : views.ownerViews) {
-    named.insert(owner);
-    named.insert(view);
-  }
-  for (const auto &[cell, record] : views.cellLenses) named.insert(cell);
-  for (const auto &[cell, shape] : views.shapeHandles) named.insert(cell);
-  for (const auto &[name, mount] : mounts)
-    named.insert(mount.roots.begin(), mount.roots.end());
-}
-
-} // namespace
-
-void VQLEngine::clearVariables() noexcept {
-  env_.clear();
-  functors_.clear();
-  putGetLenses_.clear();
-  dynamicViews_.clear();
-  closureEnvs_.clear();
-  // Nothing names a binding's cells now, so what the bindings minted goes, as
-  // :forget would have freed each in turn.
-  try {
-    std::unordered_set<zigzag::CellRef> named;
-    namedBySession(dynamicViews_, sessionMounts_, named);
-    for (const auto &[name, cells] : ownedLets_) {
-      for (const auto &held : cells) {
-        if (freeable(held, named))
-          static_cast<void>(arena().deleteCell(
-              held.cell, held.incarnation, zigzag::DeletionMode::LeaveBroken,
-              std::nullopt));
-      }
-    }
-  } catch (const std::exception &error) {
-    GLEDITOR_LOG_WARN("vql.engine", "variables cleared, cells kept: {}",
-                      error.what());
-  }
-  ownedLets_.clear();
-}
-
 void VQLEngine::publishCompilerBindings(
     ContractBindings bindings,
-    std::unordered_map<std::string, std::vector<PathStep>> functors,
-    OwnedBindings owned, const std::span<const zigzag::CellRef> keep,
-    const std::span<const ClosureEnvironment> closures) {
-  for (const auto &closure : closures)
-    closureEnvs_.insert_or_assign(closure.root, closure);
+    std::unordered_map<std::string, std::vector<PathStep>> functors) {
   auto nextEnv      = env_;
   auto nextFunctors = functors_;
   auto nextLenses   = putGetLenses_;
-  std::vector<std::string> rebound;
   for (auto &[name, cells] : bindings) {
     nextFunctors.erase(name);
     nextLenses.erase(name);
     dynamicViews_.namedLenses.erase(name);
     nextEnv[name] = std::move(cells);
-    rebound.push_back(name);
   }
   for (auto &[name, steps] : functors) {
     nextEnv.erase(name);
@@ -234,112 +176,10 @@ void VQLEngine::publishCompilerBindings(
     dynamicViews_.namedLenses.erase(name);
     nextFunctors[name] =
         std::make_shared<const std::vector<PathStep>>(std::move(steps));
-    rebound.push_back(name);
   }
   env_.swap(nextEnv);
   functors_.swap(nextFunctors);
   putGetLenses_.swap(nextLenses);
-  // The previous cells go once the new bindings are in place, so a name that
-  // is rebound to a cell it already held (a one-row `join` returns its row)
-  // keeps it.
-  std::unordered_map<std::string, std::vector<OwnedCell>> replaced;
-  for (const auto &name : rebound) {
-    if (const auto held = ownedLets_.find(name); held != ownedLets_.end()) {
-      replaced.emplace(name, std::move(held->second));
-      ownedLets_.erase(held);
-    }
-    if (const auto fresh = owned.find(name); fresh != owned.end())
-      ownedLets_[name] = std::move(fresh->second);
-  }
-  std::unordered_set<zigzag::CellRef> named(keep.begin(), keep.end());
-  for (const auto &[name, cells] : env_)
-    named.insert(cells.begin(), cells.end());
-  for (const auto &[name, cells] : ownedLets_) {
-    for (const auto &owned_ : cells) named.insert(owned_.cell);
-  }
-  namedBySession(dynamicViews_, sessionMounts_, named);
-  named.merge(heldByClosures(keep));
-  for (const auto &[name, cells] : replaced) {
-    for (const auto &held : cells) {
-      if (!freeable(held, named)) continue;
-      // The one deletion every cell goes through (P7): links broken, then the
-      // slot freed, so nothing is left naming it.
-      if (const auto deleted = arena().deleteCell(
-              held.cell, held.incarnation, zigzag::DeletionMode::LeaveBroken,
-              std::nullopt);
-          !deleted) {
-        GLEDITOR_LOG_DEBUG("vql.engine", "a replaced let cell was kept: {}",
-                           zigzag::toString(deleted.error()));
-      }
-    }
-  }
-}
-
-std::unordered_set<zigzag::CellRef>
-VQLEngine::heldByClosures(const std::span<const zigzag::CellRef> seeds) {
-  std::unordered_set<zigzag::CellRef> held;
-  if (closureEnvs_.empty()) return held;
-  // A closure holds what it captured, and a captured cell may itself be a
-  // closure (one passed to another), so the walk follows captures to a fixed
-  // point. Only a closure a binding or a row reaches is live; the rest of the
-  // table goes, which keeps it bounded by the session's closures.
-  std::vector<zigzag::CellRef> pending(seeds.begin(), seeds.end());
-  for (const auto &[name, cells] : env_)
-    pending.insert(pending.end(), cells.begin(), cells.end());
-  std::unordered_set<zigzag::CellRef> seen;
-  std::unordered_set<zigzag::CellRef> live;
-  while (!pending.empty()) {
-    const auto cell = pending.back();
-    pending.pop_back();
-    if (!seen.insert(cell).second) continue;
-    const auto found = closureEnvs_.find(cell);
-    if (found == closureEnvs_.end() ||
-        !arena().matches(cell, found->second.incarnation))
-      continue;
-    live.insert(cell);
-    for (const auto captured : found->second.captured) {
-      held.insert(captured);
-      pending.push_back(captured);
-    }
-  }
-  std::erase_if(closureEnvs_,
-                [&](const auto &entry) { return !live.contains(entry.first); });
-  return held;
-}
-
-bool VQLEngine::freeable(
-    const OwnedCell &held,
-    const std::unordered_set<zigzag::CellRef> &named) const {
-  if (named.contains(held.cell) ||
-      !arena().matches(held.cell, held.incarnation))
-    return false;
-  // A link means something other than the name reaches the cell: `%` and the
-  // path-mutating programs build structure the user keeps.
-  return std::ranges::none_of(
-      arena().dimensionsOf(held.cell), [](const zigzag::DimLink &link) {
-        return link.pos != zigzag::noCell || link.neg != zigzag::noCell;
-      });
-}
-
-void VQLEngine::releaseOwned(const std::string &name,
-                             const std::span<const zigzag::CellRef> keep) {
-  const auto held = ownedLets_.find(name);
-  if (held == ownedLets_.end()) return;
-  const auto cells = std::move(held->second);
-  ownedLets_.erase(held);
-  std::unordered_set<zigzag::CellRef> named(keep.begin(), keep.end());
-  for (const auto &[other, values] : env_)
-    named.insert(values.begin(), values.end());
-  for (const auto &[other, values] : ownedLets_)
-    for (const auto &owned : values) named.insert(owned.cell);
-  namedBySession(dynamicViews_, sessionMounts_, named);
-  named.merge(heldByClosures(keep));
-  for (const auto &cell : cells) {
-    if (!freeable(cell, named)) continue;
-    static_cast<void>(arena().deleteCell(cell.cell, cell.incarnation,
-                                         zigzag::DeletionMode::LeaveBroken,
-                                         std::nullopt));
-  }
 }
 
 void VQLEngine::publishUserDefs(const std::vector<DefDeclaration> &defs) {
