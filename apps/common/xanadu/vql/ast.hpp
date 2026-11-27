@@ -670,10 +670,9 @@ struct IoMatchStatement {
   std::vector<IoMatchArm> arms;
 };
 
-struct Statement
-    : std::variant<ExecutionBlock, WatchStatement, WeaveStatement,
-                   PerspectiveBlock, PathExpression, IoEffectStatement,
-                   IoMatchStatement> {
+struct Statement : std::variant<ExecutionBlock, WatchStatement, WeaveStatement,
+                                PerspectiveBlock, PathExpression,
+                                IoEffectStatement, IoMatchStatement> {
   using variant::variant;
 };
 
