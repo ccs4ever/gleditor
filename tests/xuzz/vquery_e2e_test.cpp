@@ -251,6 +251,55 @@ TEST_F(VQueryE2ETest, MultiStoreNamedResolution) {
   EXPECT_NE(resRoleA.output.find("primary"), std::string::npos);
 }
 
+// M7-VQL-d2: a join over a loaded store's rows saves as a transclusion of the
+// rows' own spans, and the permascroll grows by the separators alone. Run on
+// a copy so the shared fixture permascroll is untouched. Two stores loaded
+// together cannot be driven the same way from the command line: `##/+d.dims`
+// then answers the composite's own typed dimension cells, and no VQL path
+// yields the content cells of two loaded stores in one rowset, so the
+// two-store case is covered by the JoinHarness unit tests.
+TEST_F(VQueryE2ETest, AJoinOfALoadedStoresRowsSavesTranscludedPlusSeparators) {
+  const fs::path samples = "tests/samples/xudu";
+  const auto storeA      = samples / "core_hypertext" / "xanadoc_a";
+  if (!fs::exists(storeA) || !fs::exists(samples / "permascroll"))
+    GTEST_SKIP() << "Sample fixtures not present";
+  const auto perma = testDir / "permascroll";
+  fs::copy(samples / "permascroll", perma, fs::copy_options::recursive);
+  fs::copy(storeA, testDir / "xanadoc_a", fs::copy_options::recursive);
+  const auto open = [&] {
+    xanadu::UserPermascroll::Config config;
+    config.storageDir = perma;
+    return std::make_shared<xanadu::UserPermascroll>(config);
+  };
+  const auto before = open()->size();
+  const auto out    = testDir / "joined.store";
+  const auto run    = runVQuery("--permascroll=" + perma.string() + " " +
+                                (testDir / "xanadoc_a").string() +
+                                " -e 'return join(##/+d.dims, \", \")' -o '" +
+                                out.string() + "'");
+  ASSERT_EQ(run.exitCode, 0) << run.output;
+  const auto scroll = open();
+  const auto saved  = xanadu::loadStore(out, scroll);
+  const auto rows   = xanadu::readResultSlice(*saved, saved->latest());
+  ASSERT_EQ(rows.size(), 1U);
+  const auto &text       = rows.front().text;
+  std::size_t separators = 0;
+  for (auto at = text.find(", "); at != std::string::npos;
+       at      = text.find(", ", at + 2))
+    ++separators;
+  ASSERT_GT(separators, 1U) << text;
+  ASSERT_TRUE(rows.front().quote.has_value());
+  EXPECT_EQ(rows.front().quote->spans.size(), 2 * separators + 1)
+      << "one span per row and separator, not one typed copy";
+  // The rows are spans the permascroll already held; only the separators are
+  // new bytes, and a retyped copy would put the rows after `before` too.
+  const auto fresh = std::ranges::count_if(
+      rows.front().quote->spans,
+      [&](const xanadu::PrimediaSpan &span) { return span.start >= before; });
+  EXPECT_EQ(static_cast<std::size_t>(fresh), separators)
+      << "the rows were typed in again";
+}
+
 TEST_F(VQueryE2ETest, OutputStoreCreation) {
   fs::path outStorePath = testDir / "result_store";
 
