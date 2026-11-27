@@ -1543,9 +1543,15 @@ std::size_t liveCellsPerRun(FileWorld &f, const std::string &source,
 } // namespace
 
 // The price slice d leaves unreclaimed, so the number in the design (section 8)
-// is a measurement the build reproduces. The ceilings are the measured figures
-// with headroom; M7-VQL-d3 replaces them with equality to zero (the DISABLED_
-// tests above).
+// is a measurement the build reproduces. The ceilings are about 1.25 times the
+// measured figures (266, 115, 46, 267 and 165 live cells a run); M7-VQL-d3
+// turns them into equality with zero (the DISABLED_ tests above).
+constexpr std::size_t joinCeiling            = 333;
+constexpr std::size_t letJoinCeiling         = 144;
+constexpr std::size_t countCeiling           = 58;
+constexpr std::size_t unfreedRowsCeiling     = 334;
+constexpr std::size_t closureRedefineCeiling = 207;
+
 TEST(VqlIoKnownLeakTest, APlainQueryKeepsItsProgramAndTheCostIsMeasured) {
   FileWorld f;
   f.bindRows(4);
@@ -1556,11 +1562,8 @@ TEST(VqlIoKnownLeakTest, APlainQueryKeepsItsProgramAndTheCostIsMeasured) {
   RecordProperty("liveCellsPerRunJoin", static_cast<int>(join));
   RecordProperty("liveCellsPerRunLetJoin", static_cast<int>(let));
   RecordProperty("liveCellsPerRunCount", static_cast<int>(count));
-  constexpr std::size_t joinCeiling  = 400;
-  constexpr std::size_t letCeiling   = 200;
-  constexpr std::size_t countCeiling = 100;
   EXPECT_LE(join, joinCeiling);
-  EXPECT_LE(let, letCeiling);
+  EXPECT_LE(let, letJoinCeiling);
   EXPECT_LE(count, countCeiling);
 }
 
@@ -1570,8 +1573,7 @@ TEST(VqlIoKnownLeakTest,
   const auto per =
       liveCellsPerRun(f, "let $g := \\($x) $x + \"!\"; return $g(\"a\")");
   RecordProperty("liveCellsPerRunClosureRedefinition", static_cast<int>(per));
-  constexpr std::size_t ceiling = 300;
-  EXPECT_LE(per, ceiling);
+  EXPECT_LE(per, closureRedefineCeiling);
 }
 
 TEST(VqlIoKnownLeakTest, RowsTheCallerKeepsStayLiveAndTheCostIsMeasured) {
@@ -1580,8 +1582,7 @@ TEST(VqlIoKnownLeakTest, RowsTheCallerKeepsStayLiveAndTheCostIsMeasured) {
   const auto per =
       liveCellsPerRun(f, "return join($rows, \",\")", /*freeRows=*/false);
   RecordProperty("liveCellsPerRunUnfreedRows", static_cast<int>(per));
-  constexpr std::size_t ceiling = 400;
-  EXPECT_LE(per, ceiling);
+  EXPECT_LE(per, unfreedRowsCeiling);
 }
 
 // ---- The payload-less outcome constructor ----------------------------------

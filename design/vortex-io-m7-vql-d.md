@@ -1,8 +1,9 @@
 # M7-VQL-d: values (match, owned await, `let` sources, join)
 
-Status: built, gate pending. Slice d of the [roadmap](vortex-io-m7-vql-roadmap.md) §6.1; the surface
-is in [`vql-query-language.md`](vql-query-language.md) §4.13 "Values (M7-VQL-d)". No new world
-effect, no core file, no on-disk format.
+Status: built, **gate passed** (round 4, final target `2e9e4178`; reclamation deferred to
+M7-VQL-d3). Slice d of the [roadmap](vortex-io-m7-vql-roadmap.md) §6.1; the surface is in
+[`vql-query-language.md`](vql-query-language.md) §4.13 "Values (M7-VQL-d)". No new world effect, no
+core file, no on-disk format.
 
 ## 1. Scope and the rulings it rests on
 
@@ -231,8 +232,10 @@ What round 4 did, and what stayed:
 
 ### What slice d leaves unbounded
 
-Everything here is as before slice d (the slice did not make it worse), measured on the final build,
-live cells added per run after a warm-up, over four rows:
+The mechanism of each leak (a kept plain program, a replaced `let` cell, a kept closure program,
+rows the REPL never frees) is as before slice d. The `join` figures are new, because `join` is a
+function this slice adds: they are the baseline d3 starts from, not pre-slice numbers. Measured on
+the final build, live cells added per run after a warm-up, over four rows:
 
 | shape                                            | live cells per run |
 | ------------------------------------------------ | ------------------ |
@@ -240,6 +243,7 @@ live cells added per run after a warm-up, over four rows:
 | `let $t := join($rows, ","); return $t` (plain)  | 115                |
 | `return $rows/count()` (plain)                   | 46                 |
 | `let $g := \($x) $x + "!"; return $g("a")` rerun | 165                |
+| join-and-write I/O run, `let` rebound each run   | 1 (one text cell)  |
 | rows the caller keeps (a `vquery` REPL, `join`)  | 267                |
 
 - **A plain query keeps its compiled program**, so each run adds the figures above. `vquery` is
@@ -263,3 +267,4 @@ nothing frees cannot be read as another value.
 | 0.3     | 2026-11-26 | Gate round 2 fixes (section 8b); P11 approved as slice d2          |
 | 0.4     | 2026-11-26 | Gate round 3 fixes (section 8c): closure-sound free; plain reclaim |
 | 0.5     | 2026-11-26 | Round 4: reclamation and the let free removed, moved to M7-VQL-d3  |
+| 0.6     | 2026-11-26 | Gate passed (round 4); polish: tighter leak ceilings, wording      |

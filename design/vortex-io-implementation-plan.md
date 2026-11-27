@@ -1444,11 +1444,18 @@ M7-VQL-c implementation notes (built in stages C1-C5; **gate passed** in round 3
   fixed in the gate polish commit. See
   [`m7-vql-c/README.md`](projects/vortex-io-implementation-review/m7-vql-c/README.md).
 
-M7-VQL-d implementation notes (values; **gate pending**): `match` over an outcome (exhaustive, `_`
+M7-VQL-d implementation notes (values; **gate passed**): `match` over an outcome (exhaustive, `_`
 allowed, `VQL_IO_MATCH`), `await($h) as $r` as an owned record that keeps `$h` awaitable, a script
 `let` as a write source, offset or length, `join` (`VQL_IO_BOUND`), `io_cause`, and
 `OwnedOutcome::summary` as the capture host's fallback for a failed step. No core file changed. The
 design, deviations and notes for slice e are in [`vortex-io-m7-vql-d.md`](vortex-io-m7-vql-d.md).
+Gate status: **M7-VQL-d gate passed** in round 4 (final target `2e9e4178`; VQL 0/0/0, Vortex 0/0/2,
+zigzag 0/0/1, all CONVERGED). Rounds 1 to 3 were not converged; in round 4 the owner moved engine
+memory reclamation (plain programs, replaced `let` cells, closure regions, REPL rows) out of slice d
+into `M7-VQL-d3` with core proposal P12, so slice d ships no reclaim of plain programs. The r4
+MINORs were fixed in the gate polish commit (`VqlIoKnownLeakTest` ceilings at about 1.25 times the
+measured figures, the `keepIfNamed` deferral in roadmap 6.1c, design note 8c wording). See
+[`m7-vql-d/README.md`](projects/vortex-io-implementation-review/m7-vql-d/README.md).
 
 M7-VQL remaining slices: the deferrals of M7-VQL, -b and -c are collected, classified (in scope,
 owned by another milestone, refused) and ordered into slices M7-VQL-d to M7-VQL-m, with the exit

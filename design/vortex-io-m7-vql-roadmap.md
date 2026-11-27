@@ -256,6 +256,10 @@ No other slice reserves a number. P8 and P9 stay refused (`m7-vql-c.md` §14).
 
 ### 6.1 M7-VQL-d: values (name, match, join)
 
+**Status: built, gate passed** in round 4 (final target `2e9e4178`; reclamation deferred to
+M7-VQL-d3 by owner decision). See
+[`m7-vql-d/README.md`](projects/vortex-io-implementation-review/m7-vql-d/README.md).
+
 **Scope.** Everything that lets a script use an outcome and its text without a new world effect: a1
 outcome matching, a2 owned `await($h) as $r`, a3 `let` as a source, a4 `join`, a5 the payload-less
 detached outcome constructor that a2 needs.
@@ -342,7 +346,9 @@ are measured in `vortex-io-m7-vql-d.md` §8c: 266, 115 and 46 live cells per run
    bindings, the kept registry cells and everything the VM reports as live; a link on any dimension
    the VM does not claim to a cell outside the region is the user's structure and a root. Every `%`
    structure test on `d.1`, `d.role`, `d.clone`, `d.name`, `d.vars`, `d.values`, `d.stores`,
-   `d.stack` and a user rank survives unreturned.
+   `d.stack` and a user rank survives unreturned. The `keepIfNamed` lambda compares registry counts,
+   not cells (M7-VQL-d gate r3 vortex m2, r4 vortex m1); with a plain program reclaimed it can be
+   fooled by an interleaved drop and add, so d3 compares cells.
 1. **Sound replaced-`let` freeing.** The roots include parked activations' compile-time bindings (a
    parked script reads a session name while another rebinds it), closure environments (by name and
    by parameter, through other closures), rows, mounts and the registry. `:forget` and
@@ -853,3 +859,4 @@ adapters (§2.2); the frontend is complete when it can ask for them and take a t
 | 0.2     | 2026-11-26 | Owner decisions recorded: Q2 ruled yes (a script may close any capability it can name; `VQL_IO_CLOSE_NOT_OWNED` dropped; host-bound names go stale), the other nine as recommended |
 | 0.3     | 2026-11-26 | Owner approved P11 (mixed-namespace content run) as slice M7-VQL-d2, between d and e                                                                                               |
 | 0.4     | 2026-11-26 | Owner moved engine reclamation out of slice d: new slice M7-VQL-d3 with proposal P12 (the VM names its own state), between d2 and e; P12 itself awaits approval of its diff        |
+| 0.5     | 2026-11-26 | M7-VQL-d gate passed in round 4 (target `2e9e4178`); d3 scope gains the `keepIfNamed` cell comparison                                                                              |
