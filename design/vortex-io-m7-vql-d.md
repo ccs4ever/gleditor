@@ -99,10 +99,9 @@ the change reverted): exhaustiveness check off (2 tests fail), `io_own_copy` ret
 - **`$why` of `partial` is the cause**, not an error code (a Partial has none).
 - **`cancelled` and `timed_out` bind the uncertain flag**; `overflow`, `message_too_large`, `stale`,
   `conflict` and `unknown` bind nothing, and read the outcome through `$r`.
-- **A script `let` is a session variable afterwards**, and the cells its program minted are freed
-  when the name is rebound or erased (round 1, section 8); the join leak pin no longer frees by
-  hand. The claim that this bounds the arena holds for a plain query too since round 3 (section 8c):
-  before it, only a script with an I/O action reclaimed its program.
+- **A script `let` is a session variable afterwards.** Rounds 1 to 3 freed the cells a replaced
+  `let` minted; the free failed soundness three times and was removed in round 4 (section 8c), so
+  the slice frees no `let` cell and the arena claim for `let` is M7-VQL-d3's (section 8).
 - **The capture-host fallback is unit-tested at the constructor** (fits where the copy is refused),
   not end to end: forcing a failed capture step under an allocation limit needs a harness the
   capture tests do not have. Slice f touches that code and should add it.
@@ -140,10 +139,8 @@ verdicts are in
 - **A refusal's Rejected outcome graph is freed when its submission retires** (`retire()`), for a
   plain detached refusal as well as `await ... as`; pinned at 10^4 runs.
 - **`join` keeps what its rows quote** (section 2); the cost is one relation call a row.
-- **A rebound or erased `let` frees the cells its program minted** (`publishCompilerBindings` takes
-  the minted cells, found by incarnation against the pre-compile mark; I/O cells are skipped; a cell
-  the new bindings, other names, the rows the caller holds, the dynamic-view registry or a mount
-  still name is kept; deletion is `ArenaManifold::deleteCell`, the P7 path).
+- **A rebound or erased `let` freed the cells its program minted.** Removed in round 4 (section 8c):
+  it was unsound against closures, parameter capture and a parked script.
 - Minors fixed: `summary` keeps `cause`; an unbound name in `match` says it is unbound; a bare
   binding tag is told to write `complete(_)`; the per-row bound; `--io-write-bytes`.
 
@@ -158,6 +155,10 @@ verdicts are in
   a scratch separator): proposal P11, not made here. **The owner approved P11 on 2026-11-26** as its
   own small core slice, `M7-VQL-d2 (P11)`, after this gate and reviewed by the zigzag and Vortex
   critics (roadmap §5, §6.1b). Until it lands, several foreign rows are interned text.
+- **Engine memory reclamation is not part of slice d.** A plain query keeps its program, a replaced
+  `let` leaves its cell, a redefined closure keeps its program and a REPL keeps every printed row;
+  the measured prices are in section 8c, and the work is `M7-VQL-d3` with core proposal P12 (roadmap
+  §6.1c), by owner decision.
 - **`join` now needs a host that registers `join_step` and `join_end`** (`QueryExecutor` does); a
   bytecode file from `vqueryc` runs only under such a host, as `find` already requires `prose_hits`.
 - **Double retention charge** (an owned record charges the chunk its service outcome also holds) is
@@ -170,47 +171,88 @@ Reports: [`r2-vql.md`](projects/vortex-io-implementation-review/m7-vql-d/r2-vql.
 [`r2-vortex.md`](projects/vortex-io-implementation-review/m7-vql-d/r2-vortex.md); verdicts in
 [`r2-disposition.md`](projects/vortex-io-implementation-review/m7-vql-d/r2-disposition.md).
 
-- **A replaced `let` frees only a cell nothing else reaches.** "Minted by this program" was not
-  "owned by this name". A cell is freed only when it has no link on any dimension (`%` and path
-  programs build structure the user keeps) and no closure of any program captured its name (the
-  compiler reports the captured names; the engine keeps those cells, by incarnation, and never frees
-  them). Price: a cell a closure captured is not reclaimed when its name is rebound.
+- **A replaced `let` frees only a cell nothing else reaches** (name-based closure capture; replaced
+  by round 3 and removed in round 4, section 8c).
 - **`join_step` and `join_end` outlive the run that registered them.** They were registered on the
   shared VM with an undo that nulled them, so one script's end unregistered them under a parked
   script. There is no undo now; each begin registers again, which is safe because a walk is reset at
   its first step and no park falls inside one.
-- **An await of a handle another parked script admitted** is searched in that script's list too.
+- **An await of a handle another parked script admitted** was searched in that script's list too;
+  removed in round 4 (section 8c, dead and unsafe).
 
 ## 8c. Gate round 3 fixes
 
 Reports: [`r3-vql.md`](projects/vortex-io-implementation-review/m7-vql-d/r3-vql.md),
-[`r2-zigzag.md`](projects/vortex-io-implementation-review/m7-vql-d/r2-zigzag.md); verdicts in
-[`r3-disposition.md`](projects/vortex-io-implementation-review/m7-vql-d/r3-disposition.md).
+[`r2-zigzag.md`](projects/vortex-io-implementation-review/m7-vql-d/r2-zigzag.md),
+[`r3-zigzag.md`](projects/vortex-io-implementation-review/m7-vql-d/r3-zigzag.md),
+[`r3-vortex.md`](projects/vortex-io-implementation-review/m7-vql-d/r3-vortex.md); verdicts in
+[`r3-disposition.md`](projects/vortex-io-implementation-review/m7-vql-d/r3-disposition.md) and
+[`r4-disposition.md`](projects/vortex-io-implementation-review/m7-vql-d/r4-disposition.md).
 
-- **A freed `let` cell is unreachable from every root, by construction.** Rounds 1 and 2 guessed
-  what a closure holds from the names its program mentioned (`capturedNames`, removed). A closure
-  value records the cells of its environment (`VortexVM::closureValue`), so the executor reports, at
-  each publish, every closure among the bindings and rows with the cells it captured (and the
-  closures those capture), and the engine keeps that table pruned to what a binding or row reaches.
-  A replaced cell is freed only when no binding, row, mount or registry entry names it, no reachable
-  closure captured it, and it has no link. A closure made through a lambda parameter
-  (`\($s) \($y) $s + $y`) is covered, which a name could not be.
-- **A plain query's program is reclaimed like an I/O script's**: the rows and the published bindings
-  are the roots, and everything else the run allocated is freed when it ends. The program is kept
-  when something names it that is not a cell root: a functor or mount binding, a closure value among
-  the results, a dynamic-view registry entry; and a region cell linked on a dimension that is not
-  the VM's own to a cell outside the region (what a `%` builds) is a root too, so structure a query
-  attaches to the space survives. Measured at 10^4 runs over four rows (live cells added per run):
-  `return join(...)` 266, `let $t := join(...)` 115, `return $rows/count()` 46, all now 0 (pinned by
-  `VqlIoPlainReclaimTest`; before the fix the three tests fail with those figures).
-- `clearVariables` frees what the bindings minted, as `:forget` does, and drops the closure table.
-- **Prices.** A cell a live closure captured is not reclaimed until the closure is dropped (the
-  table is exact, so it is freed at the next publish or `:forget` after that). A program whose
-  results or bindings include a closure value keeps its whole region. A session that holds a closure
-  walks its bindings on each publish that frees a cell, and each publish that makes a lambda or
-  follows a closure; a session without closures pays nothing (the table is empty). Cells of a parked
-  script's program that a second script rebinds are not tracked: the scripts' names are not visible
-  to each other until one ends (section 6), so the shape is unreachable through the script surface.
+**Owner decision (2026-11-26, binding): engine memory reclamation for plain queries moves out of
+slice d** into `M7-VQL-d3`, done properly with core proposal P12 (roadmap §5, §6.1c). Slice d must
+not ship a reclaim that can destroy user structure or free a cell anything still reads.
+
+What happened. Round 3 made the replaced-`let` free closure-exact (`closureEnvs_`) and reclaimed
+plain programs with a hand list of the VM's dimensions (`systemDimension`). The round 3 critics
+showed both unsound: the list destroys a user's unreturned `%` structure on `d.role`, `d.clone`,
+`d.name` and other ranks, and a rebound `let` frees a cell a parked script still reads (the parked
+script's compile-time bindings are a root nothing reports). The free had failed three times
+(closures by name, closures through a parameter, a parked script), and each fix was a guess at a
+root set only the VM can state.
+
+What round 4 did, and what stayed:
+
+- **Removed:** the plain-query reclaim and `keepAttachedCells`/`systemDimension`;
+  `QueryExecutionOptions::keepProgram` (it existed only to opt the mesh evaluator out of that
+  reclaim, which is gone; the mesh evaluator is as before slice d); the replaced-`let` free
+  (`publishCompilerBindings` takes bindings and functors only, as before slice d); `ownedLets_`,
+  `closureEnvs_`, `heldByClosures`, `freeable`, `releaseOwned`; `clearVariables` is as before slice
+  d; the dead `live_` search in `ownOutcome` (a parked script's names are not visible to another, so
+  it could not be reached, and if it were it would erase the entry from the parked script's own list
+  and retire its request early).
+- **Kept:** a plain program keeps its whole compiled program, as before slice d. An I/O script
+  reclaims its program around the rows and the published streams, as before slice d, and now also
+  keeps it when a closure value is among the rows or bindings (`makesClosures`, a descriptor read
+  through `VortexVM::closureValue`): a closure's descriptor and frames are raw references into the
+  program. Every other gate fix of rounds 1 to 3 stands (match, `Conflict`, fall-through, numeric
+  write sources, owned cross-script await, refusal graph freed in `retire()`, join as host relations
+  with identity preservation and registration that outlives a run, summary cause).
+- **Tests.** The tests that pin correctness stay and pass with no freeing: a closure keeps the text
+  it captured (by name, by parameter, through another closure), `%` structure survives a rebind, an
+  alias keeps its text, a rows-and-bound-text query survives, and a parked script keeps the session
+  name it read while another rebinds it
+  (`AParkedScriptKeepsTheSessionNameItReadWhenAnotherRebindsIt`, new). The bounded-live-cell pins
+  that only held with the reclaim are `DISABLED_` with a comment naming M7-VQL-d3 (`ReturningAJoin`,
+  `BindingAJoin`, `ReturningACount`, `ClearingTheVariables`, the join-and-write arena pin) and are
+  that slice's acceptance tests; the service and the file stay pinned for the join-and-write run.
+  Three `VqlIoKnownLeakTest` tests measure the unreclaimed price and bound it by a ceiling, so the
+  figure below is reproducible.
+
+### What slice d leaves unbounded
+
+Everything here is as before slice d (the slice did not make it worse), measured on the final build,
+live cells added per run after a warm-up, over four rows:
+
+| shape                                            | live cells per run |
+| ------------------------------------------------ | ------------------ |
+| `return join($rows, ",")` (plain)                | 266                |
+| `let $t := join($rows, ","); return $t` (plain)  | 115                |
+| `return $rows/count()` (plain)                   | 46                 |
+| `let $g := \($x) $x + "!"; return $g("a")` rerun | 165                |
+| rows the caller keeps (a `vquery` REPL, `join`)  | 267                |
+
+- **A plain query keeps its compiled program**, so each run adds the figures above. `vquery` is
+  affected for the length of a session; the arena has no ceiling a user works around, and the growth
+  is linear in runs.
+- **A rebound or replaced `let` leaves the old cell**, one text cell plus the program that made it.
+- **Redefining a closure keeps the whole program** of each definition (a closure's descriptor and
+  frames are raw references into it), about 165 cells a run (r3 vortex M2, pre-existing).
+- **The REPL never frees the rows it prints** (`lastResults` is overwritten, the old row cells stay
+  live; r3 zigzag M1, pre-existing).
+
+All four are owned by M7-VQL-d3 with the acceptance pins above. None is a correctness defect: a cell
+nothing frees cannot be read as another value.
 
 ## 9. Change history
 
@@ -220,3 +262,4 @@ Reports: [`r3-vql.md`](projects/vortex-io-implementation-review/m7-vql-d/r3-vql.
 | 0.2     | 2026-11-26 | Gate round 1 fixes (sections 7 and 8); join rewritten              |
 | 0.3     | 2026-11-26 | Gate round 2 fixes (section 8b); P11 approved as slice d2          |
 | 0.4     | 2026-11-26 | Gate round 3 fixes (section 8c): closure-sound free; plain reclaim |
+| 0.5     | 2026-11-26 | Round 4: reclamation and the let free removed, moved to M7-VQL-d3  |

@@ -22,17 +22,18 @@ nothing proceeds without its own approval.
 The owner answered the ten questions of §7. Eight take the recommended answer; Q2 does not. The
 slices below were adjusted where a ruling changes them (only slice e).
 
-| #      | ruling                                                                                                                                                                  | effect on the text                                                                                      |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Q1     | `match` is exhaustive, `_` allowed, a missing tag is a compile diagnostic (as recommended)                                                                              | slice d as drafted                                                                                      |
-| Q2     | **Yes**: a script may close any capability it can name, host-bound ones (`--io-file`, `:open`) included. `VQL_IO_CLOSE_NOT_OWNED` is dropped; `:close NAME` still added | slice e rewritten; the host-bound name goes stale with the typed stale-binding diagnostic after a close |
-| Q3     | A detached capture alive at script end: wait, bounded by the script timeout; on timeout abandon and pin; no background completion (as recommended)                      | slice f as drafted                                                                                      |
-| Q4     | Destructive verbs granted per verb on the root, `--io-write-root DIR[:verbs]`, default today's set (as recommended)                                                     | slice h as drafted                                                                                      |
-| Q5     | `mkdir` and `list` in, `rmdir` out; an oversize line is `Overflow` with the cursor unmoved and the bytes retained; framing language-neutral, VQL first (as recommended) | slices h, j as drafted                                                                                  |
-| Q6     | No process endpoints in M7-VQL (as recommended)                                                                                                                         | slice k as drafted                                                                                      |
-| Q7/Q8  | No loop iteration ceiling; a generation guard names an explicit prior read outcome (as recommended)                                                                     | slices l, g as drafted                                                                                  |
-| Q9/Q10 | Spell `stable` now with a typed refusal; the `ux-validation` journeys are required at exit (as recommended)                                                             | slices k, m as drafted                                                                                  |
-| P11    | **Approved** (2026-11-26, after the M7-VQL-d gate round 1): a mixed-namespace content run, or a quote with a scratch separator, in `ArenaManifold`                      | new slice `M7-VQL-d2 (P11)` before e; until it lands, multi-row foreign joins are interned text         |
+| #      | ruling                                                                                                                                                                                                                             | effect on the text                                                                                      |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Q1     | `match` is exhaustive, `_` allowed, a missing tag is a compile diagnostic (as recommended)                                                                                                                                         | slice d as drafted                                                                                      |
+| Q2     | **Yes**: a script may close any capability it can name, host-bound ones (`--io-file`, `:open`) included. `VQL_IO_CLOSE_NOT_OWNED` is dropped; `:close NAME` still added                                                            | slice e rewritten; the host-bound name goes stale with the typed stale-binding diagnostic after a close |
+| Q3     | A detached capture alive at script end: wait, bounded by the script timeout; on timeout abandon and pin; no background completion (as recommended)                                                                                 | slice f as drafted                                                                                      |
+| Q4     | Destructive verbs granted per verb on the root, `--io-write-root DIR[:verbs]`, default today's set (as recommended)                                                                                                                | slice h as drafted                                                                                      |
+| Q5     | `mkdir` and `list` in, `rmdir` out; an oversize line is `Overflow` with the cursor unmoved and the bytes retained; framing language-neutral, VQL first (as recommended)                                                            | slices h, j as drafted                                                                                  |
+| Q6     | No process endpoints in M7-VQL (as recommended)                                                                                                                                                                                    | slice k as drafted                                                                                      |
+| Q7/Q8  | No loop iteration ceiling; a generation guard names an explicit prior read outcome (as recommended)                                                                                                                                | slices l, g as drafted                                                                                  |
+| Q9/Q10 | Spell `stable` now with a typed refusal; the `ux-validation` journeys are required at exit (as recommended)                                                                                                                        | slices k, m as drafted                                                                                  |
+| P12    | **Slice approved** (2026-11-26, after M7-VQL-d gate round 3): reclamation of the engine's memory is its own slice, `M7-VQL-d3`, after d2 and before e. **P12 itself still needs its own approval** when its exact diff is proposed | new slice `M7-VQL-d3 (P12)`; slice d ships no reclaim of plain programs or replaced `let` cells         |
+| P11    | **Approved** (2026-11-26, after the M7-VQL-d gate round 1): a mixed-namespace content run, or a quote with a scratch separator, in `ArenaManifold`                                                                                 | new slice `M7-VQL-d2 (P11)` before e; until it lands, multi-row foreign joins are interned text         |
 
 P11 is a small core slice of its own, reviewed by the zigzag and Vortex critics, built after the
 M7-VQL-d gate closes. It exists so that a multi-row `join` of rows that are another store's cells
@@ -133,7 +134,7 @@ the reason. "Where" cites the first place the item was deferred.
 ## 3. Ordering: dependency and risk
 
 ```text
-d values  ->  d2 (P11)  ->  e lifecycle  ->  f capture completion
+d values  ->  d2 (P11)  ->  d3 (P12)  ->  e lifecycle  ->  f capture completion
                     \                   \
                      g containment+guards -> h namespace ops -> i copy
                                                     \
@@ -230,6 +231,25 @@ mix namespaces, or a quote with a scratch separator, as its own small slice afte
 gated by the zigzag and Vortex critics; `join` over several foreign rows then returns a quote
 instead of interned text.
 
+**P12 (slice approved 2026-11-26; the proposal itself awaits approval of its exact diff): the VM
+names its own internal state.** `vortex_vm.{hpp,cpp}` and `vortex_core.{hpp,cpp}`. Justification:
+reclaiming what a program leaves in the arena needs a root set (the cells something still reads),
+and three attempts to derive it outside the VM were unsound: names a closure mentions (r2), the
+cells a closure captured (r3, still missing a parked script's compile-time bindings), and a
+hand-written list of the VM's dimensions (r3, destroyed user structure on `d.role`, `d.clone`,
+`d.name`). Only the VM knows which cells and dimensions are its own: the cursor chain, the
+contract/choice and assembly maps, the closure descriptors and frames, parked activations' bound
+slots, and the dimensions it hangs them on. P12 adds a read-only enumeration: the dimensions the VM
+uses for its own state (replacing every list a caller keeps) and the cells its live state holds
+(cursors, parked activations' bindings, closure environments and regions), so a caller can state
+"everything else in my region is garbage" soundly. Minimal alternative: no VM change, the
+conservative root set the executor can build alone (everything linked to the outside on any
+dimension is a root, every parked activation's bindings are roots, a closure keeps its whole
+region); the price is that a `%`-free plain program is reclaimed but any program that touches a
+shared rank, a closure or a parked script keeps its region, which leaves the REPL growth of
+redefined closures. Refused: another hand-written list (it is the defect), and freeing on a count or
+a trail test (the trail grows for every program).
+
 No other slice reserves a number. P8 and P9 stay refused (`m7-vql-c.md` §14).
 
 ## 6. The slices
@@ -306,6 +326,39 @@ primitives), and that is the first place to look at the gate.
 
 **Core change?** Yes, the one named in §5, approved by the owner. **Gate.** zigzag and Vortex
 critics; round budget two.
+
+### 6.1c M7-VQL-d3 (P12): reclaiming the engine's memory
+
+**Why a slice.** M7-VQL-d gate round 3 showed that three derivations of "what is unreachable"
+outside the VM were unsound, and the owner moved reclamation out of slice d (2026-11-26). Slice d
+ships what it ships: a plain query keeps its program, a replaced `let` leaves its cell. The prices
+are measured in `vortex-io-m7-vql-d.md` §8c: 266, 115 and 46 live cells per run for plain `join`,
+`let`-`join` and `count` queries over four rows, about 165 cells per closure redefinition, and about
+267 per `join` row the REPL keeps.
+
+**Scope.** All of these, each with a bounded-live-cell pin at 10^4 runs and a soundness test:
+
+1. **Plain-query program reclaim** with a VM-provided root set (P12): the rows, the published
+   bindings, the kept registry cells and everything the VM reports as live; a link on any dimension
+   the VM does not claim to a cell outside the region is the user's structure and a root. Every `%`
+   structure test on `d.1`, `d.role`, `d.clone`, `d.name`, `d.vars`, `d.values`, `d.stores`,
+   `d.stack` and a user rank survives unreturned.
+1. **Sound replaced-`let` freeing.** The roots include parked activations' compile-time bindings (a
+   parked script reads a session name while another rebinds it), closure environments (by name and
+   by parameter, through other closures), rows, mounts and the registry. `:forget` and
+   `clearVariables` free by the same rule.
+1. **Closure-region freeing on redefinition.** A closure's program region is freed around what a
+   binding, row or other closure still reaches when the closure leaves the reachable table.
+1. **REPL prior-row freeing.** `vquery` retires the previous `lastResults` rows by the engine's
+   freeable rule (not bound, not mounted, not linked), so a long session is bounded.
+1. The `DISABLED_` tests slice d left (`ReturningAJoin`, `BindingAJoin`, `ReturningACount`,
+   `ClearingTheVariables`, the join-and-write arena pin) are enabled, and the `VqlIoKnownLeakTest`
+   ceilings become equality with zero.
+
+**Core change?** Yes: P12 (§5), which needs its own approval when its exact diff is proposed, with
+the minimal alternative priced there. **Gate.** zigzag and Vortex critics, plus VQL for the `vquery`
+change; round budget two. **Order.** After d2, before e: e adds a close that frees more cells, and
+its gate would otherwise fight the leaks this slice removes.
 
 ### 6.2 M7-VQL-e: lifecycle (close, deadlines on open, the real timeout test)
 
@@ -799,3 +852,4 @@ adapters (§2.2); the frontend is complete when it can ask for them and take a t
 | 0.1     | 2026-11-26 | First draft: inventory of 23 in-scope items and 11 out-of-scope owners, slices d to m, ten owner questions, one conditional proposal                                               |
 | 0.2     | 2026-11-26 | Owner decisions recorded: Q2 ruled yes (a script may close any capability it can name; `VQL_IO_CLOSE_NOT_OWNED` dropped; host-bound names go stale), the other nine as recommended |
 | 0.3     | 2026-11-26 | Owner approved P11 (mixed-namespace content run) as slice M7-VQL-d2, between d and e                                                                                               |
+| 0.4     | 2026-11-26 | Owner moved engine reclamation out of slice d: new slice M7-VQL-d3 with proposal P12 (the VM names its own state), between d2 and e; P12 itself awaits approval of its diff        |
