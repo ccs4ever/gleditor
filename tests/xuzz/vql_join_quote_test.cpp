@@ -170,7 +170,10 @@ TEST_F(JoinHarness, ARowOfALoadedStoreBesideALocalSpanAndANumber) {
   EXPECT_EQ(arena.textOf(joined), "alpha-alpha-42");
   const auto run = arena.quotedRun(joined);
   ASSERT_TRUE(run.has_value());
-  EXPECT_EQ(run->spans.size(), 5U);
+  ASSERT_EQ(run->spans.size(), 5U);
+  const auto original = source.manifold.contentOf(source.cells[0]).front();
+  EXPECT_EQ(run->spans[0], original) << "the foreign row is quoted, not typed";
+  EXPECT_EQ(run->spans[2], original);
   EXPECT_EQ(arena.scratchTextOf(run->spans.back()), "42");
 }
 
