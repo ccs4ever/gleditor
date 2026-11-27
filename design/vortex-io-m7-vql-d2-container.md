@@ -1,15 +1,19 @@
 # M7-VQL-d2 alternative: `join` as a dimensional pack
 
-Status: design, no code. Written at the owner's request before the M7-VQL-d2 (P11) gate closes
-([`vortex-io-m7-vql-d2.md`](vortex-io-m7-vql-d2.md)). It evaluates replacing the single-cell `join`
-with the container the repo already specifies for compositing cells that are read out in sequence:
-the **dimensional pack** of [`view-system.md`](view-system.md) (§3.6 V-R27 to V-R30, §9.3.3, §9.3.9,
-decision V2, open question VU4). The first revision of this note specified clone views on
-`d.contains`/`d.seq`; the owner pointed to the pack spec, and this revision follows it (section 4
-compares the two). **Recommendation: (C) keep P11 for the gate, and build the pack as a rowset
-feature on its own merits.** The pack is sound as a representation of `join`; what decides against
-it is that it swaps a built, gated 50-line change for an unbuilt one in a different core file and
-still needs P11's algorithm at save time (section 10). No P13 is reserved under (C).
+Status: **decided: C; not adopted for `join`; the pack is deferred as a rowset feature with P13**
+(owner, 2026-11-26: keep P11 for `join` and close the d2 gate on it; a text is one cell, a
+collection is a pack; `join` is a snapshot, not live; the pack is built later as its own
+rowset/collection feature, with P13, `VortexCore::render` reading a pack out, as that feature's core
+proposal and not part of M7-VQL). Design, no code. Written at the owner's request before the
+M7-VQL-d2 (P11) gate closes ([`vortex-io-m7-vql-d2.md`](vortex-io-m7-vql-d2.md)). It evaluates
+replacing the single-cell `join` with the container the repo already specifies for compositing cells
+that are read out in sequence: the **dimensional pack** of [`view-system.md`](view-system.md) (§3.6
+V-R27 to V-R30, §9.3.3, §9.3.9, decision V2, open question VU4). The first revision of this note
+specified clone views on `d.contains`/`d.seq`; the owner pointed to the pack spec, and this revision
+follows it (section 4 compares the two). **Recommendation: (C) keep P11 for the gate, and build the
+pack as a rowset feature on its own merits.** The pack is sound as a representation of `join`; what
+decides against it is that it swaps a built, gated 50-line change for an unbuilt one in a different
+core file and still needs P11's algorithm at save time (section 10). No P13 is reserved under (C).
 
 ## 1. What the pack spec says, and what the join would use
 
@@ -330,7 +334,8 @@ Refused:
    proxy), so the same row twice would put one cell twice on a rank.
 1. **Flatten at write only, keep the join as it is.** That is (C).
 
-Open questions for the owner:
+Open questions for the owner (answered 2026-11-26: question 1 yes, so (C) stands; question 2 no,
+`join` is a snapshot; questions 3 and 4 belong to the later rowset feature, which owns P13):
 
 1. Is "a text is one cell, a collection is a pack" an acceptable rule for keeping `join` as is?
 1. Should `join` be live (follow a changed row) for any consumer? If yes, that argues for (A) on its
@@ -342,7 +347,8 @@ Open questions for the owner:
 
 ## 12. Change history
 
-| version | date       | change                                                                              |
-| ------- | ---------- | ----------------------------------------------------------------------------------- |
-| 0.1     | 2026-11-26 | Container of `d.clone` views on `d.contains`/`d.seq`; recommends (C)                |
-| 0.2     | 2026-11-26 | Follows the pack spec: `d.pack`/`d.packing`, occurrences, VU4; (C) kept, (A) priced |
+| version | date       | change                                                                                 |
+| ------- | ---------- | -------------------------------------------------------------------------------------- |
+| 0.1     | 2026-11-26 | Container of `d.clone` views on `d.contains`/`d.seq`; recommends (C)                   |
+| 0.2     | 2026-11-26 | Follows the pack spec: `d.pack`/`d.packing`, occurrences, VU4; (C) kept, (A) priced    |
+| 0.3     | 2026-11-26 | Owner decided (C); open questions 1 and 2 answered, 3 deferred with the rowset feature |

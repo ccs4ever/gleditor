@@ -1,10 +1,11 @@
 # M7-VQL-d2 (P11): a quote that admits scratch spans, and the multi-row join over it
 
-Status: design, written before the code. Slice d2 of the [roadmap](vortex-io-m7-vql-roadmap.md)
-§6.1b; core proposal P11, approved by the owner on 2026-11-26 as its own small slice. It changes one
-core file, `apps/common/xanadu/zigzag/arena_manifold.{hpp,cpp}`, and nothing else in the core
-(`store.hpp`, `ops.hpp`, `compact_op.hpp`, `store_tables.hpp`, `segmented_ops_spool`, `manifold`,
-`vortex_core` and `vortex_vm` are untouched, and so is every on-disk format and fixture).
+Status: design, written before the code; built, gate passed 2026-11-26 (section 10). Slice d2 of the
+[roadmap](vortex-io-m7-vql-roadmap.md) §6.1b; core proposal P11, approved by the owner on 2026-11-26
+as its own small slice. It changes one core file,
+`apps/common/xanadu/zigzag/arena_manifold.{hpp,cpp}`, and nothing else in the core (`store.hpp`,
+`ops.hpp`, `compact_op.hpp`, `store_tables.hpp`, `segmented_ops_spool`, `manifold`, `vortex_core`
+and `vortex_vm` are untouched, and so is every on-disk format and fixture).
 
 ## 1. The problem
 
@@ -209,8 +210,16 @@ is a quote cell and `promote()` writes it as in section 4.
 
 ## 10. As built
 
-Status: built, **gate pending** (zigzag and Vortex critics, round budget two). One core file
-changed, `arena_manifold.{hpp,cpp}`; no other core file, no on-disk format, no fixture.
+Owner decision (2026-11-26, binding): P11 stays for `join` and the d2 gate closes on it. The rule is
+"a text is one cell, a collection is a pack". `join` is a snapshot, not live. The dimensional pack
+(`d.pack`/`d.packing` of row handles read out in order, `view-system.md` §9.3) is built later as a
+separate rowset/collection feature with its own core proposal P13 (`VortexCore::render` reading a
+pack out); it is not part of M7-VQL. See
+[`vortex-io-m7-vql-d2-container.md`](vortex-io-m7-vql-d2-container.md).
+
+Status: built, **gate passed** in round 2 (zigzag and Vortex critics; see
+[`m7-vql-d2/README.md`](projects/vortex-io-implementation-review/m7-vql-d2/README.md)). One core
+file changed, `arena_manifold.{hpp,cpp}`; no other core file, no on-disk format, no fixture.
 
 - **`arena_manifold`**: `quotedRun(ref)` (section 3); `quotedContent()` is `quotedRun()` minus
   scratch-bearing runs, answers unchanged; `makeQuote()` throws `std::out_of_range` for a scratch
@@ -302,3 +311,4 @@ Findings in
 | 0.1     | 2026-11-26 | Design for M7-VQL-d2 (P11), gate |
 | 0.2     | 2026-11-26 | As built; gate pending           |
 | 0.3     | 2026-11-26 | Gate round 1 fixes               |
+| 0.4     | 2026-11-26 | Gate passed; owner decision      |
