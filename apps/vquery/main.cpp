@@ -136,42 +136,12 @@ resultRows(const xanadu::MultiStoreCoordinator &coordinator,
         }
       }
     }
-    // The bytes where they already are: a cell of a loaded store, or a line a
-    // search quoted out of a document. A constructed value has none.
+    // The bytes where they already are: a cell of a loaded store, a line a
+    // search quoted out of a document, or a capture. A constructed value has
+    // none; a join's separators are typed and its rows stay quoted.
     std::optional<xanadu::QuotedSpans> quote;
     if (const auto master = coordinator.derefCloneMaster(cell)) {
-      // The whole run: a join's separator is typed, the rows it joins stay
-      // quoted (M7-VQL-d2).
-      if (auto quoted = coordinator.arena().quotedRun(*master)) {
-        xanadu::QuotedSpans run{.store = quoted->store, .spans = {}};
-        for (auto span : quoted->spans) {
-          if (xanadu::scratchScroll == span.scroll) {
-            const auto bytes = coordinator.arena().scratchTextOf(span);
-            span.start       = run.scratch.size();
-            run.scratch += bytes;
-          }
-          run.spans.push_back(span);
-        }
-        quote = std::move(run);
-      }
-    }
-    // A captured cell's content is already a span of the author's permascroll
-    // but it names no store, so the arena cannot say where it lives. The
-    // capture store is a Store over that permascroll, and quoting the span
-    // against it transcludes the bytes the author captured instead of typing
-    // them in again. Spans of the scratch scroll are bytes the query built
-    // and stay typed.
-    if (!quote && captureStore != nullptr) {
-      if (const auto master = coordinator.derefCloneMaster(cell)) {
-        const auto content = coordinator.arena().contentOf(*master);
-        if (!content.empty() &&
-            std::ranges::none_of(content, [](const xanadu::PrimediaSpan &span) {
-              return xanadu::scratchScroll == span.scroll;
-            })) {
-          quote = xanadu::QuotedSpans{
-              .store = captureStore, .spans = {content.begin(), content.end()}};
-        }
-      }
+      quote = xanadu::quotedSpansOf(coordinator.arena(), *master, captureStore);
     }
     rows.push_back({.text   = std::move(rendered),
                     .source = std::move(source),

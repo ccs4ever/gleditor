@@ -11,6 +11,36 @@
 
 namespace xanadu {
 
+std::optional<QuotedSpans> quotedSpansOf(const zigzag::ArenaManifold &arena,
+                                         const zigzag::CellRef master,
+                                         const Store *const captureStore) {
+  QuotedSpans run;
+  if (const auto quoted = arena.quotedRun(master)) {
+    run.store = quoted->store;
+    run.spans = quoted->spans;
+  } else if (captureStore != nullptr) {
+    // A captured cell's content is a span of the author's permascroll but it
+    // names no store; the capture store is a Store over that permascroll.
+    const auto content = arena.contentOf(master);
+    const bool names =
+        std::ranges::any_of(content, [](const PrimediaSpan &span) {
+          return scratchScroll != span.scroll;
+        });
+    if (!names) return std::nullopt;
+    run.store = captureStore;
+    run.spans.assign(content.begin(), content.end());
+  } else {
+    return std::nullopt;
+  }
+  for (auto &span : run.spans) {
+    if (scratchScroll != span.scroll) continue;
+    const auto bytes = arena.scratchTextOf(span);
+    span.start       = run.scratch.size();
+    run.scratch += bytes;
+  }
+  return run;
+}
+
 MicroversionId writeResultSlice(Store &store,
                                 const std::span<const ResultRow> rows) {
   if (store.homeCell().has_value()) {

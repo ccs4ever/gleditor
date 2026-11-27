@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu {
 
@@ -23,6 +24,16 @@ struct QuotedSpans {
   std::vector<PrimediaSpan> spans;
   std::string scratch;
 };
+
+/// Where the bytes of arena cell @p master (a clone master) already live, so
+/// a row written from it transcludes them: the run `quotedRun` names, or, for
+/// a store-less cell whose spans are all of the author's permascroll (a
+/// capture), the same spans against @p captureStore. Scratch spans (a join's
+/// separators) are copied into `scratch` and typed either way; a cell with
+/// nothing but scratch quotes nothing.
+[[nodiscard]] std::optional<QuotedSpans>
+quotedSpansOf(const zigzag::ArenaManifold &arena, zigzag::CellRef master,
+              const Store *captureStore);
 
 struct ResultRow {
   /// What the row reads as. Typed only when there is no @ref quote: a value

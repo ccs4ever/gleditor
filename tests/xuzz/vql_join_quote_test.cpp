@@ -13,6 +13,7 @@
 
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/result_slice.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vql/execution.hpp"
@@ -263,6 +264,36 @@ TEST_F(JoinHarness,
   for (const auto &span : arena.contentOf(joined)) {
     EXPECT_TRUE(span.isLocal() || xanadu::scratchScroll == span.scroll);
   }
+}
+
+// vquery's capture fallback: captured cells name no store, but the capture
+// store reads the author's permascroll, so a join of them keeps the captured
+// spans transcluded and types only its separators.
+TEST_F(JoinHarness, AJoinOfCapturedCellsKeepsTheCapturesAndTypesTheSeparator) {
+  auto source = makeSource(freshPermascroll("capture"), {"first", "second"});
+  const auto one =
+      arena.makeCell(source.manifold.contentOf(source.cells[0]).front());
+  const auto two =
+      arena.makeCell(source.manifold.contentOf(source.cells[1]).front());
+  const auto joined = join({one, two}, " + ");
+  ASSERT_NE(joined, zigzag::noCell);
+  EXPECT_FALSE(arena.quotedRun(joined).has_value()) << "no store to name";
+  const auto quote = xanadu::quotedSpansOf(arena, joined, source.store.get());
+  ASSERT_TRUE(quote.has_value()) << "saved typed: the captures were lost";
+  EXPECT_EQ(quote->store, source.store.get());
+  ASSERT_EQ(quote->spans.size(), 3U);
+  EXPECT_EQ(quote->spans[0],
+            source.manifold.contentOf(source.cells[0]).front());
+  EXPECT_EQ(quote->spans[2],
+            source.manifold.contentOf(source.cells[1]).front());
+  ASSERT_EQ(xanadu::scratchScroll, quote->spans[1].scroll);
+  EXPECT_EQ(
+      quote->scratch.substr(quote->spans[1].start, quote->spans[1].length),
+      " + ");
+  EXPECT_FALSE(xanadu::quotedSpansOf(arena, joined, nullptr).has_value());
+  const auto typed = arena.makeCell(std::string_view{"constructed"});
+  EXPECT_FALSE(xanadu::quotedSpansOf(arena, typed, source.store.get()))
+      << "a constructed value has nothing to point at";
 }
 
 TEST_F(JoinHarness, OneRowNoRowsAndTheLoneForeignRowAreUnchanged) {
