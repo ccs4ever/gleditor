@@ -1463,6 +1463,37 @@ TEST(ArenaQuoteSeparatorTest, ARunTheDestinationCannotNameIsStillRefused) {
   EXPECT_EQ(target->opCount(), before);
 }
 
+// quotedRun answers for a plain cell of an arena that has its own store, not
+// only for quotes (gate r1, Vortex m2): a cell of local spans with a scratch
+// separator is checked and carried like a quote, where quotedContent used to
+// say nothing for any scratch and promote wrote it as it stood.
+TEST(ArenaQuoteSeparatorTest, APlainMixedCellIsCarriedLikeAQuoteByItsOwnStore) {
+  SeparatedQuote f("sep_plain_mixed");
+  ArenaManifold arena(nullptr, f.source.get());
+  const auto separator = arena.intern(", ");
+  const auto cell      = arena.makeCell();
+  const std::vector<PrimediaSpan> spans{f.hello, separator, f.world};
+  ASSERT_TRUE(arena.setContent(cell, spans).has_value());
+  const auto run = arena.quotedRun(cell);
+  ASSERT_TRUE(run.has_value());
+  EXPECT_EQ(run->store, f.source.get());
+
+  auto same = std::make_shared<Store>(f.perma);
+  const auto promoted =
+      promote(*same, same->sliceGenesis(MicroversionId{}), arena, cell);
+  ASSERT_TRUE(promoted.has_value());
+  const auto folded = same->rebuildManifold(promoted->version);
+  EXPECT_EQ(folded.textOf(promoted->cells.front(), *same), "hello, world");
+  EXPECT_EQ(folded.contentOf(promoted->cells.front()).front(), f.hello);
+
+  auto other         = createTestStore(tempStoreDir("sep_plain_mixed_dst"));
+  const auto refused = promoteOrRefuse(
+      *other, other->sliceGenesis(MicroversionId{}), arena, cell);
+  ASSERT_FALSE(refused.has_value())
+      << "local spans of another permascroll are no longer written raw";
+  EXPECT_EQ(refused.error(), zigzag::PromotionRefusal::UnnameableContent);
+}
+
 TEST(ArenaQuoteSeparatorTest, ScratchWithNoQuoteIsStillTypedNotCarried) {
   ArenaManifold arena;
   auto target     = createTestStore(tempStoreDir("sep_plain"));
