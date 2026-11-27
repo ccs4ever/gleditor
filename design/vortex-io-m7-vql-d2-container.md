@@ -262,7 +262,7 @@ cell), and the pins `ReturningAJoin` and `BindingAJoin` (bounded live cells at $
 `m7-vql-d.md` §8c baselines 266 and 115) count $2n$ cells per join where P11 leaves one cell and
 scratch. A REPL that keeps its rows (`lastResults`, item 4) keeps all of them until freed.
 
-## 10. Does this make P11's `arena_manifold` change unnecessary?
+## 10. Does this make P11's `arena_manifold` change unnecessary
 
 **Not unless something else carries spans and types scratch at save time, and the only thing that
 can do it without `arena_manifold` is application code that is P11's algorithm again.** The pack
