@@ -2212,6 +2212,14 @@ CellRef ArenaManifold::makeCell(const xanadu::PrimediaSpan &content) {
 CellRef
 ArenaManifold::makeQuote(const std::uint32_t space,
                          const std::span<const xanadu::PrimediaSpan> content) {
+  // The one place a quote admits scratch (P11): only bytes this arena holds.
+  for (const auto &span : content) {
+    if (xanadu::scratchScroll == span.scroll &&
+        (span.start > scratch_.size() ||
+         span.length > scratch_.size() - span.start)) {
+      throw std::out_of_range("makeQuote: scratch span past the arena buffer");
+    }
+  }
   const auto cell = mintSlot(xanadu::ValueKind::None, 0, content);
   quoteSpace_.emplace(cell, space);
   quoteSpaceOrder_.push_back(cell);
@@ -2219,7 +2227,7 @@ ArenaManifold::makeQuote(const std::uint32_t space,
 }
 
 std::optional<ArenaManifold::QuotedContent>
-ArenaManifold::quotedContent(const CellRef ref) const {
+ArenaManifold::quotedRun(const CellRef ref) const {
   CellRef target = ref;
   if (isQuoteOccurrence(ref)) {
     target = canonicalProxyOf(ref).value();
@@ -2237,12 +2245,24 @@ ArenaManifold::quotedContent(const CellRef ref) const {
   }
   const auto spans = contentOf(ref);
   if (nullptr == store || spans.empty() ||
-      std::ranges::any_of(spans, [](const xanadu::PrimediaSpan &span) {
+      std::ranges::all_of(spans, [](const xanadu::PrimediaSpan &span) {
         return xanadu::scratchScroll == span.scroll;
       })) {
     return std::nullopt;
   }
   return QuotedContent{.store = store, .spans = {spans.begin(), spans.end()}};
+}
+
+std::optional<ArenaManifold::QuotedContent>
+ArenaManifold::quotedContent(const CellRef ref) const {
+  auto run = quotedRun(ref);
+  if (run &&
+      std::ranges::any_of(run->spans, [](const xanadu::PrimediaSpan &span) {
+        return xanadu::scratchScroll == span.scroll;
+      })) {
+    return std::nullopt;
+  }
+  return run;
 }
 
 CellRef ArenaManifold::makeCell(const std::string_view text) {
@@ -3236,11 +3256,14 @@ promoteOrRefuse(xanadu::Store &store, const xanadu::MicroversionId &parent,
     if (!isEphemeral(arena) || from.isProxy(arena)) {
       continue;
     }
-    if (const auto quoted = from.quotedContent(arena);
+    // A scratch span is typed when written, so only the quoted ones are
+    // carried.
+    if (const auto quoted = from.quotedRun(arena);
         quoted && quoted->store != &store &&
         !std::ranges::all_of(
             quoted->spans, [&](const xanadu::PrimediaSpan &span) {
-              return xanadu::canCarry(*quoted->store, store, span);
+              return xanadu::scratchScroll == span.scroll ||
+                     xanadu::canCarry(*quoted->store, store, span);
             })) {
       return std::unexpected{PromotionRefusal::UnnameableContent};
     }
@@ -3326,9 +3349,10 @@ promoteOrRefuse(xanadu::Store &store, const xanadu::MicroversionId &parent,
     }
     const auto content = from.contentOf(arena);
     std::vector<xanadu::PrimediaSpan> spans(content.begin(), content.end());
-    if (const auto quoted = from.quotedContent(arena);
+    if (const auto quoted = from.quotedRun(arena);
         quoted && quoted->store != &store) {
       for (auto &span : spans) {
+        if (xanadu::scratchScroll == span.scroll) continue;
         if (const auto carried =
                 xanadu::carrySpan(*quoted->store, store, span)) {
           span = *carried;

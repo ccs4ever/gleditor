@@ -14,10 +14,14 @@
 
 namespace xanadu {
 
-/// Bytes that already have an address: spans in @ref store's own scrolls.
+/// Bytes that already have an address: spans in @ref store's own scrolls,
+/// with the bytes a query put between them (a join's separator). A span of
+/// `scratchScroll` names `[start, start + length)` of @ref scratch and is
+/// written as typed text; every other span is transcluded.
 struct QuotedSpans {
   const Store *store{nullptr};
   std::vector<PrimediaSpan> spans;
+  std::string scratch;
 };
 
 struct ResultRow {

@@ -140,9 +140,19 @@ resultRows(const xanadu::MultiStoreCoordinator &coordinator,
     // search quoted out of a document. A constructed value has none.
     std::optional<xanadu::QuotedSpans> quote;
     if (const auto master = coordinator.derefCloneMaster(cell)) {
-      if (const auto quoted = coordinator.arena().quotedContent(*master)) {
-        quote = xanadu::QuotedSpans{.store = quoted->store,
-                                    .spans = std::move(quoted->spans)};
+      // The whole run: a join's separator is typed, the rows it joins stay
+      // quoted (M7-VQL-d2).
+      if (auto quoted = coordinator.arena().quotedRun(*master)) {
+        xanadu::QuotedSpans run{.store = quoted->store, .spans = {}};
+        for (auto span : quoted->spans) {
+          if (xanadu::scratchScroll == span.scroll) {
+            const auto bytes = coordinator.arena().scratchTextOf(span);
+            span.start       = run.scratch.size();
+            run.scratch += bytes;
+          }
+          run.spans.push_back(span);
+        }
+        quote = std::move(run);
       }
     }
     // A captured cell's content is already a span of the author's permascroll

@@ -543,6 +543,12 @@ public:
    * document's prose: the bytes stay where they are, in the scroll they were
    * typed into, and this cell names them. Read through that space's reader,
    * since a span's scroll id means something only in the store it came from.
+   *
+   * @p content may hold scratch spans of this arena between the quoted ones --
+   * a separator a join put there (M7-VQL-d2, P11). Those name bytes this arena
+   * holds and are read from it, not from @p space; promote() types them and
+   * carries the rest.
+   * @throws std::out_of_range when a scratch span lies past the scratch buffer.
    */
   CellRef makeQuote(std::uint32_t space,
                     std::span<const xanadu::PrimediaSpan> content);
@@ -561,6 +567,16 @@ public:
    * which has no address outside this arena until promote() gives it one.
    */
   [[nodiscard]] std::optional<QuotedContent> quotedContent(CellRef ref) const;
+
+  /**
+   * @brief @p ref's whole quoted run: the store its non-scratch spans are
+   *        addressed in, and every span in order, scratch spans included.
+   *
+   * quotedContent() without its refusal of scratch: a join of quotes holds a
+   * scratch separator between its quoted spans. Nothing when the run has no
+   * non-scratch span (constructed text), no spans, or no store to name.
+   */
+  [[nodiscard]] std::optional<QuotedContent> quotedRun(CellRef ref) const;
 
   /// Resolves the corresponding dimension in @p space for @p dim.
   [[nodiscard]] std::optional<DimRef> dimIn(std::uint32_t space,

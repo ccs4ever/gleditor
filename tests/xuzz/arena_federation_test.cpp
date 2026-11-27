@@ -50,6 +50,7 @@ using zigzag::isEphemeral;
 using zigzag::Manifold;
 using zigzag::noCell;
 using zigzag::promote;
+using zigzag::promoteOrRefuse;
 using zigzag::QuoteViewId;
 using zigzag::Space;
 
@@ -1348,6 +1349,130 @@ TEST(ArenaFederationTest, AQuotationAnotherPermascrollHoldsIsRefused) {
   const auto before  = target->opCount();
   EXPECT_FALSE(promote(*target, genesis, arena, quote).has_value());
   EXPECT_EQ(target->opCount(), before);
+}
+
+// ---- M7-VQL-d2 (P11): a quote may hold a scratch separator ------------------
+
+struct SeparatedQuote {
+  std::shared_ptr<UserPermascroll> perma;
+  std::shared_ptr<Store> source;
+  std::vector<PrimediaSpan> spans; ///< hello | ", " | world
+  PrimediaSpan hello, world, separator;
+  ArenaManifold arena;
+  std::uint32_t space{0};
+  CellRef quote{noCell};
+
+  explicit SeparatedQuote(const std::string &name) {
+    UserPermascroll::Config cfg;
+    cfg.storageDir    = tempStoreDir(name) / "permascroll";
+    perma             = std::make_shared<UserPermascroll>(cfg);
+    source            = std::make_shared<Store>(perma);
+    const auto typed  = source->insert(MicroversionId{}, 0, "hello world");
+    const auto folded = source->rebuild(typed);
+    hello             = folded.spansFor(0, 5).front();
+    world             = folded.spansFor(6, 5).front();
+    space     = arena.attach(Space{.store = source.get(), .label = "q"});
+    separator = arena.intern(", ");
+    spans     = {hello, separator, world};
+    quote     = arena.makeQuote(space, spans);
+  }
+};
+
+TEST(ArenaQuoteSeparatorTest, AQuoteReadsAsItsQuotedSpansAndItsSeparator) {
+  SeparatedQuote f("sep_read");
+  EXPECT_EQ(f.arena.textOf(f.quote), "hello, world");
+  const auto run = f.arena.quotedRun(f.quote);
+  ASSERT_TRUE(run.has_value());
+  EXPECT_EQ(run->store, f.source.get());
+  EXPECT_EQ(run->spans, f.spans) << "the whole run, scratch span included";
+  EXPECT_FALSE(f.arena.quotedContent(f.quote).has_value())
+      << "quotedContent keeps its contract: addressable bytes only";
+}
+
+TEST(ArenaQuoteSeparatorTest, ConstructedTextIsNoQuoteEvenToQuotedRun) {
+  ArenaManifold arena;
+  EXPECT_FALSE(arena.quotedRun(arena.makeCell("constructed")).has_value());
+  EXPECT_FALSE(arena.quotedRun(arena.makeCell()).has_value());
+}
+
+TEST(ArenaQuoteSeparatorTest, AScratchSpanPastTheBufferIsRefused) {
+  SeparatedQuote f("sep_bounds");
+  const std::vector<PrimediaSpan> bad{
+      f.hello, {.scroll = xanadu::scratchScroll, .start = 1000, .length = 2}};
+  EXPECT_THROW(f.arena.makeQuote(f.space, bad), std::out_of_range);
+  const std::vector<PrimediaSpan> wraps{
+      {.scroll = xanadu::scratchScroll, .start = 1, .length = ~0ULL}};
+  EXPECT_THROW(f.arena.makeQuote(f.space, wraps), std::out_of_range);
+}
+
+TEST(ArenaQuoteSeparatorTest, AQuoteWithASeparatorVanishesWithItsMark) {
+  SeparatedQuote f("sep_mark");
+  const auto mark = f.arena.mark();
+  const auto gone = f.arena.makeQuote(f.space, f.spans);
+  EXPECT_TRUE(f.arena.release(mark));
+  const auto reused = f.arena.makeCell(f.hello);
+  EXPECT_EQ(reused, gone);
+  const auto content = f.arena.quotedRun(reused);
+  ASSERT_TRUE(content.has_value());
+  EXPECT_EQ(content->spans.size(), 1U) << "nothing of the old quote remains";
+}
+
+TEST(ArenaQuoteSeparatorTest,
+     PromotingTranscludesTheQuotedSpansAndTypesOnlyTheSeparator) {
+  SeparatedQuote f("sep_promote");
+  auto target         = std::make_shared<Store>(f.perma);
+  const auto genesis  = target->sliceGenesis(MicroversionId{});
+  const auto before   = f.perma->size();
+  const auto promoted = promote(*target, genesis, f.arena, f.quote);
+  ASSERT_TRUE(promoted.has_value());
+  const auto folded  = target->rebuildManifold(promoted->version);
+  const auto cell    = promoted->cells.front();
+  const auto content = folded.contentOf(cell);
+  ASSERT_EQ(content.size(), 3U);
+  EXPECT_EQ(content[0], f.hello) << "transcluded, same address";
+  EXPECT_EQ(content[2], f.world) << "transcluded, same address";
+  EXPECT_EQ(folded.textOf(cell, *target), "hello, world");
+  EXPECT_EQ(f.perma->size() - before, 2U) << "only the separator is new bytes";
+  EXPECT_NE(content[1].scroll, xanadu::scratchScroll)
+      << "scratch reaches a store only through promote";
+}
+
+TEST(ArenaQuoteSeparatorTest, AScratchFirstRunPromotesToo) {
+  SeparatedQuote f("sep_first");
+  const auto lead = f.arena.intern(">> ");
+  const std::vector<PrimediaSpan> spans{lead, f.hello};
+  const auto quote = f.arena.makeQuote(f.space, spans);
+  auto target      = std::make_shared<Store>(f.perma);
+  const auto promoted =
+      promote(*target, target->sliceGenesis(MicroversionId{}), f.arena, quote);
+  ASSERT_TRUE(promoted.has_value());
+  const auto folded = target->rebuildManifold(promoted->version);
+  EXPECT_EQ(folded.textOf(promoted->cells.front(), *target), ">> hello");
+}
+
+TEST(ArenaQuoteSeparatorTest, ARunTheDestinationCannotNameIsStillRefused) {
+  // Another permascroll: the quoted spans cannot be carried, and the separator
+  // must not make the run look nameable.
+  SeparatedQuote f("sep_refused");
+  auto target        = createTestStore(tempStoreDir("sep_refused_dst"));
+  const auto genesis = target->sliceGenesis(MicroversionId{});
+  const auto before  = target->opCount();
+  const auto refused = promoteOrRefuse(*target, genesis, f.arena, f.quote);
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(refused.error(), zigzag::PromotionRefusal::UnnameableContent);
+  EXPECT_EQ(target->opCount(), before);
+}
+
+TEST(ArenaQuoteSeparatorTest, ScratchWithNoQuoteIsStillTypedNotCarried) {
+  ArenaManifold arena;
+  auto target     = createTestStore(tempStoreDir("sep_plain"));
+  const auto cell = arena.makeCell("constructed");
+  const auto promoted =
+      promote(*target, target->sliceGenesis(MicroversionId{}), arena, cell);
+  ASSERT_TRUE(promoted.has_value());
+  EXPECT_EQ(target->rebuildManifold(promoted->version)
+                .textOf(promoted->cells.front(), *target),
+            "constructed");
 }
 
 } // namespace

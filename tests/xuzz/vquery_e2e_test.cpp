@@ -9,6 +9,7 @@
  */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -1549,4 +1550,136 @@ TEST_F(VQueryE2ETest, JourneyWriteWithoutAGrantIsRefusedAtTheOpen) {
   EXPECT_NE(result.output.find("Open failed"), std::string::npos)
       << result.output;
   EXPECT_FALSE(fs::exists(report));
+}
+
+// ---- M7-VQL-d2 (P11): a join of a loaded store's rows stays quoted ---------
+
+namespace {
+
+constexpr auto joinFixtureStore = "tests/samples/xudu/core_hypertext/xanadoc_a";
+constexpr auto joinFixtureScroll = "tests/samples/xudu/permascroll";
+constexpr auto joinRows          = "let $r := ##/+d.dims; ";
+
+/// The fixture's permascroll, copied so a run's appends never reach it.
+fs::path copyFixturePermascroll(const fs::path &into) {
+  const auto copy = into / "permascroll";
+  fs::copy(joinFixtureScroll, copy, fs::copy_options::recursive);
+  return copy;
+}
+
+std::uintmax_t permascrollSize(const fs::path &permascroll) {
+  return fs::file_size(permascroll / "active.primedia");
+}
+
+} // namespace
+
+TEST_F(VQueryE2ETest,
+       AJoinOfStoreRowsIsSavedAsTheRowsOwnSpansWithTypedSeparators) {
+  if (!fs::exists(joinFixtureStore)) GTEST_SKIP() << "fixture not present";
+  const auto scroll = copyFixturePermascroll(testDir);
+  const auto flags =
+      "--permascroll=" + scroll.string() + " " + joinFixtureStore;
+
+  // The rows' own addresses: each is already quoted when saved on its own.
+  const auto control = testDir / "control";
+  ASSERT_EQ(runVQuery(flags + " -e '" + joinRows + "return $r' -o " +
+                      control.string())
+                .exitCode,
+            0);
+  auto perma = std::make_shared<xanadu::UserPermascroll>(
+      xanadu::UserPermascroll::Config{.storageDir = scroll});
+  const auto controlStore = xanadu::loadStore(control, perma);
+  const auto originals =
+      xanadu::readResultSlice(*controlStore, controlStore->latest());
+  ASSERT_EQ(originals.size(), 3U);
+
+  const auto before = permascrollSize(scroll);
+  const auto out    = testDir / "joined";
+  const auto result = runVQuery(flags + " -e '" + joinRows +
+                                "return join($r, \", \")' -o " + out.string());
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  const auto stored = xanadu::loadStore(out, perma);
+  const auto rows   = xanadu::readResultSlice(*stored, stored->latest());
+  ASSERT_EQ(rows.size(), 1U);
+  EXPECT_EQ(rows.front().text, "d.dims, d.editions, d.edition-of");
+  const auto &spans = rows.front().quote->spans;
+  ASSERT_EQ(spans.size(), 5U) << "row, separator, row, separator, row";
+  for (std::size_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(spans[2 * i], originals[i].quote->spans.front())
+        << "row " << i << " is the original span, not a retyped copy";
+    EXPECT_LT(spans[2 * i].start, before);
+  }
+  for (const auto at : {1U, 3U}) {
+    EXPECT_EQ(spans[at].length, 2U);
+    EXPECT_GE(spans[at].start, before) << "the separator is the new bytes";
+  }
+}
+
+TEST_F(VQueryE2ETest,
+       AJoinOfStoreRowsSavedInPlaceGrowsThePermascrollByItsSeparators) {
+  if (!fs::exists(joinFixtureStore)) GTEST_SKIP() << "fixture not present";
+  const auto scroll = copyFixturePermascroll(testDir);
+  const auto store  = testDir / "in_place";
+  fs::copy(joinFixtureStore, store, fs::copy_options::recursive);
+  const auto before = permascrollSize(scroll);
+
+  const auto result =
+      runVQuery("--permascroll=" + scroll.string() + " " + store.string() +
+                " -e '" + joinRows + "return join($r, \", \")' --in-place");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_NE(result.output.find("Wrote 1 cell"), std::string::npos)
+      << result.output;
+  EXPECT_EQ(permascrollSize(scroll) - before, 4U)
+      << "the two separators and nothing else: the rows were not retyped";
+
+  auto perma = std::make_shared<xanadu::UserPermascroll>(
+      xanadu::UserPermascroll::Config{.storageDir = scroll});
+  const auto saved = xanadu::loadStore(store, perma);
+  const auto fold  = saved->rebuildManifold(saved->latest());
+  // Later operations on the cell name it again, so count distinct runs.
+  std::vector<std::vector<xanadu::PrimediaSpan>> runs;
+  for (zigzag::CellRef cell = 0; cell < saved->opCount(); ++cell) {
+    if (!fold.contains(cell)) continue;
+    const auto content = fold.contentOf(cell);
+    if (content.size() != 5U) continue;
+    EXPECT_LT(content[0].start, before);
+    EXPECT_GE(content[1].start, before);
+    EXPECT_LT(content[4].start, before);
+    EXPECT_EQ(fold.textOf(cell, *saved), "d.dims, d.editions, d.edition-of");
+    const std::vector<xanadu::PrimediaSpan> run(content.begin(), content.end());
+    if (std::ranges::find(runs, run) == runs.end()) runs.push_back(run);
+  }
+  EXPECT_EQ(runs.size(), 1U);
+}
+
+TEST_F(VQueryE2ETest, ALoneAndAnEmptyJoinAreSavedAsBefore) {
+  if (!fs::exists(joinFixtureStore)) GTEST_SKIP() << "fixture not present";
+  const auto scroll = copyFixturePermascroll(testDir);
+  const auto flags =
+      "--permascroll=" + scroll.string() + " " + joinFixtureStore;
+  auto perma = std::make_shared<xanadu::UserPermascroll>(
+      xanadu::UserPermascroll::Config{.storageDir = scroll});
+  const auto lone  = testDir / "lone";
+  const auto empty = testDir / "empty";
+  ASSERT_EQ(
+      runVQuery(flags +
+                " -e 'let $r := ##/+d.dims[1]; return join($r, \",\")' -o " +
+                lone.string())
+          .exitCode,
+      0);
+  ASSERT_EQ(
+      runVQuery(flags +
+                " -e 'let $r := ##/+d.edition-of; return join($r, \",\")' -o " +
+                empty.string())
+          .exitCode,
+      0);
+  const auto loneStore  = xanadu::loadStore(lone, perma);
+  const auto emptyStore = xanadu::loadStore(empty, perma);
+  const auto loneRows =
+      xanadu::readResultSlice(*loneStore, loneStore->latest());
+  const auto emptyRows =
+      xanadu::readResultSlice(*emptyStore, emptyStore->latest());
+  EXPECT_EQ(emptyRows.size(), 1U);
+  EXPECT_EQ(emptyRows.front().text, "");
+  EXPECT_EQ(loneRows.size(), 1U);
 }

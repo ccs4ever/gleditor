@@ -22,6 +22,10 @@ MicroversionId writeResultSlice(Store &store,
     if (row.quote &&
         (row.quote->spans.empty() ||
          !std::ranges::all_of(row.quote->spans, [&](const PrimediaSpan &span) {
+           if (scratchScroll == span.scroll) {
+             return span.start <= row.quote->scratch.size() &&
+                    span.length <= row.quote->scratch.size() - span.start;
+           }
            return canCarry(*row.quote->store, store, span);
          }))) {
       throw std::invalid_argument("result row \"" + row.text +
@@ -41,16 +45,26 @@ MicroversionId writeResultSlice(Store &store,
     zigzag::CellRef cell = zigzag::noCell;
     if (row.quote) {
       // The quoted bytes, transcluded: the first span makes the cell and
-      // each after it is spliced on, one span per operation (U3).
-      const auto &spans = row.quote->spans;
-      version           = store.makeCell(version,
-                                         *carrySpan(*row.quote->store, store, spans[0]));
+      // each after it is spliced on, one span per operation (U3). A span the
+      // query built (a separator) is the only text typed.
+      const auto &quote = *row.quote;
+      const auto typed  = [&](const PrimediaSpan &span) {
+        return std::string_view{quote.scratch}.substr(span.start, span.length);
+      };
+      const auto &spans = quote.spans;
+      version           = scratchScroll == spans[0].scroll
+                              ? store.makeCell(version, typed(spans[0]))
+                              : store.makeCell(version,
+                                               *carrySpan(*quote.store, store, spans[0]));
       cell              = store.cellRefOf(version).value();
       manifold.advanceOrRefold(store, version);
       std::uint64_t at = spans[0].length;
       for (const auto &quoted : spans | std::views::drop(1)) {
-        version = store.spliceCellSpan(
-            version, cell, at, 0, *carrySpan(*row.quote->store, store, quoted));
+        version =
+            scratchScroll == quoted.scroll
+                ? store.spliceCell(version, cell, at, 0, typed(quoted))
+                : store.spliceCellSpan(version, cell, at, 0,
+                                       *carrySpan(*quote.store, store, quoted));
         manifold.advanceOrRefold(store, version);
         at += quoted.length;
       }

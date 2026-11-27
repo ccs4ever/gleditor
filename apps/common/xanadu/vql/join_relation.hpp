@@ -4,7 +4,9 @@
 // quotes text keeps quoting it, so the result stays a transclusion of its
 // sources rather than retyped text; only a number, which has no span, and a
 // separator that is no cell's text are new bytes, and those sit in the arena's
-// scratch buffer, which `promote()` is the one road out of.
+// scratch buffer, which `promote()` is the one road out of. Rows that are
+// another store's cells stay quoted when their spans can share one store's
+// namespace (M7-VQL-d2); rows that cannot are joined as text.
 
 #include <cstdint>
 #include <memory>
@@ -28,8 +30,23 @@ inline constexpr std::string_view joinEndRelation = "join_end";
 
 /// What a walk has taken so far. One per execution: the rows of a join are all
 /// computed before its first step, so two walks never interleave.
+struct JoinPiece {
+  /// The row (or separator) cell, its clone master, and the spans it
+  /// contributes; text it has when it quotes nothing is already in `spans`.
+  zigzag::CellRef cell{};
+  zigzag::CellRef master{};
+  std::vector<PrimediaSpan> spans;
+  /// The store `spans` are addressed in, when the cell is a quote of one.
+  const Store *store{nullptr};
+  /// Every non-scratch span is local: the same bytes under any store that
+  /// reads the same permascroll.
+  bool localOnly{true};
+  /// A foreign cell, whose spans mean nothing outside its store.
+  bool foreign{false};
+};
+
 struct JoinWalk {
-  std::vector<PrimediaSpan> runs;
+  std::vector<JoinPiece> pieces;
   std::optional<zigzag::CellRef> only;
   std::uint64_t rows{0};
   std::uint64_t bytes{0};
