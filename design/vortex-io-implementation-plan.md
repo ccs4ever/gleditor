@@ -1457,6 +1457,13 @@ MINORs were fixed in the gate polish commit (`VqlIoKnownLeakTest` ceilings at ab
 measured figures, the `keepIfNamed` deferral in roadmap 6.1c, design note 8c wording). See
 [`m7-vql-d/README.md`](projects/vortex-io-implementation-review/m7-vql-d/README.md).
 
+M7-VQL-d2 (P11) implementation notes (**gate pending**): core change to `arena_manifold` only
+(`quotedRun`, a scratch bound check in `makeQuote`, `promote()` carries quoted spans of a run that
+holds scratch separators); `join` over several rows of a loaded store returns a quote of the rows'
+own spans, and `vquery -o` and `--in-place` save it as transclusions with typed separators. Design,
+as-built and deviations in [`vortex-io-m7-vql-d2.md`](vortex-io-m7-vql-d2.md). The gate uses the
+zigzag and Vortex critics.
+
 M7-VQL remaining slices: the deferrals of M7-VQL, -b and -c are collected, classified (in scope,
 owned by another milestone, refused) and ordered into slices M7-VQL-d to M7-VQL-m, with the exit
 criterion "M7-VQL complete", in [`vortex-io-m7-vql-roadmap.md`](vortex-io-m7-vql-roadmap.md). It is

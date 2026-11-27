@@ -328,6 +328,11 @@ primitives), and that is the first place to look at the gate.
 **Scope.** P11 only: the mixed-namespace content run (or a quote with a scratch separator) in
 `ArenaManifold`, and `join` using it for several foreign rows. Nothing else changes.
 
+**Status: built, gate pending.** The owner's "whichever is smaller and sounder" was resolved as the
+quote with scratch separators (one namespace per cell, `ArenaManifold::quotedRun`); the per-span
+mixed-namespace run was refused. Design and as-built in
+[`vortex-io-m7-vql-d2.md`](vortex-io-m7-vql-d2.md). The gate is the zigzag and Vortex critics.
+
 **Core change?** Yes, the one named in §5, approved by the owner. **Gate.** zigzag and Vortex
 critics; round budget two.
 
@@ -860,3 +865,4 @@ adapters (§2.2); the frontend is complete when it can ask for them and take a t
 | 0.3     | 2026-11-26 | Owner approved P11 (mixed-namespace content run) as slice M7-VQL-d2, between d and e                                                                                               |
 | 0.4     | 2026-11-26 | Owner moved engine reclamation out of slice d: new slice M7-VQL-d3 with proposal P12 (the VM names its own state), between d2 and e; P12 itself awaits approval of its diff        |
 | 0.5     | 2026-11-26 | M7-VQL-d gate passed in round 4 (target `2e9e4178`); d3 scope gains the `keepIfNamed` cell comparison                                                                              |
+| 0.6     | 2026-11-26 | M7-VQL-d2 (P11) built, gate pending: a quote that admits scratch spans (`quotedRun`); multi-row join of store rows stays quoted                                                    |

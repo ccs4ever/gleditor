@@ -207,8 +207,66 @@ is a quote cell and `promote()` writes it as in section 4.
 - **Fail-before**: each new test is run on the pre-change tree (the join returns interned text, the
   saved cell is a typed copy) and its failure recorded.
 
-## 10. Change history
+## 10. As built
+
+Status: built, **gate pending** (zigzag and Vortex critics, round budget two). One core file
+changed, `arena_manifold.{hpp,cpp}`; no other core file, no on-disk format, no fixture.
+
+- **`arena_manifold`**: `quotedRun(ref)` (section 3); `quotedContent()` is `quotedRun()` minus
+  scratch-bearing runs, answers unchanged; `makeQuote()` throws `std::out_of_range` for a scratch
+  span past the buffer; `promote()` uses `quotedRun()` in its two loops and skips scratch spans when
+  checking `canCarry` and when carrying. Nothing else (no `mark()`, snapshot or codec change).
+- **`join_relation`**: `JoinWalk` holds one `JoinPiece` per row and separator (cell, master, spans,
+  store, all-local, foreign). At the end the namespace rule (section 2) decides. Shared: one
+  `makeQuote(space, run)` where `space` is the attached space whose store is the anchor, else a
+  plain cell as before. Not shared: every piece that names a store is interned as text (`textOf` of
+  its master), as slice d did for foreign rows. A store-less, non-foreign, all-local piece
+  (`makeCell(span)`, a capture) agrees with any anchor, as it does for `promote()` today.
+- **`result_slice`** (`apps/common`, not core): `QuotedSpans::scratch` holds the bytes of the run's
+  scratch spans; `writeResultSlice` types those and transcludes the rest.
+- **`vquery`**: `resultRows` uses `quotedRun` and rebases scratch spans into `QuotedSpans::scratch`.
+  `--in-place` is unchanged (it calls `promoteOrRefuse`). `vpl` still uses `quotedContent`.
+
+### Deviations from the plan
+
+- The arena tests sit in `tests/xuzz/arena_federation_test.cpp` beside the other `ArenaManifold`
+  tests (they build against the engine only); the task text said `tests/zigzag`, which holds the UI
+  and slice-visualizer tests.
+- A join whose rows disagree falls back for **every** piece that names a store, including a
+  base-namespace quote that slice d kept as spans. It is text either way and always correct; it is
+  the simpler rule to state.
+- `promote()` now also carries the quoted spans of a mixed run in a base-namespace quote (hardening,
+  section 7). No existing test depended on the old raw write.
+
+### Tests
+
+- `ArenaQuoteSeparatorTest` (8, in `arena_federation_test.cpp`): `quotedRun` and `quotedContent`
+  answers, constructed text is no quote, scratch bound (past the buffer, and a wrapping length), a
+  quote with a separator vanishes with its mark, `promote()` transcludes the quoted spans and grows
+  the permascroll by exactly the separator bytes, a scratch-first run, an unnameable run is still
+  refused with the destination untouched, plain scratch is still typed.
+- `JoinHarness` (8, `vql_join_quote_test.cpp`): several rows of a loaded store stay quoted; promote
+  keeps each row transcluded; two stores over one permascroll are one quote; foreign + local + a
+  number; disagreeing external scrolls are text; one row, no rows and the lone foreign row are as
+  before; a join of joins stays quoted; 10^4 rows leave only separators in scratch.
+- `VQueryE2ETest` (3, `vquery_e2e_test.cpp`): `-o` saves the rows' own spans (equal to the spans a
+  control run quotes) with typed separators; `--in-place` grows a copy of the fixture permascroll by
+  exactly the separators (4 bytes for `", "` twice) and writes one cell whose run is those spans; a
+  lone row and an empty join save as before. `xudu-dump --section=ops` on both outputs shows
+  `make cell` over the row's original span `[1083,1089)` and `splice` ops for the separators
+  (`[11037,11039)`) and the other rows (`[1089,1099)`, `[1099,1111)`).
+
+### Fail-before
+
+Run against the pre-change `join_relation`, `result_slice` and `vquery` (arena kept): seven tests
+fail (five of `JoinHarness`, two e2e: the join is text, the saved cell is a typed copy), and the
+three "as before" tests pass. Run with `promote()` reading `quotedContent()` again: the
+unnameable-run refusal test fails (the run was written raw). The remaining arena tests cover API
+that did not exist.
+
+## 11. Change history
 
 | version | date       | change                           |
 | ------- | ---------- | -------------------------------- |
 | 0.1     | 2026-11-26 | Design for M7-VQL-d2 (P11), gate |
+| 0.2     | 2026-11-26 | As built; gate pending           |
