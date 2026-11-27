@@ -10,6 +10,8 @@
 #include <variant>
 #include <vector>
 
+#include <gleditor/logging.hpp>
+
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/query_scalar.hpp"
@@ -104,10 +106,21 @@ spansOf(zigzag::vortex::VortexVM &vm, zigzag::ArenaManifold &arena,
 /// as every other local span is, so it agrees with any anchor; a foreign
 /// piece with no store, or a store-less one with an external scroll, has no
 /// namespace to join and the rows are joined as text.
+///
+/// "Agrees with any anchor" is a precondition, not a check: a store-less local
+/// span is trusted to be on the permascroll the anchor reads. Nothing at this
+/// level can verify it (a span carries no permascroll identity), but every
+/// store-less local cell the engine hands a query is a capture of the one
+/// author permascroll, which is also what the anchor's store is over.
 struct Namespace {
   bool shared{true};
   const Store *anchor{nullptr};
 };
+
+/// A piece whose spans mean the same bytes under any anchor.
+[[nodiscard]] bool isFree(const JoinPiece &piece) noexcept {
+  return piece.store == nullptr && !piece.foreign && piece.localOnly;
+}
 
 [[nodiscard]] Namespace namespaceOf(const std::vector<JoinPiece> &pieces) {
   std::vector<const JoinPiece *> quoting;
@@ -121,9 +134,7 @@ struct Namespace {
   const auto stored = [](const JoinPiece *piece) {
     return piece->store != nullptr;
   };
-  const auto free = [&](const JoinPiece *piece) {
-    return !stored(piece) && !piece->foreign && piece->localOnly;
-  };
+  const auto free = [](const JoinPiece *piece) { return isFree(*piece); };
   if (std::ranges::any_of(quoting, [&](const JoinPiece *piece) {
         return !stored(piece) && !free(piece);
       })) {
@@ -190,54 +201,67 @@ joinStepProvider(zigzag::vortex::VortexVM &vm, std::shared_ptr<JoinWalk> walk) {
 
 zigzag::vortex::RelationProvider
 joinEndProvider(std::shared_ptr<JoinWalk> walk) {
-  return
-      [walk = std::move(walk)](const RelationQuery &query) -> RelationResult {
-        if (query.arguments.size() != 1)
-          return std::unexpected("join_end expects the separator");
-        const auto finished = std::exchange(*walk, JoinWalk{});
-        auto &arena         = query.arena;
-        CellRef joined{};
-        if (finished.only) {
-          joined = *finished.only;
-        } else if (finished.rows == 0) {
-          joined = arena.makeCell(std::string_view{});
+  return [walk =
+              std::move(walk)](const RelationQuery &query) -> RelationResult {
+    if (query.arguments.size() != 1)
+      return std::unexpected("join_end expects the separator");
+    const auto finished = std::exchange(*walk, JoinWalk{});
+    auto &arena         = query.arena;
+    CellRef joined{};
+    if (finished.only) {
+      joined = *finished.only;
+    } else if (finished.rows == 0) {
+      joined = arena.makeCell(std::string_view{});
+    } else {
+      // The rows' spans, in order, with the separators between them. Rows
+      // of stores that cannot share one namespace are the text slice d
+      // joined; the rest stay quoted.
+      const auto shared = namespaceOf(finished.pieces);
+      if (!shared.shared) {
+        GLEDITOR_LOG_DEBUG(
+            "vql.join", "join of {} rows: no shared namespace, joined as text",
+            finished.rows);
+      }
+      Spans runs;
+      for (const auto &piece : finished.pieces) {
+        // Every piece that names bytes and is not proven free is typed,
+        // whether or not it has a store: a store-less foreign or
+        // external-scroll piece's raw spans would be read in the arena's
+        // own namespace, which is the wrong bytes.
+        const bool names =
+            std::ranges::any_of(piece.spans, [](const PrimediaSpan &span) {
+              return !isScratch(span);
+            });
+        if (!shared.shared && names && !isFree(piece)) {
+          if (const auto text = arena.textOf(piece.master); !text.empty())
+            runs.push_back(arena.intern(text));
         } else {
-          // The rows' spans, in order, with the separators between them. Rows
-          // of stores that cannot share one namespace are the text slice d
-          // joined; the rest stay quoted.
-          const auto shared = namespaceOf(finished.pieces);
-          Spans runs;
-          for (const auto &piece : finished.pieces) {
-            if (!shared.shared && piece.store != nullptr) {
-              if (const auto text = arena.textOf(piece.master); !text.empty())
-                runs.push_back(arena.intern(text));
-            } else {
-              runs.insert(runs.end(), piece.spans.begin(), piece.spans.end());
-            }
-          }
-          std::optional<std::uint32_t> space;
-          if (shared.shared && shared.anchor != nullptr) {
-            for (std::uint32_t id = 1; id <= arena.spaceCount(); ++id) {
-              if (const auto attached = arena.spaceAt(id);
-                  attached && attached->store == shared.anchor) {
-                space = id;
-                break;
-              }
-            }
-          }
-          if (space) {
-            joined = arena.makeQuote(*space, runs);
-          } else {
-            joined = arena.makeCell();
-            if (const auto set = arena.setContent(joined, runs); !set)
-              return std::unexpected("join could not assemble its text");
+          runs.insert(runs.end(), piece.spans.begin(), piece.spans.end());
+        }
+      }
+      std::optional<std::uint32_t> space;
+      if (shared.shared && shared.anchor != nullptr) {
+        for (std::uint32_t id = 1; id <= arena.spaceCount(); ++id) {
+          if (const auto attached = arena.spaceAt(id);
+              attached && attached->store == shared.anchor) {
+            space = id;
+            break;
           }
         }
-        return std::optional<RelationAnswer>{
-            RelationAnswer{.nextPosition = query.position,
-                           .limit        = query.limit,
-                           .answers      = {joined}}};
-      };
+      }
+      if (space) {
+        joined = arena.makeQuote(*space, runs);
+      } else {
+        joined = arena.makeCell();
+        if (const auto set = arena.setContent(joined, runs); !set)
+          return std::unexpected("join could not assemble its text");
+      }
+    }
+    return std::optional<RelationAnswer>{
+        RelationAnswer{.nextPosition = query.position,
+                       .limit        = query.limit,
+                       .answers      = {joined}}};
+  };
 }
 
 } // namespace xanadu::vql

@@ -177,34 +177,35 @@ TEST_F(JoinHarness, ARowOfALoadedStoreBesideALocalSpanAndANumber) {
   EXPECT_EQ(arena.scratchTextOf(run->spans.back()), "42");
 }
 
+/// A store whose one cell spans an external (live) scroll of @p bytes.
+auto makeExternalSource(const std::shared_ptr<xanadu::UserPermascroll> &perma,
+                        const std::string &salt, const std::string &bytes)
+    -> Source {
+  xanadu::Scroll scroll;
+  scroll.salt = salt;
+  Source source{.perma    = perma,
+                .store    = std::make_shared<xanadu::Store>(perma),
+                .manifold = {},
+                .cells    = {},
+                .version  = {}};
+  const auto id = source.store->addScroll(scroll);
+  source.store->setExternalLiveBytes(xanadu::liveScrollBufferKey(scroll), 0,
+                                     bytes);
+  auto version = source.store->sliceGenesis(xanadu::MicroversionId{});
+  version      = source.store->makeCell(
+      version, PrimediaSpan{.scroll = id, .start = 0, .length = bytes.size()});
+  source.cells.push_back(source.store->cellRefOf(version).value());
+  source.version  = version;
+  source.manifold = source.store->rebuildManifold(version);
+  return source;
+}
+
 TEST_F(JoinHarness, RowsWhoseExternalScrollsDisagreeAreJoinedAsText) {
   const auto perma = freshPermascroll("external");
-  xanadu::Scroll one;
-  one.salt = "first-live-author";
-  xanadu::Scroll two;
-  two.salt   = "second-live-author";
-  auto build = [&](const xanadu::Scroll &scroll, const std::string &bytes) {
-    Source source{.perma    = perma,
-                  .store    = std::make_shared<xanadu::Store>(perma),
-                  .manifold = {},
-                  .cells    = {},
-                  .version  = {}};
-    const auto id = source.store->addScroll(scroll);
-    source.store->setExternalLiveBytes(xanadu::liveScrollBufferKey(scroll), 0,
-                                       bytes);
-    auto version = source.store->sliceGenesis(xanadu::MicroversionId{});
-    version      = source.store->makeCell(
-        version,
-        PrimediaSpan{.scroll = id, .start = 0, .length = bytes.size()});
-    source.cells.push_back(source.store->cellRefOf(version).value());
-    source.version  = version;
-    source.manifold = source.store->rebuildManifold(version);
-    return source;
-  };
-  auto first   = build(one, "ext-one");
-  auto second  = build(two, "ext-two");
-  const auto a = attach(first, "a");
-  const auto b = attach(second, "b");
+  auto first       = makeExternalSource(perma, "first-live-author", "ext-one");
+  auto second      = makeExternalSource(perma, "second-live-author", "ext-two");
+  const auto a     = attach(first, "a");
+  const auto b     = attach(second, "b");
   std::vector<CellRef> rows{arena.proxyFor(a, first.cells[0]),
                             arena.proxyFor(b, second.cells[0])};
   const auto joined = join(rows, "+");
@@ -212,6 +213,56 @@ TEST_F(JoinHarness, RowsWhoseExternalScrollsDisagreeAreJoinedAsText) {
   EXPECT_EQ(arena.textOf(joined), "ext-one+ext-two");
   EXPECT_FALSE(arena.quotedRun(joined).has_value())
       << "two stores' external scroll ids share no namespace: text, as slice d";
+}
+
+// A space attached with no store (only a reader) names no namespace for its
+// external-scroll spans, so a row of it cannot be quoted beside another
+// store's; its raw spans copied into a plain cell would be read as scroll ids
+// of the arena's own store.
+TEST_F(JoinHarness, AStoreLessForeignRowIsTypedNotCopiedAsRawSpans) {
+  const auto perma = freshPermascroll("storeless");
+  auto ext         = makeExternalSource(perma, "storeless-author", "ext-bytes");
+  auto plain       = makeSource(perma, {"plain"});
+  const auto bare  = arena.attach(zigzag::Space{.manifold = &ext.manifold,
+                                                .store    = nullptr,
+                                                .reader   = ext.store.get(),
+                                                .label    = "bare"});
+  const auto b     = attach(plain, "b");
+  const auto joined = join(
+      {arena.proxyFor(bare, ext.cells[0]), arena.proxyFor(b, plain.cells[0])},
+      "|");
+  ASSERT_NE(joined, zigzag::noCell);
+  EXPECT_EQ(arena.textOf(joined), "ext-bytes|plain");
+  for (const auto &span : arena.contentOf(joined)) {
+    EXPECT_TRUE(span.isLocal() || xanadu::scratchScroll == span.scroll)
+        << "a foreign scroll id survived into the arena's own namespace";
+  }
+}
+
+TEST_F(JoinHarness,
+       AMixedDisagreeingJoinTypesEveryForeignRowAndKeepsLocalOnes) {
+  const auto perma = freshPermascroll("mixeddis");
+  auto first       = makeExternalSource(perma, "mix-one", "ext-one");
+  auto second      = makeExternalSource(perma, "mix-two", "ext-two");
+  auto plain       = makeSource(perma, {"plain"});
+  const auto bare  = arena.attach(zigzag::Space{.manifold = &second.manifold,
+                                                .store    = nullptr,
+                                                .reader   = second.store.get(),
+                                                .label    = "bare"});
+  const auto a     = attach(first, "a");
+  const auto p     = attach(plain, "p");
+  const auto local =
+      arena.makeCell(plain.manifold.contentOf(plain.cells[0]).front());
+  const auto joined = join({arena.proxyFor(a, first.cells[0]),
+                            arena.proxyFor(bare, second.cells[0]),
+                            arena.proxyFor(p, plain.cells[0]), local},
+                           ",");
+  ASSERT_NE(joined, zigzag::noCell);
+  EXPECT_EQ(arena.textOf(joined), "ext-one,ext-two,plain,plain");
+  EXPECT_FALSE(arena.quotedRun(joined).has_value());
+  for (const auto &span : arena.contentOf(joined)) {
+    EXPECT_TRUE(span.isLocal() || xanadu::scratchScroll == span.scroll);
+  }
 }
 
 TEST_F(JoinHarness, OneRowNoRowsAndTheLoneForeignRowAreUnchanged) {
